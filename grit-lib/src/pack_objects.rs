@@ -88,6 +88,12 @@ impl PackBuildOptions {
             .unwrap_or((10, crate::pack::DEFAULT_PACK_DEPTH))
     }
 
+    fn window_memory_from_config(cfg: Option<&crate::config::ConfigSet>) -> u64 {
+        cfg.map(crate::config::ConfigSet::pack_window_memory_bytes)
+            .filter(|&bytes| bytes > 0)
+            .unwrap_or(SERVE_WINDOW_MEMORY)
+    }
+
     /// Production pack settings for a local full copy (clone/fetch from disk).
     #[must_use]
     pub fn for_local_copy(cfg: Option<&crate::config::ConfigSet>) -> Self {
@@ -101,6 +107,7 @@ impl PackBuildOptions {
             reuse_deltas: max_depth > 0,
             reuse_objects: true,
             use_bitmaps: true,
+            window_memory: Some(Self::window_memory_from_config(cfg)),
             ..Default::default()
         }
     }
@@ -178,6 +185,7 @@ impl PackBuildOptions {
             reuse_deltas: true,
             reuse_objects: true,
             use_bitmaps: true,
+            window_memory: Some(Self::window_memory_from_config(cfg)),
             ..Default::default()
         }
     }
@@ -1262,7 +1270,7 @@ pub(crate) fn write_pack_from_send_list(
     stop: &CancelSignal<'_>,
     w: &mut dyn Write,
     mut on_objects: Option<&mut dyn FnMut(u64)>,
-) -> Result<PackStats> {
+) -> Result<(PackStats, PackIndexRows)> {
     if !opts.delta {
         let bytes = serialize_pack(odb, send, opts)?;
         stop.poll()?;
@@ -1270,15 +1278,16 @@ pub(crate) fn write_pack_from_send_list(
         if let Some(on) = on_objects.as_deref_mut() {
             on(send.len() as u64);
         }
-        return Ok(PackStats {
-            object_count: u32::try_from(send.len()).unwrap_or(u32::MAX),
-            pack_bytes: bytes.len() as u64,
-            ..PackStats::default()
-        });
+        return Ok((
+            PackStats {
+                object_count: u32::try_from(send.len()).unwrap_or(u32::MAX),
+                pack_bytes: bytes.len() as u64,
+                ..PackStats::default()
+            },
+            Vec::new(),
+        ));
     }
     odb.with_pack_read_context(|| {
-        read_object_infos_with_progress(odb, send, None, stop, &mut on_objects)?;
-        stop.poll()?;
         let plan = plan_deltas(
             odb,
             send,
@@ -1290,16 +1299,18 @@ pub(crate) fn write_pack_from_send_list(
             stop,
         )?;
         stop.poll()?;
-        crate::pack_delta::write_pack_with_deltas(
+        let mut index_rows = Vec::with_capacity(plan.entries.len());
+        let stats = crate::pack_delta::write_pack_with_deltas(
             odb,
             &plan.entries,
             opts,
             None,
             w,
-            None,
+            Some(&mut index_rows),
             stop,
             on_objects,
-        )
+        )?;
+        Ok((stats, index_rows))
     })
 }
 

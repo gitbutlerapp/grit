@@ -1272,3 +1272,83 @@ fn push_local_concurrent_creates_of_same_branch_never_lose_an_update() {
         }
     }
 }
+
+/// Push must rebuild a pack subset when the source pack also holds unreachable
+/// branch objects (hard-linking the whole packfile is invalid).
+#[test]
+fn push_local_rebuilds_pack_when_store_has_unreachable_objects() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote.git");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&remote).unwrap();
+    std::fs::create_dir_all(&local).unwrap();
+    git(&remote, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    let remote_git = remote.as_path();
+
+    for i in 0..40 {
+        let name = format!("m{i}.txt");
+        std::fs::write(local.join(&name), format!("{i}\n")).unwrap();
+        git(&local, &["add", &name]);
+        git(&local, &["commit", "-q", "-m", &format!("m{i}")]);
+    }
+    git(&local, &["branch", "side", "HEAD~10"]);
+    git(&local, &["checkout", "-q", "side"]);
+    for i in 0..20 {
+        let name = format!("s{i}.txt");
+        std::fs::write(local.join(&name), format!("side {i}\n")).unwrap();
+        git(&local, &["add", &name]);
+        git(&local, &["commit", "-q", "-m", &format!("s{i}")]);
+    }
+    git(&local, &["checkout", "-q", "main"]);
+    git(&local, &["repack", "-q", "-a", "-d", "-f"]);
+
+    let tip = rev_parse(&local, "refs/heads/main");
+    let side_tip = rev_parse(&local, "refs/heads/side");
+    let (side_on_main, _) = git_try(
+        &local,
+        &[
+            "merge-base",
+            "--is-ancestor",
+            &side_tip.to_hex(),
+            &tip.to_hex(),
+        ],
+    );
+    assert!(!side_on_main, "side must be unreachable from main");
+
+    let outcome = push_local(
+        &local_git,
+        remote_git,
+        &[PushRefSpec {
+            src: Some(tip),
+            src_ref: None,
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+            ..Default::default()
+        }],
+        &PushOptions::default(),
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("push_local");
+    assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+    assert_eq!(remote_ref(remote_git, "refs/heads/main"), Some(tip));
+    fsck_clean(remote_git);
+    let (side_on_remote, _) = git_try(
+        remote_git,
+        &["cat-file", "-e", &format!("{side_tip}^{{commit}}")],
+    );
+    assert!(
+        !side_on_remote,
+        "objects only reachable from side must not be copied"
+    );
+    let pack_count = std::fs::read_dir(remote.join("objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .count();
+    assert_eq!(pack_count, 1, "remote should have one rebuilt pack");
+}
