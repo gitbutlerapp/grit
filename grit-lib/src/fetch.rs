@@ -434,6 +434,7 @@ fn negotiate_pack(
     // their own; a deepen posts it alone first to learn the new shallow list.
     let mut state = req;
     if !stateless || shallow_request {
+        conn.mirror_http_cancel(cancel);
         conn.writer().write_all(&state)?;
         conn.writer().flush()?;
     }
@@ -1591,10 +1592,7 @@ pub fn fetch_remote_into(
         opts.fetch_depth
     );
     validate_fetch_depth_local(local_git_dir, opts)?;
-    conn.set_http_stack_cancel(cancel);
-    if let Some(watch) = conn.http_stack_watch() {
-        mirror_stack_cancel(cancel, watch);
-    }
+    conn.mirror_http_cancel(cancel);
     let local_cfg = crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
     if opts.filter.is_none() {
         if let Some(remote) = opts.remote_name.as_deref() {

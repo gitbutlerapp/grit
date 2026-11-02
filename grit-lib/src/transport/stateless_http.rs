@@ -220,7 +220,6 @@ pub struct StatelessHttpConnection<C: HttpClient> {
     recv_posted: bool,
     cancel: Option<Arc<dyn Cancel + Send + Sync>>,
     stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    stack_cancel: Option<crate::transport::StackCancelFatPtr>,
     /// Set once an upload-pack POST wait observes cancellation; suppresses further POSTs.
     upload_cancelled: std::sync::atomic::AtomicBool,
 }
@@ -240,7 +239,6 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         git_protocol: Option<String>,
         cancel: Option<Arc<dyn Cancel + Send + Sync>>,
         stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
-        stack_cancel: Option<crate::transport::StackCancelFatPtr>,
     ) -> Self {
         let wire = service.wire_name();
         let base = repo_url.trim_end_matches('/');
@@ -269,15 +267,8 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             recv_posted: false,
             cancel,
             stack_watch,
-            stack_cancel,
             upload_cancelled: std::sync::atomic::AtomicBool::new(false),
         }
-    }
-
-    fn stack_cancel(&self) -> Option<&dyn Cancel> {
-        self.stack_cancel
-            .as_ref()
-            .map(crate::transport::StackCancelFatPtr::as_cancel)
     }
 
     fn wait_http<T: Send + 'static>(
@@ -285,10 +276,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         pending: PendingHttp<T>,
         cancel: &dyn Cancel,
     ) -> Result<T> {
-        if let Some(stack) = self.stack_cancel() {
-            crate::progress::mirror_stack_cancel(stack, self.stack_watch.as_ref());
-        }
-        pending.wait_with_stack(cancel, self.stack_cancel(), Some(self.stack_watch.as_ref()))
+        pending.wait_with_watch(cancel, Some(self.stack_watch.as_ref()))
     }
 
     fn operation_cancel(&self) -> Option<Arc<dyn Cancel + Send + Sync>> {
@@ -564,8 +552,7 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
         true
     }
 
-    fn set_http_stack_cancel(&mut self, cancel: &dyn Cancel) {
-        self.stack_cancel = Some(crate::transport::StackCancelFatPtr::capture(cancel));
+    fn mirror_http_cancel(&mut self, cancel: &dyn Cancel) {
         crate::progress::mirror_stack_cancel(cancel, self.stack_watch.as_ref());
     }
 
@@ -693,7 +680,6 @@ mod tests {
             None,
             None,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            None,
         )
     }
 
@@ -722,7 +708,6 @@ mod tests {
             None,
             None,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            None,
         );
         let wants = b"0032want 0123456789012345678901234567890123456789\n0000".to_vec();
         let have = b"0032have 1123456789012345678901234567890123456789\n";

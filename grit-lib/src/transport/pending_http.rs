@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use crate::error::{Error, Result};
 use crate::progress::{mirror_stack_cancel, Cancel, CancelSignal};
+use crate::transport::http_owner::HttpOwnerCancelGuard;
 
 /// How often a wait for an HTTP worker checks for cancellation.
 pub(crate) const HTTP_CANCEL_POLL: Duration = Duration::from_millis(20);
@@ -32,22 +33,24 @@ impl<T: Send + 'static> PendingHttp<T> {
     /// The result, or [`Error::Cancelled`] once `cancel` fires first. A cancelled
     /// request is left to finish on its own thread.
     pub(crate) fn wait(&self, cancel: &dyn Cancel) -> Result<T> {
-        self.wait_with_stack(cancel, None, None)
+        self.wait_with_watch(cancel, None)
     }
 
-    /// Like [`Self::wait`], but also mirrors `stack` into `stack_watch` on the owning thread.
-    pub(crate) fn wait_with_stack(
+    /// Like [`Self::wait`], but also checks `stack_watch` after mirroring the
+    /// thread-local owner [`Cancel`] (see [`HttpOwnerCancelGuard`]).
+    pub(crate) fn wait_with_watch(
         &self,
         cancel: &dyn Cancel,
-        stack: Option<&dyn Cancel>,
         stack_watch: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<T> {
         cancel.poll_before_wait();
         let signal = CancelSignal::new(cancel);
         loop {
-            if let (Some(stack), Some(watch)) = (stack, stack_watch) {
-                mirror_stack_cancel(stack, watch);
-            }
+            HttpOwnerCancelGuard::with_current(|owner| {
+                if let (Some(owner), Some(watch)) = (owner, stack_watch) {
+                    mirror_stack_cancel(owner, watch);
+                }
+            });
             if stack_watch.is_some_and(|w| w.load(std::sync::atomic::Ordering::Relaxed)) {
                 return Err(Error::Cancelled);
             }

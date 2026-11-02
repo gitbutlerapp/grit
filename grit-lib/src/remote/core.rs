@@ -791,6 +791,7 @@ impl Remote {
         http_factory: Option<&dyn HttpClientFactory>,
         connect: ConnectOptions,
     ) -> RemoteResult<FetchOutcome> {
+        let _http_owner = crate::transport::http_owner::HttpOwnerCancelGuard::install(cancel);
         match url {
             RemoteUrl::Bundle(path) => Ok(crate::bundle_remote::fetch_from_bundle_into(
                 repo, path, opts, progress, cancel,
@@ -871,6 +872,7 @@ impl Remote {
         http_factory: Option<&dyn HttpClientFactory>,
         connect: ConnectOptions,
     ) -> RemoteResult<PushOutcome> {
+        let _http_owner = crate::transport::http_owner::HttpOwnerCancelGuard::install(cancel);
         let mut over_wire = |conn: &mut dyn crate::transport::Connection| {
             push_remote_from(repo, conn, refs, opts, progress, cancel, pre_push)
         };
