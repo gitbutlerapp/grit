@@ -364,9 +364,6 @@ impl FilesSource {
         match self.try_read_object(oid) {
             Ok(Some(obj)) => Ok(Some(obj)),
             Ok(None) => {
-                if self.skip_loose_probe_after_empty_warmup(oid) {
-                    return Ok(None);
-                }
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
                     self.try_read_object(oid)
                 } else {
@@ -386,9 +383,6 @@ impl FilesSource {
         match self.try_read_object_into(oid, populate_delta_lru, buf) {
             Ok(Some(kind)) => Ok(Some(kind)),
             Ok(None) => {
-                if self.skip_loose_probe_after_empty_warmup(oid) {
-                    return Ok(None);
-                }
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
                     self.try_read_object_into(oid, populate_delta_lru, buf)
                 } else {
@@ -403,9 +397,6 @@ impl FilesSource {
         match self.try_read_info(oid) {
             Ok(Some(info)) => Ok(Some(info)),
             Ok(None) => {
-                if self.skip_loose_probe_after_empty_warmup(oid) {
-                    return Ok(None);
-                }
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
                     self.try_read_info(oid)
                 } else {

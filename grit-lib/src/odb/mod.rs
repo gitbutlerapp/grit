@@ -6042,6 +6042,62 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn external_pack_drop_in_visible_after_empty_primary_miss() {
+        use crate::pack::{clear_pack_cache, pack_cache_test_guard};
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let source = TempDir::new().unwrap();
+        git_in(source.path(), &["init", "-q", "-b", "main"]);
+        git_in(source.path(), &["config", "user.email", "t@example.com"]);
+        git_in(source.path(), &["config", "user.name", "T"]);
+        fs::write(source.path().join("drop-in.txt"), b"external pack payload").unwrap();
+        git_in(source.path(), &["add", "drop-in.txt"]);
+        git_in(source.path(), &["commit", "-m", "drop-in"]);
+        git_in(source.path(), &["repack", "-a", "-d"]);
+        let commit_oid = git_rev_parse_oid(source.path(), "HEAD");
+        let source_pack = source.path().join(".git/objects/pack");
+        let (pack_path, idx_path) = fs::read_dir(&source_pack)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find_map(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext == "pack")
+                    .then(|| (path.clone(), path.with_extension("idx")))
+            })
+            .expect("source pack");
+
+        let bare = TempDir::new().unwrap();
+        let objects = bare.path().join("objects");
+        fs::create_dir_all(objects.join("pack")).unwrap();
+        let odb = Odb::new(&objects);
+        assert!(
+            odb.read(&commit_oid).is_err(),
+            "empty primary must miss before the pack exists"
+        );
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let dest_pack = objects
+            .join("pack")
+            .join(pack_path.file_name().expect("pack basename"));
+        let dest_idx = objects
+            .join("pack")
+            .join(idx_path.file_name().expect("idx basename"));
+        fs::copy(&pack_path, &dest_pack).unwrap();
+        fs::copy(&idx_path, &dest_idx).unwrap();
+
+        let obj = odb
+            .read(&commit_oid)
+            .expect("external pack drop-in must be visible after reprepare");
+        assert_eq!(obj.kind, ObjectKind::Commit);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn late_midx_after_warm_read_resolves_new_commit() {
         use crate::pack::{clear_pack_cache, pack_cache_test_guard};
 

@@ -1391,7 +1391,7 @@ pub(crate) mod pack_cache {
         let decision = store.with_catalog_read(|g| match g.by_dir.get(&pack_dir) {
             None => ReprepareDecision::Rescan,
             Some(c) if c.dir_mtime != dir_mt => ReprepareDecision::Rescan,
-            Some(c) if c.idx_listing_verified => ReprepareDecision::Fresh,
+            Some(c) if c.idx_listing_verified && !c.indexes.is_empty() => ReprepareDecision::Fresh,
             Some(_) => ReprepareDecision::VerifyIdxSet,
         });
         match decision {
