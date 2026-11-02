@@ -361,3 +361,106 @@ fn merge_allows_sibling_untracked_under_same_directory() -> TestResult {
     assert_eq!(read_file(&repo.join("slot/incoming.txt"))?, "incoming\n");
     Ok(())
 }
+
+fn worktree_filesystem_case_insensitive(root: &Path) -> bool {
+    let probe = root.join(".grit_icase_probe");
+    if fs::write(&probe, b"x").is_err() {
+        return false;
+    }
+    let folds = root.join(".GRIT_ICASE_PROBE").exists();
+    let _ = fs::remove_file(&probe);
+    folds
+}
+
+fn git_ok(dir: &Path, args: &[&str]) -> Result<(), Box<dyn Error>> {
+    let out = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_AUTHOR_NAME", "Test User")
+        .env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Test User")
+        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_AUTHOR_DATE", "1700000000 +0000")
+        .env("GIT_COMMITTER_DATE", "1700000000 +0000")
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    assert!(out.status.success(), "git {:?}: {}", args, out.status);
+    Ok(())
+}
+
+fn init_issue_2499_fixture(scratch: &Scratch) -> Result<(String, String), Box<dyn Error>> {
+    let repo = scratch.path();
+    gs_ok(repo, &["init"])?;
+    git_ok(repo, &["config", "core.ignorecase", "true"])?;
+    git_ok(repo, &["branch", "-m", "main"])?;
+    fs::create_dir_all(repo.join("d"))?;
+    fs::write(repo.join("d/README.md"), "y\n")?;
+    for i in 1..=40 {
+        fs::write(repo.join(format!("d/f{i}")), format!("{i}\n"))?;
+    }
+    git_ok(repo, &["add", "-A"])?;
+    git_ok(repo, &["commit", "-qm", "A"])?;
+    git_ok(repo, &["rm", "-q", "-r", "d"])?;
+    fs::create_dir_all(repo.join("d"))?;
+    fs::write(repo.join("d/Readme.md"), "y\n")?;
+    git_ok(repo, &["add", "-A"])?;
+    git_ok(repo, &["commit", "-qm", "B"])?;
+    git_ok(repo, &["branch", "b"])?;
+    git_ok(repo, &["switch", "-q", "-c", "a", "main~1"])?;
+    let b_tip = {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", "b"])
+            .env("GIT_CONFIG_GLOBAL", null_device())
+            .env("GIT_CONFIG_SYSTEM", null_device())
+            .output()?;
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    Ok((b_tip, "b".to_owned()))
+}
+
+fn assert_fsck_clean(repo: &Path) -> Result<(), Box<dyn Error>> {
+    let out = Command::new("git")
+        .current_dir(repo)
+        .args(["fsck"])
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()?;
+    assert!(out.status.success(), "fsck: {}", out.status);
+    Ok(())
+}
+
+/// Issue #2499: wholesale-delete fast path must not treat a case-only rename as untracked.
+#[test]
+fn switch_merge_pick_allow_icase_rename_with_many_deletes() -> TestResult {
+    let probe = Scratch::new("issue-2499-icase-probe")?;
+    if !worktree_filesystem_case_insensitive(probe.path()) {
+        return Ok(());
+    }
+
+    let switch_scratch = Scratch::new("issue-2499-switch")?;
+    let (b_tip, branch) = init_issue_2499_fixture(&switch_scratch)?;
+    let repo = switch_scratch.path();
+    gs_ok(repo, &["switch", &branch])?;
+    assert_eq!(read_file(&repo.join("d/Readme.md"))?, "y\n");
+    assert_fsck_clean(repo)?;
+
+    let merge_scratch = Scratch::new("issue-2499-merge")?;
+    let (_, branch) = init_issue_2499_fixture(&merge_scratch)?;
+    let repo = merge_scratch.path();
+    gs_ok(repo, &["merge", &branch])?;
+    assert_eq!(read_file(&repo.join("d/Readme.md"))?, "y\n");
+    assert_fsck_clean(repo)?;
+
+    let pick_scratch = Scratch::new("issue-2499-pick")?;
+    let (b_tip, _) = init_issue_2499_fixture(&pick_scratch)?;
+    let repo = pick_scratch.path();
+    gs_ok(repo, &["pick", &b_tip])?;
+    assert_eq!(read_file(&repo.join("d/Readme.md"))?, "y\n");
+    assert_fsck_clean(repo)?;
+
+    let _ = (probe, b_tip);
+    Ok(())
+}

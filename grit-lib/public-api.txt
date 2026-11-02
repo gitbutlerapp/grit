@@ -25696,11 +25696,12 @@ pub grit_lib::remote::transport::ConnectOptions::diagnostics: core::option::Opti
 pub grit_lib::remote::transport::ConnectOptions::network_trace: bool
 pub grit_lib::remote::transport::ConnectOptions::protocol_version: u8
 pub grit_lib::remote::transport::ConnectOptions::server_options: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::remote::transport::ConnectOptions
+pub fn grit_lib::remote::transport::ConnectOptions::with_protocol_version(u8) -> Self
 impl core::clone::Clone for grit_lib::remote::transport::ConnectOptions
 pub fn grit_lib::remote::transport::ConnectOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::transport::ConnectOptions
 pub fn grit_lib::remote::transport::ConnectOptions::default() -> Self
-pub fn grit_lib::remote::transport::ConnectOptions::with_protocol_version(u8) -> Self
 impl core::marker::Freeze for grit_lib::remote::transport::ConnectOptions
 impl core::marker::Send for grit_lib::remote::transport::ConnectOptions
 impl core::marker::Sync for grit_lib::remote::transport::ConnectOptions
