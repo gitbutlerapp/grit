@@ -251,6 +251,83 @@ fn in_process_pre_receive_can_reject_push_options_before_refs_move() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
+    use std::process::Command;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    let pid_file = tmp.path().join("hook.pid");
+    std::fs::create_dir_all(&bare).unwrap();
+    git(&bare, &["init", "-q", "--bare", "."]);
+    write_executable_hook(
+        &bare.join("hooks/pre-receive"),
+        &format!(
+            "#!/bin/sh\ncat >/dev/null\necho $$ >{}\nsleep 120\n",
+            pid_file.display()
+        ),
+    );
+    let repo = open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("f"), "payload\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    let pack = pack_for_commit(&source, oid);
+    let body = push_body(None, oid, "refs/heads/main", &pack);
+
+    let opts = ServeOptions {
+        protocol: ProtocolVersion::V0,
+        stateless_rpc: true,
+        advertise_refs: false,
+        agent: "grit-test".to_owned(),
+        hidden_refs: Vec::new(),
+        ..ServeOptions::default()
+    };
+    let cancel = FlagCancel::new();
+    let repo_for_thread =
+        open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
+    let body_for_thread = body.clone();
+    let cancel_for_thread = cancel.clone();
+    let handle = std::thread::spawn(move || {
+        receive_pack_with_hook_cancellable(
+            &repo_for_thread,
+            &mut std::io::Cursor::new(body_for_thread),
+            &mut Vec::new(),
+            &opts,
+            &ReceivePolicy::default(),
+            &(),
+            &cancel_for_thread,
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !pid_file.is_file() {
+        assert!(Instant::now() < deadline, "pre-receive hook did not start");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let hook_pid: u32 = std::fs::read_to_string(&pid_file)
+        .expect("pid file")
+        .trim()
+        .parse()
+        .expect("pid");
+    cancel.cancel();
+    let err = handle.join().expect("join").expect_err("cancelled");
+    assert!(matches!(err, ServeError::Cancelled));
+    assert!(resolve_ref(&bare, "refs/heads/main").is_err());
+    assert!(!repo.odb().exists(&oid));
+    let hook_gone = Command::new("kill")
+        .args(["-0", &hook_pid.to_string()])
+        .status()
+        .expect("kill -0")
+        .code()
+        != Some(0);
+    assert!(hook_gone, "hook process group {hook_pid} should be gone");
+}
+
 #[test]
 fn receive_cancel_before_apply_leaves_ref_unmoved() {
     let tmp = tempfile::tempdir().expect("tempdir");

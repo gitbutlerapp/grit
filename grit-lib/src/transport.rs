@@ -1531,6 +1531,7 @@ impl SshTransport {
                     stdin: CommandStdin::Pipe(Vec::new()),
                     stdout: CommandStdio::Pipe,
                     stderr: CommandStdio::Inherit,
+                    isolate_process_group: false,
                 }
             }
             SshCommand::Program(prog) => {
@@ -1553,6 +1554,7 @@ impl SshTransport {
                     stdin: CommandStdin::Pipe(Vec::new()),
                     stdout: CommandStdio::Pipe,
                     stderr: CommandStdio::Inherit,
+                    isolate_process_group: false,
                 }
             }
             SshCommand::Auto => unreachable!("SshCommand::resolve never yields Auto"),

@@ -1,19 +1,22 @@
 //! Graceful shutdown for the HTTP server: stop accepting connections, drain
 //! in-flight requests, and optionally cap the wait.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
 use tokio::net::TcpListener;
 
 /// How long [`crate::server::Server::run`] waits for in-flight work after shutdown starts.
-#[derive(Debug)]
 pub struct Shutdown {
     /// After the listener closes, keep serving responses until this long elapses.
     /// [`Duration::ZERO`] waits with no cap until every in-flight request finishes.
     pub grace: Duration,
     /// When set, this fires instead of the first process signal (for tests).
     pub(crate) trigger: Option<tokio::sync::oneshot::Receiver<()>>,
+    /// Called before `process::exit` on a second shutdown signal (for example to
+    /// stop in-flight receive-pack hooks).
+    pub on_force_exit: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for Shutdown {
@@ -21,6 +24,7 @@ impl Default for Shutdown {
         Self {
             grace: Duration::from_secs(30),
             trigger: None,
+            on_force_exit: None,
         }
     }
 }
@@ -32,6 +36,7 @@ impl Shutdown {
         Self {
             grace,
             trigger: None,
+            on_force_exit: None,
         }
     }
 
@@ -42,6 +47,20 @@ impl Shutdown {
         Self {
             grace,
             trigger: Some(trigger),
+            on_force_exit: None,
+        }
+    }
+
+    /// Like [`Self::grace`], with a hook run before a forced exit on a second signal.
+    #[must_use]
+    pub fn grace_with_force_exit(
+        grace: Duration,
+        on_force_exit: Arc<dyn Fn() + Send + Sync>,
+    ) -> Self {
+        Self {
+            grace,
+            trigger: None,
+            on_force_exit: Some(on_force_exit),
         }
     }
 }
@@ -85,6 +104,7 @@ pub async fn serve_until_shutdown(
 ) -> std::io::Result<()> {
     let grace = shutdown.grace;
     let trigger = shutdown.trigger;
+    let on_force_exit = shutdown.on_force_exit;
     let (drain_started_tx, drain_started_rx) = tokio::sync::oneshot::channel();
 
     let shutdown_started = async move {
@@ -99,9 +119,12 @@ pub async fn serve_until_shutdown(
         );
         on_shutdown();
         let _ = drain_started_tx.send(());
-        tokio::spawn(async {
+        tokio::spawn(async move {
             wait_first_signal().await;
             eprintln!("grit serve: second shutdown signal; exiting now");
+            if let Some(on_force_exit) = on_force_exit {
+                on_force_exit();
+            }
             std::process::exit(1);
         });
     };

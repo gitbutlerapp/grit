@@ -209,6 +209,7 @@ pub async fn rpc(
         session,
         Duration::from_secs(60),
         (),
+        None,
     )
     .await
     .0
@@ -229,7 +230,7 @@ pub struct RpcFollowUp {
 /// continue streaming after `hold` is dropped; Git concurrency slots must not
 /// wait on a slow reader.
 #[allow(clippy::too_many_arguments)]
-pub async fn rpc_holding<H: Send + 'static>(
+pub(crate) async fn rpc_holding<H: Send + 'static>(
     repo_path: PathBuf,
     service: Service,
     protocol_version: Option<u8>,
@@ -240,6 +241,7 @@ pub async fn rpc_holding<H: Send + 'static>(
     session: grit_protocol::ServeSession,
     idle_timeout: Duration,
     hold: H,
+    mut cancel_guard: Option<crate::rpc_cancel::RpcCancelGuard>,
 ) -> (Response<Body>, RpcFollowUp) {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
@@ -290,6 +292,9 @@ pub async fn rpc_holding<H: Send + 'static>(
                 )
             })
             .await;
+            if let Some(guard) = cancel_guard.take() {
+                guard.mark_finished();
+            }
             let force_discard = matches!(&result, Ok(Err(_)));
             let discard = bridge.finish(force_discard).await;
             match result {

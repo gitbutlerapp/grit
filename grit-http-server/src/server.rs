@@ -199,6 +199,7 @@ pub struct ServeConfig {
 
 pub(crate) struct ServerState {
     pub(crate) repositories: Repositories,
+    pub(crate) rpc_cancels: Arc<crate::rpc_cancel::RpcCancelRegistry>,
     store: Mutex<AuthStore>,
     logins: Mutex<PendingLogins>,
     pub(crate) limits: ServeLimits,
@@ -253,6 +254,7 @@ impl Server {
             listener,
             state: Arc::new(ServerState {
                 repositories: Repositories::at(&config.root),
+                rpc_cancels: Arc::new(crate::rpc_cancel::RpcCancelRegistry::default()),
                 store: Mutex::new(store),
                 logins: Mutex::new(PendingLogins::default()),
                 limits,
@@ -295,7 +297,11 @@ impl Server {
     ///
     /// [`ServerError::Io`] when the async runtime cannot start or the
     /// listener fails.
-    pub fn run(self, shutdown: Shutdown) -> Result<(), ServerError> {
+    pub fn run(self, mut shutdown: Shutdown) -> Result<(), ServerError> {
+        if shutdown.on_force_exit.is_none() {
+            let cancels = self.state.rpc_cancels.clone();
+            shutdown.on_force_exit = Some(Arc::new(move || cancels.cancel_all()));
+        }
         self.start_bundles();
         let state = self.state.clone();
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -762,6 +768,7 @@ async fn post_dispatch(
                     body,
                     options,
                     slot,
+                    &state.rpc_cancels,
                     || state.pushed(),
                 )
                 .await
@@ -794,6 +801,11 @@ async fn post_dispatch(
         Ok(slot) => slot,
         Err(resp) => return finish_with_discarded_body(body, *resp).await,
     };
+    let (cancel, guard) = state.rpc_cancels.register();
+    let session = grit_protocol::ServeSession {
+        cancel: Some(cancel),
+        ..grit_protocol::ServeSession::none()
+    };
     let (response, _follow_up) = smart_http::rpc_holding(
         found.repo.path,
         service,
@@ -802,9 +814,10 @@ async fn post_dispatch(
         body,
         options,
         extensions,
-        grit_protocol::ServeSession::none(),
+        session,
         idle,
         slot,
+        Some(guard),
     )
     .await;
     if service == Service::ReceivePack && response.status().is_success() {

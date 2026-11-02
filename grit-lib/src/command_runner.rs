@@ -147,6 +147,9 @@ pub struct CommandSpec {
     pub stdout: CommandStdio,
     /// Stderr disposition.
     pub stderr: CommandStdio,
+    /// When true (Unix only), the child starts in its own process group so a
+    /// shutdown can SIGKILL the whole tree (server receive hooks).
+    pub isolate_process_group: bool,
 }
 
 impl CommandSpec {
@@ -166,6 +169,7 @@ impl CommandSpec {
             stdin: CommandStdin::Pipe(Vec::new()),
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
+            isolate_process_group: false,
         }
     }
 }
@@ -205,6 +209,7 @@ enum RunningCommandInner {
         stdin: Option<ChildStdin>,
         stdout: Option<ChildStdout>,
         stderr: Option<ChildStderr>,
+        kill_process_group: bool,
     },
     Recording {
         state: Arc<Mutex<RecordingState>>,
@@ -243,6 +248,7 @@ impl RunningCommand {
         stdin: Option<ChildStdin>,
         stdout: Option<ChildStdout>,
         stderr: Option<ChildStderr>,
+        kill_process_group: bool,
     ) -> Self {
         Self {
             inner: RunningCommandInner::System {
@@ -250,6 +256,7 @@ impl RunningCommand {
                 stdin,
                 stdout,
                 stderr,
+                kill_process_group,
             },
         }
     }
@@ -300,6 +307,17 @@ impl RunningCommand {
         match &self.inner {
             RunningCommandInner::System { child, .. } => Some(child.id()),
             RunningCommandInner::Recording { .. } => None,
+        }
+    }
+
+    /// Whether [`wait_hook_command`] should signal the child's process group on cancel.
+    #[must_use]
+    pub fn kill_process_group(&self) -> bool {
+        match &self.inner {
+            RunningCommandInner::System {
+                kill_process_group, ..
+            } => *kill_process_group,
+            RunningCommandInner::Recording { .. } => false,
         }
     }
 
@@ -405,6 +423,7 @@ impl RunningCommand {
                 stdin,
                 stdout,
                 stderr,
+                kill_process_group: _,
             } => Ok((child, stdin, stdout, stderr)),
             RunningCommandInner::Recording { .. } => Err(CommandHandleError),
         }
@@ -695,6 +714,22 @@ fn is_path_var(key: &OsStr) -> bool {
 impl CommandRunner for SystemCommandRunner {
     fn spawn(&self, spec: &CommandSpec) -> io::Result<RunningCommand> {
         let mut cmd = Self::build_command(spec);
+        if spec.isolate_process_group {
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    cmd.pre_exec(|| {
+                        // SAFETY: called in the child between fork and exec.
+                        if libc::setpgid(0, 0) != 0 {
+                            return Err(io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
+            }
+        }
+        let kill_process_group = spec.isolate_process_group;
         let mut child = cmd.spawn()?;
 
         let mut stdin = child.stdin.take();
@@ -710,7 +745,13 @@ impl CommandRunner for SystemCommandRunner {
 
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        Ok(RunningCommand::from_system(child, stdin, stdout, stderr))
+        Ok(RunningCommand::from_system(
+            child,
+            stdin,
+            stdout,
+            stderr,
+            kill_process_group,
+        ))
     }
 }
 
@@ -880,6 +921,7 @@ pub fn run_program(
         stdin,
         stdout: CommandStdio::Pipe,
         stderr,
+        isolate_process_group: false,
     };
     runner.spawn(&spec)?.wait_with_output()
 }
@@ -1197,6 +1239,7 @@ mod tests {
             stdin: CommandStdin::Null,
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
+            isolate_process_group: false,
         };
         let out = SystemCommandRunner
             .spawn(&spec)
@@ -1240,6 +1283,7 @@ mod tests {
             stdin: CommandStdin::Null,
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Pipe,
+            isolate_process_group: false,
         };
         let out = SystemCommandRunner
             .spawn(&spec)

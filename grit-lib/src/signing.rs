@@ -574,6 +574,7 @@ pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         stdin: stdin_pipe(payload),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
+        isolate_process_group: false,
     };
     let output = signing_spawn(cfg, spec, None)?;
 
@@ -681,6 +682,7 @@ fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         stdin: CommandStdin::Null,
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
+        isolate_process_group: false,
     };
 
     let cleanup = |literal_key_tmp: &Option<PathBuf>, buffer_path: &Path| {
@@ -1021,6 +1023,7 @@ pub fn verify_commit(cfg: &GpgConfig, raw_commit: &[u8]) -> Result<SignatureChec
         stdin: stdin_pipe(&payload),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
+        isolate_process_group: false,
     };
 
     let output = match signing_spawn(cfg, spec, None) {
@@ -1220,6 +1223,7 @@ fn verify_ssh_signed_buffer(
         stdin: CommandStdin::Null,
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
+        isolate_process_group: false,
     };
     let find_out = signing_spawn(cfg, find_spec, None).inspect_err(|_| {
         let _ = std::fs::remove_file(&sig_path);
@@ -1349,6 +1353,7 @@ fn run_with_stdin_status(
         stdin: stdin_pipe(input),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
+        isolate_process_group: false,
     };
     match signing_spawn(cfg, spec, None) {
         Ok(o) => (
@@ -1681,6 +1686,7 @@ pub fn verify_tag(cfg: &GpgConfig, raw_tag: &[u8]) -> Result<SignatureCheck> {
         stdin: stdin_pipe(&payload),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Pipe,
+        isolate_process_group: false,
     };
 
     let output = match signing_spawn(cfg, spec, None) {
