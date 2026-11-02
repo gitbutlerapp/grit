@@ -46,6 +46,7 @@ use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, HunkSelectError, HunkSelection,
 };
 use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stats;
+use crate::porcelain::merge::squash_conflict_merge_in_progress;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::replay_sequence::finish_replay_commit_state;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
@@ -918,6 +919,8 @@ pub struct CommitOutcome {
     /// Gitlink paths introduced while auto-staging before this commit (empty when nothing new was
     /// recorded as a nested repository).
     pub embedded_gitlinks: Vec<String>,
+    /// Rerere postimage events when this commit concluded a conflict resolution.
+    pub rerere: Vec<crate::rerere::RerereEvent>,
 }
 
 impl CommitOutcome {
@@ -1292,6 +1295,7 @@ fn finish_commit_dry_run(
         change_id: None,
         files,
         embedded_gitlinks: Vec::new(),
+        rerere: Vec::new(),
     })
 }
 
@@ -1870,8 +1874,16 @@ fn create_commit_with_index(
         )?;
     }
 
+    let mut rerere_events = Vec::new();
     if concluding_merge {
-        let _ = finish_merge_state(repo)?;
+        rerere_events = finish_merge_state(repo)?.rerere;
+    } else {
+        let conclude_rerere = squash_conflict_merge_in_progress(repo.git_dir())
+            || grit_rebase_conflict_stop_active(repo.git_dir())
+            || concluding_replay;
+        if conclude_rerere {
+            rerere_events = crate::rerere::finish_merge_rerere(repo)?;
+        }
     }
     if concluding_replay {
         finish_replay_commit_state(repo, oid)?;
@@ -1943,6 +1955,7 @@ fn create_commit_with_index(
         change_id: stored_change_id,
         files: commit_files,
         embedded_gitlinks: Vec::new(),
+        rerere: rerere_events,
     })
 }
 

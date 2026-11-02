@@ -224,7 +224,7 @@ fn integrate_branch_stops_with_git_index_stages() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("merge");
-    let IntegrateBranchOutcome::Conflicts { paths, details } = outcome else {
+    let IntegrateBranchOutcome::Conflicts { paths, details, .. } = outcome else {
         panic!("expected conflicts, got {outcome:?}");
     };
     assert_eq!(paths, vec!["a", "b", "c"]);

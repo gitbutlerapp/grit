@@ -504,7 +504,7 @@ fn integrate_branch_stops_and_git_reads_the_result() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("merge");
-    let IntegrateBranchOutcome::Conflicts { paths, details } = outcome else {
+    let IntegrateBranchOutcome::Conflicts { paths, details, .. } = outcome else {
         panic!("expected conflicts, got {outcome:?}");
     };
     assert_eq!(paths, vec!["b/new"]);

@@ -873,6 +873,8 @@ pub enum IntegrateBranchOutcome {
         paths: Vec<String>,
         /// Per-path conflict classification (same order as `paths` after sorting).
         details: Vec<Conflict>,
+        /// Rerere replay or preimage events when `rerere.enabled` is set.
+        rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// A `--squash` merge applied the merged tree and wrote `SQUASH_MSG`.
     Squashed,
@@ -1212,7 +1214,12 @@ fn integrate_at_tip_without_hooks(
         } else {
             record_merge_in_progress(repo.git_dir(), other_oid, merge_msg)?;
         }
-        return Ok(IntegrateBranchOutcome::Conflicts { paths, details });
+        let rerere = crate::rerere::repo_rerere(repo, crate::rerere::RerereAutoupdate::FromConfig)?;
+        return Ok(IntegrateBranchOutcome::Conflicts {
+            paths,
+            details,
+            rerere,
+        });
     }
 
     repo.odb().persist_mem_overlay()?;
@@ -1492,6 +1499,18 @@ pub struct ContinueOutcome {
     pub oid: ObjectId,
     /// Stored `change-id` on the merge commit when present.
     pub change_id: Option<ChangeId>,
+    /// Rerere postimage events from concluding the merge commit.
+    pub rerere: Vec<crate::rerere::RerereEvent>,
+}
+
+/// Squash merge stopped on conflicts (`SQUASH_MSG` and conflict `MERGE_MSG`, no `MERGE_HEAD`).
+#[must_use]
+pub fn squash_conflict_merge_in_progress(git_dir: &Path) -> bool {
+    read_merge_heads(git_dir)
+        .map(|h| h.is_empty())
+        .unwrap_or(true)
+        && git_dir.join("SQUASH_MSG").is_file()
+        && git_dir.join("MERGE_MSG").is_file()
 }
 
 /// Failure modes for [`continue_merge`].
@@ -1576,6 +1595,7 @@ pub fn continue_merge(
     Ok(ContinueOutcome {
         oid: outcome.oid,
         change_id: outcome.change_id,
+        rerere: outcome.rerere,
     })
 }
 
@@ -1673,6 +1693,7 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     if !in_merge && !squash_conflict {
         return Err(Error::NoMergeInProgress);
     }
+    crate::rerere::rerere_clear(git_dir)?;
     restore_pre_merge_state(repo)
 }
 

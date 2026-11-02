@@ -45,6 +45,7 @@ fn merge_continue_json() {
     system_git_ok(repo, &["init", "-q", "-b", "main"]);
     system_git_ok(repo, &["config", "user.name", "T"]);
     system_git_ok(repo, &["config", "user.email", "t@e.com"]);
+    system_git_ok(repo, &["config", "rerere.enabled", "true"]);
     fs::write(repo.join("f"), "base\n").unwrap();
     system_git_ok(repo, &["add", "f"]);
     system_git_ok(repo, &["commit", "-qm", "base"]);
@@ -80,6 +81,98 @@ fn merge_continue_json() {
     assert_eq!(v["branch"], "side");
     assert!(v["oid"].as_str().is_some());
     assert!(!repo.join(".git/MERGE_HEAD").exists());
+    let rerere = v["rerere"]
+        .as_array()
+        .expect("rerere array on merged continue");
+    assert!(
+        rerere.iter().any(|e| e["kind"] == "recorded_resolution"),
+        "expected recorded_resolution in JSON: {v}"
+    );
+}
+
+#[test]
+fn merge_continue_rerere_human_and_markdown() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = tmp.path();
+    system_git_ok(repo, &["init", "-q", "-b", "main"]);
+    system_git_ok(repo, &["config", "user.name", "T"]);
+    system_git_ok(repo, &["config", "user.email", "t@e.com"]);
+    system_git_ok(repo, &["config", "rerere.enabled", "true"]);
+    fs::write(repo.join("f"), "base\n").unwrap();
+    system_git_ok(repo, &["add", "f"]);
+    system_git_ok(repo, &["commit", "-qm", "base"]);
+    system_git_ok(repo, &["checkout", "-qb", "side"]);
+    fs::write(repo.join("f"), "side\n").unwrap();
+    system_git_ok(repo, &["commit", "-qam", "side"]);
+    system_git_ok(repo, &["checkout", "-q", "main"]);
+    fs::write(repo.join("f"), "main\n").unwrap();
+    system_git_ok(repo, &["commit", "-qam", "main"]);
+    let merge = Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("merge");
+    assert_ne!(merge.status.code(), Some(0));
+    fs::write(repo.join("f"), "resolved\n").unwrap();
+
+    let human = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .args(["merge", "--continue"])
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("grit");
+    assert!(human.status.success());
+    let human_text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&human.stdout),
+        String::from_utf8_lossy(&human.stderr)
+    );
+    assert!(
+        human_text.contains("Recorded rerere resolution"),
+        "human output should mention rerere: {human_text}"
+    );
+
+    let tmp2 = tempfile::tempdir().expect("tempdir2");
+    let repo2 = tmp2.path();
+    system_git_ok(repo2, &["init", "-q", "-b", "main"]);
+    system_git_ok(repo2, &["config", "user.name", "T"]);
+    system_git_ok(repo2, &["config", "user.email", "t@e.com"]);
+    system_git_ok(repo2, &["config", "rerere.enabled", "true"]);
+    fs::write(repo2.join("f"), "base\n").unwrap();
+    system_git_ok(repo2, &["add", "f"]);
+    system_git_ok(repo2, &["commit", "-qm", "base"]);
+    system_git_ok(repo2, &["checkout", "-qb", "side"]);
+    fs::write(repo2.join("f"), "side\n").unwrap();
+    system_git_ok(repo2, &["commit", "-qam", "side"]);
+    system_git_ok(repo2, &["checkout", "-q", "main"]);
+    fs::write(repo2.join("f"), "main\n").unwrap();
+    system_git_ok(repo2, &["commit", "-qam", "main"]);
+    let merge2 = Command::new("git")
+        .args(["merge", "side"])
+        .current_dir(repo2)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("merge");
+    assert_ne!(merge2.status.code(), Some(0));
+    fs::write(repo2.join("f"), "resolved\n").unwrap();
+
+    let md = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .args(["--markdown", "merge", "--continue"])
+        .current_dir(repo2)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .output()
+        .expect("grit");
+    assert!(md.status.success());
+    let md_text = String::from_utf8_lossy(&md.stdout);
+    assert!(
+        md_text.contains("recorded_resolution") || md_text.contains("Recorded rerere"),
+        "markdown should mention rerere: {md_text}"
+    );
 }
 
 #[test]

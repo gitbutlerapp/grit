@@ -1061,7 +1061,8 @@ fn commits_to_replay_empty_range_does_not_resolve_tip_alone() {
         out,
         SequenceOutcome::Completed {
             created,
-            dropped
+            dropped,
+            ..
         } if created.is_empty() && dropped.is_empty()
     ));
 }

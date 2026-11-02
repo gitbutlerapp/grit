@@ -101,6 +101,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `commits` | array | Each picked or attempted step: `source`, `oid`, `change_id`, `subject`. |
 | `dropped` | array | Source commit oids skipped as empty (`--empty drop`). |
 | `conflicts` | array or null | Conflicted paths when `result` is `conflicts`, each `{path, kind}` with a [conflict kind](../status/#conflict-kinds). |
+| `rerere` | array | Rerere events when `rerere.enabled` is active and the pick stops on conflicts (`path`, `kind` as for [`grit merge`](../merge/#json)). Omitted when empty. |
 | `next_steps` | array or null | Suggested commands when stopped (`conflicts` or `empty`). |
 | `alternatives` | array or null | `grit pick --abort` / `--skip` when a sequence is paused. |
 | `dry_run` | boolean or null | `true` when `--dry-run` was set (no refs or objects were updated). |

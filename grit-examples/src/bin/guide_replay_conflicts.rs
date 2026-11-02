@@ -138,7 +138,9 @@ fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
     )?;
 
     match continue_replay_sequence(&repo, &replay_identity(), &mut NullProgress, &NeverCancel)? {
-        SequenceOutcome::Completed { created, dropped } => {
+        SequenceOutcome::Completed {
+            created, dropped, ..
+        } => {
             println!(
                 "sequence completed; created={} dropped={}",
                 created.len(),

@@ -85,6 +85,9 @@ pub struct PickOutcome {
     /// True when this outcome is from `grit pick --check` (nothing was picked).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub check: bool,
+    /// Rerere replay or record events when `rerere.enabled` is active.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rerere: Vec<crate::operation_output::RerereEventJson>,
 }
 
 /// Options for [`run`].
@@ -128,6 +131,7 @@ impl HumanRender for PickOutcome {
                 if !self.dropped.is_empty() {
                     outln!(w, "Dropped {} empty commit(s)", self.dropped.len());
                 }
+                crate::operation_output::render_rerere_human(&self.rerere);
             }
             PickResult::Clean => {
                 if let Some(oid) = &self.oid {
@@ -143,6 +147,7 @@ impl HumanRender for PickOutcome {
                     }
                 } else if let Some(conflicts) = &self.conflicts {
                     render_conflicts_human(conflicts, w)?;
+                    crate::operation_output::render_rerere_human(&self.rerere);
                     render_pick_conflict_footer_human();
                 }
                 if !self.check {
@@ -293,6 +298,7 @@ impl PickOutcome {
             dry_run: None,
             oid: None,
             check: false,
+            rerere: Vec::new(),
         }
     }
 }
@@ -319,20 +325,27 @@ fn source_record(source: ObjectId, subject: &str) -> PickCommitRecord {
 
 fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> PickOutcome {
     match outcome {
-        SequenceOutcome::Completed { created, dropped } => PickOutcome {
+        SequenceOutcome::Completed {
+            created,
+            dropped,
+            rerere,
+        } => PickOutcome {
             commits: created.iter().map(PickCommitRecord::from).collect(),
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+            rerere: crate::operation_output::rerere_events_json(&rerere),
             ..PickOutcome::new(ok_result)
         },
         SequenceOutcome::Conflicts {
             conflicts,
             created_so_far,
+            rerere,
             ..
         } => {
             let block = OperationConflictBlock::for_pick(&conflicts);
             PickOutcome {
                 commits: created_so_far.iter().map(PickCommitRecord::from).collect(),
                 conflicts: Some(block.conflicts),
+                rerere: crate::operation_output::rerere_events_json(&rerere),
                 next_steps: Some(block.next_steps),
                 alternatives: block.alternatives,
                 ..PickOutcome::new(PickResult::Conflicts)

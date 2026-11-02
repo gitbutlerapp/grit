@@ -77,6 +77,22 @@
           "type": "string"
         }
       ]
+    },
+    "RerereEventJson": {
+      "description": "One rerere status line in `--json` output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit pick`.",
@@ -138,6 +154,13 @@
         "string",
         "null"
       ]
+    },
+    "rerere": {
+      "description": "Rerere replay or record events when `rerere.enabled` is active.",
+      "items": {
+        "$ref": "#/definitions/RerereEventJson"
+      },
+      "type": "array"
     },
     "result": {
       "$ref": "#/definitions/PickResult"
