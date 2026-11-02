@@ -1024,6 +1024,9 @@ mod merge_dry_run;
 #[path = "merge_eol_crlf_conflict_git_compat.rs"]
 mod merge_eol_crlf_conflict_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "merge_exact_renames_issue_2508.rs"]
+mod merge_exact_renames_issue_2508;
+#[cfg(feature = "full-tests")]
 #[path = "merge_file_git_compat.rs"]
 mod merge_file_git_compat;
 #[path = "merge_file_issue_2369_git_compat.rs"]
