@@ -278,7 +278,7 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
         upstream.path(),
         &["bundle", "create", bundle.to_str().expect("utf8"), "main"],
     );
-    let (_dir, repo, store) = memory_repo();
+    let (dir, repo, store) = memory_repo();
     let before = object_files(repo.git_dir());
 
     let outcome = repo.bundles().unbundle(&bundle).expect("unbundle");
@@ -333,11 +333,27 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
         ],
     );
     let opened = grit_lib::bundle::Bundle::open(&incremental).expect("open bundle");
-    assert!(opened
-        .verify(&repo)
-        .expect("verify")
-        .missing_prerequisites
-        .is_empty());
+    let disconnected = opened.verify(&repo).expect("verify");
+    assert!(disconnected.missing_prerequisites.is_empty());
+    assert!(disconnected.prerequisites_not_connected);
+    assert_eq!(
+        disconnected.into_result().unwrap_err(),
+        BundleError::PrerequisitesNotConnected
+    );
+    assert!(matches!(
+        repo.bundles()
+            .unbundle(&incremental)
+            .expect_err("unbundle without connected prerequisite"),
+        BundleError::PrerequisitesNotConnected
+    ));
+
+    git(
+        dir.path(),
+        &["update-ref", "refs/heads/main", &tip.to_hex()],
+    );
+    let connected = opened.verify(&repo).expect("verify after ref");
+    assert!(connected.is_ok(), "{connected:?}");
+
     let new_tip = rev_parse(upstream.path(), "main");
     let outcome = repo
         .bundles()
