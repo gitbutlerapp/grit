@@ -146,6 +146,7 @@ fn grit_written_tag_extra_headers_pass_git_fsck_strict() {
         tagger: Some("T <t@example.com> 1 +0000".into()),
         extra_headers: Vec::new(),
         message: "tag body\n".into(),
+        raw_message: None,
     };
     set_extra_header(
         &mut tag.extra_headers,
@@ -184,6 +185,7 @@ fn grit_fsck_ignores_tag_extra_headers() {
             b"tree-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
                 .to_vec(),
         message: "body\n".into(),
+        raw_message: None,
     };
     let bytes = serialize_tag(&tag);
     let tag_oid = repo

@@ -820,6 +820,7 @@ mod claim_tests {
             tagger: Some("T <t@example.com> 1 +0000".into()),
             extra_headers: extra.to_vec(),
             message: "msg\n".into(),
+            raw_message: None,
         }
     }
 

@@ -33,6 +33,7 @@ fn claim_headers_survive_git_cat_file_and_fsck_strict() {
         tagger: Some("T <t@example.com> 1 +0000".into()),
         extra_headers: Vec::new(),
         message: "annotated\n".into(),
+        raw_message: None,
     };
     claim.apply_to_tag(&mut tag);
     let bytes = serialize_tag(&tag);

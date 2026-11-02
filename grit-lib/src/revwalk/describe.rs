@@ -669,6 +669,7 @@ mod tests {
             tagger: Some(tagger.header_line()),
             extra_headers: Vec::new(),
             message: format!("{msg}\n"),
+            raw_message: None,
         };
         let bytes = serialize_tag(&data);
         let oid = repo.odb().write(ObjectKind::Tag, &bytes).expect("write");
@@ -696,6 +697,7 @@ mod tests {
             tagger: Some(tagger.header_line()),
             extra_headers: Vec::new(),
             message: format!("{msg}\n"),
+            raw_message: None,
         };
         let bytes = serialize_tag(&data);
         let oid = repo.odb().write(ObjectKind::Tag, &bytes).expect("write");

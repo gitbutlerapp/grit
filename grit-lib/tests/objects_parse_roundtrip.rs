@@ -302,6 +302,39 @@ fn hash_algo_name_and_len_parse_failures() {
 }
 
 #[test]
+fn parse_tag_non_utf8_message_roundtrip_preserves_bytes() {
+    let repo = init_repo(HashAlgo::Sha1);
+    git_trim(&repo, &["config", "user.email", "a@b"]);
+    git_trim(&repo, &["config", "user.name", "T"]);
+    std::fs::write(repo.path().join("f"), "1\n").unwrap();
+    git_trim(&repo, &["add", "f"]);
+    git_trim(&repo, &["commit", "-qm", "init"]);
+    let out = Command::new("bash")
+        .current_dir(repo.path())
+        .args(["-c", "git tag -a -m $'release caf\\xe9' v1"])
+        .output()
+        .expect("git tag");
+    assert!(
+        out.status.success(),
+        "git tag: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tag_oid = git_trim(&repo, &["rev-parse", "v1"]);
+    let original = git_cat_file_object(&repo, "tag", &tag_oid);
+    let parsed = parse_tag(&original).expect("parse non-UTF-8 tag");
+    assert!(
+        parsed.message.contains('\u{FFFD}'),
+        "lossy decode: {:?}",
+        parsed.message
+    );
+    assert!(parsed.raw_message.is_some());
+    let round = serialize_tag(&parsed);
+    assert_eq!(round, original);
+    let git_oid = git_hash_object_stdin(&repo, "tag", &round);
+    assert_eq!(git_oid, tag_oid);
+}
+
+#[test]
 fn serialize_tag_empty_message_has_no_extra_blank_line() {
     let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
     let tag = TagData {
@@ -311,6 +344,7 @@ fn serialize_tag_empty_message_has_no_extra_blank_line() {
         tagger: None,
         extra_headers: Vec::new(),
         message: String::new(),
+        raw_message: None,
     };
     let bytes = serialize_tag(&tag);
     let parsed = parse_tag(&bytes).expect("parse");
@@ -345,6 +379,7 @@ fn serialize_parse_commit_tag_tree_identity() {
         tagger: Some("T <t@example.com> 1 +0000".to_string()),
         extra_headers: Vec::new(),
         message: "tag msg".to_string(),
+        raw_message: None,
     };
     let tag_bytes = serialize_tag(&tag);
     let tag_back = parse_tag(&tag_bytes).unwrap();

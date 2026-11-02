@@ -397,6 +397,7 @@ fn changed_blob_detected() {
         tagger: Some("T <t@example.com> 1 +0000".into()),
         extra_headers: Vec::new(),
         message: "body\n".into(),
+        raw_message: None,
     };
     set_extra_header(
         &mut tag.extra_headers,
@@ -440,6 +441,7 @@ fn unsigned_tag_with_header_reports_missing_signature() {
         tagger: Some("T <t@example.com> 1 +0000".into()),
         extra_headers: Vec::new(),
         message: "body\n".into(),
+        raw_message: None,
     };
     set_extra_header(
         &mut tag.extra_headers,

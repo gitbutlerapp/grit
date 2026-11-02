@@ -1553,8 +1553,12 @@ pub struct TagData {
     pub tagger: Option<String>,
     /// Extra header lines after `tagger` and before the blank line (raw bytes, LF-terminated).
     pub extra_headers: Vec<u8>,
-    /// The tag message (everything after the blank line).
+    /// The tag message (everything after the blank line), lossily decoded when not UTF-8.
     pub message: String,
+    /// Optional raw message bytes for non-UTF-8 tag messages.
+    ///
+    /// When set, [`serialize_tag`] writes these bytes unchanged so parse→serialize keeps the object id.
+    pub raw_message: Option<Vec<u8>>,
 }
 
 /// Parse the raw data of a tag object.
@@ -1592,9 +1596,13 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
         let after_nl = (line_end + 1).min(data.len());
         if line.is_empty() {
             let body = data.get(after_nl..).unwrap_or_default();
-            let message = std::str::from_utf8(body)
-                .map_err(|_| Error::CorruptObject("tag message is not valid UTF-8".to_owned()))?
-                .to_owned();
+            let (message, raw_message) = match std::str::from_utf8(body) {
+                Ok(text) => (text.to_owned(), None),
+                Err(_) => (
+                    String::from_utf8_lossy(body).into_owned(),
+                    Some(body.to_vec()),
+                ),
+            };
             return Ok(TagData {
                 object: object
                     .ok_or_else(|| Error::CorruptObject("tag missing object header".to_owned()))?,
@@ -1605,6 +1613,7 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
                 tagger,
                 extra_headers,
                 message,
+                raw_message,
             });
         }
 
@@ -1689,6 +1698,7 @@ pub fn parse_tag(data: &[u8]) -> Result<TagData> {
         tagger,
         extra_headers,
         message: String::new(),
+        raw_message: None,
     })
 }
 
@@ -1707,10 +1717,14 @@ pub fn serialize_tag(t: &TagData) -> Vec<u8> {
     }
     out.extend_from_slice(&t.extra_headers);
     out.push(b'\n');
-    let msg = t.message.trim_end_matches('\n');
-    if !msg.is_empty() {
-        out.extend_from_slice(msg.as_bytes());
-        out.push(b'\n');
+    if let Some(raw) = &t.raw_message {
+        out.extend_from_slice(raw);
+    } else {
+        let msg = t.message.trim_end_matches('\n');
+        if !msg.is_empty() {
+            out.extend_from_slice(msg.as_bytes());
+            out.push(b'\n');
+        }
     }
     out
 }

@@ -201,6 +201,7 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
         tagger: Some(bench_ident(1_700_050_000)),
         extra_headers: Vec::new(),
         message: "history bench tag\n".to_owned(),
+        raw_message: None,
     };
     let tag_oid = repo
         .odb()

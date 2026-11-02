@@ -1,8 +1,16 @@
 //! Annotated tag creation round-trips with system `git`.
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
+use grit_lib::maintenance::{gc, GcOptions};
 use grit_lib::objects::{parse_tag, ObjectKind};
-use grit_lib::porcelain::tag::{create_tag, tag_ref_metadata, CreateTagRequest, TagKind};
+use grit_lib::porcelain::tag::{
+    create_tag, list_tags_with_detail, tag_ref_metadata, CreateTagRequest, TagDetail, TagKind,
+};
+use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::refs::listing::RefQuery;
+use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
 use std::process::Command;
 
@@ -68,4 +76,69 @@ fn grit_annotated_tag_round_trips_with_git() {
     let parsed = parse_tag(&obj.data).unwrap();
     assert_eq!(parsed.tag, "v1");
     assert_eq!(parsed.object, head);
+}
+
+#[test]
+fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let host = tmp.path().join("host");
+    std::fs::create_dir_all(&host).unwrap();
+    git(&host, &["init", "-q", "-b", "main"]);
+    git(&host, &["config", "user.email", "a@b"]);
+    git(&host, &["config", "user.name", "T"]);
+    std::fs::write(host.join("f"), "1\n").unwrap();
+    git(&host, &["add", "f"]);
+    git(&host, &["commit", "-qm", "init"]);
+    let tag_out = Command::new("bash")
+        .current_dir(&host)
+        .args(["-c", "git tag -a -m $'release caf\\xe9' v1"])
+        .output()
+        .expect("git tag");
+    assert!(
+        tag_out.status.success(),
+        "git tag: {}",
+        String::from_utf8_lossy(&tag_out.stderr)
+    );
+    git(&host, &["fsck"]);
+
+    let host_repo =
+        Repository::discover(Some(host.as_path()), &RepositoryOptions::empty()).expect("discover");
+    let fsck_opts = FsckOptions::full_repository(false).with_check_dangling(false);
+    let report = fsck(&host_repo, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
+    let config = host_repo.config().expect("config");
+    assert!(
+        report.ok(&config, &fsck_opts),
+        "grit fsck failed: {:?}",
+        report.issues
+    );
+
+    let listed = list_tags_with_detail(&host_repo, &RefQuery::default(), TagDetail::Annotation)
+        .expect("list tags");
+    let grit_lib::porcelain::tag::TagList::Summaries(tags) = listed else {
+        panic!("expected annotation summaries");
+    };
+    assert_eq!(tags.len(), 1);
+    let ann = tags[0].annotation.as_ref().expect("annotation");
+    assert!(ann.message.contains('\u{FFFD}'));
+
+    gc(&host_repo, &GcOptions::default()).expect("grit gc");
+
+    let clone_dest = tmp.path().join("clone");
+    clone_repo(
+        CloneOptions::new(format!("file://{}", host.display()), clone_dest.clone()),
+        &mut NoProgress,
+        &NeverCancel,
+        None,
+    )
+    .expect("grit clone");
+    let cloned = Repository::discover(Some(clone_dest.as_path()), &RepositoryOptions::empty())
+        .expect("discover clone");
+    let clone_report =
+        fsck(&cloned, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck clone");
+    let clone_config = cloned.config().expect("config");
+    assert!(
+        clone_report.ok(&clone_config, &fsck_opts),
+        "clone fsck: {:?}",
+        clone_report.issues
+    );
 }
