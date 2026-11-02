@@ -216,7 +216,7 @@ async fn read_commands(body: Body) -> Result<Bytes, Box<Response<Body>>> {
         let chunk = match chunk {
             Ok(c) => c,
             Err(_) => {
-                drain_body_stream(&mut stream).await;
+                let _ = crate::request_body::discard_data_stream(&mut stream, 0).await;
                 return Err(Box::new(status(
                     StatusCode::BAD_REQUEST,
                     "could not read request body",
@@ -224,7 +224,7 @@ async fn read_commands(body: Body) -> Result<Bytes, Box<Response<Body>>> {
             }
         };
         if buf.len().saturating_add(chunk.len()) > MAX_COMMANDS {
-            drain_body_stream(&mut stream).await;
+            let _ = crate::request_body::discard_data_stream(&mut stream, chunk.len() as u64).await;
             return Err(Box::new(status(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 "the command list is too large",
@@ -233,12 +233,6 @@ async fn read_commands(body: Body) -> Result<Bytes, Box<Response<Body>>> {
         buf.extend_from_slice(&chunk);
     }
     Ok(Bytes::from(buf))
-}
-
-async fn drain_body_stream(
-    stream: &mut (impl futures_util::Stream<Item = Result<Bytes, axum::Error>> + Unpin),
-) {
-    while stream.next().await.is_some() {}
 }
 
 fn header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
@@ -373,9 +367,14 @@ pub async fn patch(
         };
         if offset + chunk.len() as u64 > meta.length {
             let _ = file.flush().await;
-            return status(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "more bytes than Upload-Length",
+            let outcome =
+                crate::request_body::discard_data_stream(&mut stream, chunk.len() as u64).await;
+            return crate::request_body::apply_discard_outcome(
+                status(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "more bytes than Upload-Length",
+                ),
+                outcome,
             );
         }
         if let Err(e) = file.write_all(&chunk).await {

@@ -891,7 +891,9 @@ fn post_large_body_concurrent(
         head.push_str("\r\n");
     }
     head.push_str("\r\n");
-    stream.write_all(head.as_bytes()).expect("write request head");
+    stream
+        .write_all(head.as_bytes())
+        .expect("write request head");
     let mut reader = stream.try_clone().expect("dup socket for concurrent read");
     let writer = stream;
     let payload = body.to_vec();
@@ -1037,4 +1039,112 @@ fn large_upload_pack_over_fetch_limit_returns_413_without_resetting_upload() {
         "fetch body past the decoded limit must be HTTP 413"
     );
     write_ok.expect("server must accept the full upload before closing");
+}
+
+/// Send only `prefix` of a larger declared body and wait for the response headers.
+fn post_prefix_then_stall(
+    port: u16,
+    path: &str,
+    prefix: &[u8],
+    declared_len: usize,
+    extra_headers: &[(&str, &str)],
+) -> (u16, String, Duration) {
+    use std::io::{Read, Write};
+
+    let started = Instant::now();
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .expect("read timeout");
+    let mut head = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+         Content-Type: application/x-git-upload-pack-request\r\n\
+         Content-Length: {declared_len}\r\nConnection: close\r\n"
+    );
+    for (name, value) in extra_headers {
+        head.push_str(name);
+        head.push(':');
+        head.push(' ');
+        head.push_str(value);
+        head.push_str("\r\n");
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(prefix).expect("write prefix");
+    let mut response = [0u8; 4096];
+    let n = stream.read(&mut response).expect("read response");
+    let elapsed = started.elapsed();
+    let text = String::from_utf8_lossy(&response[..n]).into_owned();
+    let status = text
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse().ok())
+        .unwrap_or_else(|| panic!("no HTTP status in response: {text:?}"));
+    (status, text, elapsed)
+}
+
+#[test]
+fn stalled_fetch_over_limit_returns_413_with_connection_close_after_idle_timeout() {
+    use grit_http_server::request_body::DISCARD_IDLE_TIMEOUT;
+
+    let server_bin = require_binary("grit-http-server");
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", bare.to_str().expect("utf8 path")],
+    );
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    git(&work, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(
+        &work,
+        &["push", "-q", bare.to_str().expect("utf8 path"), "main"],
+    );
+    let oid = rev_parse(&bare, "refs/heads/main");
+
+    let port = require_port();
+    let child = spawn_server_with_env(
+        &server_bin,
+        &root,
+        port,
+        None,
+        &[("GRIT_HTTP_MAX_FETCH_BODY", "65536")],
+    );
+    let _guard = ServerGuard(child);
+    assert!(wait_ready(port), "server ready on {port}");
+
+    let mut prefix = String::new();
+    v2_fetch_pkt(&mut prefix, "command=fetch");
+    v2_fetch_pkt(&mut prefix, "object-format=sha1");
+    prefix.push_str("0001");
+    let want = format!("want {oid}");
+    while prefix.len() < 128 * 1024 {
+        v2_fetch_pkt(&mut prefix, &want);
+    }
+
+    let (status, headers, elapsed) = post_prefix_then_stall(
+        port,
+        "/project.git/git-upload-pack",
+        prefix.as_bytes(),
+        PROXY_BODY_SIZE,
+        &[("Git-Protocol", "version=2")],
+    );
+    assert_eq!(status, 413, "expected HTTP 413, headers: {headers}");
+    assert!(
+        headers.to_ascii_lowercase().contains("connection: close"),
+        "expected Connection: close, got: {headers}"
+    );
+    assert!(
+        elapsed < DISCARD_IDLE_TIMEOUT + Duration::from_secs(3),
+        "413 should arrive soon after the idle timeout, took {elapsed:?}"
+    );
+    assert!(
+        elapsed >= DISCARD_IDLE_TIMEOUT.saturating_sub(Duration::from_secs(2)),
+        "413 should not return before the idle timeout, took {elapsed:?}"
+    );
 }
