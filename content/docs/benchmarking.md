@@ -334,6 +334,11 @@ every binary that links it; `grit` enables it and lays out its own hot code the 
   as aliases at the same address. The body's input section is named after one of them,
   while callgrind reports whichever name it picks for the address, so listing only that
   name left 15 such bodies in `.text` on a `release` build of `grit status`.
+- Impl disambiguators (`Ms<n>_`) are kept, and they depend on grit-lib's features. Building
+  `grit` together with `grit-utils`, as the daily census does, turns on `serde-models`,
+  whose extra impls renumber them, while shipped binaries build `grit-cli` alone. The
+  generator profiles both builds of both profiles, so the lists match either one (see
+  [Benchmarks](benchmarks.md#pick-revert-and-merge-join-the-hot-text-layout-2026-11-02)).
 - The `hot_text_layout` test fails if either section is missing, smaller than its floor
   (256 KiB for the library, 128 KiB for the CLI, the sign that most patterns stopped
   matching), or not ahead of `.text`.

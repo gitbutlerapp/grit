@@ -9,6 +9,63 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Pick, revert and merge join the hot text layout (2026-11-02)
+
+`pick/one@synth-10k` cherry-picks a topic commit that rewrites 2,000 of 10,000 files onto `main`. Grit already took under half Git's time, but peaked at 18.8 MB on a `dist` build and 22.3 MB on `release`, against Git's 9.4 MB. Little of that was data: the heap peaks at 4.7 MB. On `release`, 12.5 MB of the binary was still resident when `grit pick` exited (8.6 MB on `dist`).
+
+The [hot text layout](benchmarking.md#hot-text-layout) had never profiled a pick. Its workloads covered status, diff, log, refs, staging, committing, switching and stashing. The code that only replays and merges commits (the replay sequence, the tree merge, the work-tree guard and the parallel checkout writes) therefore stayed scattered over plain `.text`, and each executed function made its 64 KB fault-around window resident. With fault-around temporarily set to one page, the `release` pick peaks at 12.1 MB instead of 20.7 MB, and Git at 6.0 MB instead of 8.9 MB. Most of the gap was fault-around over scattered code.
+
+`scripts/gen_hot_text_layout.py` now profiles three more workloads: `grit pick origin/topic`, `grit revert HEAD` and `grit merge origin/topic`. They run on a topic branch, forked before the last commit on `main`, that edits the first line of every fifth file. The new workloads come last in the workload order, so the Gray code order and the layout search split the earlier workloads' runs as little as possible. Two details decide whether the lists match what the census runs:
+
+- **The untracked cache.** With `core.untrackedCache` unset, grit adds an untracked cache to the index of a repository with 4,096 or more entries. The census's pick and merge fixtures leave the setting unset, so every pick there parses and writes that index extension. The generator's other workloads turn the cache off, as the census's status fixtures do. The new workloads run with the setting unset and an untracked cache already in the index.
+- **Feature sets.** Building `grit` together with `grit-utils`, as the census does, turns on grit-lib's `serde-models` feature, and its extra impls shift the impl disambiguators (`Ms<n>_`) in symbol names, which the patterns do not wildcard. Shipped binaries build `grit-cli` alone. The generator now profiles both builds of both profiles.
+
+On `dist`, the library section grows from 3.6 to 4.0 MB and the CLI section from 2.2 to 2.3 MB. A section only costs memory where a command runs its code. After the change, the pick's resident binary pages at exit drop to 6.5 MB on `release` and 5.6 MB on `dist`.
+
+Rows from `grit-bench daily` on `dist` builds of `grit-cli` with `grit-utils` (the census build), against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `85f9bca2b` with the `rebase_run_request` import fix from `67b7ad8df`. Times are medians of all samples from two alternating rounds of 15 runs, and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-pick-one-6676-before.json` → `daily-pick-one-6676-after.json` and `daily-pick-one-6676-related-before.json` → `daily-pick-one-6676-related-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `pick/one@synth-10k` | 117.01 / 9.4 | 54.25 / 18.8 | **53.66** / **16.3** | 0.46 → 0.46 | 2.00× → 1.74× |
+| `pick/one@synth-100k` | 192.72 / 38.9 | 130.82 / 34.8 | 130.75 / 31.7 | 0.68 → 0.68 | 0.89× → 0.81× |
+| `revert/one@synth-10k` | 111.24 / 9.4 | 56.12 / 20.1 | 56.32 / 17.6 | 0.50 → 0.51 | 2.13× → 1.87× |
+| `merge/clean@synth-10k` | 104.32 / 14.2 | 53.13 / 18.3 | 52.52 / 15.6 | 0.51 → 0.50 | 1.29× → 1.10× |
+| `merge/clean@synth-100k` | 289.65 / 46.3 | 144.09 / 41.7 | 141.26 / 39.4 | 0.50 → 0.49 | 0.90× → 0.85× |
+| `merge/content-both-sides@wide-20k` | 1332.62 / 66.3 | 1254.90 / 77.5 | 1253.15 / 74.1 | 0.94 → 0.94 | 1.17× → 1.12× |
+| `rebase/onto@synth-10k` | 50.31 / 14.2 | 11.55 / 12.8 | 12.00 / 12.6 | 0.23 → 0.24 | 0.90× → 0.89× |
+| `history/reword@synth-10k` | 6352.79 / 30.6 | 137.65 / 19.6 | 138.05 / 19.1 | 0.02 → 0.02 | 0.64× → 0.62× |
+| `status/clean@synth-10k` | 6.97 / 9.6 | 7.71 / 12.9 | 7.19 / 11.3 | 1.11 → 1.03 | 1.35× → 1.18× |
+| `status/dirty@synth-10k` | 10.51 / 9.7 | 8.11 / 13.2 | 7.63 / 11.4 | 0.77 → 0.73 | 1.36× → 1.18× |
+| `status/renamed@synth-10k` | 7.25 / 9.7 | 7.70 / 12.2 | 7.69 / 13.7 | 1.06 → 1.06 | 1.26× → 1.41× |
+| `status/clean@small` | 1.95 / 7.5 | 2.86 / 9.7 | 2.79 / 9.6 | 1.47 → 1.43 | 1.30× → 1.28× |
+| `diff/worktree@synth-10k` | 7.06 / 9.9 | 6.83 / 12.5 | 6.94 / 12.6 | 0.97 → 0.98 | 1.26× → 1.27× |
+| `show/head@synth-10k` | 2.02 / 8.9 | 2.51 / 10.3 | 2.46 / 10.5 | 1.24 → 1.22 | 1.15× → 1.18× |
+| `log/oneline-100@synth-100k` | 2.26 / 9.8 | 4.43 / 12.5 | 4.35 / 12.4 | 1.96 → 1.92 | 1.28× → 1.27× |
+| `branch/list@many-refs` | 1.32 / 6.7 | 1.92 / 9.0 | 1.86 / 9.1 | 1.46 → 1.42 | 1.35× → 1.36× |
+| `branch/merged@many-refs` | 1.49 / 7.7 | 1.96 / 9.7 | 1.96 / 9.8 | 1.31 → 1.31 | 1.26× → 1.28× |
+| `branch/create@many-refs` | 1.53 / 7.8 | 2.35 / 10.0 | 2.36 / 9.4 | 1.54 → 1.55 | 1.29× → 1.21× |
+| `config/get@small` | 1.14 / 6.7 | 1.59 / 7.8 | 1.55 / 7.9 | 1.39 → 1.36 | 1.16× → 1.18× |
+| `add/modified@synth-10k` | 16.75 / 12.4 | 9.98 / 17.4 | 9.95 / 17.3 | 0.60 → 0.59 | 1.40× → 1.39× |
+| `restore/paths@synth-10k` | 12.13 / 12.6 | 13.52 / 16.4 | 13.66 / 16.2 | 1.11 → 1.13 | 1.30× → 1.29× |
+| `commit/small@synth-10k` | 27.16 / 13.9 | 16.81 / 14.7 | 16.31 / 17.3 | 0.62 → 0.60 | 1.06× → 1.24× |
+| `reset/hard@synth-10k` | 15.93 / 11.2 | 14.78 / 15.7 | 14.74 / 15.8 | 0.93 → 0.93 | 1.41× → 1.41× |
+| `switch/branch@synth-10k` | 21.94 / 10.7 | 16.04 / 13.2 | 15.34 / 12.9 | 0.73 → 0.70 | 1.24× → 1.21× |
+| `switch/branch@synth-100k` | 154.52 / 37.6 | 84.75 / 31.9 | 81.96 / 31.8 | 0.55 → 0.53 | 0.85× → 0.85× |
+| `stash/push-pop@synth-10k` | 206.02 / 18.3 | 129.76 / 17.8 | 128.83 / 17.9 | 0.63 → 0.63 | 0.97× → 0.97× |
+
+Run time moved within noise. The `commit/small@synth-10k` and `status/renamed@synth-10k` peaks are bimodal for either build, as described in [the status section below](#status-code-layout-by-workload-set-2026-11-01). Measured directly, the layout lowers both. With the harness's own prepare step and 8 interleaved pairs, the commit's resident binary pages at exit drop from 6.37 to 5.93 MB, with an identical heap. Over 12 interleaved pairs of `grit status` after `git reset --hard`, they drop from 5.46 to 5.31 MB, and the peak from 14.2 to 14.1 MB.
+
+`status/clean@synth-10k` peaks are bimodal the same way. A row's peak is the largest of its runs, and the high mode of about 13 MB appears exactly when one or more of the first timed runs take 16 to 30 ms instead of 7 ms. Those runs rehash racy index entries right after the harness has reset the fixture. Over 16 alternating single-row rounds on the rebased tree (`6083ca2bb`), in both orders, the base hit the high mode in 4 and the change in 6, each time with slow runs. In every round without them, the base peaked at 10.85 to 11.08 MiB and the change at 10.67 to 10.81 MiB. Measured directly after the same prepare step (30 interleaved pairs), the change keeps 4,120 KiB of the binary resident instead of 4,316 KiB. Forcing the racy rehash on every run (15 pairs), the peak is 11,420 KiB instead of 11,508 KiB, with 4,264 KiB of binary pages instead of 4,392 KiB and an identical heap. The `release` build and the shipped `dist` build show the same direction on both paths.
+
+The other builds show the same change. On `release` (one round of 15), `pick/one@synth-10k` peaks at 17.3 MB instead of 22.3 MB, `revert/one@synth-10k` at 18.6 MB instead of 23.9 MB and `merge/clean@synth-10k` at 16.5 MB instead of 21.8 MB. On the shipped `dist` build of `grit-cli` alone (one round of 15), the same three rows peak at 16.0 MB instead of 18.5 MB, 17.6 MB instead of 20.2 MB and 15.9 MB instead of 18.0 MB.
+
+```bash
+./target/release/grit-bench daily --only pick/one@synth-10k,pick/one@synth-100k,revert/one@synth-10k,merge/clean@synth-10k,merge/clean@synth-100k,merge/content-both-sides@wide-20k,rebase/onto@synth-10k,history/reword@synth-10k \
+  --min-runs 15 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-pick-one-6676-after.json
+./target/release/grit-bench daily --only status/clean@synth-10k,status/dirty@synth-10k,status/renamed@synth-10k,status/clean@small,diff/worktree@synth-10k,show/head@synth-10k,log/oneline-100@synth-100k,branch/list@many-refs,branch/merged@many-refs,branch/create@many-refs,commit/small@synth-10k,switch/branch@synth-10k,switch/branch@synth-100k,stash/push-pop@synth-10k,add/modified@synth-10k,restore/paths@synth-10k,config/get@small,reset/hard@synth-10k \
+  --min-runs 15 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-pick-one-6676-related-after.json
+```
+
 ## `branch --merged` is start-up and code layout (2026-11-02)
 
 `branch/merged@many-refs` runs `grit branch --merged main` in a clone with 10,000 packed refs: one local branch (`main`), 6,668 remote-tracking branches and 3,333 tags. It prints one line. The daily census had grit at 1.74× Git's time and 2.18× its peak RSS, but the gap is not in the branch query. Under callgrind grit runs 2.27 million instructions and Git 1.09 million, yet `grit --version` alone runs 1.81 million against Git's 0.49 million. The query itself (repository open, ref listing, the reachability check, output) is 0.47 million instructions in grit and 0.59 million in Git, and grit makes fewer system calls (332 against 496). Start-up accounts for the difference: the dynamic loader applies 41,371 relative relocations (0.83 million instructions and 159 copy-on-write faults on `.data.rel.ro`, see [the start-up relocation study](benchmarking.md#startup-relocation-comparison)), clap builds and frees the command tree, and the Rust runtime reads `/proc/self/maps` to find the main thread's stack (0.11 million).
