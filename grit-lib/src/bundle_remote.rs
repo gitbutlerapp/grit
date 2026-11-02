@@ -130,12 +130,37 @@ pub fn write_bundle_with_options(
     path: &Path,
     options: &BundleCreateOptions,
 ) -> Result<usize> {
+    write_bundle_with_options_with_cancel(repo, path, options, &crate::progress::NeverCancel)
+}
+
+/// Like [`write_bundle_with_options`], but stops while streaming the pack when `cancel` is set.
+///
+/// On cancel or failure after the destination file was created, the partial file is removed.
+pub fn write_bundle_with_options_with_cancel(
+    repo: &Repository,
+    path: &Path,
+    options: &BundleCreateOptions,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<usize> {
     let spec = resolve_bundle_spec(repo, options)?;
-    let file = File::create(path).map_err(Error::Io)?;
-    let mut out = BufWriter::new(file);
-    crate::bundle::write_bundle(repo, &spec, &mut out).map_err(map_bundle_err)?;
-    out.flush().map_err(Error::Io)?;
-    Ok(spec.include.len())
+    let temp = path.with_extension("bundle.part");
+    if temp.exists() {
+        std::fs::remove_file(&temp).map_err(Error::Io)?;
+    }
+    let result = (|| -> Result<usize> {
+        let file = File::create(&temp).map_err(Error::Io)?;
+        let mut out = BufWriter::new(file);
+        crate::bundle::write_bundle_with_cancel(repo, &spec, &mut out, cancel)
+            .map_err(map_bundle_err)?;
+        out.flush().map_err(Error::Io)?;
+        std::fs::rename(&temp, path).map_err(Error::Io)?;
+        Ok(spec.include.len())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+        let _ = std::fs::remove_file(path);
+    }
+    result
 }
 
 fn strip_all_rev_flag(tokens: &[String]) -> (Vec<String>, bool) {

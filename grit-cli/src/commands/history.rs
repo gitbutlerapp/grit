@@ -1299,7 +1299,8 @@ fn run_rebase_with_exec(
     start: &StartRebaseOptions,
     exec: &[String],
 ) -> Result<RebaseRunOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    // Do not install InterruptCancel here: while `--exec` runs a child command, SIGINT
+    // must reach the process (or the exec runner) so the rebase can stop mid-exec.
     let spec = ExecSpec {
         commands: exec.to_vec(),
     };
@@ -1310,7 +1311,7 @@ fn run_rebase_with_exec(
         &spec,
         runner.as_ref(),
         &mut grit_lib::progress::NullProgress,
-        &interrupt,
+        &grit_lib::progress::NeverCancel,
     ) {
         Ok(RebaseOutcome::Done { .. }) => {
             RebaseCliOutcome::from_rewrite(HistoryRewriteOutcome::up_to_date("rebase", false))

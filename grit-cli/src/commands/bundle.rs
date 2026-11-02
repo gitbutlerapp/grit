@@ -304,15 +304,9 @@ pub fn run_create(
         });
     }
     let interrupt = crate::interrupt::InterruptCancel::install();
-    grit_lib::progress::poll_cancel(&mut grit_lib::progress::NullProgress, &interrupt)
-        .map_err(map_lib_error)?;
-    let refs = match bundle_remote::write_bundle_with_options(&repo, &path, &options) {
-        Ok(n) => n,
-        Err(e) => {
-            let _ = std::fs::remove_file(&path);
-            return Err(map_lib_error(e));
-        }
-    };
+    let refs =
+        bundle_remote::write_bundle_with_options_with_cancel(&repo, &path, &options, &interrupt)
+            .map_err(map_lib_error)?;
     Ok(BundleCreateOutcome {
         path: path.display().to_string(),
         refs,

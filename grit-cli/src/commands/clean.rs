@@ -113,7 +113,7 @@ pub fn run(
         &mut NullProgress,
         &interrupt,
     )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    .map_err(crate::json_error::map_lib_error)?;
     Ok(CleanOutcome {
         removed: lib_outcome.removed,
         dry_run,

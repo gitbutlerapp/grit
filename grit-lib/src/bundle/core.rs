@@ -18,7 +18,7 @@ use crate::error::{Error, Result};
 use crate::index_pack::{ingest_received_pack_path_with_progress, IngestPackOptions};
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::pack_objects::{write_upload_pack_stream, PackStats};
+use crate::pack_objects::PackStats;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
 use crate::rev_list::{
@@ -712,12 +712,29 @@ fn bundle_header_parts(
 /// and whole objects already in local packs are copied, and only blobs not already
 /// stored as deltas enter the delta search, so memory stays bounded by the pack index
 /// instead of the inflated object size. Bundles with prerequisites are thin.
+fn map_pack_error(e: Error) -> BundleError {
+    match e {
+        Error::Cancelled => BundleError::Cancelled,
+        other => BundleError::Io(other.to_string()),
+    }
+}
+
 fn write_bundle_pack(
     repo: &Repository,
     spec: &BundleSpec,
     out: &mut dyn Write,
 ) -> std::result::Result<PackStats, BundleError> {
-    let io_err = |e: Error| BundleError::Io(e.to_string());
+    write_bundle_pack_with_cancel(repo, spec, out, &crate::progress::NeverCancel)
+}
+
+fn write_bundle_pack_with_cancel(
+    repo: &Repository,
+    spec: &BundleSpec,
+    out: &mut dyn Write,
+    cancel: &dyn crate::progress::Cancel,
+) -> std::result::Result<PackStats, BundleError> {
+    let stop = crate::progress::CancelSignal::new(cancel);
+    let io_err = map_pack_error;
     let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
     let mut haves: Vec<ObjectId> = spec
         .exclude
@@ -731,21 +748,25 @@ fn write_bundle_pack(
     let pack_opts = PackBuildOptions::for_serve(cfg.as_deref(), !haves.is_empty(), true);
     let no_shallow = HashSet::new();
     let Some(filter) = spec.filter.as_ref() else {
-        return write_upload_pack_stream(
+        return crate::pack_objects::write_upload_pack_stream_with_cancel(
             repo,
             &include_oids,
             &haves,
             &no_shallow,
             &no_shallow,
             None,
+            &[],
             &pack_opts,
             &mut |_| {},
             out,
+            &stop,
         )
         .map_err(io_err);
     };
+    stop.poll().map_err(map_pack_error)?;
     let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &no_shallow)
         .map_err(io_err)?;
+    stop.poll().map_err(map_pack_error)?;
     let send = filtered_pack_objects(
         repo,
         &include_oids,
@@ -754,6 +775,7 @@ fn write_bundle_pack(
         &have_closure,
     )
     .map_err(io_err)?;
+    stop.poll().map_err(map_pack_error)?;
     let pack = build_pack_from_send_list(
         repo.odb(),
         &send,
@@ -762,6 +784,7 @@ fn write_bundle_pack(
         &HashMap::new(),
     )
     .map_err(io_err)?;
+    stop.poll().map_err(map_pack_error)?;
     out.write_all(&pack).map_err(BundleError::from)?;
     Ok(PackStats {
         object_count: crate::receive_pack::pack_object_count(&pack).unwrap_or(0),
@@ -787,9 +810,25 @@ pub fn write_bundle(
     spec: &BundleSpec,
     out: &mut dyn Write,
 ) -> std::result::Result<(), BundleError> {
+    write_bundle_with_cancel(repo, spec, out, &crate::progress::NeverCancel)
+}
+
+/// Like [`write_bundle`], but stops pack generation when `cancel` is set.
+///
+/// # Errors
+///
+/// Same as [`write_bundle`], plus [`BundleError::Cancelled`].
+pub fn write_bundle_with_cancel(
+    repo: &Repository,
+    spec: &BundleSpec,
+    out: &mut dyn Write,
+    cancel: &dyn crate::progress::Cancel,
+) -> std::result::Result<(), BundleError> {
     if spec.include.is_empty() {
         return Err(BundleError::EmptyRefs);
     }
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(map_pack_error)?;
     let header = bundle_header_parts(repo, spec)?;
     write_header(
         out,
@@ -799,7 +838,7 @@ pub fn write_bundle(
         &header.refs,
     )?;
 
-    write_bundle_pack(repo, spec, out)?;
+    write_bundle_pack_with_cancel(repo, spec, out, cancel)?;
     Ok(())
 }
 

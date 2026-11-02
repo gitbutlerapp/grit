@@ -35,8 +35,8 @@ use crate::fsck as repo_fsck;
 use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats, S_IFDIR, S_IFMT};
 use crate::git_date::approx::approxidate_careful_at;
 use crate::index_pack::{
-    install_pack_bytes, install_pack_bytes_with_progress, install_pack_path,
-    install_pack_path_with_progress, IngestPackOptions,
+    install_pack_bytes_with_progress, install_pack_path, install_pack_path_with_progress,
+    IngestPackOptions,
 };
 use crate::midx::{
     clear_pack_midx_state, midx_version_from_config, midx_write_version,
@@ -2774,6 +2774,7 @@ mod tests {
 
     use super::*;
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+    use crate::index_pack::install_pack_bytes;
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{NeverCancel, NullProgress};

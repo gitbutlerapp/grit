@@ -83,6 +83,8 @@ mod broken_pipe;
 #[cfg(feature = "full-tests")]
 #[path = "bundle_cli.rs"]
 mod bundle_cli;
+#[path = "bundle_create_interrupt.rs"]
+mod bundle_create_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "cat_replace_stream.rs"]
 mod cat_replace_stream;
@@ -101,6 +103,8 @@ mod change_ids_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "checkout_cli.rs"]
 mod checkout_cli;
+#[path = "clean_interrupt.rs"]
+mod clean_interrupt;
 #[path = "cli_transport_hygiene.rs"]
 mod cli_transport_hygiene;
 #[cfg(feature = "full-tests")]
@@ -503,7 +507,7 @@ mod rebase_conflicts_cli;
 #[cfg(unix)]
 #[path = "rebase_exec_interrupt.rs"]
 mod rebase_exec_interrupt;
-#[cfg(unix)]
+#[cfg(feature = "full-tests")]
 #[path = "rebase_interrupt.rs"]
 mod rebase_interrupt;
 #[cfg(feature = "full-tests")]
