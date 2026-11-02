@@ -9,7 +9,6 @@ use crate::objects::ObjectId;
 use crate::progress::{Cancel, NeverCancel};
 use crate::transport::http::HttpClient;
 use crate::transport::pending_http::{PendingHttp, HTTP_CANCEL_POLL};
-use crate::transport::rpc_channel::RpcChannel;
 use crate::transport::{Connection, Service};
 use std::io::{self, Cursor, Read, Write};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
@@ -480,53 +479,6 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             self.post_receive_pack(&NeverCancel)?;
         }
         Ok(())
-    }
-}
-
-impl<C: HttpClient + 'static> RpcChannel for StatelessHttpConnection<C> {
-    fn request(&mut self, body: &[u8]) -> Result<Box<dyn Read + Send>> {
-        self.drain_response();
-        let cancel = self.operation_cancel();
-        self.post_round(body, Self::cancel_ref(&cancel), None)
-            .inspect_err(|e| {
-                self.set_transport_err(e);
-            })
-    }
-}
-
-impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
-    fn post_round(
-        &mut self,
-        body: &[u8],
-        cancel: &dyn Cancel,
-        owner: Option<&dyn Cancel>,
-    ) -> Result<Box<dyn Read + Send>> {
-        if self
-            .upload_cancelled
-            .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Err(Error::Cancelled);
-        }
-        self.drain_response();
-        let client = Arc::clone(&self.client);
-        let (url, content_type, accept) = (
-            self.post_url.clone(),
-            self.content_type.clone(),
-            self.accept.clone(),
-        );
-        let git_protocol = self.git_protocol.clone();
-        let body = body.to_vec();
-        PendingHttp::spawn("grit-http-post", move || {
-            client.post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
-        })
-        .map_err(Error::Io)
-        .and_then(|pending| self.wait_http(pending, cancel, owner))
-        .inspect_err(|e| {
-            if matches!(e, Error::Cancelled) {
-                self.upload_cancelled
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-            }
-        })
     }
 }
 

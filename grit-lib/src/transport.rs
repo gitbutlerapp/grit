@@ -39,7 +39,6 @@ use crate::progress::Cancel;
 
 pub mod http;
 pub(crate) mod pending_http;
-pub(crate) mod rpc_channel;
 pub mod stateless_http;
 
 /// The Git service a [`Connection`] speaks.
