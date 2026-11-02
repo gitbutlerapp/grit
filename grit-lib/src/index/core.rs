@@ -4188,6 +4188,9 @@ pub(crate) fn parse_entry(
     pos += 2;
 
     let flags_extended = if version >= 3 && flags & 0x4000 != 0 {
+        if pos + 2 > data.len() {
+            return Err(Error::IndexError("truncated extended flags".to_owned()));
+        }
         let fe = u16::from_be_bytes(
             data[pos..pos + 2]
                 .try_into()
@@ -4228,6 +4231,13 @@ pub(crate) fn parse_entry(
         let padded = (entry_len + 7) & !7;
         let padding = padded.saturating_sub(entry_len);
         pos += padding;
+        if pos > data.len() {
+            return Err(Error::IndexError("truncated index entry".to_owned()));
+        }
+    }
+
+    if pos > data.len() {
+        return Err(Error::IndexError("truncated index entry".to_owned()));
     }
 
     Ok((
@@ -6351,6 +6361,77 @@ mod tests {
         for n in 0..12 {
             assert!(Index::parse(&vec![0u8; n]).is_err());
         }
+    }
+
+    fn patch_index_entry_count(mut data: Vec<u8>, count: u32) -> Vec<u8> {
+        data[8..12].copy_from_slice(&count.to_be_bytes());
+        let hash_len = HashAlgo::Sha1.len();
+        let body_len = data.len() - hash_len;
+        let checksum = HashAlgo::Sha1.checksum_digest(&data[..body_len]);
+        data[body_len..].copy_from_slice(&checksum);
+        data
+    }
+
+    #[test]
+    fn parse_rejects_truncated_entries_and_bogus_entry_counts() {
+        use crate::index::parse_entry;
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("index");
+
+        for version in [2u32, 4] {
+            let mut idx = if version == 4 {
+                Index {
+                    version: 4,
+                    ..Index::default()
+                }
+            } else {
+                Index::new()
+            };
+            idx.add_or_replace(make_entry("abcd"));
+            if version == 4 {
+                idx.add_or_replace(make_entry("nested/ef"));
+            }
+            idx.write(&path).unwrap();
+            let data = fs::read(&path).unwrap();
+            let hash_len = HashAlgo::Sha1.len();
+            let body = &data[12..data.len() - hash_len];
+            let mut paths: Vec<Vec<u8>> = Vec::new();
+            let mut pos = 0usize;
+            while pos < body.len() {
+                let prev: &[u8] = paths.last().map_or(&[][..], Vec::as_slice);
+                let (entry, consumed) = parse_entry(&body[pos..], version, prev, hash_len).unwrap();
+                pos += consumed;
+                if version == 4 {
+                    paths.push(entry.path);
+                }
+            }
+            for cut in [12 + pos - 1, 12 + pos - 3] {
+                if cut <= 12 {
+                    continue;
+                }
+                let truncated = data[..cut].to_vec();
+                assert!(
+                    Index::parse(&truncated).is_err(),
+                    "v{version}: truncated at {cut} must not parse"
+                );
+            }
+
+            for bogus in [0x1000_0000u32, 0x7fff_ffff] {
+                let patched = patch_index_entry_count(data.clone(), bogus);
+                assert!(
+                    Index::parse(&patched).is_err(),
+                    "v{version}: bogus entry count {bogus:#x} must fail fast"
+                );
+            }
+        }
+
+        let mut idx = Index::new();
+        idx.add_or_replace(make_entry("tracked.txt"));
+        idx.write(&path).unwrap();
+        let valid = fs::read(&path).unwrap();
+        assert!(Index::load(&path).is_ok());
+        assert!(Index::parse(&valid).is_ok());
     }
 
     #[test]
