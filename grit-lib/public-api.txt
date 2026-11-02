@@ -474,6 +474,7 @@ impl core::marker::UnsafeUnpin for grit_lib::line_range::LineRangeError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::line_range::LineRangeError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::line_range::LineRangeError
 pub struct grit_lib::blame::BlameAttributedLine
+pub grit_lib::blame::BlameAttributedLine::boundary: bool
 pub grit_lib::blame::BlameAttributedLine::commit: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameAttributedLine::content: alloc::string::String
 pub grit_lib::blame::BlameAttributedLine::content_bytes: core::option::Option<alloc::vec::Vec<u8>>
@@ -13489,9 +13490,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ResolvedChang
 pub struct grit_lib::objects::TagData
 pub grit_lib::objects::TagData::extra_headers: alloc::vec::Vec<u8>
 pub grit_lib::objects::TagData::message: alloc::string::String
-pub grit_lib::objects::TagData::raw_message: core::option::Option<alloc::vec::Vec<u8>>
 pub grit_lib::objects::TagData::object: grit_lib::objects::ObjectId
 pub grit_lib::objects::TagData::object_type: alloc::string::String
+pub grit_lib::objects::TagData::raw_message: core::option::Option<alloc::vec::Vec<u8>>
 pub grit_lib::objects::TagData::tag: alloc::string::String
 pub grit_lib::objects::TagData::tagger: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::objects::TagData
@@ -23552,6 +23553,24 @@ pub fn grit_lib::remote::serve::upload_pack_cancellable(&grit_lib::repo::Reposit
 pub fn grit_lib::remote::serve::validate_ref_update(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::odb::Odb>, &grit_lib::remote::serve::RefCommand, &grit_lib::remote::serve::ReceivePolicy, &[alloc::string::String], grit_lib::remote::serve::HeadBranches<'_>) -> grit_lib::remote::serve::Result<core::option::Option<grit_lib::remote::serve::RefUpdateRefusal>>
 pub type grit_lib::remote::serve::Result<T> = core::result::Result<T, grit_lib::remote::serve::ServeError>
 pub mod grit_lib::remote::shallow
+pub struct grit_lib::remote::shallow::EffectiveCommitParents
+impl grit_lib::remote::shallow::EffectiveCommitParents
+pub fn grit_lib::remote::shallow::EffectiveCommitParents::for_commit(&self, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub fn grit_lib::remote::shallow::EffectiveCommitParents::is_history_root(&self, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> bool
+pub fn grit_lib::remote::shallow::EffectiveCommitParents::load(&grit_lib::repo::Repository) -> Self
+impl core::clone::Clone for grit_lib::remote::shallow::EffectiveCommitParents
+pub fn grit_lib::remote::shallow::EffectiveCommitParents::clone(&self) -> Self
+impl core::default::Default for grit_lib::remote::shallow::EffectiveCommitParents
+pub fn grit_lib::remote::shallow::EffectiveCommitParents::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::shallow::EffectiveCommitParents
+pub fn grit_lib::remote::shallow::EffectiveCommitParents::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::shallow::EffectiveCommitParents
+impl core::marker::Send for grit_lib::remote::shallow::EffectiveCommitParents
+impl core::marker::Sync for grit_lib::remote::shallow::EffectiveCommitParents
+impl core::marker::Unpin for grit_lib::remote::shallow::EffectiveCommitParents
+impl core::marker::UnsafeUnpin for grit_lib::remote::shallow::EffectiveCommitParents
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::shallow::EffectiveCommitParents
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::shallow::EffectiveCommitParents
 pub const grit_lib::remote::shallow::INFINITE_DEPTH: u32
 pub fn grit_lib::remote::shallow::add_shallow_boundaries(&std::path::Path, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> core::io::error::Result<()>
 pub fn grit_lib::remote::shallow::apply_shallow_updates(&std::path::Path, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
