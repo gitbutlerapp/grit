@@ -657,7 +657,7 @@ fn agent_from_timeouts(
     proxy: Option<ureq::Proxy>,
     timeouts: &HttpTransportTimeouts,
 ) -> ureq::Agent {
-    ureq::Agent::config_builder()
+    let mut builder = ureq::Agent::config_builder()
         .timeout_connect(Some(timeouts.connect))
         .timeout_global(timeouts.global)
         // Return >= 400 responses as `Ok` so the auth-retry logic can inspect the
@@ -665,9 +665,15 @@ fn agent_from_timeouts(
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
         .http_status_as_error(false)
         .tls_config(agent_tls_config())
-        .proxy(proxy)
-        .build()
-        .new_agent()
+        .proxy(proxy);
+    // Abort discovery/fetch waits when the server accepts the connection but never
+    // sends response headers for longer than `http.lowSpeedTime` (Git applies low-speed
+    // to the whole transfer, including time-to-first-byte). Body throughput stays on
+    // [`LowSpeedReader`] once headers arrive.
+    if let Some(low) = timeouts.low_speed {
+        builder = builder.timeout_recv_response(Some(low.window));
+    }
+    builder.build().new_agent()
 }
 
 /// Resolve `http.proxy` into a [`ureq::Proxy`], or `None` for the direct path.
