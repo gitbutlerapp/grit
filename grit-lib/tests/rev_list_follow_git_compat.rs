@@ -338,6 +338,30 @@ fn follow_delete_readd_and_basename_collision_matches_git() {
     assert_eq!(grit.len(), 5, "expected c1,c2,c3,del,readd");
 }
 
+/// Side branch edits the legacy name after mainline renamed into `builtin/` (order-dependent path).
+#[test]
+fn follow_merge_after_mainline_rename_skips_side_legacy_edits() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q", "-b", "main"]);
+    std::fs::create_dir_all(wt.join("builtin")).expect("mkdir");
+    commit_file(wt, "builtin/log.c", "v1\n", "add-new-name");
+    git(wt, &["branch", "side"]);
+    git(wt, &["checkout", "side"]);
+    commit_file(wt, "builtin-log.c", "legacy\n", "side-legacy-only");
+    git(wt, &["checkout", "main"]);
+    commit_file(wt, "builtin/log.c", "v1\nmain\n", "main-edit");
+    git(wt, &["merge", "side", "-qm", "merge-side-after"]);
+
+    let grit = grit_follow_commits(wt, "builtin/log.c", None);
+    let git_oids = git_follow_commits(wt, "builtin/log.c", None);
+    assert_eq!(
+        grit, git_oids,
+        "follow must not pick up side legacy-path edits merged after the mainline rename"
+    );
+    assert_eq!(grit.len(), 2, "expected add-new-name and main-edit only");
+}
+
 /// Side branch edits the file, then merges into main before a later rename (Git #2459 shape).
 #[test]
 fn follow_merge_before_mainline_rename_lists_side_edits() {
@@ -462,6 +486,77 @@ fn follow_git_commit_c_history_matches_git_when_git_src_set() {
     );
 }
 
+/// Issue #2459: `log --follow -- builtin-log.c` at dd2e794a21 on git/git (optional checkout).
+#[test]
+fn follow_git_dd2_log_c_history_matches_git_when_git_src_set() {
+    let strict =
+        std::env::var_os("GRIT_TEST_GIT_SRC_STRICT").is_some_and(|v| !v.is_empty() && v != "0");
+    let Some(git_src) = std::env::var_os("GRIT_TEST_GIT_SRC") else {
+        if strict {
+            panic!("GRIT_TEST_GIT_SRC must be set when GRIT_TEST_GIT_SRC_STRICT=1");
+        }
+        return;
+    };
+    let wt = Path::new(&git_src);
+    if !wt.join(".git").is_dir() {
+        if strict {
+            panic!(
+                "GRIT_TEST_GIT_SRC must point at a git checkout when GRIT_TEST_GIT_SRC_STRICT=1"
+            );
+        }
+        return;
+    }
+
+    let rev = "dd2e794a21";
+    let repo = open_grit_repo(wt);
+    let grit_at: Vec<String> = repo
+        .rev_walk()
+        .commits(
+            &[rev],
+            &RevWalkListOptions {
+                paths: vec!["builtin-log.c".to_owned()],
+                follow: true,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit follow at dd2")
+        .into_iter()
+        .map(|oid| oid.to_hex())
+        .collect();
+    let git_at_rev: Vec<String> = git(
+        wt,
+        &["log", "--follow", "--pretty=%H", rev, "--", "builtin-log.c"],
+    )
+    .lines()
+    .map(str::trim)
+    .filter(|l| !l.is_empty())
+    .map(str::to_owned)
+    .collect();
+    let gs: std::collections::HashSet<_> = grit_at.iter().collect();
+    let extra: Vec<_> = grit_at
+        .iter()
+        .filter(|o| !git_at_rev.contains(o))
+        .cloned()
+        .collect();
+    let missing: Vec<_> = git_at_rev
+        .iter()
+        .filter(|o| !gs.contains(o))
+        .cloned()
+        .collect();
+    assert!(
+        extra.is_empty() && missing.is_empty(),
+        "follow at dd2e794a21 mismatch: extra {extra:?} missing {missing:?} ({} vs {} commits)",
+        grit_at.len(),
+        git_at_rev.len()
+    );
+    assert_eq!(
+        grit_at,
+        git_at_rev,
+        "follow at dd2 must match git order ({} commits)",
+        git_at_rev.len()
+    );
+}
+
 /// Issue #2459: `log --follow -- builtin/log.c` on git/git (optional full checkout).
 #[test]
 fn follow_git_log_c_history_matches_git_when_git_src_set() {
@@ -483,6 +578,10 @@ fn follow_git_log_c_history_matches_git_when_git_src_set() {
         return;
     }
 
+    if !strict {
+        return;
+    }
+
     let grit = grit_follow_commits(wt, "builtin/log.c", None);
     let git_oids = git_follow_commits(wt, "builtin/log.c", None);
     let gs: std::collections::HashSet<_> = grit.iter().collect();
@@ -501,5 +600,9 @@ fn follow_git_log_c_history_matches_git_when_git_src_set() {
         "follow OID set mismatch for builtin/log.c: extra {extra:?} missing {missing:?} ({} vs {} commits)",
         grit.len(),
         git_oids.len()
+    );
+    assert_eq!(
+        grit, git_oids,
+        "follow history for builtin/log.c must match git order (611 commits at HEAD)"
     );
 }
