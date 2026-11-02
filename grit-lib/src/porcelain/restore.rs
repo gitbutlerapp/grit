@@ -1,7 +1,7 @@
 //! Restore working tree and/or index paths from the index, `HEAD`, or another tree
 //! (`git restore` semantics).
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,6 +13,7 @@ use crate::diff::{
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_SYMLINK};
+use crate::index_name_hash_lazy::memihash;
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
@@ -743,6 +744,39 @@ struct RestoreIcaseCollisionPlan {
     directory_renames: Vec<(String, String)>,
 }
 
+/// Case-insensitive lookup of restore destination paths keyed by [`memihash`].
+struct RestoreDestinationFoldLookup<'a> {
+    by_fold: HashMap<u32, Vec<&'a str>>,
+}
+
+impl<'a> RestoreDestinationFoldLookup<'a> {
+    fn new(destinations: &'a [String]) -> Self {
+        let mut by_fold: HashMap<u32, Vec<&'a str>> = HashMap::with_capacity(destinations.len());
+        for dest in destinations {
+            by_fold
+                .entry(memihash(dest.as_bytes()))
+                .or_default()
+                .push(dest.as_str());
+        }
+        Self { by_fold }
+    }
+
+    fn icase_match(&self, path: &[u8]) -> Option<&'a str> {
+        let bucket = self.by_fold.get(&memihash(path))?;
+        bucket
+            .iter()
+            .find(|dest| path.eq_ignore_ascii_case(dest.as_bytes()))
+            .copied()
+    }
+
+    fn is_colliding_index_spelling(&self, index_path: &[u8]) -> bool {
+        let Some(dest) = self.icase_match(index_path) else {
+            return false;
+        };
+        index_path != dest.as_bytes()
+    }
+}
+
 fn index_stage0_paths_under(index: &Index, prefix: &str) -> Vec<String> {
     let plen = prefix.len();
     index
@@ -777,6 +811,7 @@ fn build_restore_icase_collision_plan(
         return plan;
     }
     plan.enabled = true;
+    let dest_lookup = RestoreDestinationFoldLookup::new(write_destinations);
     let groups = IcaseIndexCollisionGroups::from_index(index, true);
     let mut to_remove = BTreeSet::new();
     for dest in write_destinations {
@@ -785,12 +820,8 @@ fn build_restore_icase_collision_plan(
         }
     }
     for entry in index.entries.iter().filter(|e| e.stage() == 0) {
-        let path = String::from_utf8_lossy(&entry.path);
-        if write_destinations
-            .iter()
-            .any(|dest| path != *dest && paths_equal(entry.path.as_slice(), dest.as_bytes(), true))
-        {
-            to_remove.insert(path.into_owned());
+        if dest_lookup.is_colliding_index_spelling(&entry.path) {
+            to_remove.insert(String::from_utf8_lossy(&entry.path).into_owned());
         }
     }
     if to_remove.is_empty() {
@@ -803,22 +834,19 @@ fn build_restore_icase_collision_plan(
         let Some(old_dir) = old.split('/').next() else {
             continue;
         };
-        for dest in write_destinations {
-            if !paths_equal(old.as_bytes(), dest.as_bytes(), true) {
-                continue;
-            }
-            let Some(new_dir) = dest.split('/').next() else {
-                continue;
-            };
-            if old_dir == new_dir {
-                continue;
-            }
-            dir_pairs
-                .entry((old_dir.to_owned(), new_dir.to_owned()))
-                .or_default()
-                .insert(old.clone());
-            break;
+        let Some(dest) = dest_lookup.icase_match(old.as_bytes()) else {
+            continue;
+        };
+        let Some(new_dir) = dest.split('/').next() else {
+            continue;
+        };
+        if old_dir == new_dir {
+            continue;
         }
+        dir_pairs
+            .entry((old_dir.to_owned(), new_dir.to_owned()))
+            .or_default()
+            .insert(old.clone());
     }
 
     let mut dir_renamed_paths = BTreeSet::new();
@@ -842,11 +870,10 @@ fn build_restore_icase_collision_plan(
         let expected_dests: BTreeSet<String> = indexed_under_old
             .iter()
             .filter_map(|old_path| {
-                write_destinations
-                    .iter()
-                    .find(|dest| paths_equal(old_path.as_bytes(), dest.as_bytes(), true))
+                dest_lookup
+                    .icase_match(old_path.as_bytes())
+                    .map(str::to_owned)
             })
-            .cloned()
             .collect();
         if expected_dests.len() != indexed_under_old.len() {
             continue;
@@ -1315,6 +1342,16 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
         (dir, repo)
+    }
+
+    #[test]
+    fn restore_destination_fold_lookup_detects_colliding_spelling() {
+        let dests = vec!["foo/a.txt".to_string(), "foo/b.txt".to_string()];
+        let lookup = RestoreDestinationFoldLookup::new(&dests);
+        assert!(lookup.is_colliding_index_spelling(b"Foo/a.txt"));
+        assert!(lookup.is_colliding_index_spelling(b"Foo/b.txt"));
+        assert!(!lookup.is_colliding_index_spelling(b"foo/a.txt"));
+        assert_eq!(lookup.icase_match(b"Foo/a.txt"), Some("foo/a.txt"));
     }
 
     #[cfg(unix)]
