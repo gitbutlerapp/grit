@@ -366,6 +366,31 @@ fn follow_merge_after_mainline_rename_skips_side_legacy_edits() {
     assert_eq!(grit.len(), 2, "expected add-new-name and main-edit only");
 }
 
+/// Neutral-path regression mirroring parallel merge/rename topology (Git #2459 shape).
+#[test]
+fn follow_widget_parallel_merge_rename_matches_git_order() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q", "-b", "main"]);
+    commit_file(wt, "src-widget.c", "v1\n", "add");
+    git(wt, &["branch", "side"]);
+    git(wt, &["checkout", "side"]);
+    commit_file(wt, "src-widget.c", "v1\nside\n", "side-on-old-name");
+    git(wt, &["checkout", "main"]);
+    git(wt, &["merge", "side", "-qm", "merge-side"]);
+    std::fs::create_dir_all(wt.join("src")).expect("mkdir");
+    git(wt, &["mv", "src-widget.c", "src/widget.c"]);
+    git(wt, &["commit", "-qm", "rename-to-src"]);
+
+    let grit = grit_follow_commits(wt, "src/widget.c", None);
+    let git_oids = git_follow_commits(wt, "src/widget.c", None);
+    assert_eq!(
+        grit, git_oids,
+        "follow on src/widget.c must match system git exactly (order and OIDs)"
+    );
+    assert_eq!(grit.len(), 3, "rename, side-on-old-name, add");
+}
+
 /// Side branch edits the file, then merges into main before a later rename (Git #2459 shape).
 #[test]
 fn follow_merge_before_mainline_rename_lists_side_edits() {
