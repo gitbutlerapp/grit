@@ -181,17 +181,18 @@ pub(crate) fn commit_ref_update_on_store_with_wait(
 /// Prepare `txn` on `store`, retrying while the store reports [`RefStoreError::LockHeld`]
 /// until `wait` runs out.
 ///
-/// [`RefStore::prepare`] fails fast when another transaction holds the lock it needs. A
-/// backend with one writer slot for the whole store (such as
-/// [`store::MemoryRefStore`], or a database with a single write transaction) therefore
-/// rejects concurrent updates even to disjoint refs. This helper turns that into a bounded
-/// wait, sleeping a short jittered backoff between attempts: [`LockWait::Immediately`] tries
+/// [`RefStore::prepare_for`] with a bounded [`LockWait`]. Backends with one in-process writer
+/// slot (such as [`store::MemoryRefStore`] or a database with a single write transaction)
+/// must wait fairly inside `prepare_for` (typically with [`store::SingleWriterGate`]); this
+/// helper passes the wait budget through on each attempt and only retries jittered backoff
+/// when the store still reports [`RefStoreError::LockHeld`] after that wait (usually
+/// cross-process ref lock files on the files backend). [`LockWait::Immediately`] tries
 /// once, [`LockWait::Backoff`] retries until its budget elapses, and
 /// [`LockWait::Indefinitely`] retries until the lock is free. Use
 /// [`LockWait::files_ref_lock`] to follow `core.filesRefLockTimeout` like Git. The budget
-/// includes time spent inside `prepare`, so a backend that already waits for its own locks
-/// (the files and reftable backends) is not waited for twice. grit-lib's own ref writes
-/// (commits, branch updates, history rewrites, fetch and push) go through this retry.
+/// includes time spent inside `prepare_for`, so backends that already wait for their own
+/// lock files are not waited for twice when they ignore the passed `wait`. grit-lib's own ref
+/// writes (commits, branch updates, history rewrites, fetch and push) go through this path.
 ///
 /// ```rust
 /// use grit_lib::lockfile::LockWait;
@@ -241,15 +242,41 @@ fn prepare_retrying(
     txn: RefTransaction,
     wait: impl FnOnce() -> LockWait,
 ) -> std::result::Result<Box<dyn PreparedRefTransaction + Send + '_>, RefStoreError> {
-    use crate::lockfile::{retry_while_held, SystemLockClock, SystemLockJitter};
-    retry_while_held(
-        Path::new("refs"),
-        wait,
-        &SystemLockClock,
-        &SystemLockJitter,
-        || store.prepare(txn.clone()),
-        |err| matches!(err, RefStoreError::LockHeld { .. }),
-    )
+    use crate::lockfile::{backoff_delay, LockClock, SystemLockClock, SystemLockJitter};
+    let clock = &SystemLockClock;
+    let jitter = &SystemLockJitter;
+    let key = Path::new("refs");
+    let start = clock.now();
+
+    let mut err = match store.prepare_for(txn.clone(), LockWait::Immediately) {
+        Ok(prepared) => return Ok(prepared),
+        Err(err) if matches!(err, RefStoreError::LockHeld { .. }) => err,
+        other => return other,
+    };
+
+    let wait_policy = wait();
+    let deadline = match wait_policy {
+        LockWait::Immediately => return Err(err),
+        LockWait::Backoff { budget } => Some(start + budget),
+        LockWait::Indefinitely => None,
+    };
+    let mut tries: u32 = 0;
+    loop {
+        if deadline.is_some_and(|deadline| clock.now() >= deadline) {
+            return Err(err);
+        }
+        let delay = backoff_delay(key, tries, jitter);
+        tries = tries.saturating_add(1);
+        clock.sleep(match deadline {
+            Some(deadline) => delay.min(deadline.saturating_duration_since(clock.now())),
+            None => delay,
+        });
+        match store.prepare_for(txn.clone(), wait_policy.remaining_from(start, clock.now())) {
+            Ok(prepared) => return Ok(prepared),
+            Err(held) if matches!(held, RefStoreError::LockHeld { .. }) => err = held,
+            other => return other,
+        }
+    }
 }
 
 /// How long ref writes wait for a busy store when the caller has no config at hand.

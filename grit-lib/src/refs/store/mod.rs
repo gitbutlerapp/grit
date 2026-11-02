@@ -14,6 +14,7 @@ pub mod backend;
 mod checked;
 mod error;
 mod files;
+pub mod gate;
 mod linked_worktree;
 mod memory;
 mod open;
@@ -29,6 +30,7 @@ mod validation;
 pub(crate) use checked::{open_checked_ref_store, ObjectCheckedRefStore};
 pub use error::{BackendError, RefStoreError};
 pub use files::{FilesRefStore, FilesRefStoreConfig};
+pub use gate::{SingleWriterGate, SingleWriterTicket};
 pub(crate) use linked_worktree::LinkedWorktreeRefStore;
 pub use memory::MemoryRefStore;
 pub use open::open_ref_store;
@@ -170,12 +172,17 @@ pub trait RefStore: Send + Sync + Debug {
     ///    [`RefStoreError::NullOid`], and malformed reflog identity or message fields with
     ///    [`RefStoreError::InvalidReflog`].
     /// 2. While another writer holds a lock this transaction needs, fail promptly with
-    ///    [`RefStoreError::LockHeld`] naming this transaction's first ref. Do not spin or
-    ///    queue: grit-lib's ref writes go through [`crate::refs::prepare_with_lock_wait`],
-    ///    which retries with backoff for `core.filesRefLockTimeout`. The files backend takes
-    ///    one lock per ref (plus packed-refs when needed), so only the same ref contends.
-    ///    A store with one writer slot for everything may report every overlap this way, so
-    ///    disjoint refs serialize but still all succeed.
+    ///    [`RefStoreError::LockHeld`] naming this transaction's first ref when the caller
+    ///    uses [`Self::prepare`] or [`Self::prepare_for`] with [`LockWait::Immediately`].
+    ///    Cross-process contention (another process holding a ref lock file) should fail fast
+    ///    so grit-lib can retry with jittered backoff for `core.filesRefLockTimeout`. The
+    ///    files backend takes one lock per ref (plus packed-refs when needed), so only the
+    ///    same ref contends in that case. A store with one in-process writer slot for
+    ///    everything must wait inside [`Self::prepare_for`] using [`SingleWriterGate`] (or
+    ///    equivalent FIFO queueing) for the supplied [`LockWait`]; exponential backoff between
+    ///    immediate [`RefStoreError::LockHeld`] responses is not fair and will starve waiters
+    ///    under load. Only return [`RefStoreError::LockHeld`] from `prepare_for` after the
+    ///    wait budget elapses or for immediate attempts while the slot is busy.
     /// 3. Reject a created ref whose name is a directory prefix of a stored ref or of
     ///    another ref in the batch, or the other way round (`a` vs `a/b`), with
     ///    [`RefStoreError::NameUnavailable`]. Deletes in the same batch do not free a name.
@@ -203,6 +210,21 @@ pub trait RefStore: Send + Sync + Debug {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>>;
+
+    /// Like [`Self::prepare`], waiting up to `wait` for an in-process writer slot.
+    ///
+    /// Backends with one writer slot should block here (typically via [`SingleWriterGate`])
+    /// until the slot is free or `wait` expires. Backends that already wait on lock files
+    /// inside `prepare` may ignore `wait` and delegate to [`Self::prepare`]; grit-lib passes
+    /// a shrinking remaining budget when it retries cross-process [`RefStoreError::LockHeld`].
+    fn prepare_for(
+        &self,
+        txn: RefTransaction,
+        wait: LockWait,
+    ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
+        let _ = wait;
+        self.prepare(txn)
+    }
 
     /// Check the objects `updates` would point refs at, without taking any lock or writing.
     ///

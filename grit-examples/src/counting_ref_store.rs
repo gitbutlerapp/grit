@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use grit_lib::error::Result;
+use grit_lib::lockfile::LockWait;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
     PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefStoreError,
@@ -90,8 +91,16 @@ impl RefStore for CountingRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
+        self.prepare_for(txn, LockWait::Immediately)
+    }
+
+    fn prepare_for(
+        &self,
+        txn: RefTransaction,
+        wait: LockWait,
+    ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         self.prepare_calls.fetch_add(1, Ordering::Relaxed);
-        let inner = self.inner.prepare(txn)?;
+        let inner = self.inner.prepare_for(txn, wait)?;
         Ok(Box::new(CountingPrepared { inner }))
     }
 
