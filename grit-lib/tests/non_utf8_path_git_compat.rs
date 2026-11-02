@@ -9,12 +9,14 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::diff_index_to_worktree;
+use grit_lib::index::untracked_cache::{parse_untracked_extension, UntrackedCacheDir};
 use grit_lib::objects::parse_commit;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
@@ -25,6 +27,9 @@ use grit_test_support::git;
 
 const BAD_NAME: &[u8] = b"bad\xffname.txt";
 const BAD_GITLINK: &[u8] = b"bad\xffsub";
+const UNTRACKED_CAFE: &[u8] = b"caf\xe9.txt";
+const UNTRACKED_SUB_FILE: &[u8] = b"sub/\xff.txt";
+const UNTRACKED_NON_UTF8_DIR_FILE: &[u8] = b"\xfe/a.txt";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GITLINK_OID: &str = "855827c583bc30645ba427885caa40c5b81764d2";
 const RESERVED_LITERAL: &str = "grit+pathhex:6162";
@@ -43,6 +48,268 @@ fn open_repo(root: &std::path::Path) -> Repository {
 
 fn path_is_bad_name(stored: &str) -> bool {
     repo_relpath::storage_bytes(stored) == BAD_NAME
+}
+
+fn stored_path_is(stored: &str, raw: &[u8]) -> bool {
+    repo_relpath::storage_bytes(stored) == raw
+}
+
+fn write_non_utf8_path(root: &std::path::Path, rel: &[u8], contents: &[u8]) {
+    let path = root.join(OsStr::from_bytes(rel));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir parents");
+    }
+    std::fs::write(path, contents).expect("write non-utf8 path");
+}
+
+fn git_ls_files_z(root: &std::path::Path) -> Vec<Vec<u8>> {
+    let out = Command::new("git")
+        .current_dir(root)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(["ls-files", "-z"])
+        .output()
+        .expect("git ls-files");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+        .split(|&b| b == 0)
+        .filter(|p| !p.is_empty())
+        .map(|p| p.to_vec())
+        .collect()
+}
+
+fn index_has_untr_extension(index_path: &std::path::Path) -> bool {
+    let data = std::fs::read(index_path).expect("read index");
+    data.windows(4).any(|w| w == b"UNTR")
+}
+
+fn untr_extension_names_have_lossy_replacement(index_path: &std::path::Path) -> bool {
+    let data = std::fs::read(index_path).expect("read index");
+    let sig = b"UNTR";
+    let Some(start) = data.windows(4).position(|w| w == sig) else {
+        return false;
+    };
+    let size = u32::from_be_bytes(data[start + 4..start + 8].try_into().expect("size"));
+    let body = &data[start + 8..start + 8 + size as usize];
+    let Some(uc) = parse_untracked_extension(body) else {
+        return true;
+    };
+    fn walk(dir: &UntrackedCacheDir) -> bool {
+        if dir.name.contains('\u{FFFD}') {
+            return true;
+        }
+        for n in &dir.untracked {
+            if n.contains('\u{FFFD}') {
+                return true;
+            }
+        }
+        dir.dirs.iter().any(walk)
+    }
+    uc.root.as_ref().is_some_and(walk)
+}
+
+fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("untracked-non-utf8");
+    std::fs::create_dir(&root).expect("mkdir");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    if untracked_cache_enabled {
+        git(&root, &["config", "core.untrackedCache", "true"]);
+    } else {
+        git(&root, &["config", "core.untrackedCache", "false"]);
+    }
+    std::fs::write(root.join("base"), b"base\n").expect("base");
+    git(&root, &["add", "base"]);
+    git(&root, &["commit", "-qm", "base"]);
+    if untracked_cache_enabled {
+        assert!(
+            index_has_untr_extension(&root.join(".git/index")),
+            "baseline commit with core.untrackedCache=true must populate UNTR"
+        );
+    }
+
+    write_non_utf8_path(&root, UNTRACKED_CAFE, b"x\n");
+    write_non_utf8_path(&root, UNTRACKED_SUB_FILE, b"y\n");
+
+    let repo = open_repo(&root);
+    let model = status(
+        &repo,
+        &StatusOptions {
+            untracked: UntrackedMode::All,
+            ..StatusOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model
+            .untracked
+            .iter()
+            .any(|p| stored_path_is(p, UNTRACKED_CAFE)),
+        "café untracked must use pathhex encoding: {:?}",
+        model.untracked
+    );
+    assert!(
+        model
+            .untracked
+            .iter()
+            .any(|p| stored_path_is(p, UNTRACKED_SUB_FILE)),
+        "sub non-utf8 untracked must use pathhex encoding: {:?}",
+        model.untracked
+    );
+
+    let mut dry = CommitRequest::new("dry-run");
+    dry.dry_run = true;
+    let preview = commit_worktree(&repo, &dry, &mut NullProgress, &NeverCancel)
+        .expect("commit dry-run before staging");
+    assert!(
+        preview
+            .files
+            .iter()
+            .any(|f| stored_path_is(&f.path, UNTRACKED_CAFE)),
+        "dry-run file list must use pathhex, not lossy UTF-8: {:?}",
+        preview.files
+    );
+
+    let index_path = root.join(".git/index");
+    let _ = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("second status while paths remain untracked");
+    if untracked_cache_enabled {
+        assert!(
+            !untr_extension_names_have_lossy_replacement(&index_path),
+            "UNTR extension must not store U+FFFD replacement names after refresh"
+        );
+    }
+
+    stage(
+        &repo,
+        &StageOptions {
+            pathspecs: Vec::new(),
+            pathspec_sources: Vec::new(),
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stage all untracked");
+
+    commit_worktree(
+        &repo,
+        &CommitRequest::new("add non-utf8 untracked"),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("commit staged non-utf8 untracked");
+
+    let ls = git_ls_files_z(&root);
+    assert!(
+        ls.iter().any(|p| p == UNTRACKED_CAFE),
+        "git ls-files must list café under raw bytes: {ls:?}"
+    );
+    assert!(
+        ls.iter().any(|p| p == UNTRACKED_SUB_FILE),
+        "git ls-files must list sub file under raw bytes: {ls:?}"
+    );
+    git(&root, &["fsck", "--strict"]);
+}
+
+#[test]
+fn non_utf8_untracked_directory_component_with_untr() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("untr-non-utf8-dir");
+    std::fs::create_dir(&root).expect("mkdir");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    git(&root, &["config", "core.untrackedCache", "true"]);
+    std::fs::write(root.join("base"), b"base\n").expect("base");
+    git(&root, &["add", "base"]);
+    git(&root, &["commit", "-qm", "base"]);
+    assert!(
+        index_has_untr_extension(&root.join(".git/index")),
+        "UNTR must exist after baseline commit"
+    );
+
+    write_non_utf8_path(&root, UNTRACKED_NON_UTF8_DIR_FILE, b"inside\n");
+
+    let repo = open_repo(&root);
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    let collapsed = repo_relpath::directory_marker_stored(&repo_relpath::storage_string(b"\xfe"));
+    assert!(
+        model.untracked.iter().any(|p| p == &collapsed),
+        "collapsed untracked dir must be reversible pathhex (fe2f), got {:?}",
+        model.untracked
+    );
+
+    stage(
+        &repo,
+        &StageOptions {
+            pathspecs: Vec::new(),
+            pathspec_sources: Vec::new(),
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("stage must not fail on collapsed non-UTF-8 directory path");
+
+    let staged = repo.index_handle().load().expect("index after stage");
+    assert!(
+        staged.get(UNTRACKED_NON_UTF8_DIR_FILE, 0).is_some(),
+        "index must record the file under raw bytes, not only a directory placeholder"
+    );
+    assert!(
+        !staged
+            .entries()
+            .iter()
+            .any(|e| e.path == b"\xfe/" && e.mode != 0o040000),
+        "must not stage collapsed marker as an empty blob at \\xfe/"
+    );
+
+    commit_worktree(
+        &repo,
+        &CommitRequest::new("add non-utf8 dir file"),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("commit staged non-UTF-8 path under directory");
+
+    let ls = git_ls_files_z(&root);
+    assert!(
+        ls.iter().any(|p| p == UNTRACKED_NON_UTF8_DIR_FILE),
+        "git ls-files must list raw byte path after commit: {ls:?}"
+    );
+    git(&root, &["fsck", "--strict"]);
+}
+
+#[test]
+fn non_utf8_untracked_paths_with_untracked_cache() {
+    exercise_non_utf8_untracked_paths(true);
+}
+
+#[test]
+fn non_utf8_untracked_paths_untracked_cache_disabled() {
+    exercise_non_utf8_untracked_paths(false);
 }
 
 fn git_stdout(root: &std::path::Path, args: &[&str]) -> String {

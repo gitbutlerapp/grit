@@ -7,6 +7,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
+#[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
 use crate::config::{parse_path, ConfigSet};
@@ -16,6 +18,9 @@ use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
+use crate::repo_relpath::{
+    self, directory_marker_stored, format_path_stored, storage_bytes, storage_string, worktree_abs,
+};
 
 /// `DIR_SHOW_OTHER_DIRECTORIES` constant.
 pub const DIR_SHOW_OTHER_DIRECTORIES: u32 = 1 << 1;
@@ -322,11 +327,11 @@ fn write_one_dir(ucd: &UntrackedCacheDir, wd: &mut WriteDirCtx<'_>) {
     let recurse_count = ucd.dirs.iter().filter(|d| d.recurse).count() as u64;
     encode_varint(recurse_count, &mut wd.out);
 
-    wd.out.extend_from_slice(ucd.name.as_bytes());
+    wd.out.extend_from_slice(&storage_bytes(&ucd.name));
     wd.out.push(0);
 
     for n in &ucd.untracked {
-        wd.out.extend_from_slice(n.as_bytes());
+        wd.out.extend_from_slice(&storage_bytes(n));
         wd.out.push(0);
     }
 
@@ -466,14 +471,14 @@ pub fn parse_untracked_extension(data: &[u8]) -> Option<UntrackedCache> {
 
         let name_start = *pos;
         let name_end = name_start + data[name_start..].iter().position(|&b| b == 0)?;
-        let name = String::from_utf8(data[name_start..name_end].to_vec()).ok()?;
+        let name = storage_string(&data[name_start..name_end]);
         *pos = name_end + 1;
 
         let mut untracked = Vec::with_capacity(untracked_nr);
         for _ in 0..untracked_nr {
             let s = *pos;
             let e = s + data[s..].iter().position(|&b| b == 0)?;
-            untracked.push(String::from_utf8(data[s..e].to_vec()).ok()?);
+            untracked.push(storage_string(&data[s..e]));
             *pos = e + 1;
         }
 
@@ -729,18 +734,12 @@ fn has_tracked_under(
     gitlinks: &BTreeSet<String>,
     rel_dir: &str,
 ) -> bool {
-    let prefix = if rel_dir.is_empty() {
-        String::new()
-    } else {
-        format!("{rel_dir}/")
-    };
     tracked
-        .range::<String, _>(prefix.clone()..)
-        .next()
-        .is_some_and(|t| t.starts_with(&prefix))
-        || gitlinks.iter().any(|g| {
-            g.as_str() == rel_dir || (!rel_dir.is_empty() && g.starts_with(&format!("{rel_dir}/")))
-        })
+        .iter()
+        .any(|t| stored_path_is_strictly_under(t, rel_dir))
+        || gitlinks
+            .iter()
+            .any(|g| g.as_str() == rel_dir || stored_path_is_strictly_under(g, rel_dir))
 }
 
 fn has_hidden_untracked_file_or_dir(
@@ -763,8 +762,8 @@ fn has_hidden_untracked_file_or_dir(
     let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     sorted.sort_by_key(|e| e.file_name());
     for entry in sorted {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".git" {
+        let name = dir_entry_name_bytes(&entry);
+        if name == b".git" {
             continue;
         }
         let path = entry.path();
@@ -784,7 +783,7 @@ fn has_hidden_untracked_file_or_dir(
             }
         } else if !crate::read_dir_kind::entry_is_git_ignored_special(&entry).unwrap_or(true) {
             let is_ign = matcher.is_path_ignored(repo, Some(index), &child_rel, false)?;
-            if !is_ign && name.starts_with('.') {
+            if !is_ign && name.first() == Some(&b'.') {
                 return Ok(true);
             }
         }
@@ -811,8 +810,8 @@ fn has_ignored_entry_or_dir(
     let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
     sorted.sort_by_key(|e| e.file_name());
     for entry in sorted {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".git" {
+        let name = dir_entry_name_bytes(&entry);
+        if name == b".git" {
             continue;
         }
         let path = entry.path();
@@ -839,12 +838,58 @@ fn has_ignored_entry_or_dir(
     Ok(false)
 }
 
-fn relative_path(parent: &str, name: &str) -> String {
-    if parent.is_empty() {
-        name.to_string()
-    } else {
-        format!("{parent}/{name}")
+#[cfg(unix)]
+fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
+    entry.file_name().into_vec()
+}
+
+#[cfg(not(unix))]
+fn dir_entry_name_bytes(entry: &std::fs::DirEntry) -> Vec<u8> {
+    entry
+        .file_name()
+        .to_string_lossy()
+        .into_owned()
+        .into_bytes()
+}
+
+fn relative_path(parent: &str, name: &[u8]) -> String {
+    format_path_stored(parent, name)
+}
+
+fn join_stored_paths(parent: &str, child: &str) -> String {
+    let parent_bytes = storage_bytes(parent);
+    let child_bytes = storage_bytes(child);
+    storage_string(&repo_relpath::join_rel(&parent_bytes, &child_bytes))
+}
+
+fn stored_dir_name(rel: &str) -> String {
+    let bytes = storage_bytes(rel);
+    storage_string(repo_relpath::file_name(&bytes))
+}
+
+fn stored_path_is_strictly_under(path: &str, dir: &str) -> bool {
+    if dir.is_empty() {
+        return !path.is_empty();
     }
+    let dir_bytes = storage_bytes(dir);
+    let path_bytes = storage_bytes(path);
+    path_bytes.len() > dir_bytes.len()
+        && path_bytes.starts_with(dir_bytes.as_ref())
+        && path_bytes[dir_bytes.len()] == b'/'
+}
+
+#[cfg(unix)]
+fn append_stored_component(abs: &Path, comp: &str) -> PathBuf {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let mut child = abs.to_path_buf();
+    child.push(OsStr::from_bytes(&storage_bytes(comp)));
+    child
+}
+
+#[cfg(not(unix))]
+fn append_stored_component(abs: &Path, comp: &str) -> PathBuf {
+    abs.join(std::str::from_utf8(&storage_bytes(comp)).unwrap_or(comp))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1030,13 +1075,13 @@ pub fn refresh_untracked_cache_for_status(
     let tracked: BTreeSet<String> = index
         .entries
         .iter()
-        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+        .map(|e| storage_string(&e.path))
         .collect();
     let gitlinks: BTreeSet<String> = index
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
-        .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+        .map(|e| storage_string(&e.path))
         .collect();
 
     let mut matcher = IgnoreMatcher::from_repository(repo)?;
@@ -1112,7 +1157,7 @@ pub fn collect_untracked_from_cache(uc: &UntrackedCache) -> Vec<String> {
             if rel.is_empty() {
                 out.push(name.clone());
             } else {
-                out.push(format!("{rel}/{name}"));
+                out.push(join_stored_paths(rel, name));
             }
         }
         let mut children: Vec<&UntrackedCacheDir> = dir
@@ -1125,7 +1170,7 @@ pub fn collect_untracked_from_cache(uc: &UntrackedCache) -> Vec<String> {
             let child_rel = if rel.is_empty() {
                 child.name.clone()
             } else {
-                format!("{rel}/{}", child.name)
+                join_stored_paths(rel, &child.name)
             };
             walk(child, &child_rel, out);
         }
@@ -1158,9 +1203,9 @@ fn read_directory_recursive(
     let parent_exclude_rel = if rel.is_empty() {
         ".gitignore".to_string()
     } else {
-        format!("{rel}/.gitignore")
+        join_stored_paths(rel, ".gitignore")
     };
-    let parent_exclude_path = work_tree.join(&parent_exclude_rel);
+    let parent_exclude_path = worktree_abs(work_tree, &parent_exclude_rel);
     let tracked_ignore_oid = tracked_ignore_blob_oid(index, &parent_exclude_rel);
     let parent_exclude_oid = match fs::metadata(&parent_exclude_path) {
         Ok(_) => {
@@ -1220,16 +1265,17 @@ fn read_directory_recursive(
                 let Some(Ok(entry)) = rd.next() else {
                     break;
                 };
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if name == ".git" {
+                let name_bytes = dir_entry_name_bytes(&entry);
+                if name_bytes == b".git" {
                     continue;
                 }
+                let stored_name = storage_string(&name_bytes);
                 let path = entry.path();
                 let is_dir = crate::read_dir_kind::entry_is_dir(&entry)?;
                 if !is_dir && crate::read_dir_kind::entry_is_git_ignored_special(&entry)? {
                     continue;
                 }
-                Some((name, path, is_dir))
+                Some((stored_name, name_bytes, path, is_dir))
             }
             DirSource::Cache {
                 dir_idx,
@@ -1243,12 +1289,18 @@ fn read_directory_recursive(
                 if *dir_idx < child_dirs.len() {
                     let d = &child_dirs[*dir_idx];
                     *dir_idx += 1;
-                    let child_abs = if rel.is_empty() {
-                        work_tree.join(&d.name)
+                    let child_rel = if rel.is_empty() {
+                        d.name.clone()
                     } else {
-                        work_tree.join(rel).join(&d.name)
+                        join_stored_paths(rel, &d.name)
                     };
-                    Some((d.name.clone(), child_abs, true))
+                    let child_abs = worktree_abs(work_tree, &child_rel);
+                    Some((
+                        d.name.clone(),
+                        storage_bytes(&d.name).into_owned(),
+                        child_abs,
+                        true,
+                    ))
                 } else if *file_idx < child_files.len() {
                     let n = child_files[*file_idx].clone();
                     *file_idx += 1;
@@ -1261,26 +1313,22 @@ fn read_directory_recursive(
                     let child_rel = if rel.is_empty() {
                         n.clone()
                     } else {
-                        format!("{rel}/{n}")
+                        join_stored_paths(rel, &n)
                     };
-                    let child_abs = work_tree.join(&child_rel);
+                    let child_abs = worktree_abs(work_tree, &child_rel);
                     let is_dir = child_abs.is_dir();
-                    let base = Path::new(&n)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or(&n)
-                        .to_string();
-                    Some((base, child_abs, is_dir))
+                    let name_bytes = storage_bytes(&n).into_owned();
+                    Some((n, name_bytes, child_abs, is_dir))
                 } else {
                     break;
                 }
             }
         };
 
-        let Some((name, path, is_dir)) = next else {
+        let Some((stored_name, name_bytes, path, is_dir)) = next else {
             continue;
         };
-        let child_rel = relative_path(rel, &name);
+        let child_rel = relative_path(rel, &name_bytes);
 
         if is_dir && gitlinks.contains(&child_rel) {
             continue;
@@ -1311,7 +1359,7 @@ fn read_directory_recursive(
                 continue;
             }
             if use_disk {
-                ucd.untracked.push(name);
+                ucd.untracked.push(stored_name);
             }
         }
     }
@@ -1356,11 +1404,7 @@ fn visit_untracked_directory_uc(
     if let Some(watch) = cancel_watch {
         crate::progress::poll_watch(watch)?;
     }
-    let name = Path::new(rel)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(rel)
-        .to_string();
+    let name = stored_dir_name(rel);
 
     if has_tracked_under(tracked, gitlinks, rel) {
         let child = lookup_or_create_child(parent_ucd, &name, uc);
@@ -1442,7 +1486,7 @@ fn visit_untracked_directory_uc(
                 check_only_tree_has_visible_untracked(repo, index, matcher, rel, candidate)?;
             parent_ucd.dirs[idx].recurse = true;
             if has_visible {
-                let collapsed = format!("{name}/");
+                let collapsed = directory_marker_stored(rel);
                 if !parent_ucd.untracked.iter().any(|u| u == &collapsed) {
                     parent_ucd.untracked.push(collapsed);
                 }
@@ -1566,7 +1610,7 @@ fn visit_untracked_directory_uc(
         // reopening directories and overcounting `opendir` trace stats.
         let child = lookup_or_create_child(parent_ucd, &name, uc);
         populate_check_only_subtree(child, rel, abs, &sub_untracked, uc);
-        let collapsed = format!("{name}/");
+        let collapsed = directory_marker_stored(rel);
         if !parent_ucd.untracked.iter().any(|u| u == &collapsed) {
             parent_ucd.untracked.push(collapsed);
         }
@@ -1598,7 +1642,7 @@ fn populate_check_only_subtree(
     let prefix = if rel.is_empty() {
         String::new()
     } else {
-        format!("{rel}/")
+        directory_marker_stored(rel)
     };
     for full in sub_untracked {
         let rest = if prefix.is_empty() {
@@ -1615,7 +1659,7 @@ fn populate_check_only_subtree(
         if parts.is_empty() {
             continue;
         }
-        insert_check_only_path(root, abs, &parts, uc);
+        insert_check_only_path(root, abs, rel, &parts, uc);
     }
     sort_untracked_tree(root);
 }
@@ -1623,6 +1667,7 @@ fn populate_check_only_subtree(
 fn insert_check_only_path(
     dir: &mut UntrackedCacheDir,
     dir_abs: &Path,
+    dir_stored: &str,
     parts: &[&str],
     uc: &mut UntrackedCache,
 ) {
@@ -1638,11 +1683,12 @@ fn insert_check_only_path(
     }
 
     let comp = parts[0];
-    let collapsed = format!("{comp}/");
+    let collapsed = directory_marker_stored(comp);
     if !dir.untracked.iter().any(|u| u == &collapsed) {
         dir.untracked.push(collapsed);
     }
-    let child_abs = dir_abs.join(comp);
+    let child_stored = join_stored_paths(dir_stored, comp);
+    let child_abs = append_stored_component(dir_abs, comp);
     let child = lookup_or_create_child(dir, comp, uc);
     child.recurse = true;
     child.check_only = true;
@@ -1651,7 +1697,7 @@ fn insert_check_only_path(
     if let Ok(meta) = fs::symlink_metadata(&child_abs) {
         child.stat_data = stat_data_from_meta(&meta);
     }
-    insert_check_only_path(child, &child_abs, &parts[1..], uc);
+    insert_check_only_path(child, &child_abs, &child_stored, &parts[1..], uc);
 }
 
 fn sort_untracked_tree(dir: &mut UntrackedCacheDir) {
@@ -1670,14 +1716,12 @@ fn check_only_tree_has_visible_untracked(
     rel: &str,
     dir: &UntrackedCacheDir,
 ) -> Result<bool> {
-    let prefix = if rel.is_empty() {
-        String::new()
-    } else {
-        format!("{rel}/")
-    };
-
     for file in &dir.untracked {
-        let path = format!("{prefix}{file}");
+        let path = if rel.is_empty() {
+            file.clone()
+        } else {
+            join_stored_paths(rel, file)
+        };
         let (is_ignored, _) = matcher.check_path(repo, Some(index), &path, false)?;
         if !is_ignored {
             return Ok(true);
@@ -1688,7 +1732,7 @@ fn check_only_tree_has_visible_untracked(
         let child_rel = if rel.is_empty() {
             child.name.clone()
         } else {
-            format!("{rel}/{}", child.name)
+            join_stored_paths(rel, &child.name)
         };
         if check_only_tree_has_visible_untracked(repo, index, matcher, &child_rel, child)? {
             return Ok(true);
@@ -1724,8 +1768,8 @@ fn visit_untracked_node_full(
     sorted.sort_by_key(|e| e.file_name());
 
     for entry in sorted {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == ".git" {
+        let name = dir_entry_name_bytes(&entry);
+        if name == b".git" {
             continue;
         }
         let path = entry.path();
@@ -1817,7 +1861,7 @@ fn visit_untracked_directory_collect(
         && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
-        ignored_out.push(format!("{rel}/"));
+        ignored_out.push(directory_marker_stored(rel));
         return Ok(());
     }
 
@@ -1865,7 +1909,7 @@ fn visit_untracked_directory_collect(
         let collapse_matching = ignored_mode == UntrackedIgnoredMode::Matching && dir_excluded;
         let collapse_traditional = ignored_mode == UntrackedIgnoredMode::Traditional;
         if collapse_matching || collapse_traditional {
-            ignored_out.push(format!("{rel}/"));
+            ignored_out.push(directory_marker_stored(rel));
         } else {
             ignored_out.append(&mut sub_i);
         }
@@ -1876,7 +1920,7 @@ fn visit_untracked_directory_collect(
         if rel.is_empty() {
             untracked_out.append(&mut sub_u);
         } else {
-            untracked_out.push(format!("{rel}/"));
+            untracked_out.push(directory_marker_stored(rel));
         }
     }
 
@@ -1907,8 +1951,8 @@ fn traditional_normal_directory_only(
         let mut sorted: Vec<_> = entries.filter_map(|e| e.ok()).collect();
         sorted.sort_by_key(|e| e.file_name());
         for entry in sorted {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == ".git" {
+            let name = dir_entry_name_bytes(&entry);
+            if name == b".git" {
                 continue;
             }
             let path = entry.path();
@@ -1916,8 +1960,8 @@ fn traditional_normal_directory_only(
             let rel_child = if dir == *abs {
                 relative_path(rel, &name)
             } else {
-                let suffix = path.strip_prefix(work_tree).unwrap_or(&path);
-                suffix.to_string_lossy().replace('\\', "/")
+                repo_relpath::strip_worktree_prefix_stored(&path, work_tree)
+                    .unwrap_or_else(|| relative_path("", &name))
             };
             if is_dir && gitlinks.contains(&rel_child) {
                 continue;
@@ -1937,7 +1981,7 @@ fn traditional_normal_directory_only(
         }
     }
     if any_file {
-        Ok(Some(format!("{rel}/")))
+        Ok(Some(directory_marker_stored(rel)))
     } else {
         Ok(None)
     }
