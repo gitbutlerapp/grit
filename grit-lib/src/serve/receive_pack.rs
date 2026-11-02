@@ -2,6 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufWriter, Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::connectivity::{PushedObjects, Unconnected};
 
@@ -14,19 +16,117 @@ use crate::fsck_msg_policy::{ObjectFsckPolicy, SkipListError};
 use crate::fsck_standalone::FsckError;
 use crate::hooks::{run_hook_in_git_dir, HookResult};
 use crate::index_pack::{install_pack_path, IngestPackOptions};
+use crate::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
+use crate::objects::odb::OdbBuilder;
 use crate::objects::pack_stream_scan::{PackStreamScanError, PackStreamScanner};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::odb::WriteOptions;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
-use crate::receive_quarantine::ReceiveQuarantine;
+use crate::receive_quarantine::{MigratedPackKeepGuard, ReceiveQuarantine};
 use crate::repo::Repository;
 use crate::shallow::{add_shallow_boundaries, load_shallow_boundaries, PushShallowInfo};
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
 
 /// Bytes read from the client per call while spooling a pushed pack.
 const SPOOL_CHUNK: usize = 256 * 1024;
+
+/// Where an incoming push pack is held until pre-receive succeeds.
+enum ReceivePackIngest {
+    Quarantine(ReceiveQuarantine),
+    MemoryOverlay {
+        overlay: Arc<MemoryStore>,
+        objects_dir: PathBuf,
+        read: Arc<dyn ObjectStore>,
+        git_dir: PathBuf,
+        received: HashSet<ObjectId>,
+    },
+}
+
+impl ReceivePackIngest {
+    fn create(repo: &Repository) -> crate::error::Result<Self> {
+        let local = repo.odb();
+        if local.uses_files_primary() {
+            return Ok(Self::Quarantine(ReceiveQuarantine::create(
+                local,
+                repo.git_dir(),
+            )?));
+        }
+        let overlay = Arc::new(MemoryStore::new(local.hash_algo()));
+        Ok(Self::MemoryOverlay {
+            overlay,
+            objects_dir: local.objects_dir().to_path_buf(),
+            read: local.read_store(),
+            git_dir: repo.git_dir().to_path_buf(),
+            received: HashSet::new(),
+        })
+    }
+
+    fn odb(&self) -> Odb {
+        match self {
+            Self::Quarantine(q) => q.odb(),
+            Self::MemoryOverlay {
+                overlay,
+                objects_dir,
+                read,
+                git_dir,
+                ..
+            } => {
+                let mut odb = OdbBuilder::files(objects_dir)
+                    .primary(overlay.clone())
+                    .push_read_source(read.clone())
+                    .alternates(false)
+                    .build();
+                odb = odb.with_config_git_dir(git_dir.clone());
+                odb
+            }
+        }
+    }
+
+    fn spool_dir(&self) -> PathBuf {
+        match self {
+            Self::Quarantine(q) => q.odb().objects_dir().join("pack"),
+            Self::MemoryOverlay { .. } => std::env::temp_dir(),
+        }
+    }
+
+    fn files_quarantine(&self) -> Option<&ReceiveQuarantine> {
+        match self {
+            Self::Quarantine(q) => Some(q),
+            Self::MemoryOverlay { .. } => None,
+        }
+    }
+
+    fn set_received(&mut self, ids: HashSet<ObjectId>) {
+        if let Self::MemoryOverlay { received, .. } = self {
+            *received = ids;
+        }
+    }
+
+    fn migrate(&mut self, repo: &Repository) -> crate::error::Result<Vec<MigratedPackKeepGuard>> {
+        match self {
+            Self::Quarantine(q) => q.migrate(),
+            Self::MemoryOverlay {
+                overlay, received, ..
+            } => {
+                let primary = repo.odb().primary_writable()?;
+                for oid in received.iter() {
+                    if primary.contains(oid)? {
+                        continue;
+                    }
+                    let Some(obj) = overlay.read(oid)? else {
+                        return Err(crate::error::Error::ObjectNotFound(oid.to_hex()));
+                    };
+                    primary.write(obj.kind, &obj.data, WriteOptions::default())?;
+                }
+                repo.odb().flush_for_publish()?;
+                Ok(Vec::new())
+            }
+        }
+    }
+}
 
 /// Capabilities offered in the receive-pack advertisement, before the
 /// per-repository ones.
@@ -712,8 +812,8 @@ pub fn receive_pack_with_hook_cancellable(
     let needs_pack = request.commands.iter().any(|c| c.new.is_some());
     let mut bytes_received = 0u64;
     let mut objects_received = 0u32;
-    let mut quarantine = if needs_pack {
-        Some(ReceiveQuarantine::create(repo.odb(), repo.git_dir())?)
+    let mut ingest = if needs_pack {
+        Some(ReceivePackIngest::create(repo)?)
     } else {
         None
     };
@@ -742,10 +842,11 @@ pub fn receive_pack_with_hook_cancellable(
     };
     // New tips that reach a missing object: refused below.
     let mut unconnected: HashMap<ObjectId, Unconnected> = HashMap::new();
-    let unpack_error = match quarantine.as_ref() {
-        Some(q) => {
-            let odb = q.odb();
-            spool_push_pack(input, &odb, max_input, &stop)
+    let unpack_error = match ingest.as_mut() {
+        Some(ing) => {
+            let odb = ing.odb();
+            let spool_dir = ing.spool_dir();
+            spool_push_pack(input, &odb, &spool_dir, max_input, &stop)
                 .and_then(|pack| {
                     bytes_received = pack.bytes_received();
                     objects_received = pack.object_count();
@@ -758,6 +859,9 @@ pub fn receive_pack_with_hook_cancellable(
                     )
                 })
                 .and_then(|indexed| {
+                    if let Some(ids) = &indexed {
+                        ing.set_received(ids.clone());
+                    }
                     if let Some(fsck) = &policy.fsck_objects {
                         check_received_objects(repo, &odb, indexed.as_ref(), cfg.as_ref(), fsck)?;
                     }
@@ -765,11 +869,12 @@ pub fn receive_pack_with_hook_cancellable(
                     // repository already had are not proof of a complete history.
                     let received = match indexed {
                         Some(received) => received,
-                        None => odb
+                        None if odb.uses_files_primary() => odb
                             .enumerate_local_loose_objects()?
                             .into_iter()
                             .map(|(oid, _)| oid)
                             .collect(),
+                        None => HashSet::new(),
                     };
                     unconnected = unconnected_tips(
                         repo,
@@ -790,12 +895,13 @@ pub fn receive_pack_with_hook_cancellable(
         return Err(ServeError::Cancelled);
     }
 
-    let shallow = match quarantine.as_ref() {
-        Some(q) if unpack_error.is_none() => {
-            shallow_info.retain_received(&q.odb())?;
+    let shallow = match ingest.as_ref() {
+        Some(ing) if unpack_error.is_none() => {
+            let lookup = ing.odb();
+            shallow_info.retain_received(&lookup)?;
             ShallowPlan::new(
                 repo,
-                &q.odb(),
+                &lookup,
                 &request,
                 policy,
                 &shallow_info,
@@ -822,7 +928,7 @@ pub fn receive_pack_with_hook_cancellable(
             opts,
             policy,
             hook,
-            quarantine.as_mut(),
+            ingest.as_mut(),
             &unconnected,
             &shallow,
             sideband.then_some(&mut *output),
@@ -1084,13 +1190,13 @@ fn apply_commands_with_hooks(
     opts: &ServeOptions,
     policy: &ReceivePolicy,
     hook: &dyn ReceiveHook,
-    quarantine: Option<&mut ReceiveQuarantine>,
+    ingest: Option<&mut ReceivePackIngest>,
     unconnected: &HashMap<ObjectId, Unconnected>,
     shallow: &ShallowPlan,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
 ) -> Result<AppliedPush> {
-    let lookup_odb = quarantine.as_ref().map(|q| q.odb());
+    let lookup_odb = ingest.as_ref().map(|ing| ing.odb());
     let head_branch = ref_update_policy::head_branch(repo);
     let checked_out = ref_update_policy::checked_out_branch(repo);
     let branches = ref_update_policy::HeadBranches {
@@ -1156,7 +1262,10 @@ fn apply_commands_with_hooks(
 
     let scripts = ReceiveHookScripts::new(repo, &request.push_options, shallow.hook_env()?);
     let all_cmds: Vec<&RefCommand> = request.commands.iter().collect();
-    let pre_result = scripts.pre_receive(&all_cmds, quarantine.as_deref());
+    let pre_result = scripts.pre_receive(
+        &all_cmds,
+        ingest.as_ref().and_then(|i| i.files_quarantine()),
+    );
     relay_hook_sideband(&mut sideband_out, &pre_result)?;
     hook_records.push(hook_record("pre-receive", &pre_result));
     if !pre_result.is_ok() {
@@ -1169,8 +1278,8 @@ fn apply_commands_with_hooks(
     }
 
     let mut migrated_pack_keeps = Vec::new();
-    if let Some(q) = quarantine {
-        migrated_pack_keeps = q.migrate().map_err(ServeError::Repository)?;
+    if let Some(ing) = ingest {
+        migrated_pack_keeps = ing.migrate(repo).map_err(ServeError::Repository)?;
         repo.odb().invalidate_packs();
     }
 
@@ -1596,13 +1705,14 @@ impl SpooledPack {
 fn spool_push_pack(
     input: &mut dyn Read,
     odb: &Odb,
+    spool_dir: &Path,
     max_bytes: Option<u64>,
     stop: &CancelSignal<'_>,
 ) -> std::result::Result<SpooledPack, UnpackError> {
     let hash = odb.hash_algo();
     let mut file = tempfile::Builder::new()
         .prefix("tmp_pack_")
-        .tempfile_in(odb.objects_dir().join("pack"))?;
+        .tempfile_in(spool_dir)?;
     let mut scanner = PackStreamScanner::new(hash);
     let mut header = [0u8; 12];
     let mut chunk = vec![0u8; SPOOL_CHUNK];
@@ -1778,6 +1888,45 @@ fn ingest_spooled_pack(
     shallow_boundaries: &HashSet<ObjectId>,
     promises: Option<&super::promised_objects::PromisorObjects<'_>>,
 ) -> std::result::Result<Option<HashSet<ObjectId>>, UnpackError> {
+    if !odb.uses_files_primary() {
+        let mut reader = BufReader::with_capacity(SPOOL_CHUNK, pack.file.reopen()?);
+        let opts = UnpackOptions {
+            quiet: true,
+            strict: true,
+            shallow_boundaries: shallow_boundaries.clone(),
+            ..UnpackOptions::default()
+        };
+        let ingested = match promises {
+            Some(promises) => {
+                let promised =
+                    |oid: &ObjectId, referrer: &ObjectId| promises.is_promised(oid, Some(referrer));
+                crate::unpack_objects::unpack_objects_with_promises(
+                    &mut reader,
+                    odb,
+                    &opts,
+                    &promised,
+                )?;
+                odb.flush_for_publish()?;
+                let mut ids = HashSet::new();
+                odb.for_each_object(&mut |oid| {
+                    ids.insert(*oid);
+                    std::ops::ControlFlow::Continue(())
+                })?;
+                ids
+            }
+            None => {
+                let ingested = crate::unpack_objects::ingest_pack_into_odb(
+                    &mut reader,
+                    odb,
+                    &opts,
+                    None,
+                    None,
+                )?;
+                ingested.object_ids.into_iter().collect()
+            }
+        };
+        return Ok(Some(ingested));
+    }
     if should_use_unpack_objects(&pack.header, cfg) {
         let mut reader = BufReader::with_capacity(SPOOL_CHUNK, pack.file.reopen()?);
         let opts = UnpackOptions {
@@ -1978,7 +2127,8 @@ mod tests {
         let odb = test_odb(tmp.path());
         let pack = sample_pack();
         let mut input = NoReadPastEnd { data: &pack };
-        let spooled = spool_push_pack(&mut input, &odb, None, &CancelSignal::never())
+        let spool = odb.objects_dir().join("pack");
+        let spooled = spool_push_pack(&mut input, &odb, &spool, None, &CancelSignal::never())
             .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(std::fs::read(spooled.file.path()).unwrap_or_default(), pack);
         assert_eq!(&spooled.header[..], &pack[..12]);
@@ -1991,8 +2141,15 @@ mod tests {
         let pack = sample_pack();
         let mut stream = pack.clone();
         stream.extend_from_slice(b"trailing junk");
-        let spooled = spool_push_pack(&mut stream.as_slice(), &odb, None, &CancelSignal::never())
-            .unwrap_or_else(|e| panic!("{e}"));
+        let spool = odb.objects_dir().join("pack");
+        let spooled = spool_push_pack(
+            &mut stream.as_slice(),
+            &odb,
+            &spool,
+            None,
+            &CancelSignal::never(),
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
         assert_eq!(std::fs::read(spooled.file.path()).unwrap_or_default(), pack);
     }
 
@@ -2004,22 +2161,34 @@ mod tests {
 
         let truncated = &pack[..pack.len() - 5];
         let never = CancelSignal::never();
+        let spool = odb.objects_dir().join("pack");
         assert!(matches!(
-            spool_push_pack(&mut &truncated[..], &odb, None, &never),
+            spool_push_pack(&mut &truncated[..], &odb, &spool, None, &never),
             Err(UnpackError::Truncated)
         ));
 
         let limit = (pack.len() - 1) as u64;
         assert!(matches!(
-            spool_push_pack(&mut pack.as_slice(), &odb, Some(limit), &never),
+            spool_push_pack(&mut pack.as_slice(), &odb, &spool, Some(limit), &never),
             Err(UnpackError::TooLarge { limit: l }) if l == limit
         ));
-        assert!(
-            spool_push_pack(&mut pack.as_slice(), &odb, Some(pack.len() as u64), &never).is_ok()
-        );
+        assert!(spool_push_pack(
+            &mut pack.as_slice(),
+            &odb,
+            &spool,
+            Some(pack.len() as u64),
+            &never
+        )
+        .is_ok());
 
         assert!(matches!(
-            spool_push_pack(&mut &b"JUNK\0\0\0\x02\0\0\0\x01"[..], &odb, None, &never),
+            spool_push_pack(
+                &mut &b"JUNK\0\0\0\x02\0\0\0\x01"[..],
+                &odb,
+                &spool,
+                None,
+                &never
+            ),
             Err(UnpackError::Malformed(PackStreamScanError::BadSignature))
         ));
 
