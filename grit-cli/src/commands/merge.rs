@@ -605,7 +605,14 @@ pub fn run(
                 );
             }
             if check {
-                return check_merge(&repo, head_oid, other_oid, branch, &short_name);
+                return check_merge(
+                    &repo,
+                    head_oid,
+                    other_oid,
+                    branch,
+                    &short_name,
+                    &merge_options,
+                );
             }
             integrate_with_options(
                 &repo,
@@ -633,9 +640,15 @@ pub fn run(
                 .for_detached_head());
             }
             if check {
-                return Ok(
-                    check_merge(&repo, head_oid, other_oid, branch, "HEAD")?.for_detached_head()
-                );
+                return Ok(check_merge(
+                    &repo,
+                    head_oid,
+                    other_oid,
+                    branch,
+                    "HEAD",
+                    &merge_options,
+                )?
+                .for_detached_head());
             }
             integrate_detached_with_options(
                 &repo,
@@ -758,9 +771,12 @@ fn check_merge(
     other_oid: ObjectId,
     label: &str,
     head_short: &str,
+    merge_options: &MergeOptions,
 ) -> Result<MergeOutcome> {
     let options = MergePredictionOptions {
+        favor: merge_options.favor,
         theirs_label: label.to_owned(),
+        directory_renames: merge_options.directory_renames,
         ..MergePredictionOptions::default()
     };
     match predict_merge(repo, into_oid, other_oid, &options)? {
@@ -977,6 +993,93 @@ mod tests {
             a_txt, "main edit\n",
             "worktree must be unchanged after --check"
         );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn merge_check_honors_merge_favor() {
+        let fixture = CliFixture::empty();
+        std::fs::write(fixture.path().join("f"), "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n").unwrap();
+        fixture.run_ok(&["add", "f"]);
+        fixture.run_ok(&["commit", "-m", "base"]);
+        fixture.run_ok(&["switch", "--create", "topic"]);
+        std::fs::write(
+            fixture.path().join("f"),
+            "1\n2\n3\n4\ntopic\n6\n7\n8\n9\n10\n",
+        )
+        .unwrap();
+        fixture.run_ok(&["commit", "-m", "topic"]);
+        fixture.run_ok(&["switch", "main"]);
+        std::fs::write(
+            fixture.path().join("f"),
+            "1\n2\n3\n4\nmain\n6\n7\n8\n9\n10\n",
+        )
+        .unwrap();
+        fixture.run_ok(&["commit", "-m", "main"]);
+
+        let head_before = grit_test_support::git(fixture.path(), &["rev-parse", "HEAD"])
+            .trim()
+            .to_owned();
+        let main_oid = head_before.clone();
+        let topic_oid = grit_test_support::git(fixture.path(), &["rev-parse", "topic"])
+            .trim()
+            .to_owned();
+
+        let bare_conflict = fixture.run(&["--json", "merge", "--check", "topic"]);
+        assert_eq!(
+            bare_conflict.status,
+            Some(1),
+            "{}",
+            bare_conflict.dump("merge --check conflict")
+        );
+        let v: serde_json::Value = serde_json::from_str(&bare_conflict.stdout).expect("json");
+        assert_eq!(v["result"], "conflicts");
+
+        for favor in ["ours", "theirs"] {
+            let out = fixture.run(&["--json", "merge", "--check", "-X", favor, "topic"]);
+            assert_eq!(
+                out.status,
+                Some(0),
+                "{}",
+                out.dump(&format!("merge --check -X {favor}"))
+            );
+            let v: serde_json::Value = serde_json::from_str(&out.stdout).expect("json");
+            assert_eq!(v["result"], "clean");
+            assert_eq!(v["check"], true);
+            let grit_oid = v["oid"].as_str().expect("oid").to_owned();
+
+            let git_tree = grit_test_support::git(
+                fixture.path(),
+                &[
+                    "merge-tree",
+                    "--write-tree",
+                    "-X",
+                    favor,
+                    &main_oid,
+                    &topic_oid,
+                ],
+            )
+            .lines()
+            .next()
+            .expect("merge-tree tree oid")
+            .trim()
+            .to_owned();
+            assert_eq!(
+                grit_oid, git_tree,
+                "-X {favor} tree must match git merge-tree"
+            );
+
+            let head_after = grit_test_support::git(fixture.path(), &["rev-parse", "HEAD"])
+                .trim()
+                .to_owned();
+            assert_eq!(
+                head_before, head_after,
+                "HEAD unchanged after --check -X {favor}"
+            );
+        }
     }
 
     #[test]
