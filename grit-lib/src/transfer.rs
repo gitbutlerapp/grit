@@ -4260,7 +4260,7 @@ pub(crate) fn apply_fetch_ref_updates(
             .into_iter()
             .map(&store_update)
             .collect::<Result<Vec<_>>>()?;
-        if crate::refs::commit_initial_ref_updates_on_store(store, direct).is_ok() {
+        if crate::refs::commit_initial_clone_ref_updates_on_store(store, direct).is_ok() {
             pending = rest;
         }
     }

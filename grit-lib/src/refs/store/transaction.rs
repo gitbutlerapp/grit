@@ -16,6 +16,10 @@ pub struct RefTransaction {
     reflog_renames: Vec<RefReflogRename>,
     case_only_renames: Vec<RefCaseOnlyRename>,
     initial: bool,
+    /// When set with [`Self::initial`], an initial packed-refs batch may contain creates
+    /// that differ only by ASCII case (`core.ignorecase`). Used only for the first fetch
+    /// of a clone; receive-pack keeps strict validation.
+    initial_ignorecase_same_batch_refs: bool,
     /// When set, [`super::RefStore::prepare`] may skip updates that fail per-ref checks and
     /// commit the rest in one batch (Git `REF_TRANSACTION_ALLOW_FAILURE`).
     allow_failures: bool,
@@ -133,6 +137,19 @@ impl RefTransaction {
     #[must_use]
     pub fn is_initial(&self) -> bool {
         self.initial
+    }
+
+    /// Allow ASCII case variant pairs in an [`Self::initial`] packed-refs batch (clone import).
+    #[must_use]
+    pub(crate) fn initial_ignorecase_same_batch_refs(mut self) -> Self {
+        self.initial_ignorecase_same_batch_refs = true;
+        self
+    }
+
+    /// Whether [`Self::initial_ignorecase_same_batch_refs`] was set.
+    #[must_use]
+    pub(crate) fn allows_initial_ignorecase_same_batch_refs(&self) -> bool {
+        self.initial_ignorecase_same_batch_refs
     }
 
     /// Allow per-ref rejections during prepare while committing the rest in one batch.

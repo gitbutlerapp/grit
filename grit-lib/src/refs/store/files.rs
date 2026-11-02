@@ -1090,7 +1090,15 @@ impl FilesRefStore {
             return Ok(None);
         }
         verify_create_conflicts(&existing, updates)?;
-        verify_create_casefold_against_existing(self.refs_ignore_ascii_case(), &existing, updates)?;
+        if txn.allows_initial_ignorecase_same_batch_refs() {
+            verify_create_casefold_against_existing(
+                self.refs_ignore_ascii_case(),
+                &existing,
+                updates,
+            )?;
+        } else {
+            verify_create_casefold_conflicts(self.refs_ignore_ascii_case(), &existing, updates)?;
+        }
 
         let odb = crate::odb::Odb::new(&self.common_dir.join("objects"))
             .with_config_git_dir(self.git_dir.clone());

@@ -1400,6 +1400,8 @@ mod rebase_cancel_rollback_wide_perf;
 #[cfg(feature = "full-tests")]
 #[path = "receive_pack_ignorecase_ref_2471.rs"]
 mod receive_pack_ignorecase_ref_2471;
+#[path = "receive_pack_same_batch_casefold_2490.rs"]
+mod receive_pack_same_batch_casefold_2490;
 #[cfg(feature = "full-tests")]
 #[path = "ref_dir_file_conflict_2198.rs"]
 mod ref_dir_file_conflict_2198;

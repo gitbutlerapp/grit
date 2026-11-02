@@ -159,6 +159,43 @@ fn receive_pack_reports_reference_already_exists_for_casefold_collision() {
 }
 
 #[test]
+fn initial_transaction_rejects_same_batch_casefold_pair() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let git_dir = dir.path();
+    git(git_dir, &["init", "-q", "--bare", "."]);
+    git(git_dir, &["config", "core.ignorecase", "true"]);
+    let store = FilesRefStore::open(FilesRefStoreConfig {
+        git_dir: git_dir.to_path_buf(),
+        common_dir: git_dir.to_path_buf(),
+        namespace_prefix: None,
+    });
+    let foo = RefUpdate {
+        name: "refs/heads/Foo".to_owned(),
+        new_value: Some(RawRef::Direct(oid(1))),
+        expected: Expected::Missing,
+        reflog: None,
+        flags: Default::default(),
+    };
+    let bar = RefUpdate {
+        name: "refs/heads/foo".to_owned(),
+        new_value: Some(RawRef::Direct(oid(2))),
+        expected: Expected::Missing,
+        reflog: None,
+        flags: Default::default(),
+    };
+    let txn = RefTransaction::new()
+        .initial()
+        .update(foo)
+        .expect("Foo")
+        .update(bar)
+        .expect("foo");
+    assert!(
+        matches!(store.prepare(txn), Err(RefStoreError::CaseConflict { .. })),
+        "receive-pack initial batch must not accept casefold pair"
+    );
+}
+
+#[test]
 fn case_sensitive_config_allows_distinct_case_ref_names() {
     let dir = tempfile::tempdir().expect("tempdir");
     let git_dir = dir.path();

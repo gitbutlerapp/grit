@@ -378,6 +378,7 @@ pub fn commit_ref_batch_on_store(
         reflog_renames.to_vec(),
         case_only_renames.to_vec(),
         false,
+        false,
         || default_ref_lock_wait(store),
     )
 }
@@ -494,7 +495,15 @@ pub(crate) fn commit_ref_updates_on_store_with_wait(
     if updates.is_empty() {
         return Ok(());
     }
-    commit_owned_ref_batch_on_store(store, updates.to_vec(), Vec::new(), Vec::new(), false, wait)
+    commit_owned_ref_batch_on_store(
+        store,
+        updates.to_vec(),
+        Vec::new(),
+        Vec::new(),
+        false,
+        false,
+        wait,
+    )
 }
 
 /// [`commit_ref_updates_on_store`] taking ownership of `updates`, so a large batch is not copied.
@@ -509,7 +518,7 @@ pub(crate) fn commit_owned_ref_updates_on_store(
     if updates.is_empty() {
         return Ok(());
     }
-    commit_owned_ref_batch_on_store(store, updates, Vec::new(), Vec::new(), false, || {
+    commit_owned_ref_batch_on_store(store, updates, Vec::new(), Vec::new(), false, false, || {
         default_ref_lock_wait(store)
     })
 }
@@ -521,11 +530,14 @@ pub(crate) fn commit_owned_ref_updates_on_store(
 /// # Errors
 ///
 /// Same as [`commit_ref_updates_on_store`].
-pub(crate) fn commit_initial_ref_updates_on_store(
+/// [`commit_initial_ref_updates_on_store_with_wait`] for the first fetch of a clone (case variant pairs).
+pub(crate) fn commit_initial_clone_ref_updates_on_store(
     store: &dyn RefStore,
     updates: Vec<RefUpdate>,
 ) -> Result<()> {
-    commit_initial_ref_updates_on_store_with_wait(store, updates, || default_ref_lock_wait(store))
+    commit_initial_clone_ref_updates_on_store_with_wait(store, updates, || {
+        default_ref_lock_wait(store)
+    })
 }
 
 /// [`commit_initial_ref_updates_on_store`] retrying a busy store for `wait` (see
@@ -535,10 +547,37 @@ pub(crate) fn commit_initial_ref_updates_on_store_with_wait(
     updates: Vec<RefUpdate>,
     wait: impl FnOnce() -> LockWait,
 ) -> Result<()> {
+    commit_initial_ref_updates_on_store_with_wait_impl(store, updates, wait, false)
+}
+
+/// Like [`commit_initial_ref_updates_on_store_with_wait`], but allows ASCII case variant
+/// pairs in one initial `packed-refs` write (remote-tracking refs on clone).
+pub(crate) fn commit_initial_clone_ref_updates_on_store_with_wait(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+    wait: impl FnOnce() -> LockWait,
+) -> Result<()> {
+    commit_initial_ref_updates_on_store_with_wait_impl(store, updates, wait, true)
+}
+
+fn commit_initial_ref_updates_on_store_with_wait_impl(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+    wait: impl FnOnce() -> LockWait,
+    allow_ignorecase_same_batch_refs: bool,
+) -> Result<()> {
     if updates.is_empty() {
         return Ok(());
     }
-    commit_owned_ref_batch_on_store(store, updates, Vec::new(), Vec::new(), true, wait)
+    commit_owned_ref_batch_on_store(
+        store,
+        updates,
+        Vec::new(),
+        Vec::new(),
+        true,
+        allow_ignorecase_same_batch_refs,
+        wait,
+    )
 }
 
 fn commit_owned_ref_batch_on_store(
@@ -547,6 +586,7 @@ fn commit_owned_ref_batch_on_store(
     reflog_renames: Vec<RefReflogRename>,
     case_only_renames: Vec<RefCaseOnlyRename>,
     initial: bool,
+    initial_ignorecase_same_batch_refs: bool,
     wait: impl FnOnce() -> LockWait,
 ) -> Result<()> {
     for update in &updates {
@@ -578,6 +618,9 @@ fn commit_owned_ref_batch_on_store(
     }
     if initial {
         txn = txn.initial();
+        if initial_ignorecase_same_batch_refs {
+            txn = txn.initial_ignorecase_same_batch_refs();
+        }
     }
     let prepared = prepare_retrying(store, txn, wait)
         .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
