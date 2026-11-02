@@ -2187,11 +2187,13 @@ fn build_cached_stack_tables_with_reload(
 
 fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables>> {
     let key = tables_list_cache_key(reftable_dir)?;
-    let mut guard = stack_table_cache()
-        .lock()
-        .map_err(|_| Error::Io(std::io::Error::other("reftable stack cache lock poisoned")))?;
-    if let Some(hit) = guard.get(&key) {
-        return Ok(Arc::clone(hit));
+    {
+        let guard = stack_table_cache()
+            .lock()
+            .map_err(|_| Error::Io(std::io::Error::other("reftable stack cache lock poisoned")))?;
+        if let Some(hit) = guard.get(&key) {
+            return Ok(Arc::clone(hit));
+        }
     }
 
     let tables_list = reftable_dir.join("tables.list");
@@ -2208,6 +2210,13 @@ fn load_cached_stack_tables(reftable_dir: &Path) -> Result<Arc<CachedStackTables
         reftable_dir,
         table_names,
     )?);
+
+    let mut guard = stack_table_cache()
+        .lock()
+        .map_err(|_| Error::Io(std::io::Error::other("reftable stack cache lock poisoned")))?;
+    if let Some(hit) = guard.get(&key) {
+        return Ok(Arc::clone(hit));
+    }
     guard.insert(key, Arc::clone(&cached));
     Ok(cached)
 }
@@ -4429,6 +4438,116 @@ mod tests {
             Arc::ptr_eq(&cached, &again),
             "second load must hit the process-wide stack cache"
         );
+    }
+
+    #[test]
+    fn stack_table_cache_missing_table_returns_error_without_deadlock() {
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let (_dir, git_dir) = reftable_repo_with_config("");
+        let reftable_dir = git_dir.join("reftable");
+        let tables_list = reftable_dir.join("tables.list");
+        let mut content = fs::read_to_string(&tables_list).expect("tables.list");
+        content.push_str("0x000000000099-0x000000000099-deadbeef.ref\n");
+        fs::write(&tables_list, content).expect("append missing table name");
+        super::invalidate_stack_table_cache(&reftable_dir);
+
+        let (tx, rx) = mpsc::sync_channel(1);
+        let load_dir = reftable_dir.clone();
+        thread::spawn(move || {
+            let result = super::load_cached_stack_tables(&load_dir);
+            let _ = tx.send(result);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match rx.try_recv() {
+                Ok(result) => {
+                    assert!(result.is_err(), "missing table file must fail");
+                    return;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    if Instant::now() >= deadline {
+                        std::process::exit(124);
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    panic!("load_cached_stack_tables thread exited without sending");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn build_cached_stack_tables_with_reload_retries_when_tables_list_compacts() {
+        let (_dir, git_dir) = reftable_repo_with_config("");
+        let reftable_dir = git_dir.join("reftable");
+        let valid = read_tables_list_names(&reftable_dir).expect("tables.list");
+        let mut stale_names = valid.clone();
+        stale_names.push("0x000000000099-0x000000000099-deadbeef.ref".to_owned());
+        let tables_list = reftable_dir.join("tables.list");
+        fs::write(&tables_list, format!("{}\n", stale_names.join("\n")))
+            .expect("stale tables.list");
+        // Compaction removed the phantom name before the reader re-reads the list.
+        fs::write(&tables_list, format!("{}\n", valid.join("\n"))).expect("compact tables.list");
+        super::invalidate_stack_table_cache(&reftable_dir);
+
+        let cached = super::build_cached_stack_tables_with_reload(&reftable_dir, stale_names)
+            .expect("reload after compaction");
+        assert_eq!(cached.table_names, valid);
+        assert!(
+            cached.readers.iter().all(|r| r.table_backing_is_mapped()),
+            "reloaded stack must still mmap tables"
+        );
+    }
+
+    #[test]
+    fn lookup_ref_missing_table_in_list_does_not_deadlock() {
+        use crate::objects::ObjectId;
+        use std::sync::mpsc;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let (_dir, git_dir) = reftable_repo_with_config("");
+        let oid = ObjectId::from_bytes(&[0x55; 20]).expect("oid");
+        reftable_write_ref(&git_dir, "refs/heads/deadlock-test", &oid, None, None)
+            .expect("write ref");
+        let reftable_dir = git_dir.join("reftable");
+        let tables_list = reftable_dir.join("tables.list");
+        let mut content = fs::read_to_string(&tables_list).expect("tables.list");
+        content.push_str("0x000000000099-0x000000000099-deadbeef.ref\n");
+        fs::write(&tables_list, content).expect("append missing table name");
+        super::invalidate_stack_table_cache(&reftable_dir);
+
+        let (tx, rx) = mpsc::sync_channel(1);
+        let lookup_git_dir = git_dir.clone();
+        thread::spawn(move || {
+            let stack = ReftableStack::open(&lookup_git_dir).expect("open");
+            let result = stack.lookup_ref("refs/heads/deadlock-test");
+            let _ = tx.send(result);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match rx.try_recv() {
+                Ok(result) => {
+                    assert!(result.is_err(), "lookup with broken tables.list must fail");
+                    return;
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    if Instant::now() >= deadline {
+                        std::process::exit(124);
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    panic!("lookup_ref thread exited without sending");
+                }
+            }
+        }
     }
 
     #[test]
