@@ -338,6 +338,31 @@ fn follow_delete_readd_and_basename_collision_matches_git() {
     assert_eq!(grit.len(), 5, "expected c1,c2,c3,del,readd");
 }
 
+/// Side branch edits the file, then merges into main before a later rename (Git #2459 shape).
+#[test]
+fn follow_merge_before_mainline_rename_lists_side_edits() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    git(wt, &["init", "-q", "-b", "main"]);
+    commit_file(wt, "builtin-log.c", "v1\n", "add");
+    git(wt, &["branch", "side"]);
+    git(wt, &["checkout", "side"]);
+    commit_file(wt, "builtin-log.c", "v1\nside\n", "side-on-old-name");
+    git(wt, &["checkout", "main"]);
+    git(wt, &["merge", "side", "-qm", "merge-side"]);
+    std::fs::create_dir_all(wt.join("builtin")).expect("mkdir");
+    git(wt, &["mv", "builtin-log.c", "builtin/log.c"]);
+    git(wt, &["commit", "-qm", "rename-to-builtin"]);
+
+    let grit = grit_follow_commits(wt, "builtin/log.c", None);
+    let git_oids = git_follow_commits(wt, "builtin/log.c", None);
+    assert_eq!(
+        grit, git_oids,
+        "follow must list side edits merged before the mainline rename"
+    );
+    assert_eq!(grit.len(), 3, "rename, side-on-old-name, add");
+}
+
 #[test]
 fn follow_merge_skips_side_line_legacy_path_edits() {
     let hist = HistoryRepo::init();
@@ -432,6 +457,48 @@ fn follow_git_commit_c_history_matches_git_when_git_src_set() {
         grit,
         git_oids,
         "follow history for builtin/commit.c must match git ({} vs {} commits)",
+        grit.len(),
+        git_oids.len()
+    );
+}
+
+/// Issue #2459: `log --follow -- builtin/log.c` on git/git (optional full checkout).
+#[test]
+fn follow_git_log_c_history_matches_git_when_git_src_set() {
+    let strict =
+        std::env::var_os("GRIT_TEST_GIT_SRC_STRICT").is_some_and(|v| !v.is_empty() && v != "0");
+    let Some(git_src) = std::env::var_os("GRIT_TEST_GIT_SRC") else {
+        if strict {
+            panic!("GRIT_TEST_GIT_SRC must be set when GRIT_TEST_GIT_SRC_STRICT=1");
+        }
+        return;
+    };
+    let wt = Path::new(&git_src);
+    if !wt.join(".git").is_dir() {
+        if strict {
+            panic!(
+                "GRIT_TEST_GIT_SRC must point at a git checkout when GRIT_TEST_GIT_SRC_STRICT=1"
+            );
+        }
+        return;
+    }
+
+    let grit = grit_follow_commits(wt, "builtin/log.c", None);
+    let git_oids = git_follow_commits(wt, "builtin/log.c", None);
+    let gs: std::collections::HashSet<_> = grit.iter().collect();
+    let extra: Vec<_> = grit
+        .iter()
+        .filter(|o| !git_oids.contains(o))
+        .cloned()
+        .collect();
+    let missing: Vec<_> = git_oids
+        .iter()
+        .filter(|o| !gs.contains(o))
+        .cloned()
+        .collect();
+    assert!(
+        extra.is_empty() && missing.is_empty(),
+        "follow OID set mismatch for builtin/log.c: extra {extra:?} missing {missing:?} ({} vs {} commits)",
         grit.len(),
         git_oids.len()
     );

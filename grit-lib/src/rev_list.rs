@@ -15,7 +15,7 @@ use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphC
 use crate::config::ConfigSet;
 use crate::diff::pickaxe::PickaxeRenames;
 use crate::diff::zero_oid;
-use crate::diff::{detect_renames, diff_trees, diff_trees_for_pathspecs, DiffStatus};
+use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::error::{Error, Result};
 use crate::ident::committer_unix_seconds_for_ordering;
 use crate::ignore::{parse_sparse_patterns_from_blob, ParsedSparsePatterns};
@@ -4514,48 +4514,31 @@ fn follow_path_into_parent(
     Ok(Some(follow_path.to_owned()))
 }
 
+/// Path to follow in `parent_tree` when walking a merge's non-first parent.
 fn follow_path_into_parent_at_merge(
     repo: &Repository,
     parent_tree: ObjectId,
     commit_tree: ObjectId,
-    _argv_path: &str,
     follow_path: &str,
     threshold: u32,
     cache: &mut DenseWalkCache,
 ) -> Result<Option<String>> {
-    if let Some(literal) = normalized_plain_literal_treesame_path(repo, follow_path) {
-        if !literal_path_leaf_at_tree(repo, commit_tree, &literal, cache)?.is_some() {
-            return Ok(None);
-        }
-        if literal_path_leaf_at_tree(repo, parent_tree, &literal, cache)?.is_some() {
-            return Ok(Some(follow_path.to_owned()));
-        }
-    } else {
-        let path_specs = [follow_path.to_owned()];
-        let path_check = RevPathspecCheck {
-            specs: &path_specs,
-            attr: None,
-        };
-        if !tree_has_pathspec_match(repo, commit_tree, "", &path_check)? {
-            return Ok(None);
-        }
-        if tree_has_pathspec_match(repo, parent_tree, "", &path_check)? {
-            return Ok(Some(follow_path.to_owned()));
-        }
-    }
     let path_specs = [follow_path.to_owned()];
+    let path_check = RevPathspecCheck {
+        specs: &path_specs,
+        attr: None,
+    };
+    if !tree_has_pathspec_match(repo, commit_tree, "", &path_check)? {
+        return Ok(None);
+    }
+    if tree_has_pathspec_match(repo, parent_tree, "", &path_check)? {
+        return Ok(Some(follow_path.to_owned()));
+    }
     let odb = repo.odb();
-    let pathspec_matcher = repo.pathspec_matcher(&path_specs)?;
-    let entries = diff_trees_for_pathspecs(
-        odb,
-        Some(&parent_tree),
-        Some(&commit_tree),
-        &path_specs,
-        Some(&pathspec_matcher),
-    )?;
     let entries = if threshold >= 100 {
-        entries
+        diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?
     } else {
+        let entries = diff_trees(odb, Some(&parent_tree), Some(&commit_tree), "")?;
         detect_renames(odb, None, entries, threshold)
     };
     if let Some(old) = entries
@@ -4571,10 +4554,6 @@ fn follow_path_into_parent_at_merge(
         }
         return Ok(None);
     }
-    let path_check = RevPathspecCheck {
-        specs: &path_specs,
-        attr: None,
-    };
     if tree_has_pathspec_match(repo, parent_tree, "", &path_check)? {
         return Ok(Some(follow_path.to_owned()));
     }
@@ -4759,7 +4738,6 @@ fn dense_path_limited_action(
                     repo,
                     parent_tree,
                     commit_tree,
-                    argv_path,
                     follow_path,
                     follow_rename_threshold,
                     cache,
@@ -4817,7 +4795,7 @@ fn dense_path_limited_action(
             lineage.push((*parent_oid, differs, parent_follow_path));
         }
 
-        let parents_to_walk: Vec<ObjectId> = if merge {
+        let mut parents_to_walk: Vec<ObjectId> = if merge {
             let mut treesame_parent = None;
             for parent_oid in &parents {
                 let Some((_, differs, _)) = lineage.iter().find(|(p, _, _)| p == parent_oid) else {
@@ -4828,14 +4806,28 @@ fn dense_path_limited_action(
                     break;
                 }
             }
-            if let Some(parent) = treesame_parent {
-                vec![parent]
+            if let Some(treesame) = treesame_parent {
+                lineage
+                    .iter()
+                    .filter(|(parent_oid, _, parent_follow_path)| {
+                        *parent_oid == treesame || parent_follow_path.as_str() != follow_path
+                    })
+                    .map(|(p, _, _)| *p)
+                    .collect()
             } else {
                 let mut filtered: Vec<ObjectId> = lineage
                     .iter()
                     .filter(|(_, _, parent_follow_path)| parent_follow_path == follow_path)
                     .map(|(p, _, _)| *p)
                     .collect();
+                for (parent_oid, differs, parent_follow_path) in &lineage {
+                    if parent_follow_path.as_str() != follow_path
+                        && *differs
+                        && !filtered.contains(parent_oid)
+                    {
+                        filtered.push(*parent_oid);
+                    }
+                }
                 if filtered.is_empty() {
                     if let Some((parent_oid, _, _)) = lineage
                         .iter()
@@ -4851,7 +4843,6 @@ fn dense_path_limited_action(
         } else {
             lineage.iter().map(|(p, _, _)| *p).collect()
         };
-
         // Git `log --follow` walks through merges but does not list merge commits.
         let visible = if sparse {
             true
