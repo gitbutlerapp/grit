@@ -9,6 +9,45 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## `branch --merged` is start-up and code layout (2026-11-02)
+
+`branch/merged@many-refs` runs `grit branch --merged main` in a clone with 10,000 packed refs: one local branch (`main`), 6,668 remote-tracking branches and 3,333 tags. It prints one line. The daily census had grit at 1.74× Git's time and 2.18× its peak RSS, but the gap is not in the branch query. Under callgrind grit runs 2.27 million instructions and Git 1.09 million, yet `grit --version` alone runs 1.81 million against Git's 0.49 million. The query itself (repository open, ref listing, the reachability check, output) is 0.47 million instructions in grit and 0.59 million in Git, and grit makes fewer system calls (332 against 496). Start-up accounts for the difference: the dynamic loader applies 41,371 relative relocations (0.83 million instructions and 159 copy-on-write faults on `.data.rel.ro`, see [the start-up relocation study](benchmarking.md#startup-relocation-comparison)), clap builds and frees the command tree, and the Rust runtime reads `/proc/self/maps` to find the main thread's stack (0.11 million).
+
+The memory gap is code pages. The heap peaks at 180 KB, and the rest of the resident set is file pages of the binary. The [hot text layout](benchmarking.md#hot-text-layout) had drifted again since it was last regenerated: about 90 commits renamed or added functions on the ref-listing and object-read paths (the pack store's thread-local snapshots, ref store lookups, config overrides) and in CLI start-up (`parse_command`, `normalize_diff_argv`). The command ran code from 68 fault-around windows of 64 KB, 23 of them in plain `.text`. Both fragments were regenerated from the `dist` and `release` builds with the same workload set. The command now touches 41 code windows, 4 of them in plain `.text`. On a `release` build its peak RSS drops from about 10.0 to 8.5 MB, and its time from 1.87 to 1.81 ms (hyperfine medians, three alternating rounds of 1,500 runs).
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `e1e84dfca`. Each cell is the mean of two alternating rounds' medians (30 runs per round), and peak RSS is the mean of the rounds' peaks; the harness runs each command through `sh`. Values are **milliseconds / MB**. Reports (first round): `daily-branch-merged-6636-before.json` → `daily-branch-merged-6636-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `branch/merged@many-refs` | 1.43 / 7.7 | 1.93 / 10.6 | 1.95 / **9.9** | 1.35 → 1.37 | 1.38× → 1.29× |
+| `branch/list@many-refs` | 1.30 / 7.0 | 1.73 / 9.5 | 1.78 / **9.2** | 1.33 → 1.37 | 1.36× → 1.31× |
+| `branch/list-json@many-refs` | 1.50 / 7.7 | 1.94 / 9.9 | 1.98 / **9.5** | 1.29 → 1.32 | 1.28× → 1.23× |
+| `branch/list@many-refs-loose` | 1.33 / 7.0 | 1.76 / 9.6 | 1.83 / **9.3** | 1.32 → 1.37 | 1.37× → 1.33× |
+| `branch/create@many-refs` | 1.55 / 7.8 | 2.25 / 10.7 | 2.22 / **10.4** | 1.46 → 1.43 | 1.37× → 1.33× |
+| `branch/delete@many-refs` | 4.45 / 8.0 | 3.26 / 11.3 | 3.39 / **10.8** | 0.73 → 0.76 | 1.40× → 1.35× |
+| `branch/rename@many-refs` | 1.72 / 7.8 | 3.38 / 10.0 | 3.52 / 10.0 | 1.96 → 2.04 | 1.28× → 1.28× |
+| `branch/merged-ref@many-refs` | 0.79 / 6.9 | 1.82 / 8.5 | 1.80 / 8.5 | 2.30 → 2.28 | 1.22× → 1.23× |
+| `status/clean@synth-10k` | 6.95 / 9.7 | 6.99 / 13.6 | 7.45 / 13.9 | 1.00 → 1.07 | 1.40× → 1.43× |
+| `status/dirty@synth-10k` | 10.56 / 9.8 | 7.27 / 14.2 | 7.60 / **13.8** | 0.69 → 0.72 | 1.44× → 1.41× |
+| `diff/worktree@synth-10k` | 6.85 / 10.0 | 6.43 / 13.1 | 6.73 / **12.0** | 0.94 → 0.98 | 1.32× → 1.20× |
+| `add/modified@synth-10k` | 16.72 / 12.5 | 10.05 / 18.0 | 9.92 / **17.5** | 0.60 → 0.59 | 1.44× → 1.40× |
+| `commit/small@synth-10k` | 27.20 / 14.0 | 16.34 / 17.0 | 16.23 / **16.5** | 0.60 → 0.60 | 1.21× → 1.18× |
+| `switch/branch@synth-10k` | 22.50 / 10.7 | 15.89 / 14.0 | 16.55 / **13.4** | 0.71 → 0.74 | 1.31× → 1.25× |
+| `merge/clean@synth-10k` | 100.32 / 14.3 | 52.23 / 18.9 | 51.79 / **18.2** | 0.52 → 0.52 | 1.32× → 1.27× |
+| `pick/one@synth-10k` | 114.04 / 9.4 | 52.76 / 19.8 | 53.31 / **19.0** | 0.46 → 0.47 | 2.10× → 2.02× |
+| `stash/push-pop@synth-10k` | 205.26 / 18.6 | 126.87 / 19.0 | 131.92 / **18.4** | 0.62 → 0.64 | 1.02× → 0.99× |
+| `pull/rebase@synth-10k` | 72.63 / 42.3 | 18.43 / 22.8 | 18.70 / **22.5** | 0.25 → 0.26 | 0.54× → 0.53× |
+| `clone/local@synth-10k` | 978.14 / 37.3 | 868.81 / 30.7 | 865.02 / 31.0 | 0.89 → 0.88 | 0.82× → 0.83× |
+
+Times moved within the run-to-run noise of this VM. The second round ran slower for both tools: `diff/worktree` read 6.40 → 6.19 ms in round one and 6.45 → 7.26 ms in round two, with Git at 6.57 and 7.40 ms in the same rounds. Measured directly under `perf stat` (150 runs, three alternating rounds), `grit status` on the 10,000-file fixture takes 737 page faults instead of 756 at the same time, and on the many-refs clone 320 instead of 336. `branch/merged-ref` and `branch/rename` time `grit-bench` drivers that link only the library fragment.
+
+Two other start-up changes were measured and left out. Leaking the parsed clap command tree instead of freeing it saves 59,000 instructions, but the allocations that would have reused that memory touch 12 more heap pages, and wall time did not move. A non-PIE link (`-C relocation-model=static`) removes every relative relocation and the 159 copy-on-write faults: on a `release` build `grit --version` drops from 1.4 to 0.93 ms, and `grit branch --merged main` from 1.9 to 1.5 ms and from 9.8 to 8.6 MB. It also gives up ASLR for the executable, which the start-up policy keeps.
+
+```bash
+./target/release/grit-bench daily --only branch/merged@many-refs,branch/list@many-refs,branch/list-json@many-refs,branch/list@many-refs-loose,branch/create@many-refs,branch/delete@many-refs,branch/rename@many-refs,branch/merged-ref@many-refs,status/clean@synth-10k,status/dirty@synth-10k,add/modified@synth-10k,commit/small@synth-10k,diff/worktree@synth-10k,switch/branch@synth-10k,merge/clean@synth-10k,pick/one@synth-10k,stash/push-pop@synth-10k,pull/rebase@synth-10k,clone/local@synth-10k \
+  --min-runs 30 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-branch-merged-6636-after.json
+```
+
 ## Commit previews compare object ids only (2026-11-02)
 
 `commit/dry-run@synth-10k` previews a commit of 100 modified files in a 10,000-file clone (`grit commit --dry-run`, against `git commit --dry-run -a`). Grit took twice as long as Git, and longer than the real commit it previewed (`commit/small@synth-10k`, 16 ms). Two leftovers from when the preview diffed trees with rename detection did the extra work:
