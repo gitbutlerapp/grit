@@ -38,7 +38,6 @@ use crate::pkt_line;
 use crate::progress::Cancel;
 
 pub mod http;
-pub(crate) mod http_owner;
 pub(crate) mod pending_http;
 pub(crate) mod rpc_channel;
 pub mod stateless_http;
@@ -158,6 +157,15 @@ pub trait Connection {
         if let Some(watch) = self.http_stack_watch() {
             crate::progress::mirror_stack_cancel(cancel, watch);
         }
+    }
+
+    /// Complete any deferred smart-HTTP request still waiting on the owning thread.
+    ///
+    /// Stateless upload-pack POSTs are started on flush and finished here so the
+    /// scoped `cancel` borrow can be polled while the HTTP worker blocks.
+    fn drain_pending_http(&mut self, cancel: &dyn Cancel) -> crate::error::Result<()> {
+        let _ = cancel;
+        Ok(())
     }
 
     /// Shared flag mirrored from the stack [`Cancel`] during smart-HTTP waits.

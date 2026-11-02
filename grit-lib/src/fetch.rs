@@ -32,6 +32,13 @@ use crate::transfer::{
 };
 use crate::transport::Connection;
 
+fn http_writer_flush(conn: &mut dyn Connection, cancel: &dyn Cancel) -> Result<()> {
+    conn.mirror_http_cancel(cancel);
+    conn.writer().flush()?;
+    conn.drain_pending_http(cancel)?;
+    Ok(())
+}
+
 /// Sink for wire transport progress: typed phases via [`ProgressSink`] plus
 /// raw side-band channel 2 bytes from the remote.
 ///
@@ -436,7 +443,7 @@ fn negotiate_pack(
     if !stateless || shallow_request {
         conn.mirror_http_cancel(cancel);
         conn.writer().write_all(&state)?;
-        conn.writer().flush()?;
+        http_writer_flush(conn, cancel)?;
     }
     if !stateless {
         state.clear();
@@ -494,7 +501,7 @@ fn negotiate_pack(
                 conn.writer().write_all(&pending)?;
                 flush_at = next_flush_count(count);
             }
-            conn.writer().flush()?;
+            http_writer_flush(conn, cancel)?;
             pending.clear();
             flushes += 1;
             // Duplex: keep one window ahead. Stateless: every POST must be read
@@ -534,7 +541,7 @@ fn negotiate_pack(
             mirror_stack_cancel(cancel, watch);
         }
         conn.writer().write_all(&tail)?;
-        conn.writer().flush()?;
+        http_writer_flush(conn, cancel)?;
 
         // Stateless v0 repeats shallow/unshallow lines after `done` before NAK/pack.
         if shallow_request && stateless {

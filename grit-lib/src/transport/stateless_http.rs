@@ -220,6 +220,8 @@ pub struct StatelessHttpConnection<C: HttpClient> {
     recv_posted: bool,
     cancel: Option<Arc<dyn Cancel + Send + Sync>>,
     stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Upload-pack POST started on flush; finished in [`Connection::drain_pending_http`].
+    in_flight_upload: Option<PendingHttp<Box<dyn Read + Send>>>,
     /// Set once an upload-pack POST wait observes cancellation; suppresses further POSTs.
     upload_cancelled: std::sync::atomic::AtomicBool,
 }
@@ -267,6 +269,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             recv_posted: false,
             cancel,
             stack_watch,
+            in_flight_upload: None,
             upload_cancelled: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -275,8 +278,27 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         &self,
         pending: PendingHttp<T>,
         cancel: &dyn Cancel,
+        owner: Option<&dyn Cancel>,
     ) -> Result<T> {
-        pending.wait_with_watch(cancel, Some(self.stack_watch.as_ref()))
+        pending.wait_with_watch(cancel, owner, Some(self.stack_watch.as_ref()))
+    }
+
+    fn finish_in_flight_upload(
+        &mut self,
+        owner: Option<&dyn Cancel>,
+        operation: &dyn Cancel,
+    ) -> Result<()> {
+        let Some(pending) = self.in_flight_upload.take() else {
+            return Ok(());
+        };
+        let reader = self.wait_http(pending, operation, owner).inspect_err(|e| {
+            if matches!(e, Error::Cancelled) {
+                self.upload_cancelled
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        })?;
+        self.response = Some(reader);
+        Ok(())
     }
 
     fn operation_cancel(&self) -> Option<Arc<dyn Cancel + Send + Sync>> {
@@ -337,12 +359,30 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         if self.pending.is_empty() {
             return Ok(());
         }
+        self.finish_in_flight_upload(None, Self::cancel_ref(&self.operation_cancel()))?;
         // Each POST carries a complete request: a v2 command, or a v0/v1 want
         // block plus haves that the negotiation restates itself, as Git's
         // stateless upload-pack stops reading at the first flush after the haves.
         let body = std::mem::take(&mut self.pending);
-        let cancel = self.operation_cancel();
-        self.response = Some(self.post_round(&body, Self::cancel_ref(&cancel))?);
+        if self
+            .upload_cancelled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(Error::Cancelled);
+        }
+        self.drain_response();
+        let client = Arc::clone(&self.client);
+        let (url, content_type, accept) = (
+            self.post_url.clone(),
+            self.content_type.clone(),
+            self.accept.clone(),
+        );
+        let git_protocol = self.git_protocol.clone();
+        let pending = PendingHttp::spawn("grit-http-post", move || {
+            client.post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
+        })
+        .map_err(Error::Io)?;
+        self.in_flight_upload = Some(pending);
         Ok(())
     }
 
@@ -369,7 +409,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
                         .map(ReadResponse::read_from)
                 })
                 .map_err(Error::Io)
-                .and_then(|pending| self.wait_http(pending, cancel))
+                .and_then(|pending| self.wait_http(pending, cancel, Some(cancel)))
             }
         };
         let response = response.inspect_err(|e| self.set_transport_err(e))?;
@@ -429,12 +469,13 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             client.post_into_reader(&url, &content_type, &accept, b"0000", None)
         })
         .map_err(Error::Io)
-        .and_then(|pending| self.wait_http(pending, Self::cancel_ref(&cancel)))?;
+        .and_then(|pending| self.wait_http(pending, Self::cancel_ref(&cancel), None))?;
         io::copy(&mut reply, &mut io::sink()).map_err(Error::Io)?;
         Ok(())
     }
 
     fn ensure_response_for_read(&mut self) -> Result<()> {
+        self.finish_in_flight_upload(None, Self::cancel_ref(&self.operation_cancel()))?;
         if self.service == Service::ReceivePack && !self.recv_posted {
             self.post_receive_pack(&NeverCancel)?;
         }
@@ -446,7 +487,7 @@ impl<C: HttpClient + 'static> RpcChannel for StatelessHttpConnection<C> {
     fn request(&mut self, body: &[u8]) -> Result<Box<dyn Read + Send>> {
         self.drain_response();
         let cancel = self.operation_cancel();
-        self.post_round(body, Self::cancel_ref(&cancel))
+        self.post_round(body, Self::cancel_ref(&cancel), None)
             .inspect_err(|e| {
                 self.set_transport_err(e);
             })
@@ -454,7 +495,12 @@ impl<C: HttpClient + 'static> RpcChannel for StatelessHttpConnection<C> {
 }
 
 impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
-    fn post_round(&mut self, body: &[u8], cancel: &dyn Cancel) -> Result<Box<dyn Read + Send>> {
+    fn post_round(
+        &mut self,
+        body: &[u8],
+        cancel: &dyn Cancel,
+        owner: Option<&dyn Cancel>,
+    ) -> Result<Box<dyn Read + Send>> {
         if self
             .upload_cancelled
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -474,7 +520,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             client.post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
         })
         .map_err(Error::Io)
-        .and_then(|pending| self.wait_http(pending, cancel))
+        .and_then(|pending| self.wait_http(pending, cancel, owner))
         .inspect_err(|e| {
             if matches!(e, Error::Cancelled) {
                 self.upload_cancelled
@@ -554,6 +600,10 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
 
     fn mirror_http_cancel(&mut self, cancel: &dyn Cancel) {
         crate::progress::mirror_stack_cancel(cancel, self.stack_watch.as_ref());
+    }
+
+    fn drain_pending_http(&mut self, cancel: &dyn Cancel) -> Result<()> {
+        self.finish_in_flight_upload(Some(cancel), Self::cancel_ref(&self.operation_cancel()))
     }
 
     fn http_stack_watch(&self) -> Option<&std::sync::Arc<std::sync::atomic::AtomicBool>> {
