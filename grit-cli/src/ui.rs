@@ -217,7 +217,7 @@ impl CommitColumns {
     }
 }
 
-/// Lines a commit added and removed, for the summary at the end of a [`commit_rows`] row.
+/// Lines a commit added and removed, for the summary at the end of a [`commit_rows_with`] row.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LineCounts {
     /// Lines added.
@@ -240,7 +240,7 @@ pub struct CommitRowOptions<'a> {
     pub sha_abbrevs: Option<&'a [String]>,
 }
 
-/// Like [`commit_rows`], with the per-row extras in `opts`.
+/// Formats commit summaries as aligned log rows, with per-row extras in `opts`.
 pub fn commit_rows_with(
     commits: &[CommitSummary],
     now: i64,

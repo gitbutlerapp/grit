@@ -45,7 +45,8 @@ pub fn approximate_object_count(odb: &Odb) -> Result<usize> {
 
 /// Minimum abbreviated oid length from `core.abbrev` and object count (Git-compatible).
 ///
-/// Missing `core.abbrev` or the value `auto` uses [`auto_abbrev_len_for_object_count`].
+/// Missing `core.abbrev` or the value `auto` uses Git-compatible automatic length from
+/// the approximate object count (same rule as `auto_abbrev_len_for_object_count`).
 /// Numeric values are clamped to 4–40.
 ///
 /// # Errors

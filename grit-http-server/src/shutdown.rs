@@ -6,7 +6,7 @@ use std::time::Duration;
 use axum::Router;
 use tokio::net::TcpListener;
 
-/// How long [`super::Server::run`] waits for in-flight work after shutdown starts.
+/// How long [`crate::server::Server::run`] waits for in-flight work after shutdown starts.
 #[derive(Debug)]
 pub struct Shutdown {
     /// After the listener closes, keep serving responses until this long elapses.
