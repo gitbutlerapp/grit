@@ -435,6 +435,8 @@ mod commit_scope_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "commit_scope_hook_index.rs"]
 mod commit_scope_hook_index;
+#[path = "commit_show_untracked_no_2523.rs"]
+mod commit_show_untracked_no_2523;
 #[cfg(feature = "full-tests")]
 #[path = "commit_tag_no_blank_line_git_compat.rs"]
 mod commit_tag_no_blank_line_git_compat;

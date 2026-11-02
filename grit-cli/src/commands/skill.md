@@ -76,7 +76,7 @@ Commit rows in `--json` from `log`, `show`, `revs`, and `status` share `change_i
 $ grit commit -m "Explain what changed and why"
 ```
 
-`grit commit` **auto-stages** the whole worktree by default (`commit.autoStage=true`). Use **`grit commit --staged`** to commit only the index (set `commit.autoStage=false` to make that the default). Use **`grit commit -m msg -- <paths>`** (or `--pathspec-from-file`) for a partial commit that leaves other staged changes alone — like `git commit --only`. `-a` / `--all` forces auto-stage; `--staged` and paths cannot be combined with each other or with `-a`.
+`grit commit` **auto-stages** the whole worktree by default (`commit.autoStage=true`), including untracked files unless `status.showUntrackedFiles=no` (then only tracked edits/deletions — same as `git commit -a` and what status shows). Use **`grit commit --staged`** to commit only the index (set `commit.autoStage=false` to make that the default). Use **`grit commit -m msg -- <paths>`** (or `--pathspec-from-file`) for a partial commit that leaves other staged changes alone — like `git commit --only`; path commits can still record a named untracked file. `-a` / `--all` forces auto-stage; `--staged` and paths cannot be combined with each other or with `-a`.
 
 **Partial hunks:** `grit diff --unstaged --json` → pick `hunks[].id` → **`grit commit --hunks id1,id2 -m msg`** (optional `-- paths`). Same exit code **2** as `grit add --hunks` for unknown or stale ids. **`grit commit --patch-file file`** applies a cached patch then commits. Neither mode auto-stages the rest of the tree.
 
