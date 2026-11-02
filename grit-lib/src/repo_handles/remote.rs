@@ -825,11 +825,7 @@ fn refs_to_delete_for_remote(
 /// Whether `remote.<name>.skipFetchAll` disables [`RepositoryRemotes::fetch_all`].
 #[must_use]
 pub fn remote_skip_fetch_all(config: &ConfigSet, remote: &str) -> bool {
-    match config.get_bool(&format!("remote.{remote}.skipFetchAll")) {
-        None | Some(Ok(false)) => false,
-        Some(Ok(true)) => true,
-        Some(Err(_)) => false,
-    }
+    config.bool_or(&format!("remote.{remote}.skipFetchAll"), false)
 }
 
 /// Remote names in merged config load order (first `remote.<name>.url` wins ordering).

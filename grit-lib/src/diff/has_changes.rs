@@ -34,10 +34,7 @@ fn opts_need_content_compare(opts: &DiffOptions) -> bool {
 }
 
 fn trust_filemode(config: &ConfigSet) -> bool {
-    config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true)
+    config.file_mode()
 }
 
 fn rename_threshold(opts: &DiffOptions) -> u32 {

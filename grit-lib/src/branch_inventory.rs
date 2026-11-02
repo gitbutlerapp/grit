@@ -214,10 +214,7 @@ fn ref_query_options(config: &ConfigSet) -> RefQueryOptions {
             .iter()
             .map(|s| s.to_owned())
             .collect(),
-        ignore_case: config
-            .get_bool("core.ignorecase")
-            .and_then(|r| r.ok())
-            .unwrap_or(false),
+        ignore_case: config.ignore_case(),
     }
 }
 

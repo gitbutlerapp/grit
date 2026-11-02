@@ -177,7 +177,7 @@ fn non_blank(value: Option<String>) -> Option<String> {
 }
 
 fn use_config_only(config: &ConfigSet) -> bool {
-    matches!(config.get_bool("user.useConfigOnly"), Some(Ok(true)))
+    config.bool_or("user.useConfigOnly", false)
 }
 
 fn config_mail_given(config: &ConfigSet) -> bool {

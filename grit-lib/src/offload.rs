@@ -219,7 +219,7 @@ impl LopReadiness {
     }
 
     fn from_config(config: &ConfigSet) -> Self {
-        let flag = |key: &str| config.get_bool(key).and_then(|v| v.ok()).unwrap_or(false);
+        let flag = |key: &str| config.bool_or(key, false);
         Self {
             allow_filter: flag("uploadpack.allowfilter"),
             allow_any_sha1_in_want: flag("uploadpack.allowanysha1inwant"),
@@ -433,10 +433,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
         main_bytes_after: main_bytes_before,
         config_changes: Vec::new(),
         lop_ready: LopReadiness::from_config(&lop_config(&lop)?),
-        advertised: config
-            .get_bool("promisor.advertise")
-            .and_then(|v| v.ok())
-            .unwrap_or(false),
+        advertised: config.bool_or("promisor.advertise", false),
     };
     if opts.dry_run {
         return Ok(report);
@@ -460,7 +457,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
 
     let mut wanted: Vec<(String, String)> = Vec::new();
     let promisor_key = format!("remote.{remote}.promisor");
-    if config.get_bool(&promisor_key).and_then(|v| v.ok()) != Some(true) {
+    if !config.bool_or(&promisor_key, false) {
         wanted.push((promisor_key, "true".to_owned()));
     }
     let filter_key = format!("remote.{remote}.partialCloneFilter");
@@ -471,7 +468,7 @@ pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<Offload
     // full closure; once a push lands outside the promisor pack, Git's `gc` fails
     // trying (bitmaps are on by default in bare repositories).
     let bitmaps_key = "repack.writeBitmaps";
-    if config.get_bool(bitmaps_key).and_then(|v| v.ok()) != Some(false) {
+    if config.bool_or(bitmaps_key, true) {
         wanted.push((bitmaps_key.to_owned(), "false".to_owned()));
     }
     // The promisor pack is about to hold blobs the LOP does not have; record where

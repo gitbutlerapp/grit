@@ -2529,12 +2529,7 @@ pub(crate) fn push_local_from(
     let remote_cfg = remote_repo
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
-    if !opts.push_options.is_empty()
-        && !remote_cfg
-            .get_bool("receive.advertisepushoptions")
-            .and_then(|r| r.ok())
-            .unwrap_or(false)
-    {
+    if !opts.push_options.is_empty() && !remote_cfg.bool_or("receive.advertisepushoptions", false) {
         return Err(Error::PushOptionsUnsupported);
     }
 

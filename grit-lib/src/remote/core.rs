@@ -668,8 +668,7 @@ impl Remote {
         let enabled = repo
             .config()
             .ok()
-            .and_then(|c| c.get_bool("transfer.bundleURI").and_then(|r| r.ok()))
-            .unwrap_or(true);
+            .is_none_or(|c| c.bool_or("transfer.bundleURI", true));
         if !enabled {
             return BundleSeed::NotOffered;
         }

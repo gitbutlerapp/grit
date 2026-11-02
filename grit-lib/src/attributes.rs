@@ -1396,11 +1396,7 @@ fn merge_info_attributes(repo: &Repository, merged: &mut ParsedGitAttributes) {
 /// Whether attribute pattern matching should fold ASCII case (`core.ignorecase`).
 #[must_use]
 pub fn attribute_matching_ignore_case(repo: &Repository) -> bool {
-    repo.config()
-        .ok()
-        .and_then(|c| c.get_bool("core.ignorecase"))
-        .and_then(|r| r.ok())
-        .unwrap_or(false)
+    repo.config().ok().is_some_and(|c| c.ignore_case())
 }
 
 /// Merged attribute rules for `git check-attr --cached` (global, index `.gitattributes`, `info/attributes`).

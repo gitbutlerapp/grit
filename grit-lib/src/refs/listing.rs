@@ -823,10 +823,7 @@ fn find_header_value<'a>(header: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
 pub fn ref_query_options_for_repo(repo: &Repository) -> crate::error::Result<RefQueryOptions> {
     let config = repo.config()?;
     let versionsort_suffixes = config.get_all("versionsort.suffix");
-    let ignore_case = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignore_case = config.ignore_case();
     Ok(RefQueryOptions {
         versionsort_suffixes,
         ignore_case,

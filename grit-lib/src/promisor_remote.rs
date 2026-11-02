@@ -323,10 +323,7 @@ impl PromisorAdvertisement {
     /// `None` when `promisor.advertise` is not true or there is no remote to advertise.
     #[must_use]
     pub fn from_server_config(cfg: &ConfigSet) -> Option<Self> {
-        let advertise = cfg
-            .get_bool("promisor.advertise")
-            .and_then(|r| r.ok())
-            .unwrap_or(false);
+        let advertise = cfg.bool_or("promisor.advertise", false);
         if !advertise {
             return None;
         }

@@ -166,10 +166,7 @@ impl FilesRefStore {
             let config = ConfigSet::load(&Environment::empty(), Some(&self.common_dir), true).ok();
             if let Some(cfg) = config.as_ref() {
                 if cfg.get("core.ignorecase").is_some() {
-                    return cfg
-                        .get_bool("core.ignorecase")
-                        .unwrap_or(Ok(false))
-                        .unwrap_or(false);
+                    return cfg.ignore_case();
                 }
             }
             crate::init_filesystem::probe_filesystem_case_insensitive(&self.common_dir)

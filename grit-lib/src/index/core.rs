@@ -129,10 +129,7 @@ impl StatMatchPolicy {
             policy.check_stat = match raw.to_ascii_lowercase().as_str() {
                 "minimal" => false,
                 "default" => true,
-                other => cfg
-                    .get_bool("core.checkstat")
-                    .and_then(|r| r.ok())
-                    .unwrap_or(!other.eq_ignore_ascii_case("minimal")),
+                other => cfg.bool_or("core.checkstat", !other.eq_ignore_ascii_case("minimal")),
             };
         }
         if let Some(use_ns) = cfg.get_bool("core.usenanosec").and_then(|r| r.ok()) {
@@ -925,10 +922,7 @@ impl Index {
     /// `index.version` from `config`.
     #[must_use]
     pub fn new_from_config(config: &ConfigSet) -> Self {
-        let many_files = config
-            .get_bool("feature.manyFiles")
-            .and_then(|r| r.ok())
-            .unwrap_or(false);
+        let many_files = config.bool_or("feature.manyFiles", false);
         Self::empty(version_from_config(
             config.get("index.version").as_deref(),
             many_files,
@@ -3497,30 +3491,13 @@ fn config_truthy(raw: Option<&str>) -> bool {
 /// Whether to write 20 zero bytes instead of the SHA-1 of the index body.
 ///
 /// Mirrors Git `prepare_repo_settings`: `feature.manyFiles` enables skip-hash unless
-/// `index.skipHash` / `index.skiphash` is explicitly false; otherwise honor true `index.skipHash`.
+/// `index.skipHash` is explicitly false; otherwise honor true `index.skipHash`.
 pub(crate) fn index_skip_hash_for_write(config: Option<&ConfigSet>) -> bool {
     let Some(config) = config else {
         return false;
     };
-    let many_files = config
-        .get_bool("feature.manyFiles")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-    if many_files {
-        if let Some(Ok(false)) = config.get_bool("index.skipHash") {
-            return false;
-        }
-        if let Some(Ok(false)) = config.get_bool("index.skiphash") {
-            return false;
-        }
-        return true;
-    }
-    for key in ["index.skipHash", "index.skiphash"] {
-        if let Some(Ok(true)) = config.get_bool(key) {
-            return true;
-        }
-    }
-    false
+    let default = config.bool_or("feature.manyFiles", false);
+    config.bool_or("index.skipHash", default)
 }
 
 fn trim_trailing_slash_bytes(path: &[u8]) -> &[u8] {

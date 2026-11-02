@@ -286,14 +286,8 @@ fn switch_worktree_clean_for_paths(
 
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let config = repo.config().ok();
-    let precompose_unicode = config
-        .as_ref()
-        .and_then(|c| c.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
-        .unwrap_or(false);
-    let ignorecase = config
-        .as_ref()
-        .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
-        .unwrap_or(false);
+    let precompose_unicode = config.as_ref().is_some_and(|c| c.precompose_unicode());
+    let ignorecase = config.as_ref().is_some_and(|c| c.ignore_case());
     let small = paths.len() < SWITCH_TREE_DIFF_STAT_SKIP_MIN;
     let mut dirty: BTreeSet<String> = BTreeSet::new();
     if small {
@@ -373,10 +367,7 @@ fn switch_worktree_clean_for_paths(
         if blob_dirs.is_empty() {
             return Ok(SwitchWorktreeClean::Clean);
         }
-        let preload_index = config
-            .as_ref()
-            .and_then(|c| c.get_bool("core.preloadIndex").and_then(|r| r.ok()))
-            .unwrap_or(true);
+        let preload_index = config.as_ref().is_none_or(|c| c.preload_index());
         let stat_parallel_threads =
             switch_prepare_stat_parallel_threads(repo, config.as_deref(), paths.len());
         let guard_batches = collect_blob_lookup_batches(
@@ -1414,11 +1405,7 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         return Ok((Vec::new(), Vec::new(), true, false));
     }
     let all_specs: Vec<String> = pathspecs.into_iter().collect();
-    let ignorecase = repo
-        .config()
-        .ok()
-        .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
-        .unwrap_or(false);
+    let ignorecase = repo.config().ok().is_some_and(|c| c.ignore_case());
     let under_delete_root = |path: &str| {
         let root = path.split('/').next().unwrap_or(path);
         if ignorecase {

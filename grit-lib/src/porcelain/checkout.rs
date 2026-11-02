@@ -183,10 +183,7 @@ pub(crate) fn restore_checkout_rollback_paths(
         return targets.iter().map(|t| t.path.clone()).collect();
     };
     let conv = rules.conversion().clone();
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     let precompose = repo.pathspec_precompose_enabled();
 
     let mut changes: Vec<DiffEntry> = Vec::with_capacity(targets.len());
@@ -733,10 +730,7 @@ fn checkout_populated_tree_journaled(
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
     let config = repo.config()?;
     let protect = ProtectOptions::from_config(config.as_ref());
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     let precompose = repo.pathspec_precompose_enabled();
 
     let rules = Rc::new(
@@ -994,10 +988,7 @@ fn checkout_hard_to_tree_journaled(
         .collect();
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&index, None);
     let config = repo.config()?;
-    let index_sparse = config
-        .get_bool("index.sparse")
-        .and_then(|v| v.ok())
-        .unwrap_or(false);
+    let index_sparse = config.bool_or("index.sparse", false);
     let sparse = SparseCheckout::load(repo)?;
     let trees_differ = head_tree != target_tree;
     // Sparse-directory rows left by the load already record the target subtree.
@@ -1044,10 +1035,7 @@ fn checkout_hard_to_tree_journaled(
         .collect();
     hard_reset_drop_unmerged_and_intent(&mut index);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let trust_filemode = config.file_mode();
     let stat_check = HardResetStatCheck {
         policy: stat_policy,
         trust_filemode,
@@ -1145,10 +1133,7 @@ fn checkout_hard_to_tree_journaled(
     }
     let sparse = SparseCheckout::load(repo)?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let trust_filemode = config.file_mode();
     // Hard reset reapplies the sparse definition. Tracked files that caused skip-worktree
     // to be cleared are removed again; paths still marked skip-worktree (including the
     // expectFilesOutsideOfPatterns opt-out) and untracked files are left alone. Only retain
@@ -2773,10 +2758,7 @@ fn checkout_coalesced_subtree_changes(
 
     let config = repo.config()?;
     let protect = ProtectOptions::from_config(config.as_ref());
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     let precompose = repo.pathspec_precompose_enabled();
     let rules = if let Some(ref precomputed) = apply.precomputed_worktree_rules {
         Rc::clone(precomputed)
@@ -4462,10 +4444,7 @@ fn apply_tree_changes(
     if let Some(extra) = attribute_changes {
         validate_diff_changes_for_worktree(extra, protect)?;
     }
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     let precompose = repo.pathspec_precompose_enabled();
     let attr_changes = attribute_changes.unwrap_or(changes);
 

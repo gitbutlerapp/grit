@@ -438,11 +438,7 @@ fn case_variant(repo: &Repository, refname: &str) -> Result<Option<String>> {
 /// Whether the repository's file system can't tell names apart by case
 /// (`core.ignorecase`), so that two branches differing only in case are one.
 pub(crate) fn ignores_case(repo: &Repository) -> Result<bool> {
-    Ok(repo
-        .config()?
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false))
+    Ok(repo.config()?.ignore_case())
 }
 
 #[cfg(test)]

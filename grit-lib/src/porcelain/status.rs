@@ -764,11 +764,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
             }
         }
     }
-    let ignorecase = rules
-        .config()
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = rules.config().ignore_case();
     let tracked_paths =
         crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase);
 
@@ -890,11 +886,7 @@ pub fn expand_untracked_for_staging_with_rules(
         .into_iter()
         .partition(|p| !crate::repo_relpath::stored_path_is_directory_marker(p));
     if !dirs.is_empty() {
-        let ignorecase = rules
-            .config()
-            .get_bool("core.ignorecase")
-            .and_then(|r| r.ok())
-            .unwrap_or(false);
+        let ignorecase = rules.config().ignore_case();
         let tracked_paths =
             crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase);
         let gitlinks = stage0_gitlink_paths(index);
@@ -2547,10 +2539,7 @@ pub fn status(
 
     let operation = status_operation(&state, !conflicts.is_empty());
 
-    let precompose_unicode = repo_config
-        .as_ref()
-        .and_then(|c| c.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
-        .unwrap_or(false);
+    let precompose_unicode = repo_config.as_ref().is_some_and(|c| c.precompose_unicode());
     let embedded_repositories =
         embedded_unregistered_git_repositories(work_tree, &index, &untracked, precompose_unicode);
 

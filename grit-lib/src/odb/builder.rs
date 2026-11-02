@@ -274,10 +274,7 @@ impl Odb {
         )
         .unwrap_or_default();
         let skip = crate::maintenance::CommitGraphSkipReason::detect(git_dir, || {
-            let enabled = config
-                .get_bool("core.useReplaceRefs")
-                .and_then(|r| r.ok())
-                .unwrap_or(true);
+            let enabled = config.bool_or("core.useReplaceRefs", true);
             Ok(enabled && !crate::refs::list_refs(git_dir, "refs/replace/")?.is_empty())
         })?;
         if skip.is_some() {

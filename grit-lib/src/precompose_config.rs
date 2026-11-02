@@ -201,18 +201,14 @@ pub fn effective_core_precomposeunicode_with_config(
         return v;
     }
     if let Some(cfg) = config {
-        return cfg
-            .get_bool("core.precomposeunicode")
-            .and_then(|r| r.ok())
-            .unwrap_or(false);
+        return cfg.precompose_unicode();
     }
     let Some(gd) = git_dir else {
         return false;
     };
     crate::config::ConfigSet::load(&crate::environment::Environment::empty(), Some(gd), true)
         .ok()
-        .and_then(|cfg| cfg.get_bool("core.precomposeunicode").and_then(|r| r.ok()))
-        .unwrap_or(false)
+        .is_some_and(|cfg| cfg.precompose_unicode())
 }
 
 /// True when the filesystem aliases NFD and NFC spellings for the same path (macOS / HFS+ style).

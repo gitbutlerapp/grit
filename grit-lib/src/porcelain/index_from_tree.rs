@@ -350,10 +350,7 @@ fn prepare_sparse_rows(
     let protect = ProtectOptions::from_config(config.as_ref());
     let sparse = SparseCheckout::load(repo)?;
     let worktree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let index_sparse = config
-        .get_bool("index.sparse")
-        .and_then(|v| v.ok())
-        .unwrap_or(false);
+    let index_sparse = config.bool_or("index.sparse", false);
     let mut candidates = std::collections::BTreeMap::new();
     for row in &index.entries {
         if row.is_sparse_directory_placeholder()

@@ -49,7 +49,7 @@ pub fn ensure_untracked_cache_shell(index: &mut Index, work_tree: &Path, config:
     if index.untracked_cache.is_some() {
         return;
     }
-    if config.get_bool("core.untrackedCache").and_then(|r| r.ok()) == Some(false) {
+    if !config.bool_or("core.untrackedCache", true) {
         return;
     }
     if index.entries.len() < AUTO_UNTRACKED_CACHE_MIN_ENTRIES {

@@ -172,11 +172,7 @@ fn switch_path_collisions_on_disk(repo: &Repository) -> Result<Vec<String>> {
 }
 
 fn ignores_case(repo: &Repository) -> Result<bool> {
-    Ok(repo
-        .config()?
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false))
+    Ok(repo.config()?.ignore_case())
 }
 
 pub(crate) struct PreparedSwitch {
@@ -881,10 +877,7 @@ fn plan_allow_local_tree_transition_core(
         // Only switch keeps sparse-directory rows here, and its preparation leaves each one
         // recording the target subtree, so nothing inside them changes.
         let config = repo.config()?;
-        let index_sparse = config
-            .get_bool("index.sparse")
-            .and_then(|v| v.ok())
-            .unwrap_or(false);
+        let index_sparse = config.bool_or("index.sparse", false);
         let sparse = crate::sparse_checkout::SparseCheckout::load(repo)?;
         crate::diff::diff_trees_outside_sparse_directories(
             repo.odb(),
@@ -929,11 +922,7 @@ fn plan_allow_local_tree_transition_core(
             Ok(preserve) => (Vec::new(), preserve),
             Err(blocked) => (blocked, HashSet::new()),
         };
-    let ignorecase = repo
-        .config()
-        .ok()
-        .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
-        .unwrap_or(false);
+    let ignorecase = repo.config().ok().is_some_and(|c| c.ignore_case());
     let delete_paths_set: HashSet<String> = tree_changes
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)

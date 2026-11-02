@@ -7036,7 +7036,7 @@ fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
 }
 
 fn repo_commit_graph_enabled(cfg: &ConfigSet) -> bool {
-    !matches!(cfg.get_bool("core.commitgraph"), Some(Ok(false)))
+    cfg.bool_or("core.commitGraph", true)
 }
 
 fn dense_bloom_context_for_paths(

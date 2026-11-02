@@ -274,8 +274,7 @@ fn main_worktree_list_is_bare(repo: &Repository) -> bool {
     let core_bare = repo
         .config()
         .ok()
-        .and_then(|cfg| cfg.get_bool("core.bare").and_then(|r| r.ok()))
-        .unwrap_or(false);
+        .is_some_and(|cfg| cfg.bool_or("core.bare", false));
     core_bare || repo.is_bare()
 }
 

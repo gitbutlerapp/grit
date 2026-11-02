@@ -75,10 +75,7 @@ pub fn warn_ambiguous_refs_from_config(repo: &Repository) -> bool {
     let Ok(config) = repo.config() else {
         return true;
     };
-    config
-        .get_bool("core.warnAmbiguousRefs")
-        .and_then(|r| r.ok())
-        .unwrap_or(true)
+    config.bool_or("core.warnAmbiguousRefs", true)
 }
 
 /// Expand `spec` with Git `expand_ref` / `repo_dwim_ref` rules.

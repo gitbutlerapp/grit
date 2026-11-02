@@ -225,10 +225,7 @@ impl ChangeIdPolicy {
     /// Load `grit.changeIds` (default true) and `grit.testing.changeId`.
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
-        let enabled = config
-            .get_bool("grit.changeIds")
-            .and_then(|r| r.ok())
-            .unwrap_or(true);
+        let enabled = config.bool_or("grit.changeIds", true);
         let testing = config
             .get("grit.testing.changeId")
             .map(|s| s.trim().to_owned())

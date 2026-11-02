@@ -363,13 +363,6 @@ fn merge_gitattributes_text(
     merge_parsed_into(merged, parsed, attr_base.is_empty());
 }
 
-pub(crate) fn config_ignorecase(config: &ConfigSet) -> bool {
-    config
-        .get_bool("core.ignorecase")
-        .unwrap_or(Ok(false))
-        .unwrap_or(false)
-}
-
 /// Load root and `info/attributes` gitattributes from the worktree.
 #[must_use]
 pub fn load_gitattributes_parsed(work_tree: &Path) -> ParsedGitAttributes {
@@ -609,7 +602,7 @@ pub fn file_attrs_from_gitattributes(
     config: &ConfigSet,
 ) -> FileAttrs {
     let path = attr_path_for_match(rel_path, is_dir);
-    let map = collect_attrs_for_path(rules, macros, &path, config_ignorecase(config));
+    let map = collect_attrs_for_path(rules, macros, &path, config.ignore_case());
     file_attrs_from_attr_map(&map, config)
 }
 

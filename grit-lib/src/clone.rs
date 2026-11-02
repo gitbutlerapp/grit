@@ -1057,11 +1057,7 @@ fn perform_clone_checkout(
         repo, None, &tree, progress, cancel,
     )?;
     let index = repo.index_handle().load()?;
-    let ignorecase = repo
-        .config()?
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = repo.config()?.ignore_case();
     let (files, worktree_bytes) =
         crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);
     let (submodule_paths, bare_gitlink_paths) =

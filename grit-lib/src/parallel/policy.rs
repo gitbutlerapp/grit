@@ -105,7 +105,7 @@ impl ThreadPolicy {
         op: ParallelOp,
         config: &ConfigSet,
     ) -> Result<ParallelOptions, ConfigError> {
-        let preload = core_preload_index(config);
+        let preload = config.preload_index();
         let threads = match op {
             ParallelOp::IndexRefresh | ParallelOp::IndexLoad => {
                 if self.threads_override.is_some() || preload {
@@ -167,7 +167,7 @@ impl ThreadPolicy {
         blob_count: usize,
         stat_parallel_threads: Option<usize>,
     ) -> usize {
-        if !core_preload_index(config) || blob_count < PARALLEL_STAT_MIN_ENTRIES {
+        if !config.preload_index() || blob_count < PARALLEL_STAT_MIN_ENTRIES {
             return 1;
         }
         self.index_stat_scan_threads(config, blob_count, stat_parallel_threads)
@@ -228,14 +228,6 @@ impl ParallelOptions {
     pub fn parallelism(self) -> Parallelism {
         Parallelism::new(self.threads)
     }
-}
-
-#[must_use]
-fn core_preload_index(config: &ConfigSet) -> bool {
-    config
-        .get_bool("core.preloadIndex")
-        .and_then(|r| r.ok())
-        .unwrap_or(true)
 }
 
 /// Git `repo_config_get_index_threads` value semantics for `index.threads`.

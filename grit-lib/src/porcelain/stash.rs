@@ -2186,10 +2186,7 @@ fn check_stash_local_changes<'a>(
 ) -> Result<()> {
     let config = repo.config()?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let trust_filemode = config.file_mode();
     let index_mtime = crate::diff::index_mtime_for_diff(current_index, None);
     let comparer =
         crate::diff::WorktreeEntryComparer::new(repo.git_dir(), work_tree, Some(config.as_ref()));

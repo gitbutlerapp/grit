@@ -556,11 +556,7 @@ impl From<Refusal> for Error {
 
 /// The checks that must pass before anything is considered: `None` when they do.
 fn gate(repo: &Repository, config: &ConfigSet) -> Result<Option<Refusal>> {
-    if config
-        .get_bool("extensions.preciousobjects")
-        .and_then(|v| v.ok())
-        .unwrap_or(false)
-    {
+    if config.bool_or("extensions.preciousobjects", false) {
         return Ok(Some(Refusal::PreciousObjects));
     }
     if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config) {

@@ -656,10 +656,7 @@ fn stage_inner_on_index(
             rules_config.as_ref(),
         )
         .parallelism();
-    let ignorecase = rules_config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = rules_config.ignore_case();
     let icase_collisions =
         ignorecase.then(|| IcaseCheckoutCollisionMap::from_index(work_tree, index, true));
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
@@ -1433,11 +1430,7 @@ fn stage_untracked_paths_parallel(
     outcome: &mut StageOutcome,
     scope: &mut ProgressScope<'_>,
 ) -> Result<()> {
-    let precompose_unicode = rules
-        .config()
-        .get_bool("core.precomposeunicode")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let precompose_unicode = rules.config().precompose_unicode();
 
     let untracked =
         collapse_embedded_git_repo_untracked_paths(index, work_tree, untracked, precompose_unicode);
@@ -1599,11 +1592,7 @@ fn stage_untracked_path(
     matches: &impl Fn(&str) -> bool,
 ) -> Result<()> {
     let rel_path = rel_path.trim_end_matches('/');
-    let precompose_unicode = rules
-        .config()
-        .get_bool("core.precomposeunicode")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let precompose_unicode = rules.config().precompose_unicode();
     let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
     let abs = resolved.abs;
     let index_relpath = resolved.index_relpath;
@@ -2010,11 +1999,7 @@ fn stage_intent_to_add_paths(
             .write(crate::objects::ObjectKind::Blob, b"")
             .map_err(|e| Error::Message(format!("could not store empty blob: {e}")))?;
     }
-    let precompose = rules
-        .config()
-        .get_bool("core.precomposeunicode")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let precompose = rules.config().precompose_unicode();
 
     let mut file_paths: BTreeSet<String> = BTreeSet::new();
     for rel in candidates {

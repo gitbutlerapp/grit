@@ -437,10 +437,7 @@ fn apply_query_result(index: &mut Index, config: &ConfigSet, outcome: QueryOutco
     if outcome.changed_paths.is_empty() {
         return;
     }
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     for path in outcome.changed_paths {
         index.invalidate_fsmonitor_for_path(&path, ignorecase);
     }

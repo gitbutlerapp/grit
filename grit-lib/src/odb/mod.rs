@@ -1624,11 +1624,7 @@ impl Odb {
                 return false;
             }
             let cfg = self.load_config_cascade().unwrap_or_default();
-            match cfg.get_bool("core.multiPackIndex") {
-                Some(Ok(b)) => b,
-                Some(Err(_)) => true,
-                None => true,
-            }
+            cfg.bool_or("core.multiPackIndex", true)
         })
     }
 

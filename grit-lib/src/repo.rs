@@ -942,10 +942,7 @@ impl Repository {
         cfg: &ConfigSet,
         environment: &Environment,
     ) -> RepoCachedSettings {
-        let use_replace_refs = cfg
-            .get_bool("core.useReplaceRefs")
-            .and_then(|r| r.ok())
-            .unwrap_or(true);
+        let use_replace_refs = cfg.bool_or("core.useReplaceRefs", true);
         let replace_ref_base = environment
             .git_replace_ref_base
             .clone()
@@ -1074,11 +1071,7 @@ impl Repository {
         cfg: &ConfigSet,
         environment: &Environment,
     ) -> Option<String> {
-        if !cfg
-            .get_bool("core.useReplaceRefs")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
-        {
+        if !cfg.bool_or("core.useReplaceRefs", true) {
             return None;
         }
         let replace_ref_base = environment
@@ -1545,7 +1538,7 @@ impl Repository {
             Some(work_tree) => self.caches().gitattributes_stack_shared(self, work_tree)?,
             None => self.caches().gitattributes_bare_shared(self)?,
         };
-        let icase = crate::crlf::config_ignorecase(self.config()?.as_ref());
+        let icase = self.config()?.ignore_case();
         Ok(crate::pathspec::PathspecMatcher::new(
             specs,
             precompose,
@@ -2744,7 +2737,7 @@ impl Repository {
     #[must_use]
     pub fn is_bare(&self) -> bool {
         if let Ok(cfg) = self.config() {
-            if matches!(cfg.get_bool("core.bare"), Some(Ok(false))) {
+            if !cfg.bool_or("core.bare", true) {
                 return false;
             }
         }
@@ -3895,10 +3888,7 @@ fn warn_core_bare_worktree_conflict(options: &RepositoryOptions, repo: &Reposito
 }
 
 fn read_core_bare_and_worktree_from_config(cfg: &ConfigSet) -> (bool, Option<String>) {
-    let bare = cfg
-        .get_bool("core.bare")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let bare = cfg.bool_or("core.bare", false);
     let worktree = cfg.get("core.worktree").map(|s| s.to_owned());
     (bare, worktree)
 }

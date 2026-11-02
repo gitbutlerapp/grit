@@ -266,7 +266,7 @@ impl IgnoreMatcher {
     /// Returns [`Error::Io`] if configured pattern files cannot be read, or a config error if
     /// the repository configuration cannot be loaded.
     pub fn from_repository(repo: &Repository) -> Result<Self> {
-        let ignore_case = crate::crlf::config_ignorecase(repo.config()?.as_ref());
+        let ignore_case = repo.config()?.ignore_case();
         Ok(Self {
             global_rules: load_global_excludes(repo)?,
             info_rules: load_info_excludes(repo)?,

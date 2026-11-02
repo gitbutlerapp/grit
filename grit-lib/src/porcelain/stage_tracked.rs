@@ -314,11 +314,7 @@ fn stage_tracked_modifications_in_index_body(
         untracked_invalidation_deferred: bulk_untr_defer,
         ..StageTrackedSummary::default()
     };
-    let ignorecase = repo
-        .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
-        .unwrap_or(false);
+    let ignorecase = repo.config().ok().is_some_and(|cfg| cfg.ignore_case());
     let icase_collisions = if ignorecase {
         Some(crate::path_icase::IcaseCheckoutCollisionMap::from_index(
             work_tree, index, true,
@@ -411,10 +407,7 @@ fn stage_tracked_modifications_in_index_body(
             ignorecase,
         )
     };
-    let preload_index = rules_config
-        .get_bool("core.preloadIndex")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let preload_index = rules_config.preload_index();
     let blob_count = blob_dirs.len();
     let thread_policy = repo.thread_policy();
     let stat_threads = stat_scan_thread_count(

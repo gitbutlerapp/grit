@@ -68,10 +68,7 @@ pub fn promisor_lazy_fetch_enabled(config: &ConfigSet, env: &Environment) -> boo
     if lazy_fetch_disabled_by_env(env) {
         return false;
     }
-    match config.get_bool(PROMISOR_LAZY_FETCH_CONFIG) {
-        Some(Ok(false)) => false,
-        Some(Err(_)) | None | Some(Ok(true)) => true,
-    }
+    config.bool_or(PROMISOR_LAZY_FETCH_CONFIG, true)
 }
 
 fn lazy_fetch_disabled_by_env(env: &Environment) -> bool {

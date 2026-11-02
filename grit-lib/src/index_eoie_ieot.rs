@@ -79,13 +79,10 @@ pub(crate) fn record_end_of_index_entries(config: Option<&ConfigSet>) -> bool {
     let Some(cfg) = config else {
         return false;
     };
-    if let Some(Ok(v)) = cfg.get_bool("index.recordEndOfIndexEntries") {
-        return v;
+    match cfg.get_bool("index.recordEndOfIndexEntries") {
+        Some(Ok(v)) => v,
+        _ => index_threads_explicitly_non_serial(cfg),
     }
-    if let Some(Ok(v)) = cfg.get_bool("index.recordendofindexentries") {
-        return v;
-    }
-    index_threads_explicitly_non_serial(cfg)
 }
 
 #[must_use]
@@ -93,13 +90,10 @@ pub(crate) fn record_offset_table(config: Option<&ConfigSet>) -> bool {
     let Some(cfg) = config else {
         return false;
     };
-    if let Some(Ok(v)) = cfg.get_bool("index.recordOffsetTable") {
-        return v;
+    match cfg.get_bool("index.recordOffsetTable") {
+        Some(Ok(v)) => v,
+        _ => index_threads_explicitly_non_serial(cfg),
     }
-    if let Some(Ok(v)) = cfg.get_bool("index.recordoffsettable") {
-        return v;
-    }
-    index_threads_explicitly_non_serial(cfg)
 }
 
 #[must_use]
@@ -488,16 +482,6 @@ pub(crate) fn write_ieot_payload(ieot: &IeotTable, out: &mut Vec<u8>) {
     }
 }
 
-#[must_use]
-pub(crate) fn preload_index_enabled(config: Option<&ConfigSet>) -> bool {
-    let Some(cfg) = config else {
-        return true;
-    };
-    cfg.get_bool("core.preloadIndex")
-        .and_then(|r| r.ok())
-        .unwrap_or(true)
-}
-
 /// Whether parallel IEOT load is allowed for this parse (Git: threads + preload + IEOT present).
 #[must_use]
 pub(crate) fn parallel_index_load_allowed(
@@ -505,7 +489,7 @@ pub(crate) fn parallel_index_load_allowed(
     config: Option<&ConfigSet>,
     entry_count: usize,
 ) -> bool {
-    if !preload_index_enabled(config) {
+    if !config.is_none_or(ConfigSet::preload_index) {
         return false;
     }
     if entry_count < 2 * INDEX_LOAD_THREAD_COST {

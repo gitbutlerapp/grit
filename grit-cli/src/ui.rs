@@ -64,10 +64,7 @@ impl PathDisplayContext {
 /// `core.quotePath` setting is still honored.
 fn quote_path_fully_for_modern_cli(repo: &Repository) -> Result<bool> {
     let config = repo.config()?;
-    Ok(config
-        .get_bool("core.quotePath")
-        .and_then(Result::ok)
-        .unwrap_or(false))
+    Ok(config.bool_or("core.quotePath", false))
 }
 
 /// Cwd-relative path display and `core.quotepath` quoting for human / Markdown output.

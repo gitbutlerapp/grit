@@ -811,18 +811,11 @@ pub fn clear_skip_worktree_from_present_files(
         )
         .unwrap_or_default()
     });
-    let sparse_enabled = config
-        .get_bool("core.sparsecheckout")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let sparse_enabled = config.bool_or("core.sparsecheckout", false);
     if !sparse_enabled {
         return;
     }
-    if config
-        .get_bool("sparse.expectfilesoutsideofpatterns")
-        .and_then(|r| r.ok())
-        .unwrap_or(false)
-    {
+    if config.bool_or("sparse.expectfilesoutsideofpatterns", false) {
         return;
     }
 

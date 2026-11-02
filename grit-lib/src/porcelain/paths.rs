@@ -324,11 +324,7 @@ pub fn move_paths(
         });
     }
 
-    let ignorecase = repo
-        .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
-        .unwrap_or(false);
+    let ignorecase = repo.config().ok().is_some_and(|cfg| cfg.ignore_case());
 
     let mut index = repo.load_index()?;
     let dst_had_trailing_slash = destination_had_trailing_separator(&opts.destination);

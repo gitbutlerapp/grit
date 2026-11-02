@@ -3987,7 +3987,7 @@ pub fn read_write_options_with_environment(
     {
         opts.restart_interval = v;
     }
-    if let Some(Ok(false)) = config.get_bool("reftable.indexObjects") {
+    if !config.bool_or("reftable.indexObjects", true) {
         opts.skip_index_objects = true;
     }
     if let Some(value) = config.get("reftable.geometricFactor") {

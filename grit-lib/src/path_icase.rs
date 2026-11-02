@@ -718,10 +718,7 @@ pub(crate) fn smudge_ignorecase_collision_stat_mismatches(
     config: &crate::config::ConfigSet,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> bool {
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     if !ignorecase {
         return false;
     }

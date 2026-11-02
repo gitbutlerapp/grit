@@ -268,11 +268,7 @@ impl DiffOptions {
         }
         opts.indent_heuristic = indent_heuristic_from_config(config);
         opts.renames = renames_from_config(config);
-        if config
-            .get_bool("diff.ignoreSpaceChange")
-            .and_then(|r| r.ok())
-            .unwrap_or(false)
-        {
+        if config.bool_or("diff.ignoreSpaceChange", false) {
             opts.whitespace.ignore_space_change = true;
         }
         opts

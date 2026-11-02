@@ -1645,10 +1645,7 @@ where
 /// `diff.indentHeuristic` from config (Git defaults to true when unset).
 #[must_use]
 pub fn indent_heuristic_from_config(config: &ConfigSet) -> bool {
-    match config.get_bool("diff.indentHeuristic") {
-        Some(Ok(b)) => b,
-        Some(Err(_)) | None => true,
-    }
+    config.bool_or("diff.indentHeuristic", true)
 }
 
 /// Resolve indent heuristic: `--no-indent-heuristic` and `--indent-heuristic` override config.
@@ -6336,16 +6333,10 @@ fn diff_index_to_worktree_inner(
         }
     };
     let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
-    let precompose_unicode = config
-        .get_bool("core.precomposeunicode")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let precompose_unicode = config.precompose_unicode();
     let mode_policy = crate::index::WorktreeModePolicy::from_config(&config);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let ignorecase = config.ignore_case();
     let icase_collisions = ignorecase
         .then(|| crate::path_icase::IcaseCheckoutCollisionMap::from_index(work_tree, index, true));
     let hash_blobs_without_write = options.hash_blobs_without_write;
@@ -6481,10 +6472,7 @@ fn diff_index_to_worktree_inner(
         stat_scan_thread_count, visit_blob_lookup_batches, BlobDiskLookup, BlobScanSparseMode,
         WorktreeBlobScanOptions, PARALLEL_STAT_MIN_ENTRIES,
     };
-    let preload_index = config
-        .get_bool("core.preloadIndex")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let preload_index = config.preload_index();
     let blob_scan = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads: options.stat_parallel_threads,
@@ -7305,8 +7293,7 @@ impl<'a> WorktreeEntryComparer<'a> {
             )
             .unwrap_or_else(|_| ConfigSet::new())
         });
-        let flag =
-            |key: &str, default: bool| config.get_bool(key).and_then(|r| r.ok()).unwrap_or(default);
+        let flag = |key: &str, default: bool| config.bool_or(key, default);
         Self {
             work_tree,
             mode_policy: crate::index::WorktreeModePolicy::from_config(&config),
@@ -7745,10 +7732,7 @@ pub fn refresh_index_stat_content_verified_with_rules(
                 .unwrap_or_default()
             })
         });
-    let preload_index = config
-        .get_bool("core.preloadIndex")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let preload_index = config.preload_index();
     let blob_scan = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads,
@@ -7772,14 +7756,8 @@ pub fn refresh_index_stat_content_verified_with_rules(
             crlf::FileAttrs::default()
         }
     };
-    let precompose_unicode = config
-        .get_bool("core.precomposeunicode")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
+    let precompose_unicode = config.precompose_unicode();
+    let ignorecase = config.ignore_case();
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
 
     let blob_dirs = group_blob_entries_by_dir(index, false);

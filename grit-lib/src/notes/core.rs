@@ -1330,10 +1330,7 @@ fn notes_rewrite_command_enabled(config: &ConfigSet, command: NotesRewriteComman
         NotesRewriteCommand::Rebase => "notes.rewrite.rebase",
         NotesRewriteCommand::Amend => "notes.rewrite.amend",
     };
-    config
-        .get_bool(key)
-        .and_then(|parsed| parsed.ok())
-        .unwrap_or(true)
+    config.bool_or(key, true)
 }
 
 fn resolve_notes_rewrite_mode<E: IdentityEnv>(

@@ -554,10 +554,7 @@ impl LockHolder {
 #[must_use]
 pub fn grit_lockfile_pid_enabled(config: Option<&ConfigSet>, git_dir: Option<&Path>) -> bool {
     fn from_config(cfg: &ConfigSet) -> bool {
-        match cfg.get_bool("core.lockfilepid") {
-            Some(Ok(false)) => false,
-            Some(Ok(true)) | Some(Err(_)) | None => true,
-        }
+        cfg.bool_or("core.lockfilepid", true)
     }
     if let Some(cfg) = config {
         return from_config(cfg);
