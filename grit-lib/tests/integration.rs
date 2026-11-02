@@ -1424,6 +1424,9 @@ mod ref_update_kinds_git_compat;
 #[path = "reference_transaction_hook.rs"]
 mod reference_transaction_hook;
 #[cfg(feature = "full-tests")]
+#[path = "references_update_head_2497.rs"]
+mod references_update_head_2497;
+#[cfg(feature = "full-tests")]
 #[path = "reflog_expire_dry_run.rs"]
 mod reflog_expire_dry_run;
 #[cfg(feature = "full-tests")]

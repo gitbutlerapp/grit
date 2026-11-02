@@ -19742,6 +19742,8 @@ pub fn grit_lib::refs::handle::References<'repo>::reflog(&self, &grit_lib::refs:
 pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::handle::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::refs::handle::References<'repo>
@@ -20969,6 +20971,8 @@ pub grit_lib::refs::store::ReflogUpdate::message: alloc::string::String
 pub grit_lib::refs::store::ReflogUpdate::new_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::old_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::time: time::offset_date_time::OffsetDateTime
+impl grit_lib::refs::store::ReflogUpdate
+pub fn grit_lib::refs::store::ReflogUpdate::from_signature(&grit_lib::ident::Signature, impl Into<alloc::string::String>) -> Self
 impl core::clone::Clone for grit_lib::refs::store::ReflogUpdate
 pub fn grit_lib::refs::store::ReflogUpdate::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::ReflogUpdate
@@ -21281,6 +21285,8 @@ pub fn grit_lib::refs::handle::References<'repo>::reflog(&self, &grit_lib::refs:
 pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::handle::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::refs::handle::References<'repo>
