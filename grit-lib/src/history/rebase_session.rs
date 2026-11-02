@@ -289,7 +289,8 @@ pub fn start_rebase(
         }
         .into()),
         Ok(ResumablePlanOutcome::Complete(plan)) => {
-            let applied = apply_rewrite(repo, &plan, &opts.apply, progress, cancel)?;
+            let applied =
+                apply_rewrite(repo, &plan, &opts.apply, progress, cancel).map_err(map_apply_err)?;
             write_orig_head(repo, orig_head).map_err(map_lib)?;
             Ok(RebaseOutcome::Done {
                 head_change: (orig_head != applied.head).then_some((orig_head, applied.head)),
@@ -406,7 +407,8 @@ pub fn start_rebase_with_exec(
                 }
                 Err(err) => return Err(err.into()),
             };
-            let applied = apply_rewrite(repo, &plan, &opts.apply, progress, cancel)?;
+            let applied =
+                apply_rewrite(repo, &plan, &opts.apply, progress, cancel).map_err(map_apply_err)?;
             write_orig_head(repo, orig_head).map_err(map_lib)?;
             Ok(RebaseOutcome::ExecDone {
                 applied,
@@ -460,7 +462,8 @@ pub fn start_rebase_with_exec(
                 }
                 Err(err) => return Err(err.into()),
             };
-            let applied = apply_rewrite(repo, &plan, &opts.apply, progress, cancel)?;
+            let applied =
+                apply_rewrite(repo, &plan, &opts.apply, progress, cancel).map_err(map_apply_err)?;
             write_orig_head(repo, orig_head).map_err(map_lib)?;
             Ok(RebaseOutcome::ExecDone {
                 applied,
@@ -1454,7 +1457,8 @@ fn advance_after_plan(
                 hooks: PostOperationHooks::Skip,
                 ..apply.clone()
             };
-            let mut applied = apply_rewrite(repo, &plan, &apply_without_hooks, progress, cancel)?;
+            let mut applied = apply_rewrite(repo, &plan, &apply_without_hooks, progress, cancel)
+                .map_err(map_apply_err)?;
             // The branch moved while HEAD was detached for the replay, so apply_rewrite only
             // logged it on the branch; HEAD's log still ends at the pre-rebase tip. Log before
             // reattaching so a failure leaves a detached, abortable rebase.
@@ -1736,6 +1740,14 @@ use std::io::Write;
 
 fn map_lib<E: Into<crate::error::Error>>(err: E) -> RebaseSessionError {
     RebaseSessionError::Library(err.into())
+}
+
+fn map_apply_err(err: HistoryError) -> RebaseSessionError {
+    if err.is_cancelled() {
+        RebaseSessionError::Library(crate::error::Error::Cancelled)
+    } else {
+        err.into()
+    }
 }
 
 fn replan_rewrite_options(state: &LoadedState) -> RewriteOptions {

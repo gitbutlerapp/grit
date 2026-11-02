@@ -788,9 +788,10 @@ fn rebase_cancelled_during_checkout_rolls_back() {
     let err = start_rebase(&repo, &rebase_start(side, topic), &mut sink, &NeverCancel)
         .expect_err("cancelled");
     assert!(
-        err.is_cancelled(),
-        "expected a cancelled rebase, got {err:?}"
+        matches!(&err, RebaseSessionError::Library(e) if e.is_cancelled()),
+        "expected RebaseSessionError::Library(Cancelled), got {err:?}"
     );
+    assert!(err.is_cancelled());
     assert_eq!(branch(&repo, "topic"), topic, "refs roll back");
     assert!(
         !tmp.path().join("side/f0299.txt").exists(),

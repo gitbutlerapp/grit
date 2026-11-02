@@ -22,7 +22,7 @@ use super::{
 use crate::history::error::HistoryError;
 use crate::history::types::{ApplyOptions, HeadEffect, PlannedRefUpdate, RewritePlan};
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 const META: &str = "meta";
 const INDEX_BEFORE: &str = "index-before";
 const WORKTREE_DIR: &str = "worktree";
@@ -593,12 +593,18 @@ fn write_worktree_from_tree_manifest(
     dir: &Path,
     paths: &[(&str, &WorktreePathSnapshot)],
 ) -> Result<(), HistoryError> {
-    let mut body = String::from("from-tree-manifest 1\n");
+    let mut body = String::from("from-tree-manifest 2\n");
     for (path, snap) in paths {
+        let (oid, mode) = snap
+            .tree_oid
+            .map(|oid| (oid.to_hex(), format!("{:o}", snap.tree_mode)))
+            .unwrap_or_else(|| ("-".into(), "-".into()));
         body.push_str(&format!(
-            "{} {}\n",
+            "{} {} {} {}\n",
             worktree_kind_label(snap.kind),
-            encode_snapshot_path(path)?
+            encode_snapshot_path(path)?,
+            oid,
+            mode
         ));
     }
     fs::write(dir.join(WORKTREE_FROM_TREE), body).map_err(journal_write_err)
@@ -616,7 +622,8 @@ fn read_worktree_from_tree_manifest(
     let mut out = HashMap::new();
     let mut lines = text.lines();
     let header = lines.next().unwrap_or_default().trim();
-    if header != "from-tree-manifest 1" {
+    let manifest_v2 = header == "from-tree-manifest 2";
+    if header != "from-tree-manifest 1" && !manifest_v2 {
         return Err(HistoryError::UndoRecordRead {
             message: format!("unsupported from-tree manifest header {header:?}"),
         });
@@ -626,7 +633,7 @@ fn read_worktree_from_tree_manifest(
         if line.is_empty() {
             continue;
         }
-        let mut parts = line.splitn(2, ' ');
+        let mut parts = line.split_whitespace();
         let kind_label = parts.next().unwrap_or_default();
         let path_hex = parts
             .next()
@@ -644,7 +651,30 @@ fn read_worktree_from_tree_manifest(
                 ));
             }
         };
-        out.insert(repo_path, WorktreePathSnapshot::from_old_tree(kind));
+        let snap = if manifest_v2 {
+            let oid_hex = parts
+                .next()
+                .ok_or_else(|| parse_err(line_no + 1, "missing oid in from-tree manifest"))?;
+            let mode_raw = parts
+                .next()
+                .ok_or_else(|| parse_err(line_no + 1, "missing mode in from-tree manifest"))?;
+            if oid_hex == "-" || mode_raw == "-" {
+                WorktreePathSnapshot::from_old_tree_legacy(kind)
+            } else {
+                let oid =
+                    ObjectId::from_hex(oid_hex).map_err(|e| HistoryError::UndoRecordRead {
+                        message: format!("from-tree manifest oid: {e}"),
+                    })?;
+                let mode =
+                    u32::from_str_radix(mode_raw, 8).map_err(|e| HistoryError::UndoRecordRead {
+                        message: format!("from-tree manifest mode: {e}"),
+                    })?;
+                WorktreePathSnapshot::from_old_tree(kind, oid, mode)
+            }
+        } else {
+            WorktreePathSnapshot::from_old_tree_legacy(kind)
+        };
+        out.insert(repo_path, snap);
     }
     Ok(out)
 }
@@ -793,6 +823,8 @@ fn parse_worktree_snapshot_file(
             kind,
             bytes,
             from_old_tree,
+            tree_oid: None,
+            tree_mode: 0,
             #[cfg(unix)]
             mode,
         },
@@ -830,6 +862,8 @@ mod tests {
                 kind: WorktreePathKind::Regular,
                 bytes: Some(b"hello".to_vec()),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -876,6 +910,8 @@ mod tests {
                 kind: WorktreePathKind::Regular,
                 bytes: Some(Vec::new()),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -924,6 +960,8 @@ mod tests {
                 kind: WorktreePathKind::Regular,
                 bytes: Some(b"file".to_vec()),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -934,6 +972,8 @@ mod tests {
                 kind: WorktreePathKind::Regular,
                 bytes: Some(b"nested".to_vec()),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -985,6 +1025,8 @@ mod tests {
                 kind: WorktreePathKind::Regular,
                 bytes: Some(b"payload".to_vec()),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -1026,14 +1068,23 @@ mod tests {
         let (_dir, repo) = temp_repo();
         let mut snaps = HashMap::new();
         for i in 0..50 {
+            let oid = repo
+                .odb()
+                .hash_algo()
+                .hash_object(crate::objects::ObjectKind::Blob, format!("{i}").as_bytes())
+                .expect("hash");
             snaps.insert(
                 format!("path/{i}.txt"),
-                WorktreePathSnapshot::from_old_tree(WorktreePathKind::Regular),
+                WorktreePathSnapshot::from_old_tree(WorktreePathKind::Regular, oid, 0o100644),
             );
         }
         snaps.insert(
             "gone.txt".into(),
-            WorktreePathSnapshot::from_old_tree(WorktreePathKind::Absent),
+            WorktreePathSnapshot::from_old_tree(
+                WorktreePathKind::Absent,
+                ObjectId::from_hex("0000000000000000000000000000000000000000").expect("zero"),
+                0,
+            ),
         );
         let plan = RewritePlan {
             commits: Vec::new(),
@@ -1071,9 +1122,9 @@ mod tests {
         let record = read_rewrite_apply_journal(&repo).expect("read");
         let restored = record.worktree_before.expect("snapshots");
         assert_eq!(restored.len(), 51);
-        assert!(restored
-            .get("path/0.txt")
-            .is_some_and(|s| s.from_old_tree && s.bytes.is_none()));
+        assert!(restored.get("path/0.txt").is_some_and(|s| {
+            s.from_old_tree && s.bytes.is_none() && s.tree_oid.is_some() && s.tree_mode == 0o100644
+        }));
         clear_rewrite_apply_journal(&repo).expect("clear");
     }
 }
