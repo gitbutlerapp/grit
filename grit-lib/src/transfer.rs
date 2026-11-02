@@ -1382,10 +1382,11 @@ fn copy_objects_for_local_fetch(
 
     let pack_opts = pack_build_options_for_send(remote_odb, &still_missing, pack_build);
     crate::progress::poll_cancel(progress, cancel)?;
+    let send_oids: HashSet<ObjectId> = send.iter().copied().collect();
     // Stream the pack into a spool in `objects/pack` rather than memory, as a local push
     // does; a cancelled or failed copy removes the spool.
     let mut spool = crate::pack_receive::TempPackReceive::create_in_pack_dir(local_objects)?;
-    write_pack_for_local_transfer(
+    let trusted_index_rows = write_pack_for_local_transfer(
         remote_odb,
         &send_set,
         &still_missing,
@@ -1402,7 +1403,12 @@ fn copy_objects_for_local_fetch(
     crate::progress::poll_cancel(progress, cancel)?;
     let ingested = match spool.finish()? {
         Some(pack_path) => {
-            let ingest_opts = ingest_pack_options_for_fetch(local_git_dir, fetch_opts)?;
+            drop(send_set);
+            remote_odb.clear_delta_base_cache();
+            let mut ingest_opts = ingest_pack_options_for_fetch(local_git_dir, fetch_opts)?;
+            if let Some(rows) = trusted_index_rows.filter(|r| !r.is_empty()) {
+                ingest_opts.trusted_index_rows = Some(rows);
+            }
             crate::index_pack::ingest_received_pack_path_with_progress(
                 pack_path,
                 local_odb,
@@ -1415,7 +1421,7 @@ fn copy_objects_for_local_fetch(
     };
     refresh_local_odb_after_link(local_odb);
     // Every object in `send` is stored locally now: linked, or in the new pack.
-    let mut out: HashSet<ObjectId> = send.iter().copied().collect();
+    let mut out = send_oids;
     out.extend(ingested.object_ids);
     let transfer = transfer_stats_for_local_operation(local_odb, &out, None, &pack_dir_before)?;
     Ok((out, transfer))
@@ -1509,7 +1515,7 @@ fn copy_objects_for_local_push(
 
     let pack_opts = pack_build_options_for_send(local_odb, &still_missing, opts);
     let mut spool = crate::pack_receive::TempPackReceive::create_in_pack_dir(dest_objects)?;
-    write_pack_for_local_transfer(
+    let trusted_index_rows = write_pack_for_local_transfer(
         local_odb,
         &send_set,
         &still_missing,
@@ -1525,14 +1531,17 @@ fn copy_objects_for_local_push(
     let Some(pack_path) = spool.finish()? else {
         return Ok(());
     };
-    // Indexing hashes every object and checks the trailer, as receive-pack does, so
-    // the second whole-pack verification pass is skipped.
+    drop(send_set);
+    local_odb.clear_delta_base_cache();
+    let trusted_rows = trusted_index_rows.filter(|rows| !rows.is_empty());
+    // Locally built pack: trailer checked at write time; trusted rows skip a body rescan.
     crate::index_pack::ingest_received_pack_path_with_progress(
         pack_path,
         dest_odb,
         &crate::index_pack::IngestPackOptions {
             fix_thin: pack_opts.thin,
-            skip_post_index_verify: true,
+            skip_post_index_verify: trusted_rows.is_some(),
+            trusted_index_rows: trusted_rows,
             ..Default::default()
         },
         None,
@@ -1585,10 +1594,10 @@ fn write_pack_for_local_transfer(
     stop: &crate::progress::CancelSignal<'_>,
     w: &mut dyn Write,
     copy: Option<(&mut LocalCopyProgress, &mut dyn Progress)>,
-) -> Result<()> {
+) -> Result<Option<Vec<(ObjectId, u64, u32)>>> {
     if !opts.thin && have_shallow.is_empty() {
         let pack_budget = missing.len() as u64;
-        if let Some((copy, progress)) = copy {
+        let (_stats, index_rows) = if let Some((copy, progress)) = copy {
             let mut pack_reported = 0u64;
             let mut on_pack = |n: u64| {
                 let add = n.min(pack_budget.saturating_sub(pack_reported));
@@ -1605,7 +1614,7 @@ fn write_pack_for_local_transfer(
                 stop,
                 w,
                 Some(&mut on_pack),
-            )?;
+            )?
         } else {
             crate::pack_objects::write_pack_from_send_list(
                 source_odb,
@@ -1615,8 +1624,9 @@ fn write_pack_for_local_transfer(
                 stop,
                 w,
                 None,
-            )?;
-        }
+            )?
+        };
+        Ok((!index_rows.is_empty()).then_some(index_rows))
     } else {
         write_pack_for_local_fetch(
             source_odb,
@@ -1629,8 +1639,8 @@ fn write_pack_for_local_transfer(
             stop,
             w,
         )?;
+        Ok(None)
     }
-    Ok(())
 }
 
 /// Objects a local transfer must send, from [`collect_reachable_excluding_peer`].
