@@ -475,6 +475,8 @@ mod push_dry_run;
 #[cfg(feature = "full-tests")]
 #[path = "push_force_lease.rs"]
 mod push_force_lease;
+#[path = "push_interrupt.rs"]
+mod push_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "push_json_flags.rs"]
 mod push_json_flags;
@@ -672,6 +674,8 @@ mod untracked_overwrite_merge_pick;
 #[cfg(feature = "full-tests")]
 #[path = "upload_pack_filter.rs"]
 mod upload_pack_filter;
+#[path = "upload_pack_interrupt.rs"]
+mod upload_pack_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "upload_pack_re_shallow_branches.rs"]
 mod upload_pack_re_shallow_branches;

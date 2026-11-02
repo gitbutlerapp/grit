@@ -3759,6 +3759,25 @@ mod tests {
     }
 
     #[test]
+    fn gc_prunes_stale_tmp_objdir_incoming_quarantine() {
+        let (_dir, repo) = repo_with_config("");
+        let objects = repo.git_dir().join("objects");
+        let stale = objects.join("tmp_objdir-incoming-99999-0");
+        fs::create_dir_all(stale.join("pack")).unwrap();
+        fs::write(stale.join("pack/tmp_pack_stale"), b"partial pack").unwrap();
+        let fresh = objects.join("tmp_objdir-incoming-1-0");
+        fs::create_dir_all(fresh.join("pack")).unwrap();
+        fs::write(fresh.join("pack/tmp_pack_fresh"), b"new").unwrap();
+        let cutoff = SystemTime::now() - std::time::Duration::from_secs(21 * 86400);
+        filetime::set_file_mtime(&stale, FileTime::from(cutoff)).unwrap();
+        filetime::set_file_mtime(stale.join("pack/tmp_pack_stale"), FileTime::from(cutoff))
+            .unwrap();
+        gc(&repo, &GcOptions::default()).expect("gc");
+        assert!(!stale.exists(), "stale receive quarantine should be pruned");
+        assert!(fresh.exists(), "fresh receive quarantine should be kept");
+    }
+
+    #[test]
     fn gc_reaps_stale_next_index_files_in_git_and_linked_worktree() {
         use crate::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 
