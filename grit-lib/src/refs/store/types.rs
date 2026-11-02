@@ -111,6 +111,22 @@ pub struct ReflogUpdate {
     pub new_oid: Option<crate::objects::ObjectId>,
 }
 
+impl ReflogUpdate {
+    /// Build a reflog line from a committer [`crate::ident::Signature`].
+    ///
+    /// Old and new object ids are left unset so the ref store derives them from the update.
+    #[must_use]
+    pub fn from_signature(signature: &crate::ident::Signature, message: impl Into<String>) -> Self {
+        Self {
+            identity: signature.reflog_name_email(),
+            message: message.into(),
+            time: signature.time,
+            old_oid: None,
+            new_oid: None,
+        }
+    }
+}
+
 /// Per-update flags (Git `REF_NO_DEREF` / `REF_LOG_ONLY` / `REF_SKIP_OID_VERIFICATION`
 /// semantics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

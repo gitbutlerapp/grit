@@ -20969,6 +20969,8 @@ pub grit_lib::refs::store::ReflogUpdate::message: alloc::string::String
 pub grit_lib::refs::store::ReflogUpdate::new_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::old_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::time: time::offset_date_time::OffsetDateTime
+impl grit_lib::refs::store::ReflogUpdate
+pub fn grit_lib::refs::store::ReflogUpdate::from_signature(&grit_lib::ident::Signature, impl Into<alloc::string::String>) -> Self
 impl core::clone::Clone for grit_lib::refs::store::ReflogUpdate
 pub fn grit_lib::refs::store::ReflogUpdate::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::ReflogUpdate

@@ -1,14 +1,17 @@
 //! Repository-scoped reference and reflog access via [`References`].
 use std::ops::ControlFlow;
 
-use crate::error::Result;
+use crate::config::ident_resolve::IdentRole;
+use crate::error::{Error, Result};
+use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryError, RefQueryOptions};
-use crate::refs::store::{Expected, RawRef, RefName, RefUpdate, RefUpdateFlags};
+use crate::refs::on_store::reflog_wanted;
+use crate::refs::store::{Expected, RawRef, RefName, RefUpdate, RefUpdateFlags, ReflogUpdate};
 use crate::refs::{
-    commit_ref_update_on_store, ensure_refname_safe_for_storage, list_refs_for_repository,
-    update_direct_ref_on_store,
+    commit_ref_update_on_store, commit_ref_updates_on_store_with_wait,
+    ensure_refname_safe_for_storage, list_refs_for_repository,
 };
 use crate::repo::Repository;
 
@@ -154,6 +157,15 @@ impl<'repo> References<'repo> {
     /// Uses the [`RefStore`](crate::refs::store::RefStore) installed on this repository (including
     /// injected in-memory stores), not a fresh open from `git_dir` alone.
     ///
+    /// Symbolic refs are followed: updating `HEAD` while it points at `refs/heads/main` moves
+    /// `main` and leaves `HEAD` symbolic. Reflog entries are appended when
+    /// [`core.logAllRefUpdates`](crate::refs::LogRefsConfig) allows (same policy as
+    /// `git update-ref`). Identity comes from the repository committer signature.
+    ///
+    /// To rewrite `HEAD` itself (detach or replace the symref file), use
+    /// [`Self::update_direct`]. To require the ref tip to match an expected oid first, use
+    /// [`Self::compare_and_swap`].
+    ///
     /// `oid` must be stored in this repository, and must be a commit when `name` is a branch
     /// (`refs/heads/…`) or `HEAD`. This catches a commit that a concurrent prune deleted after
     /// you wrote it, instead of leaving the ref pointing at a missing object.
@@ -193,7 +205,115 @@ impl<'repo> References<'repo> {
     /// ```
     #[inline]
     pub fn update(&self, name: &RefName, oid: &ObjectId) -> Result<()> {
-        update_direct_ref_on_store(self.repo.refs(), self.repo.git_dir(), name.as_str(), oid)
+        self.commit_point(name, oid, Expected::Any, RefUpdateFlags::default())
+    }
+
+    /// Point `name` at `oid` without following symbolic refs.
+    ///
+    /// Updating `HEAD` writes the object id into `.git/HEAD` (detached HEAD) instead of moving
+    /// the branch `HEAD` points at. Reflog policy matches [`Self::update`].
+    ///
+    /// # Errors
+    ///
+    /// Same validation and backend errors as [`Self::update`].
+    pub fn update_direct(&self, name: &RefName, oid: &ObjectId) -> Result<()> {
+        self.commit_point(
+            name,
+            oid,
+            Expected::Any,
+            RefUpdateFlags {
+                no_deref: true,
+                ..RefUpdateFlags::default()
+            },
+        )
+    }
+
+    /// Point `name` at `oid` only when it currently resolves to `expected`.
+    ///
+    /// Symbolic refs are followed the same way as [`Self::update`]. On mismatch the ref is
+    /// unchanged and the error is
+    /// [`RefStoreError::ExpectedMismatch`](crate::refs::store::RefStoreError::ExpectedMismatch).
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::update`], plus compare-and-swap mismatch.
+    pub fn compare_and_swap(
+        &self,
+        name: &RefName,
+        expected: &ObjectId,
+        oid: &ObjectId,
+    ) -> Result<()> {
+        self.commit_point(
+            name,
+            oid,
+            Expected::Oid(*expected),
+            RefUpdateFlags::default(),
+        )
+    }
+
+    fn commit_point(
+        &self,
+        name: &RefName,
+        oid: &ObjectId,
+        expected: Expected,
+        flags: RefUpdateFlags,
+    ) -> Result<()> {
+        let refname = name.as_str();
+        ensure_refname_safe_for_storage(refname)?;
+        let store = self.repo.refs();
+        let config = self.repo.config()?;
+        let signature = match self
+            .repo
+            .identity(IdentRole::Committer, self.repo.identity_now())
+        {
+            Ok(sig) => Some(sig),
+            Err(Error::Identity(_)) => None,
+            Err(err) => return Err(err),
+        };
+        let reflog_for = |target: &str| -> Result<Option<ReflogUpdate>> {
+            let Some(sig) = signature.as_ref() else {
+                return Ok(None);
+            };
+            Ok(reflog_wanted(store, config.as_ref(), target)?
+                .then(|| ReflogUpdate::from_signature(sig, "")))
+        };
+
+        let old_tip = self.resolve_if_exists(refname)?;
+        let mut updates = vec![RefUpdate {
+            name: refname.to_owned(),
+            new_value: Some(RawRef::Direct(*oid)),
+            expected,
+            reflog: reflog_for(refname)?,
+            flags,
+        }];
+
+        let mirror_head = !flags.no_deref
+            && refname.starts_with("refs/heads/")
+            && matches!(
+                store.read_raw("HEAD")?,
+                Some(RawRef::Symbolic(branch)) if branch == refname
+            );
+        if mirror_head {
+            if let Some(mut head_reflog) = reflog_for("HEAD")? {
+                head_reflog.old_oid = old_tip;
+                head_reflog.new_oid = Some(*oid);
+                updates.push(RefUpdate {
+                    name: "HEAD".to_owned(),
+                    new_value: Some(RawRef::Direct(*oid)),
+                    expected: Expected::Any,
+                    reflog: Some(head_reflog),
+                    flags: RefUpdateFlags {
+                        log_only: true,
+                        no_deref: true,
+                        ..RefUpdateFlags::default()
+                    },
+                });
+            }
+        }
+
+        commit_ref_updates_on_store_with_wait(store, &updates, || {
+            LockWait::files_ref_lock(Some(config.as_ref()))
+        })
     }
 
     /// Read reflog entries for `name` (oldest first).

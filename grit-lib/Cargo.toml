@@ -379,6 +379,11 @@ name = "ref_storage_format"
 path = "tests/ref_storage_format.rs"
 
 [[test]]
+name = "references_update_head_2497"
+path = "tests/references_update_head_2497.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "remote_dispatch"
 path = "tests/remote_dispatch.rs"
 required-features = ["full-tests"]
