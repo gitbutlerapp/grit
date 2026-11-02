@@ -352,8 +352,10 @@ python3 scripts/gen_hot_text_layout.py \
 The script needs `valgrind`. It builds a 10,000-file clone (packed objects and refs, tags,
 an upstream) and runs the library's common operations through each binary, so inlining
 matches what is linked: status, diff, log (one page and a streamed `--json` listing), show,
-revision walks, blame, refs, branch listing and edits, config, add, commit, switch and
-stash. Each workload starts right after a reset, so its first step also takes the
+revision walks, blame, refs, branch listing and edits, config, add, commit, stash, and
+switch twice: to a branch about 300 files away (the parallel checkout) and to one 50 files
+away, below `checkout.thresholdForParallelism`, which writes files on the serial path every
+small switch takes. Each workload starts right after a reset, so its first step also takes the
 index-refresh path. Callgrind records every function each step runs; the script merges what
 the builds ran and splits it into the library's functions and the rest. Each list keeps the
 functions that the same set of workloads runs together, and orders those groups in reflected
@@ -365,7 +367,13 @@ each, and the further down the list a workload is, the more runs its code splits
 the commands whose memory matters most come first. The CLI's list keeps the older sort by
 sharing count and uses the Gray order only between equally shared functions: every command
 runs the CLI's start-up and argument parsing, so that shared core stays dense at the front,
-and the full Gray order there cost config and ref listings a window each. Both builds
+and the full Gray order there cost config and ref listings a window each.
+
+Both orders are then refined by a search: it moves whole groups and keeps a move when the
+64 KB windows all workloads touch, counted with each build's code sizes and averaged over
+four section start offsets, do not rise in total and no workload's own count rises above
+what the starting order gave it. The search is seeded, so a regeneration from the same
+builds is reproducible; `--search-iterations 0` keeps the plain Gray order. Both builds
 matter: the shipped `dist` binary inlines more under fat LTO, while the `release` build that
 development and local benchmarking use keeps functions such as clap's command construction
 separate, and those are cold in a list taken from `dist` alone.

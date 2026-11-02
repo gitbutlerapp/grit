@@ -43,6 +43,58 @@ Apart from the preview, a real commit gained one boolean test, and staging decod
   --min-runs 15 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-commit-dry-run-6560-related-after.json
 ```
 
+## Small switches join the hot text layout (2026-11-02)
+
+`switch/branch@synth-10k` switches between two branches 50 files apart on a 10,000-file clone. Grit was faster than Git but peaked about 5 MB higher on a `release` build and 3 MB higher on `dist`. Its heap peaks at 1.4 MB, mostly the parsed index, which Git holds as well. The rest was the binary's own code: on `release`, 6.5 MB of the executable segment was resident when `grit switch` exited. The [hot text layout](benchmarking.md#hot-text-layout) had two blind spots for this command:
+
+- **The profiled switch never took the serial write path.** The generator's switch workload changes about 300 files, above `checkout.thresholdForParallelism` (100), so the checkout always used its parallel writer. A switch of fewer files writes them on the caller's thread, and that path was never profiled. On top of that, renames and new code since the last regeneration (pack thread-local snapshots, reference-transaction hooks, checkout write helpers) had dropped out of the lists. Together, about 45 functions with 51 KB of code ran from plain `.text` on a `release` build, each in its own 64 KB fault-around window: 36 windows, about 2.3 MB. The generator now also switches to a branch 50 files away from `main`.
+- **Switch sits late in the Gray code order.** Later workloads split into more runs, so switch's 1.3 MB of library code touched 45 of the section's windows. The Gray order is now only the starting point of a seeded search: it moves groups of functions that the same workloads run, and keeps a move when the total windows over all workloads and both builds do not rise and no workload rises above its starting count. On the profile that cut the library section's windows by 6 to 7% and the CLI section's by 10 to 13% across workloads. Switch, refs, branch, show, revs, resolve and stash gained most.
+
+On the 10,000-file clone, the switch's resident code at exit drops from 6.5 to 3.6 MB on `release` and from 4.2 to 2.8 MB on `dist`. In direct runs, the command's peak drops from 13.3 to 11.1 MB on `release` and from 10.8 to 10.1 MB on `dist` (Git: 8.0 MB). Steady-state `grit status` on the same clone drops from 9.6 to 8.8 MB on `dist`. Run time is unchanged: 200 interleaved pairs each put `grit status` at 6.91 → 6.89 ms, `grit config core.bare` at 1.44 → 1.44 ms and the switch pair at 16.03 → 15.95 ms (`release`).
+
+`status/dirty@synth-10k` and `status/renamed@synth-10k` peaks are bimodal, as described in the next section. Round 1 of the change hit the racy path for `status/dirty` (12.9 MB) and round 2 did not (11.0 MB, against 11.7 and 11.8 MB for the base), so the median of the two rounds in the table sits between the modes.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `765230dc0`. Times are medians of all samples from two alternating rounds of 15 runs, and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-switch-branch-10k-6598-before.json` → `daily-switch-branch-10k-6598-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `switch/branch@synth-10k` | 21.51 / 10.2 | 15.79 / 13.1 | **15.09** / **12.4** | 0.73 → 0.70 | 1.29× → 1.22× |
+| `switch/branch@synth-100k` | 149.19 / 35.9 | 85.79 / 30.5 | 82.39 / 30.4 | 0.58 → 0.55 | 0.85× → 0.85× |
+| `switch/delete-heavy@wide-48k` | 112.85 / 21.7 | 115.14 / 24.5 | 112.30 / 24.0 | 1.02 → 1.00 | 1.13× → 1.10× |
+| `switch/large-blob@big-asset` | 864.15 / 307.0 | 741.84 / 13.4 | 745.09 / 12.7 | 0.86 → 0.86 | 0.04× → 0.04× |
+| `switch/sparse@sparse-120k` | 40.78 / 7.8 | 20.96 / 12.9 | 21.65 / 12.3 | 0.51 → 0.53 | 1.66× → 1.59× |
+| `switch/sparse@sparse-240k` | 60.08 / 8.1 | 20.91 / 12.9 | 21.18 / 12.3 | 0.35 → 0.35 | 1.60× → 1.53× |
+| `switch/sparse@sparse-unique-120k` | 74.57 / 17.5 | 28.12 / 15.9 | 28.90 / 15.2 | 0.38 → 0.39 | 0.91× → 0.87× |
+| `add/modified@synth-10k` | 15.87 / 11.9 | 9.76 / 17.0 | 9.53 / 16.2 | 0.61 → 0.60 | 1.43× → 1.36× |
+| `branch/create@many-refs` | 1.57 / 7.4 | 2.27 / 10.0 | 2.23 / 9.3 | 1.45 → 1.42 | 1.36× → 1.26× |
+| `branch/list@many-refs` | 1.32 / 6.6 | 1.82 / 8.9 | 1.68 / 8.5 | 1.37 → 1.27 | 1.35× → 1.30× |
+| `commit/dry-run@synth-10k` | 10.89 / 13.9 | 31.27 / 16.0 | 31.14 / 15.4 | 2.87 → 2.86 | 1.15× → 1.11× |
+| `commit/small@synth-10k` | 25.70 / 13.1 | 15.70 / 15.9 | 15.78 / 14.2 | 0.61 → 0.61 | 1.21× → 1.09× |
+| `config/get@small` | 1.21 / 6.4 | 1.57 / 7.8 | 1.54 / 7.2 | 1.29 → 1.27 | 1.21× → 1.12× |
+| `diff/worktree@synth-10k` | 6.48 / 9.5 | 6.18 / 12.3 | 6.27 / 11.7 | 0.95 → 0.97 | 1.30× → 1.24× |
+| `init/empty@small` | 2.41 / 6.6 | 2.21 / 9.5 | 2.27 / 9.3 | 0.92 → 0.94 | 1.44× → 1.40× |
+| `log/oneline-100@synth-100k` | 2.23 / 9.2 | 4.22 / 12.8 | 4.11 / 12.0 | 1.90 → 1.85 | 1.40× → 1.30× |
+| `merge/clean@synth-10k` | 97.36 / 13.6 | 49.06 / 18.2 | 49.62 / 17.4 | 0.50 → 0.51 | 1.34× → 1.28× |
+| `pick/one@synth-10k` | 110.57 / 9.0 | 51.18 / 18.4 | 50.88 / 17.8 | 0.46 → 0.46 | 2.05× → 1.98× |
+| `reflog/list@synth-10k` | 3.60 / 9.0 | 31.91 / 9.9 | 32.14 / 9.2 | 8.85 → 8.92 | 1.10× → 1.03× |
+| `reset/hard@synth-10k` | 15.01 / 10.6 | 14.10 / 15.3 | 14.01 / 15.1 | 0.94 → 0.93 | 1.44× → 1.43× |
+| `restore/paths@synth-10k` | 11.57 / 12.1 | 12.95 / 15.9 | 13.07 / 15.3 | 1.12 → 1.13 | 1.32× → 1.27× |
+| `show/head@synth-10k` | 2.00 / 8.6 | 2.50 / 9.9 | 2.41 / 9.6 | 1.25 → 1.20 | 1.16× → 1.12× |
+| `stash/push-pop@synth-10k` | 194.12 / 17.6 | 120.98 / 17.8 | 122.78 / 16.9 | 0.62 → 0.63 | 1.01× → 0.96× |
+| `status/clean@small` | 1.87 / 7.2 | 2.66 / 9.3 | 2.73 / 8.9 | 1.42 → 1.46 | 1.29× → 1.24× |
+| `status/clean@synth-10k` | 6.74 / 9.2 | 6.77 / 13.5 | 6.91 / 13.0 | 1.00 → 1.03 | 1.46× → 1.40× |
+| `status/dirty@synth-100k` | 92.36 / 28.9 | 51.14 / 30.9 | 49.83 / 30.7 | 0.55 → 0.54 | 1.07× → 1.06× |
+| `status/dirty@synth-10k` | 10.21 / 9.3 | 7.19 / 11.7 | 7.33 / 11.9 | 0.70 → 0.72 | 1.27× → 1.28× |
+| `status/renamed@synth-10k` | 6.84 / 9.2 | 6.98 / 13.7 | 6.81 / 13.0 | 1.02 → 1.00 | 1.49× → 1.41× |
+| `worktree/list@synth-10k` | 1.52 / 6.4 | 2.38 / 8.6 | 2.43 / 8.3 | 1.57 → 1.60 | 1.34× → 1.30× |
+
+The `release` build shows the same pattern with larger steps, since its lists had drifted further: `switch/branch@synth-10k` 15.6 → 13.3 MB, `status/clean@synth-10k` 15.4 → 12.3 MB, `show/head@synth-10k` 11.9 → 9.6 MB and `stash/push-pop@synth-10k` 20.2 → 17.7 MB, with run times within noise.
+
+```bash
+./target/release/grit-bench daily --only switch/branch@synth-10k,switch/branch@synth-100k,switch/delete-heavy@wide-48k,switch/large-blob@big-asset,switch/sparse@sparse-120k,switch/sparse@sparse-240k,switch/sparse@sparse-unique-120k \
+  --min-runs 15 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-switch-branch-10k-6598-after.json
+```
+
 ## Status code layout by workload set (2026-11-01)
 
 `status/clean@synth-10k` runs `grit status` on a clean 10,000-file clone. Grit took as long as Git but peaked 2 to 6 MB higher. Its heap peaks at only 1.7 MB; most of the rest is the binary's own pages, and on a `release` build `grit status` left 6.9 MB of code and read-only data resident. Three things kept the [hot text layout](benchmarking.md#hot-text-layout) from doing its job, and a fourth cost only the first status after a checkout:
