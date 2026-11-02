@@ -3550,6 +3550,7 @@ pub struct grit_lib::diff::handle::Diff<'repo>
 impl grit_lib::diff::handle::Diff<'_>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many_work(&self, &[grit_lib::diff::CommitFilesManyInput], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
+pub fn grit_lib::diff::handle::Diff<'_>::commit_line_totals(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<core::option::Option<grit_lib::diff::DiffTotals>>>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
 pub fn grit_lib::diff::handle::Diff<'repo>::entries(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
 pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>
@@ -4718,6 +4719,7 @@ pub struct grit_lib::diff::Diff<'repo>
 impl grit_lib::diff::handle::Diff<'_>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
 pub fn grit_lib::diff::handle::Diff<'_>::commit_files_many_work(&self, &[grit_lib::diff::CommitFilesManyInput], &[alloc::string::String], grit_lib::diff::CommitFilesManyOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::CommitFilesResult>>
+pub fn grit_lib::diff::handle::Diff<'_>::commit_line_totals(&self, &[grit_lib::objects::ObjectId], &[alloc::string::String], grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<core::option::Option<grit_lib::diff::DiffTotals>>>
 impl<'repo> grit_lib::diff::handle::Diff<'repo>
 pub fn grit_lib::diff::handle::Diff<'repo>::entries(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffEntriesResult>
 pub fn grit_lib::diff::handle::Diff<'repo>::files(&self, &grit_lib::diff::DiffTarget, &[alloc::string::String], &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::FileDiff>>

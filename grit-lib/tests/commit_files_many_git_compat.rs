@@ -187,3 +187,112 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
     }
     git(path, &["fsck", "--strict"]);
 }
+
+/// Sum `git diff-tree --numstat` for one commit; `None` when Git prints nothing (merges).
+fn git_line_totals(
+    path: &std::path::Path,
+    oid: &ObjectId,
+    paths: &[&str],
+) -> Option<(usize, usize, usize)> {
+    let mut args = vec![
+        "diff-tree",
+        "--root",
+        "--no-commit-id",
+        "-r",
+        "-M",
+        "--numstat",
+    ];
+    let hex = oid.to_hex();
+    args.push(&hex);
+    if !paths.is_empty() {
+        args.push("--");
+        args.extend_from_slice(paths);
+    }
+    let out = git(path, &args);
+    if out.trim().is_empty() {
+        return None;
+    }
+    Some(out.lines().fold((0, 0, 0), |(files, ins, del), line| {
+        let mut cols = line.split('\t');
+        let count = |c: Option<&str>| c.and_then(|c| c.parse::<usize>().ok()).unwrap_or(0);
+        let added = count(cols.next());
+        let removed = count(cols.next());
+        (files + 1, ins + added, del + removed)
+    }))
+}
+
+#[test]
+fn commit_line_totals_match_git_numstat_and_skip_merges() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    git(path, &["init", "-q", "-b", "main"]);
+    for (key, value) in [
+        ("gc.auto", "0"),
+        ("user.name", "Stat Test"),
+        ("user.email", "stat@example.com"),
+        ("commit.gpgsign", "false"),
+    ] {
+        git(path, &["config", key, value]);
+    }
+    let commit = |msg: &str| git(path, &["commit", "-q", "-m", msg]);
+    let body = (0..40).map(|i| format!("line {i}\n")).collect::<String>();
+    std::fs::write(path.join("a.txt"), &body).unwrap();
+    std::fs::write(path.join("b.txt"), "b\n").unwrap();
+    git(path, &["add", "."]);
+    commit("root");
+    git(path, &["mv", "a.txt", "moved.txt"]);
+    std::fs::write(path.join("moved.txt"), format!("{body}tail\n")).unwrap();
+    git(path, &["add", "."]);
+    commit("rename with an edit");
+    git(path, &["switch", "-q", "-c", "side", "HEAD~1"]);
+    std::fs::write(path.join("b.txt"), "b\nside\n").unwrap();
+    std::fs::write(path.join("bin.dat"), [0u8, 1, 2]).unwrap();
+    git(path, &["add", "."]);
+    commit("side edit with a binary file");
+    git(path, &["switch", "-q", "main"]);
+    git(path, &["merge", "-q", "--no-edit", "side"]);
+    std::fs::write(path.join("b.txt"), "replaced\n").unwrap();
+    git(path, &["add", "."]);
+    commit("after merge");
+    git(path, &["repack", "-adq"]);
+    git(path, &["fsck", "--strict"]);
+
+    let repo = Repository::open(
+        &path.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(path),
+    )
+    .unwrap();
+    let oids: Vec<ObjectId> = git(path, &["rev-list", "HEAD"])
+        .lines()
+        .map(|l| l.parse().unwrap())
+        .collect();
+    assert_eq!(oids.len(), 5);
+    let config = ConfigSet::new();
+    for (paths, specs) in [(vec![], vec![]), (vec!["b.txt"], vec!["b.txt".to_owned()])] {
+        for threads in [1, 4] {
+            let totals = repo
+                .diff()
+                .commit_line_totals(
+                    &oids,
+                    &specs,
+                    DiffOptions::default(),
+                    &config,
+                    &ThreadPolicy::with_threads_override(Some(threads)),
+                )
+                .unwrap();
+            for (oid, totals) in oids.iter().zip(totals) {
+                let ours = totals.map(|t| (t.files_changed, t.insertions, t.deletions));
+                let theirs = git_line_totals(path, oid, &paths);
+                // Git prints nothing for a commit whose pathspec matches no change.
+                let theirs = theirs.or_else(|| {
+                    (git(path, &["rev-list", "--parents", "-n1", &oid.to_hex()])
+                        .split_whitespace()
+                        .count()
+                        <= 2)
+                        .then_some((0, 0, 0))
+                });
+                assert_eq!(ours, theirs, "commit {oid} paths {paths:?}");
+            }
+        }
+    }
+}
