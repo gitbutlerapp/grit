@@ -11,8 +11,9 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    abort_rebase, continue_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome,
-    RebaseRequest, RefScope, RewriteOptions, StartRebaseOptions,
+    abort_rebase, continue_rebase, plan_rebase, rebase_run_request, ApplyOptions, EmptyPolicy,
+    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
 use std::fs;
@@ -849,6 +850,144 @@ fn pull_rebase_lands_on_upstream_when_only_local_patch_is_upstream() {
     git_pull_rebase(&git_dir);
     assert_repo_matches_git(&grit_dir, &git_dir);
     assert_eq!(rev(&grit_dir, "HEAD"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_implicit_upstream_up_to_date_after_fetch() {
+    let (grit_dir, _git_dir) = setup_tracked_pair("up-to-date-after-fetch");
+    git(&grit_dir, &["fetch", "-q"]);
+    let repo = open(&grit_dir);
+    let head = rev(&grit_dir, "HEAD");
+    let upstream = rev(&grit_dir, "origin/main");
+    let request =
+        rebase_run_request(&repo, head, upstream, None, None, false, None).expect("request");
+    let opts = RebaseOntoOptions::new(RewriteOptions {
+        scope: RefScope::Head,
+        empty: EmptyPolicy::Drop,
+        committer: test_sig(),
+        preserve_committer: false,
+        sign: false,
+    });
+    let plan = plan_rebase(&repo, &request, &opts).expect("plan");
+    assert!(
+        matches!(plan, RebasePlan::UpToDate),
+        "implicit rebase after fetch should be up to date, got {plan:?}"
+    );
+}
+
+#[test]
+fn pull_rebase_respects_fork_point_after_force_push_drops_upstream_commit() {
+    let root = unique_tmp("pull-rebase-fork-point", "2488");
+    let remote = root.join("remote.git");
+    fs::create_dir_all(&root).expect("root");
+    git(&root, &["init", "-q", "--bare", "-b", "main", "remote.git"]);
+    let seed = root.join("seed");
+    git(&root, &["clone", "-q", "remote.git", "seed"]);
+    let f_body = format!(
+        "{}\n",
+        (1..=30)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    write_file(&seed, "f", &f_body);
+    write_file(&seed, "g", "base\n");
+    git(&seed, &["add", "."]);
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    );
+    git(&seed, &["push", "-q", "origin", "main"]);
+    git(&seed, &["switch", "-q", "-c", "shared"]);
+    for i in 1..=3 {
+        write_file(&seed, &format!("s{i}"), &format!("s{i}\n"));
+        git(&seed, &["add", "."]);
+        git(
+            &seed,
+            &[
+                "-c",
+                "user.name=T",
+                "-c",
+                "user.email=t@example.com",
+                "commit",
+                "-q",
+                "-m",
+                &format!("shared {i}"),
+            ],
+        );
+    }
+    git(&seed, &["push", "-q", "-u", "origin", "shared"]);
+
+    let grit_dir = root.join("grit");
+    let git_dir = root.join("git");
+    git(&root, &["clone", "-q", "remote.git", "grit"]);
+    git(&root, &["clone", "-q", "remote.git", "git"]);
+    grit_identity(&grit_dir);
+    grit_identity(&git_dir);
+    for dir in [&grit_dir, &git_dir] {
+        git(dir, &["switch", "-q", "shared"]);
+        for i in 1..=2 {
+            write_file(dir, &format!("m{i}"), &format!("mine{i}\n"));
+            git(dir, &["add", "."]);
+            git(
+                dir,
+                &[
+                    "-c",
+                    "user.name=T",
+                    "-c",
+                    "user.email=t@example.com",
+                    "commit",
+                    "-q",
+                    "-m",
+                    &format!("mine {i}"),
+                ],
+            );
+        }
+    }
+
+    git(&seed, &["fetch", "-q"]);
+    git(
+        &seed,
+        &["rebase", "-q", "--onto", "main", "shared~2", "shared"],
+    );
+    git(
+        &seed,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--amend",
+            "-m",
+            "shared 3 rewritten",
+        ],
+    );
+    git(&seed, &["push", "-q", "-f", "origin", "shared"]);
+
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+    pull_rebase_grit(&open(&grit_dir));
+    git_pull_rebase(&git_dir);
+
+    let expected = ["base", "shared 2", "shared 3 rewritten", "mine 1", "mine 2"];
+    assert_eq!(log_messages(&grit_dir), expected, "grit subjects");
+    assert_eq!(log_messages(&git_dir), expected, "git oracle subjects");
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert!(
+        !log_messages(&grit_dir).iter().any(|s| s == "shared 1"),
+        "dropped shared 1 must not appear on HEAD"
+    );
 }
 
 #[test]

@@ -12,7 +12,7 @@ grit rebase [<upstream>]
 grit rebase [--onto <rev>] [<upstream>]
 grit rebase --continue | --abort | --skip
 grit history rebase [<upstream>]
-grit rebase|history rebase … [--check] [-X ours|theirs] [--dry-run] [--exec <cmd>]… [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer] [--no-verify]
+grit rebase|history rebase … [--check] [-X ours|theirs] [--dry-run] [--exec <cmd>]… [--fork-point] [--no-fork-point] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer] [--no-verify]
 ```
 
 ## Description
@@ -36,7 +36,7 @@ When `notes.rewriteRef` is configured, grit copies notes from each replayed comm
 
 A commit whose patch is already upstream (for example one you cherry-picked from the upstream branch) is skipped, as `git rebase` skips it. The commits before and after it are still replayed in order on top of the new base, and a branch that pointed at the skipped commit moves to the replayed commit before it, or to the new base when nothing came before. In the output and the `rewritten` JSON rows, the skipped commit maps to the upstream commit that carries its patch.
 
-When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If no upstream is configured, the command fails with a hint to run [`grit branch -u`](branch.md).
+When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If no upstream is configured, the command fails with a hint to run [`grit branch -u`](branch.md). With implicit upstream, grit uses the upstream tracking ref's reflog to find where your branch forked (`rebase.forkPoint`, default true), matching `git rebase` with `--fork-point`. An explicit `<upstream>` uses the merge base unless you pass `--fork-point`; `--no-fork-point` disables reflog fork detection even for implicit upstream.
 
 When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. As with [`grit pick`](pick.md) (and `git rebase`), the incoming `>>>>>>>` marker names the commit being replayed as `<abbrev> (<subject>)`, so each stop shows which commit it came from; the current side is `HEAD`. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, then either stage and `grit rebase --continue` (`grit add` + `--continue`) or record the resolution with [`grit commit`](commit.md) (auto-staging applies) and run `grit rebase --continue` to replay only the remaining commits. Use `--skip` / `--abort` to drop the stopped pick or restore the branch. [`grit pull --rebase`](pull.md) stops the same way.
 
@@ -189,6 +189,8 @@ the moved tip and `new` the restored one. An abort of an unmoved branch has no `
 | `--keep-committer` | Preserve committer ident and timestamp on replayed commits. |
 | `--exec` | After each replayed commit is checked out, run `CMD` via `sh -c` in the worktree (repeatable; runs in order at every commit). Requires a clean index and worktree. Incompatible with `--dry-run`, `--check`, and `-X`. Command output goes to stderr. On nonzero command exit, grit restores `HEAD`, the index, and the worktree without moving refs; exit code is the command's exit code. A successful command may amend the replayed commit or add commits on top of it; later commits are replayed onto the result. A successful command that leaves tracked edits stops with `exec_dirty` and preserves them for recovery. |
 | `--check` | Predict success or conflicts without changing refs, index, or worktree (conflicts with `--dry-run`). |
+| `--fork-point` | Use the upstream reflog to find where the branch forked (on by default when `<upstream>` is omitted). |
+| `--no-fork-point` | Use the merge base with `<upstream>` instead of the reflog fork point. |
 | `-X ours\|theirs` | Auto-resolve replay conflicts in favor of the onto side (`ours`) or replayed commits (`theirs`). |
 | `--no-verify` | Skip the `pre-rebase` hook. |
 

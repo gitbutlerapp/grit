@@ -5,10 +5,14 @@ use std::collections::{HashMap, HashSet};
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
 use std::cell::Cell;
 
+use crate::branch_tracking::upstream_tracking_full_ref;
+use crate::config::ConfigSet;
 use crate::diff::diff_trees;
 use crate::hooks::run_pre_rebase;
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of, is_ancestor, merge_bases_first_vs_rest,
+    rebase_boundary_from_fork_point, rebase_fork_point_enabled, resolve_fork_point_reflog_ref,
+    try_reflog_fork_point,
 };
 use crate::merge_file::MergeFavor;
 use crate::objects::{parse_commit, ObjectId};
@@ -16,6 +20,7 @@ use crate::operation::Conflict;
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::topo_order_commit_subset;
+use crate::state::{resolve_head_for_repository, HeadState};
 
 use super::error::HistoryError;
 use super::plan::{
@@ -54,6 +59,175 @@ pub struct RebaseRequest {
     pub onto: Option<ObjectId>,
     /// Tip of the branch being rebased (typically `HEAD`).
     pub branch_tip: ObjectId,
+}
+
+/// Builds a [`RebaseRequest`] for pull/rebase and implicit-upstream `rebase` after fetch.
+///
+/// When `use_fork_point` is true, the exclude boundary comes from the upstream tracking ref's
+/// reflog ([`try_reflog_fork_point`]) with Git's octopus fast-forward guard
+/// ([`rebase_boundary_from_fork_point`]). Otherwise the merge base between `head` and
+/// `upstream_tip` is used. A [`FetchedUpstream::landed`](crate::porcelain::pull::FetchedUpstream::landed)
+/// boundary is composed when it is a descendant of the fork boundary.
+///
+/// # Errors
+///
+/// Propagates merge-base and reflog errors.
+pub fn rebase_request_after_fetch(
+    repo: &Repository,
+    head: ObjectId,
+    upstream_tip: ObjectId,
+    upstream_reflog_ref: &str,
+    landed: Option<ObjectId>,
+    use_fork_point: bool,
+) -> Result<RebaseRequest, HistoryError> {
+    let merge_base = rebase_fork(repo, upstream_tip, head)?;
+    if !use_fork_point {
+        if let Some(base) = landed {
+            if base != merge_base
+                && is_ancestor(repo, base, head).map_err(history_repo_err)?
+                && is_ancestor(repo, merge_base, base).map_err(history_repo_err)?
+            {
+                return Ok(RebaseRequest {
+                    upstream: base,
+                    onto: Some(upstream_tip),
+                    branch_tip: head,
+                });
+            }
+        }
+        return Ok(RebaseRequest {
+            upstream: upstream_tip,
+            onto: None,
+            branch_tip: head,
+        });
+    }
+    let fork =
+        try_reflog_fork_point(repo, upstream_reflog_ref, upstream_tip, head).map_err(|e| {
+            HistoryError::Planning {
+                message: e.to_string(),
+            }
+        })?;
+    let mut boundary =
+        rebase_boundary_from_fork_point(repo, head, upstream_tip, fork).map_err(|e| {
+            HistoryError::Planning {
+                message: e.to_string(),
+            }
+        })?;
+    if let Some(base) = landed {
+        if base != boundary
+            && is_ancestor(repo, base, head).map_err(history_repo_err)?
+            && is_ancestor(repo, merge_base, base).map_err(history_repo_err)?
+        {
+            boundary = pick_newer_boundary(repo, boundary, base)?;
+        }
+    }
+    let onto = (boundary != upstream_tip).then_some(upstream_tip);
+    Ok(RebaseRequest {
+        upstream: boundary,
+        onto,
+        branch_tip: head,
+    })
+}
+
+fn pick_newer_boundary(
+    repo: &Repository,
+    a: ObjectId,
+    b: ObjectId,
+) -> Result<ObjectId, HistoryError> {
+    if is_ancestor(repo, a, b).map_err(history_repo_err)? && a != b {
+        Ok(b)
+    } else {
+        Ok(a)
+    }
+}
+
+fn history_repo_err(err: crate::error::Error) -> HistoryError {
+    HistoryError::Planning {
+        message: err.to_string(),
+    }
+}
+
+/// Builds a [`RebaseRequest`] for `grit rebase` / `grit history rebase`.
+///
+/// When `explicit_onto` is set, `upstream` and `onto` are taken literally. Otherwise fork-point
+/// rules match Git: enabled for implicit `@{upstream}` unless `rebase.forkPoint=false`, disabled
+/// for an explicit upstream unless `use_fork_point` is true.
+///
+/// # Errors
+///
+/// Propagates revision, config, and planning errors.
+pub fn rebase_run_request(
+    repo: &Repository,
+    branch_tip: ObjectId,
+    upstream_oid: ObjectId,
+    onto_oid: Option<ObjectId>,
+    upstream_spec: Option<&str>,
+    explicit_onto: bool,
+    use_fork_point: Option<bool>,
+) -> Result<RebaseRequest, HistoryError> {
+    if explicit_onto {
+        return Ok(RebaseRequest {
+            upstream: upstream_oid,
+            onto: onto_oid,
+            branch_tip,
+        });
+    }
+    let config = repo.config().map_err(history_repo_err)?;
+    let fork_enabled =
+        resolve_rebase_use_fork_point(config.as_ref(), upstream_spec, use_fork_point);
+    if fork_enabled {
+        let reflog_ref = rebase_upstream_reflog_ref(repo, upstream_spec)?;
+        rebase_request_after_fetch(repo, branch_tip, upstream_oid, &reflog_ref, None, true)
+    } else {
+        Ok(RebaseRequest {
+            upstream: upstream_oid,
+            onto: None,
+            branch_tip,
+        })
+    }
+}
+
+/// Whether fork-point detection is active for this rebase invocation.
+#[must_use]
+pub fn resolve_rebase_use_fork_point(
+    config: &ConfigSet,
+    upstream_spec: Option<&str>,
+    override_fork_point: Option<bool>,
+) -> bool {
+    if override_fork_point == Some(true) {
+        return true;
+    }
+    if override_fork_point == Some(false) {
+        return false;
+    }
+    if upstream_spec.is_some() {
+        return false;
+    }
+    rebase_fork_point_enabled(config)
+}
+
+fn rebase_upstream_reflog_ref(
+    repo: &Repository,
+    upstream_spec: Option<&str>,
+) -> Result<String, HistoryError> {
+    if let Some(spec) = upstream_spec {
+        return Ok(resolve_fork_point_reflog_ref(repo, spec));
+    }
+    let branch = match resolve_head_for_repository(repo).map_err(history_repo_err)? {
+        HeadState::Branch { refname, .. } => refname
+            .strip_prefix("refs/heads/")
+            .map(str::to_owned)
+            .ok_or_else(|| HistoryError::Planning {
+                message: "cannot rebase from a non-branch HEAD".into(),
+            })?,
+        _ => {
+            return Err(HistoryError::Planning {
+                message: "cannot rebase detached HEAD without an upstream argument".into(),
+            });
+        }
+    };
+    upstream_tracking_full_ref(repo, &branch).ok_or_else(|| HistoryError::Planning {
+        message: format!("no upstream configured for branch '{branch}'"),
+    })
 }
 
 /// Result of [`plan_rebase`]: already current, a rewrite plan, or a conflict report (not an error).

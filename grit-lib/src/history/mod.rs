@@ -85,7 +85,8 @@ pub use last::{read_history_last, HistoryLastRecord};
 pub use plan::plan_rewrite;
 pub use r#move::{move_commit, Placement};
 pub use rebase::{
-    plan_rebase, plan_rebase_check, plan_rebase_with_hook, rebase_onto, PreRebase, RebaseCheckPlan,
+    plan_rebase, plan_rebase_check, plan_rebase_with_hook, rebase_onto, rebase_request_after_fetch,
+    rebase_run_request, resolve_rebase_use_fork_point, PreRebase, RebaseCheckPlan,
     RebaseOntoOptions, RebasePlan, RebaseRequest,
 };
 #[cfg(any(test, feature = "unstable-bench-helpers"))]

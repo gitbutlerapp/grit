@@ -14,8 +14,8 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     abort_rebase, absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_fixup_rewrite,
     apply_rewrite, continue_rebase, drop as history_drop, fixup, format_hunk_range_header,
-    move_commit, plan_rebase, plan_rebase_check, reword_with, skip_rebase, split, squash,
-    staged_fixup_paths, start_rebase, start_rebase_with_exec, undo_last_rewrite,
+    move_commit, plan_rebase, plan_rebase_check, rebase_run_request, reword_with, skip_rebase,
+    split, squash, staged_fixup_paths, start_rebase, start_rebase_with_exec, undo_last_rewrite,
     verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec,
     FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, PreRebase, RebaseCheckPlan,
     RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
@@ -97,6 +97,12 @@ pub struct RebaseRunFlags {
     /// Skip the `pre-rebase` hook.
     #[arg(long = "no-verify")]
     pub no_verify: bool,
+    /// Use the upstream reflog to find where the branch forked (implicit upstream only unless set).
+    #[arg(long = "fork-point", conflicts_with = "no_fork_point")]
+    pub fork_point: bool,
+    /// Do not use the upstream reflog fork point (merge base only).
+    #[arg(long = "no-fork-point", conflicts_with = "fork_point")]
+    pub no_fork_point: bool,
 }
 
 impl RebaseRunFlags {
@@ -1430,11 +1436,23 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
         .as_deref()
         .map(|rev| resolve_commit(&rewrite.repo, rev, "onto"))
         .transpose()?;
-    let request = RebaseRequest {
-        upstream: upstream_oid,
-        onto: onto_oid,
-        branch_tip,
+    let fork_override = if flags.fork_point {
+        Some(true)
+    } else if flags.no_fork_point {
+        Some(false)
+    } else {
+        None
     };
+    let request = rebase_run_request(
+        &rewrite.repo,
+        branch_tip,
+        upstream_oid,
+        onto_oid,
+        opts.upstream.as_deref(),
+        opts.onto.is_some(),
+        fork_override,
+    )
+    .map_err(on_err)?;
     let mut rebase_opts = RebaseOntoOptions::new(rewrite.options.clone());
     if flags.check {
         rebase_opts.rewrite.sign = false;

@@ -604,6 +604,109 @@ pub fn resolve_fork_point_reflog_ref(repo: &Repository, spec: &str) -> String {
     format!("refs/heads/{spec}")
 }
 
+/// Collects commits from an upstream reflog the way Git's `get_fork_point` does.
+fn reflog_commits_for_fork_point(
+    repo: &Repository,
+    reflog_ref: &str,
+    upstream_tip: ObjectId,
+) -> Result<Vec<ObjectId>> {
+    let entries = read_reflog(repo.git_dir(), reflog_ref)
+        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+    let mut commits = Vec::new();
+    let mut seen = oid_hash_set();
+    let mut initial = true;
+    for entry in &entries {
+        if initial {
+            initial = false;
+            push_reflog_fork_commit(repo, &mut commits, &mut seen, entry.old_oid);
+        }
+        push_reflog_fork_commit(repo, &mut commits, &mut seen, entry.new_oid);
+    }
+    if commits.is_empty() {
+        push_reflog_fork_commit(repo, &mut commits, &mut seen, upstream_tip);
+    }
+    Ok(commits)
+}
+
+/// Records `oid` for fork-point scanning when it is a non-null commit (Git's `add_one_commit`).
+fn push_reflog_fork_commit(
+    repo: &Repository,
+    commits: &mut Vec<ObjectId>,
+    seen: &mut OidHashSet,
+    oid: ObjectId,
+) {
+    if oid.is_zero() || seen.contains(&oid) {
+        return;
+    }
+    if ensure_is_commit(repo, oid).is_err() {
+        return;
+    }
+    seen.insert(oid);
+    commits.push(oid);
+}
+
+/// Reflog-only fork point for rebase restrict revision (matches `git get_fork_point`).
+///
+/// Returns `None` when Git would not set restrict revision (no unique merge base among
+/// reflog entries that is itself one of those entries). Unlike [`fork_point`], there is
+/// no merge-base fallback.
+///
+/// # Parameters
+///
+/// - `reflog_ref` - full ref name whose reflog is scanned (for example `refs/remotes/origin/main`).
+/// - `upstream_tip` - current tip of that ref, used when the reflog is empty.
+/// - `head` - commit being rebased (usually `HEAD`).
+pub fn try_reflog_fork_point(
+    repo: &Repository,
+    reflog_ref: &str,
+    upstream_tip: ObjectId,
+    head: ObjectId,
+) -> Result<Option<ObjectId>> {
+    let commits = reflog_commits_for_fork_point(repo, reflog_ref, upstream_tip)?;
+    let bases = merge_bases_all_vs_union(repo, head, &commits)?;
+    if bases.len() != 1 {
+        return Ok(None);
+    }
+    let base = bases[0];
+    if commits.contains(&base) {
+        Ok(Some(base))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Chooses the rebase exclude boundary from an optional reflog fork point.
+///
+/// Matches `get_rebase_newbase_and_upstream` in Git's pull/rebase path: when the fork point
+/// equals the octopus merge base of `head`, `upstream_tip`, and the fork point, the upstream
+/// tip is used instead (fast-forward upstream guard).
+pub fn rebase_boundary_from_fork_point(
+    repo: &Repository,
+    head: ObjectId,
+    upstream_tip: ObjectId,
+    fork_point: Option<ObjectId>,
+) -> Result<ObjectId> {
+    let Some(fork) = fork_point else {
+        return Ok(upstream_tip);
+    };
+    let oct = merge_bases_octopus(repo, &[head, upstream_tip, fork])?;
+    if oct.len() == 1 && oct[0] == fork {
+        return Ok(upstream_tip);
+    }
+    Ok(fork)
+}
+
+/// Whether implicit-upstream rebase should use fork-point detection (Git's `rebase.forkPoint`).
+///
+/// Defaults to `true`; `rebase.forkPoint=false` disables it.
+#[must_use]
+pub fn rebase_fork_point_enabled(config: &crate::config::ConfigSet) -> bool {
+    config
+        .get("rebase.forkPoint")
+        .and_then(|raw| crate::config::parse_git_config_maybe_bool(raw.trim()))
+        .unwrap_or(true)
+}
+
 /// Picks the fork-point candidate that is not strictly dominated by another candidate in the list.
 fn select_best_fork_point(repo: &Repository, candidates: &[ObjectId]) -> Result<Option<ObjectId>> {
     if candidates.is_empty() {

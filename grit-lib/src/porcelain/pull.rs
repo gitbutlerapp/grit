@@ -16,7 +16,7 @@ use crate::config::parse_git_config_maybe_bool;
 use crate::config::ConfigSet;
 use crate::error::{Error, OverwriteReason};
 use crate::fetch_request::{configured_remote_for_pull, resolve_remote_argument};
-use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor, merge_bases_first_vs_rest};
+use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor};
 use crate::objects::ObjectId;
 use crate::operation::Conflict;
 use crate::porcelain::checkout::checkout_between_trees;
@@ -37,9 +37,9 @@ use crate::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode, Transf
 use crate::remote::{HttpClientFactory, RemoteError};
 use crate::repo::Repository;
 use crate::revwalk::history::{
-    plan_rebase_check, start_rebase, ApplyOptions, EmptyPolicy, HistoryError, PreRebase,
-    RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    plan_rebase_check, rebase_request_after_fetch, start_rebase, ApplyOptions, EmptyPolicy,
+    HistoryError, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebaseSessionError,
+    RefScope, RewriteOptions, StartRebaseOptions,
 };
 use crate::state::{resolve_head_for_repository, HeadState};
 use thiserror::Error;
@@ -546,21 +546,33 @@ where
             });
         }
 
-        let (label, upstream_oid) = match &options.upstream {
-            Some(fetched) => (fetched.label.clone(), fetched.oid),
+        let (label, upstream_oid, upstream_full_ref) = match &options.upstream {
+            Some(fetched) => (
+                fetched.label.clone(),
+                fetched.oid,
+                resolve_fork_point_upstream_ref(repo, &fetched.label),
+            ),
             None => {
                 let upstream =
                     resolve_pull_integration_base(repo, &short_name, &remote_name, explicit_fetch)
                         .ok_or(PullError::NoUpstream {
                             branch: short_name.clone(),
                         })?;
-                (upstream.name, upstream.oid)
+                (upstream.name, upstream.oid, upstream.full_ref)
             }
         };
 
         let landed = options.upstream.as_ref().and_then(|u| u.landed);
         if options.check {
-            return pull_check_outcome(repo, head_oid, upstream_oid, &label, integration, landed);
+            return pull_check_outcome(
+                repo,
+                head_oid,
+                upstream_oid,
+                &label,
+                &upstream_full_ref,
+                integration,
+                landed,
+            );
         }
 
         match head_oid {
@@ -572,6 +584,7 @@ where
                 Upstream {
                     oid: upstream_oid,
                     label: &label,
+                    full_ref: &upstream_full_ref,
                     landed,
                     copies: options
                         .upstream
@@ -681,6 +694,7 @@ fn pull_check_outcome(
     head_oid: Option<ObjectId>,
     upstream_oid: ObjectId,
     label: &str,
+    upstream_full_ref: &str,
     integration: PullIntegration,
     landed: Option<ObjectId>,
 ) -> std::result::Result<PullOutcome, PullError> {
@@ -692,7 +706,14 @@ fn pull_check_outcome(
             let would = if landed == Some(head_oid) && diverged(repo, head_oid, upstream_oid)? {
                 PullResult::Landed
             } else {
-                predict_pull_result(repo, head_oid, upstream_oid, integration)?
+                predict_pull_result(
+                    repo,
+                    head_oid,
+                    upstream_oid,
+                    upstream_full_ref,
+                    integration,
+                    landed,
+                )?
             };
             let up_to_date = head_oid == upstream_oid || is_ancestor(repo, upstream_oid, head_oid)?;
             let fast_forward = !up_to_date
@@ -717,11 +738,17 @@ fn pull_check_outcome(
     })
 }
 
+fn resolve_fork_point_upstream_ref(repo: &Repository, label: &str) -> String {
+    crate::merge_base::resolve_fork_point_reflog_ref(repo, label)
+}
+
 fn predict_pull_result(
     repo: &Repository,
     head_oid: ObjectId,
     upstream_oid: ObjectId,
+    upstream_full_ref: &str,
     integration: PullIntegration,
+    landed: Option<ObjectId>,
 ) -> std::result::Result<PullResult, PullError> {
     if head_oid == upstream_oid || is_ancestor(repo, upstream_oid, head_oid)? {
         return Ok(PullResult::UpToDate);
@@ -738,11 +765,15 @@ fn predict_pull_result(
             PullMode::Rebase => {
                 let mut opts = pull_rebase_options(repo)?;
                 opts.rewrite.sign = false;
-                let request = RebaseRequest {
-                    upstream: upstream_oid,
-                    onto: None,
-                    branch_tip: head_oid,
-                };
+                let request = rebase_request_after_fetch(
+                    repo,
+                    head_oid,
+                    upstream_oid,
+                    upstream_full_ref,
+                    landed,
+                    true,
+                )
+                .map_err(map_history_error)?;
                 match plan_rebase_check(repo, &request, &opts).map_err(map_history_error)? {
                     RebaseCheckPlan::UpToDate | RebaseCheckPlan::Clean { .. } => {
                         Ok(PullResult::Rebased)
@@ -807,6 +838,8 @@ fn diverged(
 struct Upstream<'a> {
     oid: ObjectId,
     label: &'a str,
+    /// Full ref name for upstream reflog fork-point lookup.
+    full_ref: &'a str,
     /// [`FetchedUpstream::landed`].
     landed: Option<ObjectId>,
     /// [`FetchedUpstream::copies`].
@@ -899,38 +932,12 @@ fn rebase_fetched_upstream(
     let Upstream {
         oid: upstream_oid,
         label,
+        full_ref,
         landed,
         copies,
     } = upstream;
-    let fork = merge_bases_first_vs_rest(repo, head_oid, &[upstream_oid])
-        .map_err(PullError::Repository)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            PullError::Repository(Error::Message(format!(
-                "'{label}' has no common history with the current branch"
-            )))
-        })?;
-    // Commits up to a landed one are in the upstream already: replay only those above it,
-    // as `git rebase --onto <upstream> <landed>` does.
-    let request = match landed {
-        Some(base)
-            if base != fork
-                && is_ancestor(repo, base, head_oid).map_err(PullError::Repository)?
-                && is_ancestor(repo, fork, base).map_err(PullError::Repository)? =>
-        {
-            RebaseRequest {
-                upstream: base,
-                onto: Some(upstream_oid),
-                branch_tip: head_oid,
-            }
-        }
-        _ => RebaseRequest {
-            upstream: upstream_oid,
-            onto: None,
-            branch_tip: head_oid,
-        },
-    };
+    let request = rebase_request_after_fetch(repo, head_oid, upstream_oid, full_ref, landed, true)
+        .map_err(map_history_error)?;
 
     let mut rebase = pull_rebase_options(repo)?;
     // The upstream already has these commits: they are its copies of local ones.
