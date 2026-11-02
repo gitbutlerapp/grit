@@ -47,7 +47,7 @@ Pick either completes a step, stops for conflicts or an empty commit, or changes
 | `-m`, `--message` | Replace the message (only with exactly one commit). |
 | `-F`, `--message-file` | Read the message from a file, or `-` for stdin (only with exactly one commit). |
 | `--mainline` | Parent number when replaying a merge commit (library support; CLI wiring pending). |
-| `--check` | Predict whether the pick would succeed without changing refs, the index, or the worktree. Exit **0** when every step would apply cleanly; exit **1** when a step would conflict or stop as empty (with `--empty stop`). Conflicts with `--continue`, `--abort`, `--skip`, and `--dry-run`. |
+| `--check` | Predict whether the pick would succeed without changing refs, the index, or the worktree. Exit **0** when every step would apply cleanly; exit **1** when a step would conflict or stop as empty (with `--empty stop`), including rename/delete conflicts at the new path (same as [`grit merge`](merge.md)). Conflicts with `--continue`, `--abort`, `--skip`, and `--dry-run`. |
 | `--dry-run` | Print the commits that would be replayed without changing refs or the worktree. Conflicts with `--check`. |
 | `-X ours\|theirs` | Auto-resolve replay conflicts: keep the current branch side (`ours`) or the picked change (`theirs`). |
 | `--conflict merge\|diff3\|zdiff3` | Conflict marker style when a step stops with conflicts (default from `merge.conflictStyle`). |

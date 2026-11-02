@@ -5,13 +5,16 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_trees::merge_trees_three_way;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
+use grit_lib::porcelain::merge::{
+    integrate_branch, predict_merge, IntegrateBranchOutcome, MergePrediction,
+    MergePredictionOptions,
+};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use std::fs;
 use support::{
-    commit_tree, git_ls_files_stage, git_ls_files_stage0_map, git_merge_tree_oracle,
-    CommitMergeLabels,
+    assert_merge_output_matches_oracle, commit_tree, git_ls_files_stage, git_ls_files_stage0_map,
+    git_merge_tree_oracle, CommitMergeLabels,
 };
 
 fn issue_1093_repo() -> (tempfile::TempDir, Repository) {
@@ -176,8 +179,6 @@ fn rename_on_theirs_delete_on_ours_repo() -> (tempfile::TempDir, Repository) {
     (tmp, repo)
 }
 
-/// Bugbot: skipping a rename target when the source is only in `touched` must not run when ours
-/// deleted the source — `merge_one_path` can emit nothing and the renamed file would vanish.
 #[test]
 fn merge_trees_rename_on_theirs_delete_on_ours_matches_git() {
     let (_tmp, repo) = rename_on_theirs_delete_on_ours_repo();
@@ -214,8 +215,103 @@ fn merge_trees_rename_on_theirs_delete_on_ours_matches_git() {
         &theirs,
         grit_lib::diff::merge_file::MergeFavor::None,
     );
-    assert_eq!(
-        merged.result_tree, oracle.result_tree,
-        "merge result tree must match git merge-tree"
+    assert_merge_output_matches_oracle(
+        &repo,
+        &merged,
+        &oracle,
+        "theirs rename + ours delete (identical content)",
+    );
+}
+
+fn rename_on_theirs_edit_delete_on_ours_repo() -> (tempfile::TempDir, Repository) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("f.txt"), "content\n").expect("f.txt");
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["switch", "-q", "-c", "ren"]);
+    git(root, &["mv", "f.txt", "g.txt"]);
+    fs::write(root.join("g.txt"), "edited on ren\n").expect("edit g");
+    git(root, &["commit", "-qam", "rename and edit"]);
+
+    git(root, &["switch", "-q", "main"]);
+    git(root, &["rm", "f.txt"]);
+    git(root, &["commit", "-qm", "delete"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    (tmp, repo)
+}
+
+#[test]
+fn merge_trees_rename_edit_on_theirs_delete_on_ours_matches_git() {
+    let (_tmp, repo) = rename_on_theirs_edit_delete_on_ours_repo();
+    let root = repo.work_tree().expect("worktree");
+
+    let base: ObjectId = git(root, &["merge-base", "main", "ren"])
+        .trim()
+        .parse()
+        .unwrap();
+    let ours: ObjectId = git(root, &["rev-parse", "main"]).trim().parse().unwrap();
+    let theirs: ObjectId = git(root, &["rev-parse", "ren"]).trim().parse().unwrap();
+    let base_tree = commit_tree(&repo, &base).expect("base tree");
+    let ours_tree = commit_tree(&repo, &ours).expect("ours tree");
+    let theirs_tree = commit_tree(&repo, &theirs).expect("theirs tree");
+
+    let labels = CommitMergeLabels::from_commits(&ours, &theirs);
+    let merged = merge_trees_three_way(
+        &repo,
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        Default::default(),
+        Default::default(),
+        None,
+        labels.presentation(),
+        grit_lib::diff::merge_trees::DirectoryRenameMode::default(),
+    )
+    .expect("merge_trees_three_way");
+
+    let oracle = git_merge_tree_oracle(
+        root,
+        Some(&base),
+        &ours,
+        &theirs,
+        grit_lib::diff::merge_file::MergeFavor::None,
+    );
+    assert_merge_output_matches_oracle(&repo, &merged, &oracle, "theirs rename+edit + ours delete");
+}
+
+#[test]
+fn predict_merge_rename_on_theirs_delete_on_ours_reports_conflicts() {
+    let (_tmp, repo) = rename_on_theirs_delete_on_ours_repo();
+    let root = repo.work_tree().expect("worktree");
+
+    let main_oid: ObjectId = git(root, &["rev-parse", "main"]).trim().parse().unwrap();
+    let ren_oid: ObjectId = git(root, &["rev-parse", "ren"]).trim().parse().unwrap();
+
+    let prediction = predict_merge(&repo, main_oid, ren_oid, &MergePredictionOptions::default())
+        .expect("predict_merge");
+    assert!(
+        matches!(prediction, MergePrediction::Conflicts { .. }),
+        "rename/delete must predict conflicts, got {prediction:?}"
+    );
+
+    let outcome = integrate_branch(
+        &repo,
+        "refs/heads/main",
+        main_oid,
+        ren_oid,
+        "ren",
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("integrate");
+    assert!(
+        matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }),
+        "integrate must stop conflicted, got {outcome:?}"
     );
 }

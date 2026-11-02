@@ -1368,7 +1368,7 @@ pub(crate) fn merge_one_path(
         }
         (Some(_), None, None) => {}
         (Some(be), Some(oe), None) if same_blob(be, oe) && be.path.as_slice() == out_path => {}
-        (Some(be), None, Some(te)) if same_blob(be, te) => {}
+        (Some(be), None, Some(te)) if same_blob(be, te) && be.path.as_slice() == out_path => {}
         (Some(be), Some(_), None) | (Some(be), None, Some(_)) if ctx.virtual_base() => {
             push_stage0(index, out_path, be);
         }
