@@ -4543,245 +4543,6 @@ fn follow_hyphen_dir_spelling(path: &str) -> Option<String> {
     path.contains('/').then(|| path.replace('/', "-"))
 }
 
-/// Active first-parent / side-parent pair when `--follow` entered through a merge side that still
-/// uses the legacy hyphen spelling for `argv_path`.
-type FollowSideMergeContext = (ObjectId, ObjectId);
-
-type FollowSlashHyphenMergePairs = Vec<(ObjectId, ObjectId)>;
-
-fn follow_collect_slash_hyphen_merge_pairs(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    tips: &[ObjectId],
-    argv_path: &str,
-) -> Result<FollowSlashHyphenMergePairs> {
-    let Some(variant) = follow_hyphen_dir_spelling(argv_path) else {
-        return Ok(Vec::new());
-    };
-    let mut pairs = Vec::new();
-    let mut seen = HashSet::new();
-    let mut cache = DenseWalkCache::default();
-    for tip in tips {
-        let mut current = *tip;
-        loop {
-            let parents = graph.parents_of(current)?;
-            if parents.len() > 1 && seen.insert(current) {
-                let fp_parent = parents[0];
-                let fp_tree = graph.commit_tree(fp_parent)?;
-                if literal_path_leaf_at_tree(repo, fp_tree, argv_path, &mut cache)?.is_some() {
-                    for side_parent in parents.iter().skip(1) {
-                        let side_tree = graph.commit_tree(*side_parent)?;
-                        let side_hyphen =
-                            literal_path_leaf_at_tree(repo, side_tree, &variant, &mut cache)?
-                                .is_some();
-                        let side_slash =
-                            literal_path_leaf_at_tree(repo, side_tree, argv_path, &mut cache)?
-                                .is_some();
-                        if side_hyphen && !side_slash {
-                            pairs.push((fp_parent, *side_parent));
-                        }
-                    }
-                }
-            }
-            if parents.is_empty() {
-                break;
-            }
-            current = parents[0];
-        }
-    }
-    Ok(pairs)
-}
-
-fn follow_merge_has_slash_fp_hyphen_side(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    merge: ObjectId,
-    argv_path: &str,
-    variant: &str,
-    cache: &mut DenseWalkCache,
-) -> Result<Option<(ObjectId, ObjectId)>> {
-    let parents = graph.parents_of(merge)?;
-    if parents.len() < 2 {
-        return Ok(None);
-    }
-    let fp_parent = parents[0];
-    let fp_tree = graph.commit_tree(fp_parent)?;
-    if literal_path_leaf_at_tree(repo, fp_tree, argv_path, cache)?.is_none() {
-        return Ok(None);
-    }
-    for side_parent in parents.iter().skip(1) {
-        let side_tree = graph.commit_tree(*side_parent)?;
-        let side_hyphen = literal_path_leaf_at_tree(repo, side_tree, variant, cache)?.is_some();
-        let side_slash = literal_path_leaf_at_tree(repo, side_tree, argv_path, cache)?.is_some();
-        if side_hyphen && !side_slash {
-            return Ok(Some((fp_parent, *side_parent)));
-        }
-    }
-    Ok(None)
-}
-
-fn follow_collect_spine_slash_hyphen_merges(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    tips: &[ObjectId],
-    argv_path: &str,
-    variant: &str,
-    cache: &mut DenseWalkCache,
-) -> Result<Vec<(ObjectId, ObjectId, ObjectId)>> {
-    let mut out = Vec::new();
-    for tip in tips {
-        let mut current = *tip;
-        loop {
-            let parents = graph.parents_of(current)?;
-            if parents.len() > 1 {
-                if let Some((fp, side)) = follow_merge_has_slash_fp_hyphen_side(
-                    repo,
-                    graph,
-                    current,
-                    argv_path,
-                    variant,
-                    cache,
-                )? {
-                    out.push((current, fp, side));
-                }
-            }
-            if parents.is_empty() {
-                break;
-            }
-            current = parents[0];
-        }
-    }
-    Ok(out)
-}
-
-fn follow_oid_is_fp_only_hyphen_squash_candidate(
-    repo: &Repository,
-    oid: ObjectId,
-    merges: &[(ObjectId, ObjectId, ObjectId)],
-) -> Result<bool> {
-    for &(merge, fp, side) in merges {
-        if !crate::merge_base::is_ancestor(repo, oid, merge)? {
-            continue;
-        }
-        let side_only = crate::merge_base::is_ancestor(repo, oid, side)?
-            && !crate::merge_base::is_ancestor(repo, oid, fp)?;
-        let fp_only = crate::merge_base::is_ancestor(repo, oid, fp)?
-            && !crate::merge_base::is_ancestor(repo, oid, side)?;
-        if fp_only && !side_only {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-fn follow_prune_fp_only_hyphen_visible_commits(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    _tips: &[ObjectId],
-    ordered: Vec<ObjectId>,
-    argv_path: &str,
-) -> Result<Vec<ObjectId>> {
-    let Some(variant) = follow_hyphen_dir_spelling(argv_path) else {
-        return Ok(ordered);
-    };
-    let slash_spec = [argv_path.to_owned()];
-    let path_check = RevPathspecCheck::build(repo, &slash_spec)?;
-    let hyphen_spec = [variant.clone()];
-    let hyphen_check = RevPathspecCheck::build(repo, &hyphen_spec)?;
-    let mut cache = DenseWalkCache::default();
-    let spine_merges = follow_collect_spine_slash_hyphen_merges(
-        repo,
-        graph,
-        _tips,
-        argv_path,
-        variant.as_str(),
-        &mut cache,
-    )?;
-    let mut kept = Vec::with_capacity(ordered.len());
-    for oid in ordered {
-        let parents = graph.parents_of(oid)?;
-        if parents.len() != 1 {
-            kept.push(oid);
-            continue;
-        }
-        let parent_tree = graph.commit_tree(parents[0])?;
-        let commit_tree = graph.commit_tree(oid)?;
-        let slash_differs = follow_commit_differs_for_path(
-            repo,
-            parent_tree,
-            commit_tree,
-            argv_path,
-            &path_check,
-            None,
-            oid,
-            &mut cache,
-        )?;
-        if slash_differs {
-            kept.push(oid);
-            continue;
-        }
-        let hyphen_differs = follow_commit_differs_for_path(
-            repo,
-            parent_tree,
-            commit_tree,
-            variant.as_str(),
-            &hyphen_check,
-            None,
-            oid,
-            &mut cache,
-        )?;
-        if !hyphen_differs {
-            kept.push(oid);
-            continue;
-        }
-        if follow_oid_is_fp_only_hyphen_squash_candidate(repo, oid, &spine_merges)? {
-            continue;
-        }
-        kept.push(oid);
-    }
-    Ok(kept)
-}
-
-/// When a side walk uses the hyphen spelling, commits on the first-parent side of that merge must
-/// be checked against the argv slash path (Git keeps one current path for visibility).
-fn follow_resolved_path_in_side_merge(
-    repo: &Repository,
-    argv_path: &str,
-    queue_path: &str,
-    oid: ObjectId,
-    side_merge: Option<FollowSideMergeContext>,
-) -> Result<String> {
-    if queue_path == argv_path || !follow_path_spelling_variants(queue_path, argv_path) {
-        return Ok(queue_path.to_owned());
-    }
-    let Some((fp_parent, side_parent)) = side_merge else {
-        return Ok(argv_path.to_owned());
-    };
-    if crate::merge_base::is_ancestor(repo, oid, fp_parent)?
-        && !crate::merge_base::is_ancestor(repo, oid, side_parent)?
-    {
-        Ok(argv_path.to_owned())
-    } else {
-        Ok(queue_path.to_owned())
-    }
-}
-
-fn follow_side_parent_uses_hyphen_spelling(
-    repo: &Repository,
-    graph: &mut CommitGraph<'_>,
-    argv_path: &str,
-    side_parent: ObjectId,
-    cache: &mut DenseWalkCache,
-) -> Result<bool> {
-    let Some(variant) = follow_hyphen_dir_spelling(argv_path) else {
-        return Ok(false);
-    };
-    let side_tree = graph.commit_tree(side_parent)?;
-    let hyphen = literal_path_leaf_at_tree(repo, side_tree, &variant, cache)?.is_some();
-    let slash = literal_path_leaf_at_tree(repo, side_tree, argv_path, cache)?.is_some();
-    Ok(hyphen && !slash)
-}
-
 /// Literal path in `tree` that carries the followed file for `argv_path` / `follow_path`.
 fn follow_resolved_path_at_tree(
     repo: &Repository,
@@ -5102,9 +4863,9 @@ fn walk_dense_path_limited_closure(
     if follow {
         let initial = paths.specs()[0].clone();
         let argv_path = initial.as_str();
-        let mut queue: VecDeque<(ObjectId, String, Option<FollowSideMergeContext>)> =
-            tips.iter().map(|t| (*t, initial.clone(), None)).collect();
-        while let Some((oid, follow_path, side_merge)) = queue.pop_front() {
+        let mut queue: VecDeque<(ObjectId, String, bool)> =
+            tips.iter().map(|t| (*t, initial.clone(), false)).collect();
+        while let Some((oid, follow_path, from_merge_side)) = queue.pop_front() {
             if excluded.is_excluded_with_hide_cache(hide_cache, oid)?
                 || !walked.insert((oid, follow_path.clone()))
             {
@@ -5124,44 +4885,24 @@ fn walk_dense_path_limited_closure(
                 &mut cache,
                 Some(follow_path.as_str()),
                 follow_rename_threshold,
-                side_merge,
+                from_merge_side,
                 tips,
             )?;
             if action.visible {
                 selected.insert(oid);
             }
             if let Some(next_paths) = action.next_follow_paths.as_ref() {
-                let parents = graph.parents_of(oid)?;
                 for (parent, next_path) in action.parents_to_walk.iter().zip(next_paths.iter()) {
                     if excluded.is_excluded(*parent) {
                         continue;
                     }
-                    let nth = parents.iter().position(|p| p == parent).unwrap_or(0);
-                    let (parent_path, parent_side_merge) = if parents.len() > 1 && nth > 0 {
-                        let fp_parent = parents[0];
-                        if follow_side_parent_uses_hyphen_spelling(
-                            repo, graph, argv_path, *parent, &mut cache,
-                        )? {
-                            (next_path.clone(), Some((fp_parent, *parent)))
-                        } else {
-                            (next_path.clone(), side_merge)
-                        }
-                    } else if let Some(ctx) = side_merge {
-                        if crate::merge_base::is_ancestor(repo, *parent, ctx.0)?
-                            && !crate::merge_base::is_ancestor(repo, *parent, ctx.1)?
-                        {
-                            (initial.clone(), None)
-                        } else {
-                            (next_path.clone(), Some(ctx))
-                        }
-                    } else {
-                        (next_path.clone(), None)
-                    };
-                    if parents.len() > 1 && nth == 0 {
-                        queue.push_front((*parent, parent_path, parent_side_merge));
-                    } else {
-                        queue.push_back((*parent, parent_path, parent_side_merge));
-                    }
+                    let nth = graph
+                        .parents_of(oid)?
+                        .iter()
+                        .position(|p| p == parent)
+                        .unwrap_or(0);
+                    let merge_side = graph.parents_of(oid)?.len() > 1 && nth > 0;
+                    queue.push_back((*parent, next_path.clone(), from_merge_side || merge_side));
                 }
             }
         }
@@ -5184,7 +4925,7 @@ fn walk_dense_path_limited_closure(
                 &mut cache,
                 None,
                 100,
-                None,
+                false,
                 &[],
             )?;
             if action.visible {
@@ -5223,7 +4964,7 @@ fn dense_path_limited_action(
     cache: &mut DenseWalkCache,
     follow_path: Option<&str>,
     follow_rename_threshold: u32,
-    side_merge: Option<FollowSideMergeContext>,
+    follow_from_merge_side: bool,
     _walk_tips: &[ObjectId],
 ) -> Result<DensePathAction> {
     let mut follow_spec_storage = String::new();
@@ -5257,8 +4998,6 @@ fn dense_path_limited_action(
             .first()
             .map(String::as_str)
             .unwrap_or(follow_path);
-        let visibility_path =
-            follow_resolved_path_in_side_merge(repo, argv_path, follow_path, oid, side_merge)?;
         let merge = parents.len() > 1;
         let visible = if sparse {
             true
@@ -5270,7 +5009,7 @@ fn dense_path_limited_action(
                 repo,
                 parent_tree,
                 commit_tree,
-                visibility_path.as_str(),
+                follow_path,
                 paths,
                 bloom,
                 oid,
@@ -5282,20 +5021,18 @@ fn dense_path_limited_action(
         let mut next_follow_paths = Vec::with_capacity(parents.len());
         for parent_oid in &parents {
             let parent_tree = graph.commit_tree(*parent_oid)?;
-            let next = if !visible && parents.len() == 1 && side_merge.is_none() {
-                follow_path.to_owned()
-            } else {
-                follow_path_propagate_to_parent(
-                    repo,
-                    parent_tree,
-                    commit_tree,
-                    follow_path,
-                    follow_rename_threshold,
-                    cache,
-                )?
-            };
+            let next = follow_path_propagate_to_parent(
+                repo,
+                parent_tree,
+                commit_tree,
+                follow_path,
+                follow_rename_threshold,
+                cache,
+            )?;
             next_follow_paths.push(next);
         }
+
+        let _ = (argv_path, follow_from_merge_side);
 
         return Ok(DensePathAction {
             visible,
@@ -7518,12 +7255,10 @@ fn try_bounded_path_limit_list(
     };
     let argv_path = options.paths.first().map(String::as_str).unwrap_or("");
     let mut follow_paths: HashMap<ObjectId, String> = HashMap::new();
-    let mut follow_side_merges: HashMap<ObjectId, Option<FollowSideMergeContext>> = HashMap::new();
     if follow {
         let initial = options.paths[0].clone();
         for &tip in include {
             follow_paths.insert(tip, initial.clone());
-            follow_side_merges.insert(tip, None);
         }
     }
     let mut heap = BinaryHeap::new();
@@ -7558,11 +7293,6 @@ fn try_bounded_path_limit_list(
                 .cloned()
                 .unwrap_or_else(|| options.paths[0].clone())
         });
-        let side_merge_ctx = if follow {
-            follow_side_merges.get(&oid).copied().flatten()
-        } else {
-            None
-        };
         let bloom_use = bloom_for_follow_path(Some(&bloom_ctx), argv_path, follow_path.as_deref());
         let action = dense_path_limited_action(
             repo,
@@ -7575,7 +7305,7 @@ fn try_bounded_path_limit_list(
             &mut cache,
             follow_path.as_deref(),
             follow_threshold,
-            side_merge_ctx,
+            false,
             include,
         )?;
 
@@ -7634,32 +7364,7 @@ fn try_bounded_path_limit_list(
                         .get(parent_idx)
                         .cloned()
                         .unwrap_or_else(|| options.paths[0].clone());
-                    if follow {
-                        let parents = graph.parents_of(oid)?;
-                        let nth = parent_idx;
-                        let (parent_path, parent_side_merge) = if parents.len() > 1 && nth > 0 {
-                            let fp_parent = parents[0];
-                            if follow_side_parent_uses_hyphen_spelling(
-                                repo, &mut graph, argv_path, *parent, &mut cache,
-                            )? {
-                                (next.clone(), Some((fp_parent, *parent)))
-                            } else {
-                                (next.clone(), side_merge_ctx)
-                            }
-                        } else if let Some(ctx) = side_merge_ctx {
-                            if crate::merge_base::is_ancestor(repo, *parent, ctx.0)?
-                                && !crate::merge_base::is_ancestor(repo, *parent, ctx.1)?
-                            {
-                                (options.paths[0].clone(), None)
-                            } else {
-                                (next.clone(), Some(ctx))
-                            }
-                        } else {
-                            (next.clone(), None)
-                        };
-                        follow_paths.insert(*parent, parent_path);
-                        follow_side_merges.insert(*parent, parent_side_merge);
-                    }
+                    follow_paths.insert(*parent, next);
                 }
             }
             heap.push(CommitDateKey {
