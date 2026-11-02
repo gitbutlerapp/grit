@@ -40,6 +40,11 @@ impl std::fmt::Debug for FilesSource {
 }
 
 impl FilesSource {
+    fn skip_loose_probe_after_empty_warmup(&self, oid: &ObjectId) -> bool {
+        self.loose.may_skip_open_for(oid)
+            && pack::pack_cache::trusted_verified_empty_pack_listing(&self.objects_dir)
+    }
+
     /// Open a files source for `pack_store`'s directory.
     ///
     /// `use_midx` enables multi-pack-index reads when a chain is present.
@@ -216,6 +221,9 @@ impl FilesSource {
             }
         }
 
+        if self.skip_loose_probe_after_empty_warmup(oid) {
+            return Ok(None);
+        }
         #[cfg(test)]
         crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
         self.loose.read_into(oid, buf)
@@ -263,6 +271,9 @@ impl FilesSource {
             }
         }
 
+        if self.skip_loose_probe_after_empty_warmup(oid) {
+            return Ok(None);
+        }
         #[cfg(test)]
         crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
         self.loose.read(oid)
@@ -311,6 +322,9 @@ impl FilesSource {
             }
         }
 
+        if self.skip_loose_probe_after_empty_warmup(oid) {
+            return Ok(None);
+        }
         #[cfg(test)]
         crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
         self.loose.read_info(oid)
@@ -350,6 +364,9 @@ impl FilesSource {
         match self.try_read_object(oid) {
             Ok(Some(obj)) => Ok(Some(obj)),
             Ok(None) => {
+                if self.skip_loose_probe_after_empty_warmup(oid) {
+                    return Ok(None);
+                }
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
                     self.try_read_object(oid)
                 } else {
@@ -369,6 +386,9 @@ impl FilesSource {
         match self.try_read_object_into(oid, populate_delta_lru, buf) {
             Ok(Some(kind)) => Ok(Some(kind)),
             Ok(None) => {
+                if self.skip_loose_probe_after_empty_warmup(oid) {
+                    return Ok(None);
+                }
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
                     self.try_read_object_into(oid, populate_delta_lru, buf)
                 } else {
@@ -383,6 +403,9 @@ impl FilesSource {
         match self.try_read_info(oid) {
             Ok(Some(info)) => Ok(Some(info)),
             Ok(None) => {
+                if self.skip_loose_probe_after_empty_warmup(oid) {
+                    return Ok(None);
+                }
                 if pack::reprepare_pack_directory_on_miss(&self.objects_dir)? {
                     self.try_read_info(oid)
                 } else {

@@ -1270,7 +1270,7 @@ impl<'r> ReachableCommits<'r> {
         if tips.is_empty() {
             return reachable;
         }
-        reachable.graph = repo.caches().commit_graph_chain(repo.odb().objects_dir());
+        reachable.graph = repo.odb().commit_graph_chain();
         {
             let mut commits = cache.commits.borrow_mut();
             let mut shallow = crate::shallow::load_shallow_boundaries(repo.git_dir())

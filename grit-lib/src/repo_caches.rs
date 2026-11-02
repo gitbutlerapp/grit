@@ -166,16 +166,30 @@ impl RepoCaches {
     }
 
     /// Parsed commit-graph chain for this repository handle (at most one disk load).
-    pub(crate) fn commit_graph_chain(&self, objects_dir: &Path) -> Option<Arc<CommitGraphChain>> {
+    pub(crate) fn commit_graph_chain(
+        &self,
+        objects_dir: &Path,
+        alternate_object_dirs: &[PathBuf],
+    ) -> Option<Arc<CommitGraphChain>> {
         let Ok(mut guard) = self.commit_graph.lock() else {
             return None;
         };
         if let Some(chain) = guard.as_ref() {
             return Some(Arc::clone(chain));
         }
-        let chain = CommitGraphChain::try_load_with_caches(objects_dir, Some(self))
+        let chain = if alternate_object_dirs.is_empty() {
+            CommitGraphChain::try_load_with_caches(objects_dir, Some(self))
+                .ok()
+                .flatten()?
+        } else {
+            CommitGraphChain::try_load_across_with_caches(
+                objects_dir,
+                alternate_object_dirs,
+                Some(self),
+            )
             .ok()
-            .flatten()?;
+            .flatten()?
+        };
         let arc = Arc::new(chain);
         *guard = Some(Arc::clone(&arc));
         Some(arc)

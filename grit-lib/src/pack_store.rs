@@ -295,6 +295,7 @@ impl PackStore {
         self.delta_bases.clear();
         self.sparse_read_files.clear();
         let epoch = self.bump_cache_epoch();
+        crate::pack::pack_cache::drop_store_tls_snapshot(self.id());
         crate::pack::pack_cache::clear_thread_local_after_invalidation(epoch);
     }
 
@@ -389,13 +390,21 @@ impl PackReadContextGuard {
 
 impl Drop for PackReadContextGuard {
     fn drop(&mut self) {
-        if CURRENT.with(|c| c.borrow().as_ref().is_some_and(|s| s.bounded_reads())) {
+        let bounded = CURRENT.with(|c| c.borrow().as_ref().is_some_and(|s| s.bounded_reads()));
+        if bounded {
             // Operation-local pack bytes/indexes must not outlive their cache through
             // thread-local fast paths, including when the allocator reuses a store address.
             crate::pack::pack_cache::clear_thread_local_after_invalidation(0);
+            crate::pack::clear_pack_read_info_cache();
         }
-        crate::pack::clear_pack_read_info_cache();
         ACTIVE_OBJECTS_DIR.with(|d| *d.borrow_mut() = self.prev_dir.take());
-        CURRENT.with(|c| *c.borrow_mut() = self.prev_store.take());
+        let prev_store = self.prev_store.take();
+        CURRENT.with(|c| *c.borrow_mut() = prev_store.clone());
+        if bounded {
+            return;
+        }
+        if let Some(store) = prev_store {
+            crate::pack::pack_cache::switch_tls_for_store(&store);
+        }
     }
 }
