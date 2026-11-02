@@ -5083,15 +5083,15 @@ pub grit_lib::diff::FileDiff::binary: bool
 pub grit_lib::diff::FileDiff::content_changed: bool
 pub grit_lib::diff::FileDiff::hunks: alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>
 pub grit_lib::diff::FileDiff::line_stat: core::option::Option<grit_lib::diff::LineStat>
-pub grit_lib::diff::FileDiff::new_size: u64
 pub grit_lib::diff::FileDiff::new_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::new_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::new_oid: grit_lib::objects::ObjectId
+pub grit_lib::diff::FileDiff::new_size: u64
 pub grit_lib::diff::FileDiff::old_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::old_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::old_oid: grit_lib::objects::ObjectId
-pub grit_lib::diff::FileDiff::old_size: u64
 pub grit_lib::diff::FileDiff::old_path: core::option::Option<alloc::string::String>
+pub grit_lib::diff::FileDiff::old_size: u64
 pub grit_lib::diff::FileDiff::path: alloc::string::String
 pub grit_lib::diff::FileDiff::status: grit_lib::diff::DiffStatus
 impl core::clone::Clone for grit_lib::diff::FileDiff
@@ -5419,6 +5419,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::TreeDiffContent
 pub struct grit_lib::diff::TreeDiffStructured
 pub grit_lib::diff::TreeDiffStructured::binary: bool
 pub grit_lib::diff::TreeDiffStructured::entry: grit_lib::diff::DiffEntry
+pub grit_lib::diff::TreeDiffStructured::new_size: u64
+pub grit_lib::diff::TreeDiffStructured::old_size: u64
 pub grit_lib::diff::TreeDiffStructured::patch_bytes: core::option::Option<(grit_lib::diff::structured::SideBytes, grit_lib::diff::structured::SideBytes)>
 pub grit_lib::diff::TreeDiffStructured::structured: grit_lib::diff::structured::StructuredFileDiff
 impl core::clone::Clone for grit_lib::diff::TreeDiffStructured
@@ -5621,7 +5623,7 @@ pub fn grit_lib::diff::submodule_head_object_broken(&std::path::Path) -> bool
 pub fn grit_lib::diff::submodule_porcelain_flags(&std::path::Path, &str, grit_lib::objects::ObjectId) -> grit_lib::diff::SubmodulePorcelainFlags
 pub fn grit_lib::diff::text_sides_differ(&str, &str, &grit_lib::diff::DiffOptions) -> bool
 pub fn grit_lib::diff::tree_diff_contents_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffContent>>
-pub fn grit_lib::diff::tree_diff_stat_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::diff::DiffEntry, bool, core::option::Option<grit_lib::diff::LineStat>)>>
+pub fn grit_lib::diff::tree_diff_stat_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::diff::DiffEntry, bool, core::option::Option<grit_lib::diff::LineStat>, u64, u64)>>
 pub fn grit_lib::diff::tree_diff_structured_entry(&grit_lib::objects::odb::Odb, &grit_lib::diff::DiffEntry, &grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::TreeDiffStructured>
 pub fn grit_lib::diff::tree_diff_structured_parallel(&grit_lib::objects::odb::Odb, alloc::vec::Vec<grit_lib::diff::DiffEntry>, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::TreeDiffStructured>>
 pub fn grit_lib::diff::tree_oid_of_commit(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
