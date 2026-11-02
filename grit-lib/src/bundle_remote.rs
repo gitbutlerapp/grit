@@ -185,9 +185,9 @@ pub fn write_bundle_spec_to_path_with_cancel(
     let _cleanup = PartCleanup(&temp);
     let file = File::create(&temp).map_err(BundleError::from)?;
     let mut out = BufWriter::new(file);
-    crate::bundle::write_bundle_with_cancel(repo, spec, &mut out, progress, cancel)?;
+    crate::bundle::write_bundle_with_cancel_and_progress(repo, spec, &mut out, progress, cancel)?;
     out.flush().map_err(BundleError::from)?;
-    std::fs::rename(&temp, path).map_err(BundleError::from)?;
+    crate::atomic_replace::replace_file(&temp, path).map_err(BundleError::from)?;
     std::mem::forget(_cleanup);
     Ok(spec.include.len())
 }

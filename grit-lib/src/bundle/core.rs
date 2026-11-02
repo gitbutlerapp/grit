@@ -793,7 +793,7 @@ fn write_bundle_pack_with_cancel(
     let pack_opts = PackBuildOptions::for_serve(cfg.as_deref(), !haves.is_empty(), true);
     let no_shallow = HashSet::new();
     let Some(filter) = spec.filter.as_ref() else {
-        return crate::pack_objects::write_upload_pack_stream_with_cancel(
+        let stats = crate::pack_objects::write_upload_pack_stream_with_cancel(
             repo,
             &include_oids,
             &haves,
@@ -806,7 +806,9 @@ fn write_bundle_pack_with_cancel(
             out,
             &stop,
         )
-        .map_err(io_err);
+        .map_err(io_err)?;
+        progress.finish();
+        return Ok(stats);
     };
     stop.poll().map_err(map_pack_error)?;
     let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &no_shallow)
@@ -831,6 +833,7 @@ fn write_bundle_pack_with_cancel(
     .map_err(io_err)?;
     stop.poll().map_err(map_pack_error)?;
     out.write_all(&pack).map_err(BundleError::from)?;
+    progress.finish();
     Ok(PackStats {
         object_count: crate::receive_pack::pack_object_count(&pack).unwrap_or(0),
         pack_bytes: pack.len() as u64,
@@ -855,13 +858,7 @@ pub fn write_bundle(
     spec: &BundleSpec,
     out: &mut dyn Write,
 ) -> std::result::Result<(), BundleError> {
-    write_bundle_with_cancel(
-        repo,
-        spec,
-        out,
-        &mut NullProgress,
-        &crate::progress::NeverCancel,
-    )
+    write_bundle_with_cancel(repo, spec, out, &crate::progress::NeverCancel)
 }
 
 /// Like [`write_bundle`], but stops pack generation when `cancel` is set.
@@ -870,6 +867,20 @@ pub fn write_bundle(
 ///
 /// Same as [`write_bundle`], plus [`BundleError::Cancelled`].
 pub fn write_bundle_with_cancel(
+    repo: &Repository,
+    spec: &BundleSpec,
+    out: &mut dyn Write,
+    cancel: &dyn crate::progress::Cancel,
+) -> std::result::Result<(), BundleError> {
+    write_bundle_with_cancel_and_progress(repo, spec, out, &mut NullProgress, cancel)
+}
+
+/// Like [`write_bundle_with_cancel`], reporting pack progress through `progress`.
+///
+/// # Errors
+///
+/// Same as [`write_bundle_with_cancel`].
+pub fn write_bundle_with_cancel_and_progress(
     repo: &Repository,
     spec: &BundleSpec,
     out: &mut dyn Write,

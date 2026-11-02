@@ -1031,7 +1031,8 @@ pub fn grit_lib::bundle::plan_bundle_unbundle(&grit_lib::bundle::Bundle, &grit_l
 pub fn grit_lib::bundle::read_header(&mut dyn alloc::io::buf_read::BufRead) -> core::result::Result<grit_lib::bundle::BundleHeader, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle_header(&mut dyn core::io::write::Write, grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectId, core::option::Option<alloc::string::String>)], &[(grit_lib::objects::ObjectId, alloc::string::String)]) -> core::result::Result<(), grit_lib::bundle::BundleError>
-pub fn grit_lib::bundle::write_bundle_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::write_bundle_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::write_bundle_with_cancel_and_progress(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub mod grit_lib::change_id
 pub enum grit_lib::change_id::ChangeIdError
 pub grit_lib::change_id::ChangeIdError::HashCollision

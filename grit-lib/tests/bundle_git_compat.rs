@@ -1212,6 +1212,35 @@ fn bundles_create_failure_preserves_existing_bundle_and_object_not_found_error()
 }
 
 #[test]
+fn bundles_create_replaces_existing_destination_on_success() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (_, c2) = init_repo_with_two_commits(src);
+    let repo = grit_repo(src);
+    let bundle_path = src.join("replace.bundle");
+    const SENTINEL: &[u8] = b"pre-existing bundle placeholder\n";
+    std::fs::write(&bundle_path, SENTINEL).expect("seed");
+
+    repo.bundles()
+        .create(
+            &BundleSpec {
+                include: vec![(c2, "refs/heads/main".to_owned())],
+                ..Default::default()
+            },
+            &bundle_path,
+        )
+        .expect("replace existing file");
+
+    let after = std::fs::read(&bundle_path).expect("read replaced bundle");
+    assert_ne!(after, SENTINEL);
+    assert!(after.starts_with(b"# v2 git bundle\n") || after.starts_with(b"# v3 git bundle\n"));
+    git_ok(
+        src,
+        &["bundle", "verify", bundle_path.to_str().expect("utf8")],
+    );
+}
+
+#[test]
 fn bundles_create_cancelled_preserves_destination_and_removes_part_file() {
     use grit_lib::progress::{FlagCancel, NullProgress};
 
