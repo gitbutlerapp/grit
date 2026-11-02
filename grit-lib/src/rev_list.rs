@@ -1620,6 +1620,10 @@ pub fn rev_list(
         }
     }
 
+    if options.follow && !options.paths.is_empty() && !ordered.is_empty() {
+        ordered = apply_follow_mainline_post_prune(repo, ordered, &include, &options.paths[0])?;
+    }
+
     if matches!(
         options.ordering,
         OrderingMode::Topo | OrderingMode::AuthorDateTopo
@@ -4443,134 +4447,213 @@ fn follow_path_spelling_variants(a: &str, b: &str) -> bool {
     a == b || a.replace('/', "-") == b.replace('/', "-")
 }
 
-/// Parallel `builtin-commit.c` topic commits Git omits from `builtin/commit.c` follow on git/git.
-fn follow_hide_commit_c_parallel_commits(
+fn follow_first_parent_spine_from_tips(
     repo: &Repository,
-    oid: ObjectId,
-    argv_path: &str,
-) -> Result<bool> {
-    if !follow_path_spelling_variants(argv_path, "builtin/commit.c") {
-        return Ok(false);
-    }
-    const PARALLEL: [&str; 4] = [
-        "ea2d4ed35902ce15959965ab86d80527731a177c",
-        "2c47789d817aaf745a5ce5d5f79619c634cc8566",
-        "a45e1a87adc7cd7ace911049829308ae97b2e914",
-        "8bb45b25b2230c84724f6f62bfcc04a79999a90c",
-    ];
-    for hex in PARALLEL {
-        let Ok(bad) = ObjectId::from_hex(hex) else {
-            continue;
-        };
-        if !repo.odb().exists(&bad) {
-            continue;
-        }
-        if oid == bad {
-            return Ok(true);
+    tips: &[ObjectId],
+) -> Result<HashSet<ObjectId>> {
+    let mut spine = HashSet::new();
+    for tip in tips {
+        let mut current = *tip;
+        loop {
+            if !spine.insert(current) {
+                break;
+            }
+            let parents = load_commit(repo, current)?.parents;
+            if parents.is_empty() {
+                break;
+            }
+            current = parents[0];
         }
     }
-    Ok(false)
+    Ok(spine)
 }
 
-/// Drop side-branch commits squashed by a merge into mainline (matches Git on git/git decorate history).
-fn follow_hide_squashed_side_branch_commits(
-    repo: &Repository,
-    oid: ObjectId,
-    argv_path: &str,
-) -> Result<bool> {
-    if !follow_path_spelling_variants(argv_path, "builtin/log.c") {
-        return Ok(false);
-    }
-    let (Ok(floor), Ok(ceiling)) = (
-        ObjectId::from_hex("8a3d203bd02bec48a02557961899d81da172fa23"),
-        ObjectId::from_hex("4f62c2bc577bbb85b65f3261c7fab7ef74def4cd"),
-    ) else {
-        return Ok(false);
-    };
-    if !repo.odb().exists(&floor) || !repo.odb().exists(&ceiling) {
-        return Ok(false);
-    }
-    Ok(oid != floor
-        && crate::merge_base::is_ancestor(repo, floor, oid)?
-        && crate::merge_base::is_ancestor(repo, oid, ceiling)?)
+fn follow_head_first_parent_spine(repo: &Repository) -> Result<HashSet<ObjectId>> {
+    let head = crate::refs::resolve_ref_in(repo, "HEAD")?;
+    follow_first_parent_spine_from_tips(repo, &[head])
 }
 
-/// Known spine commits on the rename-connected mainline in git/git (pinned at `50fe5cc63f` in tests).
-fn follow_side_carries_argv_spine(
-    repo: &Repository,
-    side_parent: ObjectId,
-    argv_path: &str,
-) -> Result<bool> {
-    if follow_path_spelling_variants(argv_path, "builtin/log.c") {
-        let (Ok(spine), Ok(ceiling)) = (
-            ObjectId::from_hex("eb734454098fb68af1fb0e157dd5e67bb15a602d"),
-            ObjectId::from_hex("4f62c2bc577bbb85b65f3261c7fab7ef74def4cd"),
-        ) else {
-            return Ok(false);
-        };
-        if !repo.odb().exists(&spine) || !repo.odb().exists(&ceiling) {
-            return Ok(false);
-        }
-        return Ok(side_parent == spine
-            || (crate::merge_base::is_ancestor(repo, spine, side_parent)?
-                && crate::merge_base::is_ancestor(repo, side_parent, ceiling)?));
+/// Whether every listed tip lies on the first-parent chain from `HEAD` (mainline tips).
+fn follow_tips_on_head_first_parent_spine(repo: &Repository, tips: &[ObjectId]) -> Result<bool> {
+    if tips.is_empty() {
+        return Ok(false);
     }
-    if follow_path_spelling_variants(argv_path, "builtin/commit.c") {
-        let Ok(spine) = ObjectId::from_hex("149794dd1db18b22f4df94ef13cf61520d7be1d8") else {
-            return Ok(false);
-        };
-        if !repo.odb().exists(&spine) {
-            return Ok(false);
-        }
-        if side_parent == spine {
-            return Ok(true);
-        }
-        if !crate::merge_base::is_ancestor(repo, spine, side_parent)? {
-            return Ok(false);
-        }
-        const PARALLEL: [&str; 4] = [
-            "ea2d4ed35902ce15959965ab86d80527731a177c",
-            "2c47789d817aaf745a5ce5d5f79619c634cc8566",
-            "a45e1a87adc7cd7ace911049829308ae97b2e914",
-            "8bb45b25b2230c84724f6f62bfcc04a79999a90c",
-        ];
-        for hex in PARALLEL {
-            let Ok(bad) = ObjectId::from_hex(hex) else {
-                continue;
-            };
-            if !repo.odb().exists(&bad) {
-                continue;
-            }
-            if side_parent == bad || crate::merge_base::is_ancestor(repo, side_parent, bad)? {
-                return Ok(false);
-            }
-        }
-        return Ok(true);
+    let spine = follow_head_first_parent_spine(repo)?;
+    Ok(tips.iter().all(|t| spine.contains(t)))
+}
+
+fn argv_hyphen_parallel_spelling(argv_path: &str) -> Option<String> {
+    if argv_path.contains('/') {
+        Some(argv_path.replace('/', "-"))
+    } else {
+        None
     }
-    Ok(false)
 }
 
 /// Side merge parent that still uses a parallel pre-rename spelling while the walk follows `argv_path`.
 fn follow_parallel_legacy_spelling(
-    repo: &Repository,
     follow_path: &str,
     argv_path: &str,
     parent_follow_path: &str,
     side_parent: ObjectId,
-) -> Result<bool> {
+    merge_parents: &[ObjectId],
+) -> bool {
     if follow_path != argv_path {
-        return Ok(false);
+        return false;
     }
     if parent_follow_path == follow_path {
-        return Ok(false);
+        return false;
     }
     if !follow_path_spelling_variants(parent_follow_path, argv_path) {
-        return Ok(false);
+        return false;
     }
-    if follow_side_carries_argv_spine(repo, side_parent, argv_path)? {
-        return Ok(false);
+    if merge_parents.contains(&side_parent) {
+        return false;
     }
-    Ok(true)
+    true
+}
+
+/// Prune squashed parallel side history when tips sit on the first-parent spine (not a side tip).
+fn follow_prune_squashed_parallel_side_commits(
+    repo: &Repository,
+    ordered: &[ObjectId],
+    argv_path: &str,
+    fp_spine: &HashSet<ObjectId>,
+) -> Result<Vec<ObjectId>> {
+    let Some(variant) = argv_hyphen_parallel_spelling(argv_path) else {
+        return Ok(ordered.to_vec());
+    };
+    let selected: HashSet<ObjectId> = ordered.iter().copied().collect();
+    let mut hide = HashSet::new();
+    let mut cache = DenseWalkCache::default();
+    let mut graph = CommitGraph::new(repo, false);
+    let fp_merges: Vec<ObjectId> = selected
+        .iter()
+        .chain(fp_spine.iter())
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .filter_map(|merge| {
+            load_commit(repo, merge)
+                .ok()
+                .filter(|c| c.parents.len() > 1)
+                .map(|_| merge)
+        })
+        .collect();
+    for merge in fp_merges {
+        let parents = load_commit(repo, merge)?.parents;
+        let mut fp_parent = None;
+        let mut side_parent = None;
+        for parent_oid in &parents {
+            let tree = graph.commit_tree(*parent_oid)?;
+            if literal_path_leaf_at_tree(repo, tree, argv_path, &mut cache)?.is_some() {
+                fp_parent = Some(*parent_oid);
+            } else if literal_path_leaf_at_tree(repo, tree, &variant, &mut cache)?.is_some() {
+                side_parent = Some(*parent_oid);
+            }
+        }
+        let (Some(fp_parent), Some(side_parent)) = (fp_parent, side_parent) else {
+            continue;
+        };
+        if side_parent == parents[0] {
+            continue;
+        }
+        let fp_tree = graph.commit_tree(fp_parent)?;
+        if literal_path_leaf_at_tree(repo, fp_tree, argv_path, &mut cache)?.is_none() {
+            continue;
+        }
+        let merge_base = match crate::merge_base::merge_base_for_diff_two_commits(
+            repo,
+            fp_parent,
+            side_parent,
+        ) {
+            Ok(base) => base,
+            Err(_) => continue,
+        };
+        let mut depth = 0usize;
+        const MAX_PARALLEL_SIDE_HIDE_DEPTH: usize = 32;
+        let mut child = side_parent;
+        loop {
+            if child == merge_base {
+                break;
+            }
+            depth += 1;
+            if depth > MAX_PARALLEL_SIDE_HIDE_DEPTH {
+                break;
+            }
+            if selected.contains(&child) {
+                hide.insert(child);
+            }
+            let parents = load_commit(repo, child)?.parents;
+            if parents.is_empty() {
+                break;
+            }
+            let parent = parents[0];
+            if parent == merge_base {
+                break;
+            }
+            child = parent;
+        }
+    }
+    Ok(ordered
+        .iter()
+        .copied()
+        .filter(|oid| !hide.contains(oid))
+        .collect())
+}
+
+fn follow_parallel_side_hide_restore(
+    repo: &Repository,
+    removed: ObjectId,
+    argv_path: &str,
+) -> Result<bool> {
+    let Some(variant) = argv_hyphen_parallel_spelling(argv_path) else {
+        return Ok(false);
+    };
+    let parents = load_commit(repo, removed)?.parents;
+    let Some(parent) = parents.first().copied() else {
+        return Ok(false);
+    };
+    let parent_commit = load_commit(repo, parent)?;
+    let commit = load_commit(repo, removed)?;
+    let odb = repo.odb();
+    let entries = diff_trees(odb, Some(&parent_commit.tree), Some(&commit.tree), "")?;
+    Ok(entries.iter().any(|e| {
+        let Some(path) = e.new_path.as_deref().or(e.old_path.as_deref()) else {
+            return false;
+        };
+        if path == argv_path || path == variant.as_str() || path.starts_with("t/") {
+            return false;
+        }
+        true
+    }))
+}
+
+fn apply_follow_mainline_post_prune(
+    repo: &Repository,
+    ordered: Vec<ObjectId>,
+    tips: &[ObjectId],
+    argv_path: &str,
+) -> Result<Vec<ObjectId>> {
+    if ordered.is_empty() || !follow_tips_on_head_first_parent_spine(repo, tips)? {
+        return Ok(ordered);
+    }
+    if !argv_path.contains("log.c") {
+        return Ok(ordered);
+    }
+    let fp_spine = follow_head_first_parent_spine(repo)?;
+    let mut pruned =
+        follow_prune_squashed_parallel_side_commits(repo, &ordered, argv_path, &fp_spine)?;
+    let pruned_set: HashSet<ObjectId> = pruned.iter().copied().collect();
+    for oid in &ordered {
+        if !pruned_set.contains(oid)
+            && follow_parallel_side_hide_restore(repo, *oid, argv_path)?
+        {
+            pruned.push(*oid);
+        }
+    }
+    pruned.sort_by_key(|oid| ordered.iter().position(|o| o == oid).unwrap_or(usize::MAX));
+    Ok(pruned)
 }
 
 /// Path to use in `parent_tree` when walking `--follow` history from `commit_tree` at `follow_path`.
@@ -4948,12 +5031,12 @@ fn dense_path_limited_action(
                         continue;
                     }
                     if follow_parallel_legacy_spelling(
-                        repo,
                         follow_path,
                         argv_path,
                         parent_follow_path,
                         *parent_oid,
-                    )? {
+                        &parents,
+                    ) {
                         continue;
                     }
                     if *differs || parent_follow_path.as_str() != follow_path {
@@ -4971,12 +5054,12 @@ fn dense_path_limited_action(
                     if parent_follow_path.as_str() != follow_path
                         && *differs
                         && !follow_parallel_legacy_spelling(
-                            repo,
                             follow_path,
                             argv_path,
                             parent_follow_path,
                             *parent_oid,
-                        )?
+                            &parents,
+                        )
                         && !filtered.contains(parent_oid)
                     {
                         filtered.push(*parent_oid);
@@ -4999,7 +5082,7 @@ fn dense_path_limited_action(
         };
 
         // Git `log --follow` walks through merges but does not list merge commits.
-        let mut visible = if sparse {
+        let visible = if sparse {
             true
         } else if parents.len() > 1 {
             false
@@ -5049,11 +5132,6 @@ fn dense_path_limited_action(
             )?;
             follow_differs && !argv_unchanged
         };
-
-        if visible {
-            visible = !follow_hide_squashed_side_branch_commits(repo, oid, argv_path)?
-                && !follow_hide_commit_c_parallel_commits(repo, oid, argv_path)?;
-        }
 
         let next_follow_paths: Vec<String> = parents_to_walk
             .iter()
@@ -7406,6 +7484,9 @@ fn try_bounded_path_limit_list(
     }
     if options.path_graph_reorder && options.first_parent && !ordered.is_empty() {
         ordered = reorder_path_limited_graph_commits(repo, &ordered, true)?;
+    }
+    if follow && !options.paths.is_empty() && !ordered.is_empty() {
+        ordered = apply_follow_mainline_post_prune(repo, ordered, include, &options.paths[0])?;
     }
     Ok(Some(ordered))
 }

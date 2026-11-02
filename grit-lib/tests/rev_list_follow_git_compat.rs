@@ -561,6 +561,73 @@ fn follow_git_dd2_log_c_history_matches_git_when_git_src_set() {
     );
 }
 
+/// Issue #2459: `log --follow -- builtin-log.c` at `4f62c2bc577b` on git/git (strict checkout).
+#[test]
+fn follow_git_log_c_at_4f62_builtin_log_c_history_matches_git_when_git_src_set() {
+    let strict =
+        std::env::var_os("GRIT_TEST_GIT_SRC_STRICT").is_some_and(|v| !v.is_empty() && v != "0");
+    let Some(git_src) = std::env::var_os("GRIT_TEST_GIT_SRC") else {
+        if strict {
+            panic!("GRIT_TEST_GIT_SRC must be set when GRIT_TEST_GIT_SRC_STRICT=1");
+        }
+        return;
+    };
+    let wt = Path::new(&git_src);
+    if !wt.join(".git").is_dir() {
+        if strict {
+            panic!(
+                "GRIT_TEST_GIT_SRC must point at a git checkout when GRIT_TEST_GIT_SRC_STRICT=1"
+            );
+        }
+        return;
+    }
+
+    let rev = "4f62c2bc577bbb85b65f3261c7fab7ef74def4cd";
+    let repo = open_grit_repo(wt);
+    let grit_at: Vec<String> = repo
+        .rev_walk()
+        .commits(
+            &[rev],
+            &RevWalkListOptions {
+                paths: vec!["builtin-log.c".to_owned()],
+                follow: true,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit follow at 4f62")
+        .into_iter()
+        .map(|oid| oid.to_hex())
+        .collect();
+    let git_at_rev: Vec<String> = git(
+        wt,
+        &["log", "--follow", "--pretty=%H", rev, "--", "builtin-log.c"],
+    )
+    .lines()
+    .map(str::trim)
+    .filter(|l| !l.is_empty())
+    .map(str::to_owned)
+    .collect();
+    assert_eq!(
+        grit_at.len(),
+        git_at_rev.len(),
+        "follow at 4f62 must match git commit count ({} vs {} commits)",
+        grit_at.len(),
+        git_at_rev.len()
+    );
+    assert_eq!(
+        grit_at, git_at_rev,
+        "follow at 4f62c2bc577b for builtin-log.c must match git order (179 commits)"
+    );
+    assert!(
+        grit_at.first().is_some_and(|h| h.starts_with("4f62c2bc")),
+        "tip commit 4f62c2bc must be listed when used as the start revision"
+    );
+    assert!(
+        grit_at.iter().any(|h| h.starts_with("635530a2")),
+        "635530a2 side-branch commit must remain in follow history at this tip"
+    );
+}
+
 /// Issue #2459: `log --follow -- builtin/log.c` on git/git (optional full checkout).
 #[test]
 fn follow_git_log_c_history_matches_git_when_git_src_set() {
