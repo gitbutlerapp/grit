@@ -21,7 +21,8 @@ Two fragments come out of one profile:
 
 Both lists are the union of what common operations run (repository discovery and config,
 refs and branches, object reads, revision walks, diffs, blame, the index and work tree,
-staging, committing, switching, stashing), profiled with callgrind on a clone through
+staging, committing, switching over many files and over fewer than
+`checkout.thresholdForParallelism`, stashing), profiled with callgrind on a clone through
 `grit` binaries built like the ones that run them, so inlining matches what is linked: the
 shipped `dist` build (fat LTO, one codegen unit) and the `release` build that development
 and local benchmarking use (ThinLTO over many codegen units, which inlines less and keeps
@@ -37,6 +38,13 @@ the sort by sharing count and uses the Gray order only between equally shared fu
 every command runs the CLI's start-up and argument parsing, so that shared core stays
 dense, and the full Gray order there cost the later commands (config, refs, branch) a
 window each.
+
+Both orders are only the starting point of a search (`searched`): with each build's code
+sizes, it moves groups of functions that run together and keeps a move when the windows
+all workloads touch, summed over both builds, do not rise and no workload's own count rises
+above what the starting order gave it. On the profile it was added with, that cut the
+library section's windows by 6 to 7% and the CLI section's by 10 to 13% over all workloads,
+with the largest gains on the later workloads (refs, branch, show, revs, resolve, stash).
 
 Each function's input section (`.text.<v0 symbol>`, or `.text.unlikely.<v0 symbol>` for
 `#[cold]` functions) is matched with the crate disambiguators (`Cs<hash>_`), back-references
@@ -64,6 +72,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -87,6 +96,9 @@ CRATE_ROOT = re.compile(r"Cs[0-9A-Za-z]*_([0-9]+)")
 
 FILE = "data/d0000/f000000.txt"
 OTHER = "data/d0001/f000100.txt"
+# A local branch whose tip differs from `main` in NEAR_FILES files.
+NEAR_BRANCH = "synth/near"
+NEAR_FILES = 50
 
 # Each workload starts from a reset work tree in the given shape and runs its steps in order
 # (so a step sees what the previous one left). Every step is profiled.
@@ -121,6 +133,8 @@ WORKLOADS: list[tuple[str, str, list[list[str]]]] = [
     ("add", "dirty", [["add", FILE], ["restore", OTHER]]),
     ("commit", "dirty", [["commit", "-m", "hot-text workload"]]),
     ("switch", "clean", [["switch", "synth/b000001"], ["switch", "main"]]),
+    # Fewer files than `checkout.thresholdForParallelism`: the serial write path.
+    ("switch-near", "clean", [["switch", NEAR_BRANCH], ["switch", "main"]]),
     ("stash", "dirty", [["stash"], ["stash", "pop"]]),
 ]
 
@@ -132,6 +146,8 @@ INSTANTIATING_CRATE = re.compile(r"Cs\*_([0-9]+)([A-Za-z_][A-Za-z0-9_]*)$")
 # Numbered local copies (`name.1234`, `name.llvm.5678`) are renumbered by every build.
 LOCAL_SUFFIX = re.compile(r"(\.llvm)?(\.[0-9]+)+$")
 CALLGRIND_FN = re.compile(r"^c?fn=\(\d+\) (.+)$")
+# Bytes the kernel maps per file-backed page fault (`fault_around_bytes`).
+FAULT_AROUND = 64 * 1024
 
 
 def run_env(isolated: bool) -> dict[str, str]:
@@ -162,7 +178,8 @@ def build_fixture(root: Path, files: int) -> tuple[Path, list[Path]]:
     """A clone with `files` small files in 100-file directories, history and many refs.
 
     Every object is packed; remote-tracking refs and lightweight and annotated tags are in
-    packed-refs, `main` tracks `origin/main`, and local branches exist to switch to.
+    packed-refs, `main` tracks `origin/main`, and local branches exist to switch to: one at
+    the first commit and `NEAR_BRANCH`, one loose commit ahead of `main`.
     """
     source = root / "source"
     source.mkdir()
@@ -188,7 +205,14 @@ def build_fixture(root: Path, files: int) -> tuple[Path, list[Path]]:
     git(repo, "config", "core.untrackedCache", "false")
     git(repo, "config", "core.fsmonitor", "false")
     git(repo, "branch", "-q", "synth/b000001", "origin/synth/b000001")
-    return repo, sorted(repo.glob("data/*/*.txt"))
+    git(repo, "switch", "-q", "-c", NEAR_BRANCH)
+    paths = sorted(repo.glob("data/*/*.txt"))
+    for path in paths[:NEAR_FILES]:
+        with path.open("a") as f:
+            f.write("near\n")
+    git(repo, "commit", "-q", "-a", "-m", "near")
+    git(repo, "switch", "-q", "main")
+    return repo, paths
 
 
 def apply_shape(repo: Path, paths: list[Path], shape: str) -> None:
@@ -238,8 +262,9 @@ def executed_functions(
     return list(names)
 
 
-def defined_text_symbols(grit: Path) -> dict[str, list[str]]:
-    """Every function symbol, mapped to all the function symbols at its address.
+def defined_text_symbols(grit: Path) -> tuple[dict[str, list[str]], dict[str, tuple[int, int]]]:
+    """Every function symbol, mapped to all the function symbols at its address, and each
+    symbol's body as (address, size in bytes).
 
     LLVM merges functions whose code is identical into one body and keeps the other names
     as aliases of it. The body's input section is named after one of them, while callgrind
@@ -247,14 +272,22 @@ def defined_text_symbols(grit: Path) -> dict[str, list[str]]:
     the list names every alias.
     """
     out = subprocess.run(
-        ["nm", "--defined-only", str(grit)], check=True, capture_output=True, text=True
+        ["nm", "--defined-only", "--print-size", str(grit)],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     by_address: dict[str, list[str]] = {}
+    bodies: dict[str, tuple[int, int]] = {}
     for line in out.splitlines():
-        parts = line.split(" ", 2)
-        if len(parts) == 3 and parts[1] in "tTwW":
-            by_address.setdefault(parts[0], []).append(parts[2])
-    return {name: names for names in by_address.values() for name in names}
+        parts = line.split(" ", 3)
+        if len(parts) == 3:
+            parts.insert(1, "0")
+        if len(parts) == 4 and parts[2] in "tTwW":
+            by_address.setdefault(parts[0], []).append(parts[3])
+            bodies[parts[3]] = (int(parts[0], 16), int(parts[1], 16))
+    aliases = {name: names for names in by_address.values() for name in names}
+    return aliases, bodies
 
 
 def crate_libs(package: str, features: str = "") -> set[str]:
@@ -373,6 +406,72 @@ def ordered(
     return sorted(first_seen, key=key)
 
 
+def searched(
+    patterns: list[str],
+    builds: list[tuple[list[set[str]], dict[str, int]]],
+    iterations: int,
+) -> list[str]:
+    """Refine `patterns` (in Gray code order) to touch fewer fault-around windows.
+
+    Patterns that every build runs in the same set of workloads are always resident
+    together, so they move as one group, in their given order. `builds` holds each
+    build's per-workload pattern sets and pattern code sizes. The cost of an order is the
+    number of 64 KiB windows each workload's code touches, summed over workloads and builds
+    and over section starts a quarter window apart, so it does not hinge on where the
+    section happens to begin. A seeded random walk moves one group to another place and
+    keeps the move unless the total rises or some workload's own count exceeds what the
+    starting order gave it: deterministic, and no workload is worse off than in the Gray
+    code order.
+    """
+    groups: dict[tuple[tuple[int, ...], ...], list[str]] = {}
+    for p in patterns:
+        key = tuple(tuple(int(p in seen) for seen in sets) for sets, _ in builds)
+        groups.setdefault(key, []).append(p)
+    keys = list(groups)
+    sizes = [
+        [sum((sizes.get(p, 0) + 15) & ~15 for p in groups[k]) for k in keys]
+        for _, sizes in builds
+    ]
+    members = [
+        [[w for w, member in enumerate(k[b]) if member] for k in keys] for b in range(len(builds))
+    ]
+    offsets = range(0, FAULT_AROUND, FAULT_AROUND // 4)
+
+    workloads = len(builds[0][0])
+
+    def cost(order: list[int]) -> list[int]:
+        per_workload = [0] * workloads
+        for b in range(len(builds)):
+            for start in offsets:
+                windows: list[set[int]] = [set() for _ in range(workloads)]
+                at = start
+                for g in order:
+                    size = sizes[b][g]
+                    if size:
+                        span = range(at // FAULT_AROUND, (at + size - 1) // FAULT_AROUND + 1)
+                        for w in members[b][g]:
+                            windows[w].update(span)
+                    at += size
+                for w, touched in enumerate(windows):
+                    per_workload[w] += len(touched)
+        return per_workload
+
+    rng = random.Random(0)
+    order = list(range(len(keys)))
+    ceiling = cost(order)
+    best = sum(ceiling)
+    for _ in range(iterations):
+        i, j = rng.randrange(len(order)), rng.randrange(len(order))
+        if i == j:
+            continue
+        candidate = order[:i] + order[i + 1 :]
+        candidate.insert(j, order[i])
+        c = cost(candidate)
+        if sum(c) <= best and all(x <= limit for x, limit in zip(c, ceiling)):
+            order, best = candidate, sum(c)
+    return [p for g in order for p in groups[keys[g]]]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
@@ -386,6 +485,12 @@ def main() -> int:
     parser.add_argument("--cli-output", type=Path, default=DEFAULT_CLI_OUTPUT)
     # Large enough that index parsing and the work-tree scans take their threaded paths.
     parser.add_argument("--files", type=int, default=10000, help="tracked files in the fixture")
+    parser.add_argument(
+        "--search-iterations",
+        type=int,
+        default=60000,
+        help="moves the layout search tries per section (0 keeps the Gray code order)",
+    )
     args = parser.parse_args()
 
     if shutil.which("valgrind") is None:
@@ -394,24 +499,29 @@ def main() -> int:
     builds = []
     crates = library_crates()
     for grit in (path.resolve() for path in args.grit):
-        symbols = defined_text_symbols(grit)
+        symbols, bodies = defined_text_symbols(grit)
         if not any(s.startswith("_R") for s in symbols):
             print(f"{grit} has no Rust symbols; build it with strip = false", file=sys.stderr)
             return 1
-        builds.append((grit, symbols, library_symbols(set(symbols), crates)))
+        builds.append((grit, symbols, bodies, library_symbols(set(symbols), crates)))
 
     # Dict order is first-seen order; `seen_by_workload` holds the patterns each workload
-    # ran, in any of the builds.
+    # ran, in any of the builds. `build_profiles` keeps each build's own per-workload sets
+    # and the code size of the bodies each pattern matched there, for the layout search.
     lib_seen: dict[str, None] = {}
     cli_seen: dict[str, None] = {}
     seen_by_workload: dict[str, set[str]] = {name: set() for name, _, _ in WORKLOADS}
+    build_profiles: list[tuple[list[set[str]], dict[str, int]]] = []
     with tempfile.TemporaryDirectory(prefix="grit-hot-text-") as tmp:
         root = Path(tmp)
         repo, paths = build_fixture(root, args.files)
-        for b, (grit, symbols, library) in enumerate(builds):
+        for b, (grit, symbols, bodies, library) in enumerate(builds):
+            build_sets: list[set[str]] = []
+            pattern_bodies: dict[str, dict[int, int]] = {}
             for name, shape, steps in WORKLOADS:
                 apply_shape(repo, paths, shape)
                 seen = seen_by_workload[name]
+                build_seen: set[str] = set()
                 for i, argv in enumerate(steps):
                     # The first step runs with the census's isolated config, later ones with
                     # the usual config cascade.
@@ -422,11 +532,17 @@ def main() -> int:
                             p = section_pattern(n)
                             (lib_seen if n in library else cli_seen).setdefault(p, None)
                             seen.add(p)
+                            build_seen.add(p)
+                            address, size = bodies[n]
+                            pattern_bodies.setdefault(p, {})[address] = size
+                build_sets.append(build_seen)
                 print(
                     f"{grit} {name}: {len(seen)} functions, {len(lib_seen)} "
                     f"library and {len(cli_seen)} CLI total",
                     file=sys.stderr,
                 )
+            sizes = {p: sum(found.values()) for p, found in pattern_bodies.items()}
+            build_profiles.append((build_sets, sizes))
     workload_sets = [seen_by_workload[name] for name, _, _ in WORKLOADS]
 
     # Wildcarded patterns can coincide; the library's fragment keeps a shared one.
@@ -438,6 +554,7 @@ def main() -> int:
         (".text.grit_cli_hot", CLI_HEADER, cli_seen, args.cli_output, True),
     ]:
         patterns = ordered(seen_patterns, workload_sets, sharing_first)
+        patterns = searched(patterns, build_profiles, args.search_iterations)
         output.write_text(render(section, header, patterns))
         print(f"wrote {len(patterns)} patterns to {output}", file=sys.stderr)
     return 0
