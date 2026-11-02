@@ -4810,6 +4810,8 @@ fn apply_tree_changes(
         }
     }
 
+    remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
+
     let path_refs: Vec<&str> = write_jobs.iter().map(|j| j.path.as_str()).collect();
     let serial_indices = paths_needing_serial_checkout_str(&path_refs, ignorecase, precompose);
     let parallel_indices: HashSet<usize> = write_jobs
@@ -4894,7 +4896,6 @@ fn apply_tree_changes(
         )?;
     }
 
-    remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
     drop(rules);
     let bulk_index_rewrite = changes.len() >= BULK_INDEX_REWRITE_MIN;
     crate::progress::poll_cancel(&mut progress, cancel)?;
@@ -6717,6 +6718,73 @@ mod tests {
             syscall_probe::max_per_written_file() <= 1,
             "each written file should incur at most one post-write metadata call"
         );
+    }
+
+    #[test]
+    fn case_only_directory_rename_removes_old_directory_before_add() {
+        use crate::diff::{DiffEntry, DiffStatus};
+        use crate::objects::FileMode;
+
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        fs::create_dir_all(wt.join("Foo")).expect("mkdir Foo");
+        fs::write(wt.join("Foo/a.txt"), "1\n").expect("write");
+        let blob = fs::read(wt.join("Foo/a.txt")).expect("read");
+        let oid = repo.odb().write(ObjectKind::Blob, &blob).expect("blob");
+        let mut index = repo.load_index().expect("index");
+        index.add_or_replace(
+            entry_from_stat(
+                &wt.join("Foo/a.txt"),
+                b"Foo/a.txt",
+                oid,
+                MODE_REGULAR,
+            )
+            .expect("entry"),
+        );
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+
+        let changes = vec![
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("Foo/a.txt".into()),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: oid,
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+            DiffEntry {
+                status: DiffStatus::Added,
+                old_path: None,
+                new_path: Some("foo/a.txt".into()),
+                old_mode: FileMode::ABSENT,
+                new_mode: FileMode::REGULAR,
+                old_oid: ObjectId::zero(),
+                new_oid: oid,
+                score: None,
+            },
+        ];
+        checkout_tree_changes(&repo, &changes).expect("apply delete+add");
+
+        assert!(
+            !wt.join("Foo").exists(),
+            "emptied old-case directory must be removed before creating the new spelling"
+        );
+        assert!(
+            wt.join("foo").is_dir(),
+            "target directory spelling must exist"
+        );
+        assert!(wt.join("foo/a.txt").is_file());
     }
 
     #[test]

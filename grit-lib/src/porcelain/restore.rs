@@ -16,10 +16,12 @@ use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, 
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
+use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
 use crate::pathspec::{pathspec_is_exclude, PathspecMatchContext};
 use crate::porcelain::checkout::{
     checkout_between_trees, index_entry_from_worktree_write, remove_empty_parent_dirs,
-    write_blob_to_worktree, write_smudged_blob_to_worktree, CheckoutJournal, LeadingDirCache,
+    remove_empty_parent_dirs_batch, write_blob_to_worktree, write_smudged_blob_to_worktree,
+    CheckoutJournal, LeadingDirCache,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::porcelain::pathspec_match::{
@@ -884,6 +886,51 @@ fn apply_worktree_restore_inner(
     Ok(())
 }
 
+/// Drop index rows and work-tree files whose spelling differs from `dest_path` but matches
+/// under `core.ignorecase` on a folding volume (issue #2522).
+fn remove_icase_spelling_collisions_before_restore(
+    work_tree: &Path,
+    index_out: &mut Index,
+    dest_path: &str,
+    ignorecase: bool,
+    journal: &mut CheckoutJournal,
+    outcome: &mut RestoreOutcome,
+    index_dirty: &mut bool,
+) -> Result<()> {
+    if !ignorecase || !worktree_filesystem_case_insensitive(work_tree) {
+        return Ok(());
+    }
+    let dest_bytes = dest_path.as_bytes();
+    let mut collision_paths: Vec<String> = index_out
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter_map(|e| {
+            let path = String::from_utf8_lossy(&e.path);
+            if e.path.as_slice() != dest_bytes && paths_equal(&e.path, dest_bytes, true) {
+                Some(path.into_owned())
+            } else {
+                None
+            }
+        })
+        .collect();
+    if collision_paths.is_empty() {
+        return Ok(());
+    }
+    collision_paths.sort();
+    collision_paths.dedup();
+    let mut removed_abs = Vec::with_capacity(collision_paths.len());
+    for path in &collision_paths {
+        journal.spool_remove(path)?;
+        removed_abs.push(work_tree.join(path));
+        index_out.remove_path_all_stages(path.as_bytes());
+        *index_dirty = true;
+        outcome.removed.push(path.clone());
+    }
+    remove_empty_parent_dirs_batch(work_tree, &removed_abs);
+    Ok(())
+}
+
 /// Spool a tracked file out of the work tree for restore; returns whether a file was removed.
 fn remove_worktree_path_for_restore(
     work_tree: &Path,
@@ -976,6 +1023,16 @@ fn restore_worktree_blob_from_index(
     if mode == MODE_GITLINK {
         return Ok(());
     }
+    let ignorecase = repo.config()?.ignore_case();
+    remove_icase_spelling_collisions_before_restore(
+        work_tree,
+        index_out,
+        path,
+        ignorecase,
+        journal,
+        outcome,
+        index_dirty,
+    )?;
     journal.preserve_before_write(path)?;
     let meta = restore_blob_to_worktree(repo, rules, work_tree, path, &oid, mode, dir_cache)?;
     let index_path = crate::repo_relpath::storage_bytes(path);
@@ -1010,6 +1067,16 @@ fn restore_worktree_entry(
     if entry.mode == MODE_GITLINK {
         return Ok(());
     }
+    let ignorecase = repo.config()?.ignore_case();
+    remove_icase_spelling_collisions_before_restore(
+        work_tree,
+        index_out,
+        path,
+        ignorecase,
+        journal,
+        outcome,
+        index_dirty,
+    )?;
     journal.preserve_before_write(path)?;
     let meta = restore_blob_to_worktree(
         repo, rules, work_tree, path, &entry.oid, entry.mode, dir_cache,

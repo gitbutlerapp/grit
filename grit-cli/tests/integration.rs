@@ -86,6 +86,9 @@ mod bundle_cli;
 #[path = "bundle_create_interrupt.rs"]
 mod bundle_create_interrupt;
 #[cfg(feature = "full-tests")]
+#[path = "case_only_directory_rename_2522.rs"]
+mod case_only_directory_rename_2522;
+#[cfg(feature = "full-tests")]
 #[path = "cat_replace_stream.rs"]
 mod cat_replace_stream;
 #[cfg(feature = "full-tests")]
