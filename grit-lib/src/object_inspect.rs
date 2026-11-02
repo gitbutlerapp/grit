@@ -586,7 +586,7 @@ mod abbreviate_for_display_tests {
     use std::collections::HashMap;
 
     use crate::hash::hash_object;
-    use crate::objects::{HashAlgo, ObjectKind, ObjectId};
+    use crate::objects::{HashAlgo, ObjectId, ObjectKind};
     use crate::repo::{InitOptions, Repository};
     use crate::rev_parse::resolve_revision;
 

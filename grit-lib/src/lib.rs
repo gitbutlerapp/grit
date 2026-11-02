@@ -386,7 +386,6 @@ pub mod fuzz;
 
 pub use ref_storage::RefStorageFormat;
 
-pub use crate::commit_pretty::resolve_core_abbrev_len;
 pub use crate::oid_abbrev::OidAbbrevBatch;
 pub use objects::bench_fixture;
 pub use objects::pack_reuse;

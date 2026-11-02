@@ -24,7 +24,7 @@ pub struct DescribeCliArgs {
     /// Follow first-parent chains when counting distance after the tag.
     #[arg(long = "first-parent")]
     pub first_parent: bool,
-    /// Minimum abbreviated commit id length (default 7).
+    /// Minimum abbreviated commit id length (default follows `core.abbrev`).
     #[arg(long, value_name = "N")]
     pub abbrev: Option<usize>,
 }

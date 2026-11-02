@@ -391,17 +391,19 @@ impl MarkdownRender for LogOutcome {
             }
         } else if self.display.decorate {
             let repo = crate::context::discover()?;
+            let sha_abbrevs =
+                crate::log_display::abbrev_commit_summaries(&repo, &self.commit_rows)?;
             let now = ctx.now.unix_timestamp();
             let head_branch = self.head_branch.as_deref();
-            for (summary, commit) in self.commit_rows.iter().zip(&self.commits) {
-                let short =
-                    grit_lib::object_inspect::abbreviate_for_display(&repo, summary.oid, true)?;
+            for ((summary, short), commit) in
+                self.commit_rows.iter().zip(&sha_abbrevs).zip(&self.commits)
+            {
                 outln!(
                     w,
                     "{}",
                     markdown::commit_bullet_with_decorations(
                         summary,
-                        &short,
+                        short,
                         &commit.commit.refs,
                         head_branch,
                         now,

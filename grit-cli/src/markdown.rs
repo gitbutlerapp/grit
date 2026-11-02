@@ -3,7 +3,6 @@
 use std::io::Write;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
-use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::short_hex;
 
 use crate::commands::add::AddOutcome;
@@ -42,10 +41,10 @@ pub fn print_commit_list(
         return Ok(());
     }
     let repo = context::discover()?;
+    let sha_abbrevs = crate::log_display::abbrev_commit_summaries(&repo, commits)?;
     let now = ctx.now.unix_timestamp();
-    for c in commits {
-        let short = abbreviate_for_display(&repo, c.oid, true)?;
-        outln!(w, "{}", commit_bullet_with_short(c, &short, now));
+    for (c, short) in commits.iter().zip(&sha_abbrevs) {
+        outln!(w, "{}", commit_bullet_with_short(c, short, now));
     }
     Ok(())
 }
