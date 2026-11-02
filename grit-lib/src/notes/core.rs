@@ -294,6 +294,402 @@ fn path_with_fanout(hex: &str, fanout: usize) -> Vec<u8> {
     path
 }
 
+/// Notes ref tip and root notes tree when the ref exists.
+pub(crate) fn resolve_notes_ref_tree(
+    repo: &Repository,
+    notes_ref: &str,
+) -> Result<(Option<ObjectId>, Option<ObjectId>)> {
+    let tip = notes_ref_tip(repo, notes_ref)?;
+    let Some(tip) = tip else {
+        return Ok((None, None));
+    };
+    Ok((Some(tip), Some(notes_tree_oid(repo, &tip)?)))
+}
+
+fn notes_tree_oid(repo: &Repository, tip: &ObjectId) -> Result<ObjectId> {
+    let obj = repo.odb().read(tip)?;
+    match obj.kind {
+        ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
+        ObjectKind::Tree => Ok(*tip),
+        found => Err(Error::NotesRefNotCommit {
+            notes_ref: String::new(),
+            found,
+        }),
+    }
+}
+
+fn read_tree_entries(repo: &Repository, tree_oid: &ObjectId) -> Result<Vec<TreeEntry>> {
+    let tree_obj = repo.odb().read(tree_oid)?;
+    if tree_obj.kind != ObjectKind::Tree {
+        return Err(Error::NotesObjectKind {
+            oid: *tree_oid,
+            expected: ObjectKind::Tree,
+            found: tree_obj.kind,
+        });
+    }
+    parse_tree(&tree_obj.data)
+}
+
+fn is_fanout_tree_name(name: &[u8]) -> bool {
+    name.len() == 2 && name.iter().all(u8::is_ascii_hexdigit)
+}
+
+fn is_full_note_blob_name(name: &[u8]) -> bool {
+    ObjectId::is_hex_len(name.len()) && name.iter().all(u8::is_ascii_hexdigit)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum NotesTreeLayout {
+    Empty,
+    FlatNotes,
+    FanoutNotes,
+    Irregular,
+}
+
+fn classify_notes_tree(entries: &[TreeEntry]) -> NotesTreeLayout {
+    if entries.is_empty() {
+        return NotesTreeLayout::Empty;
+    }
+    let mut flat = false;
+    let mut fanout = false;
+    for entry in entries {
+        if entry.mode == 0o040000 {
+            if is_fanout_tree_name(&entry.name) {
+                fanout = true;
+            }
+        } else if is_full_note_blob_name(&entry.name) {
+            flat = true;
+        }
+    }
+    match (flat, fanout) {
+        (true, true) => NotesTreeLayout::Irregular,
+        (true, false) => NotesTreeLayout::FlatNotes,
+        (false, true) => NotesTreeLayout::FanoutNotes,
+        (false, false) => NotesTreeLayout::Empty,
+    }
+}
+
+fn count_flat_note_entries(entries: &[TreeEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|e| e.mode != 0o040000 && is_full_note_blob_name(&e.name))
+        .count()
+}
+
+fn store_tree_entries(repo: &Repository, entries: &[TreeEntry]) -> Result<ObjectId> {
+    let mut sorted = entries.to_vec();
+    sorted.sort_by(|a, b| tree_entry_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+    repo.odb().write(ObjectKind::Tree, &serialize_tree(&sorted))
+}
+
+/// One hop on the path from the notes root to a note blob.
+struct NoteTreeHop {
+    entries: Vec<TreeEntry>,
+    child_index: usize,
+}
+
+/// ASCII case-insensitive equality for hex path segments (Git may store `AB` vs `ab`).
+fn hex_name_eq(left: &[u8], right: &[u8]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
+/// Locate a note blob in an existing fanout or flat tree without reading sibling subtrees.
+pub(crate) fn lookup_note_blob_oid(
+    repo: &Repository,
+    root_tree: &ObjectId,
+    object_hex: &str,
+) -> Result<Option<ObjectId>> {
+    let hex = object_hex.as_bytes();
+    let mut tree_oid = *root_tree;
+    let mut offset = 0usize;
+    loop {
+        let entries = read_tree_entries(repo, &tree_oid)?;
+        if let Some(entry) = entries
+            .iter()
+            .find(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), &hex[offset..]))
+        {
+            return Ok(Some(entry.oid));
+        }
+        if offset + 2 > hex.len() {
+            return Ok(None);
+        }
+        let prefix = &hex[offset..offset + 2];
+        let Some(child) = entries
+            .iter()
+            .find(|e| e.mode == 0o040000 && hex_name_eq(e.name.as_slice(), prefix))
+        else {
+            return Ok(None);
+        };
+        offset += 2;
+        tree_oid = child.oid;
+    }
+}
+
+/// Result of an in-place notes tree splice; [`NotesSpliceResult::Fallback`] means callers should
+/// rebuild with [`write_notes_tree`].
+pub(crate) enum NotesSpliceResult {
+    Tree(ObjectId),
+    Fallback,
+}
+
+pub(crate) fn splice_note_upsert(
+    repo: &Repository,
+    root_tree: Option<ObjectId>,
+    object_hex: &str,
+    blob_oid: ObjectId,
+) -> Result<NotesSpliceResult> {
+    let hex = object_hex.as_bytes();
+    if !ObjectId::is_hex_len(hex.len()) {
+        return Ok(NotesSpliceResult::Fallback);
+    }
+    let Some(root) = root_tree else {
+        let tree = store_tree_entries(
+            repo,
+            &[TreeEntry {
+                mode: 0o100644,
+                name: hex.to_vec(),
+                oid: blob_oid,
+            }],
+        )?;
+        return Ok(NotesSpliceResult::Tree(tree));
+    };
+
+    let root_entries = read_tree_entries(repo, &root)?;
+    match classify_notes_tree(&root_entries) {
+        NotesTreeLayout::Irregular => Ok(NotesSpliceResult::Fallback),
+        NotesTreeLayout::FlatNotes => {
+            if let Some((mode, old)) = find_note_in_flat_tree(&root_entries, hex) {
+                if old == blob_oid {
+                    Ok(NotesSpliceResult::Tree(root))
+                } else {
+                    let mut entries = root_entries;
+                    replace_blob_in_entries(&mut entries, hex, mode, blob_oid);
+                    Ok(NotesSpliceResult::Tree(store_tree_entries(repo, &entries)?))
+                }
+            } else if count_flat_note_entries(&root_entries) > 0xff {
+                Ok(NotesSpliceResult::Fallback)
+            } else {
+                let mut entries = root_entries;
+                entries.push(TreeEntry {
+                    mode: 0o100644,
+                    name: hex.to_vec(),
+                    oid: blob_oid,
+                });
+                Ok(NotesSpliceResult::Tree(store_tree_entries(repo, &entries)?))
+            }
+        }
+        NotesTreeLayout::Empty | NotesTreeLayout::FanoutNotes => {
+            match walk_note_for_upsert(repo, root, hex, blob_oid)? {
+                Some(tree) => Ok(NotesSpliceResult::Tree(tree)),
+                None => Ok(NotesSpliceResult::Fallback),
+            }
+        }
+    }
+}
+
+pub(crate) fn splice_note_remove(
+    repo: &Repository,
+    root_tree: ObjectId,
+    object_hex: &str,
+) -> Result<NotesSpliceResult> {
+    let hex = object_hex.as_bytes();
+    if !ObjectId::is_hex_len(hex.len()) {
+        return Ok(NotesSpliceResult::Fallback);
+    }
+    let root_entries = read_tree_entries(repo, &root_tree)?;
+    match classify_notes_tree(&root_entries) {
+        NotesTreeLayout::Irregular => Ok(NotesSpliceResult::Fallback),
+        NotesTreeLayout::FlatNotes => {
+            let mut entries = root_entries;
+            if remove_blob_named(&mut entries, hex) {
+                Ok(NotesSpliceResult::Tree(store_tree_entries(repo, &entries)?))
+            } else {
+                Ok(NotesSpliceResult::Tree(root_tree))
+            }
+        }
+        NotesTreeLayout::Empty | NotesTreeLayout::FanoutNotes => {
+            match walk_note_for_remove(repo, root_tree, hex)? {
+                Some(tree) => Ok(NotesSpliceResult::Tree(tree)),
+                None => Ok(NotesSpliceResult::Fallback),
+            }
+        }
+    }
+}
+
+fn find_note_in_flat_tree(entries: &[TreeEntry], hex: &[u8]) -> Option<(u32, ObjectId)> {
+    entries
+        .iter()
+        .find(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), hex))
+        .map(|e| (e.mode, e.oid))
+}
+
+fn replace_blob_in_entries(entries: &mut [TreeEntry], hex: &[u8], mode: u32, blob: ObjectId) {
+    for entry in entries.iter_mut() {
+        if entry.mode != 0o040000 && hex_name_eq(entry.name.as_slice(), hex) {
+            entry.mode = mode;
+            entry.oid = blob;
+            return;
+        }
+    }
+}
+
+fn remove_blob_named(entries: &mut Vec<TreeEntry>, name: &[u8]) -> bool {
+    let before = entries.len();
+    entries.retain(|e| !(e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), name)));
+    entries.len() < before
+}
+
+fn walk_note_for_upsert(
+    repo: &Repository,
+    root_tree: ObjectId,
+    hex: &[u8],
+    blob_oid: ObjectId,
+) -> Result<Option<ObjectId>> {
+    let mut path: Vec<NoteTreeHop> = Vec::new();
+    let mut tree_oid = root_tree;
+    let mut offset = 0usize;
+    loop {
+        let entries = read_tree_entries(repo, &tree_oid)?;
+        let layout = classify_notes_tree(&entries);
+        if layout == NotesTreeLayout::Irregular {
+            return Ok(None);
+        }
+        if let Some(idx) = entries
+            .iter()
+            .position(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), &hex[offset..]))
+        {
+            if entries[idx].oid == blob_oid {
+                return Ok(Some(root_tree));
+            }
+            let mut new_entries = entries;
+            new_entries[idx].oid = blob_oid;
+            return Ok(Some(rewrite_note_path(repo, &path, new_entries)?));
+        }
+
+        let can_descend = layout == NotesTreeLayout::FanoutNotes
+            || (layout == NotesTreeLayout::Empty && offset == 0);
+        if can_descend && offset + 2 <= hex.len() {
+            let prefix = &hex[offset..offset + 2];
+            if let Some(child_idx) = entries
+                .iter()
+                .position(|e| e.mode == 0o040000 && hex_name_eq(e.name.as_slice(), prefix))
+            {
+                let child_oid = entries[child_idx].oid;
+                path.push(NoteTreeHop {
+                    entries,
+                    child_index: child_idx,
+                });
+                offset += 2;
+                tree_oid = child_oid;
+                continue;
+            }
+            let leaf = store_tree_entries(
+                repo,
+                &[TreeEntry {
+                    mode: 0o100644,
+                    name: hex[offset + 2..].to_vec(),
+                    oid: blob_oid,
+                }],
+            )?;
+            let mut parent_entries = entries;
+            parent_entries.push(TreeEntry {
+                mode: 0o040000,
+                name: prefix.to_vec(),
+                oid: leaf,
+            });
+            return Ok(Some(rewrite_note_path(repo, &path, parent_entries)?));
+        }
+
+        if layout == NotesTreeLayout::FlatNotes && offset == 0 {
+            return Ok(None);
+        }
+
+        let mut new_entries = entries;
+        new_entries.push(TreeEntry {
+            mode: 0o100644,
+            name: hex[offset..].to_vec(),
+            oid: blob_oid,
+        });
+        return Ok(Some(rewrite_note_path(repo, &path, new_entries)?));
+    }
+}
+
+fn walk_note_for_remove(
+    repo: &Repository,
+    root_tree: ObjectId,
+    hex: &[u8],
+) -> Result<Option<ObjectId>> {
+    let mut path: Vec<NoteTreeHop> = Vec::new();
+    let mut tree_oid = root_tree;
+    let mut offset = 0usize;
+    loop {
+        let entries = read_tree_entries(repo, &tree_oid)?;
+        if classify_notes_tree(&entries) == NotesTreeLayout::Irregular {
+            return Ok(None);
+        }
+        if let Some(idx) = entries
+            .iter()
+            .position(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), &hex[offset..]))
+        {
+            let mut new_entries = entries;
+            new_entries.remove(idx);
+            return Ok(Some(rewrite_note_path_or_drop(repo, &path, new_entries)?));
+        }
+        if offset + 2 > hex.len() {
+            return Ok(Some(root_tree));
+        }
+        let prefix = &hex[offset..offset + 2];
+        let Some(child_idx) = entries
+            .iter()
+            .position(|e| e.mode == 0o040000 && hex_name_eq(e.name.as_slice(), prefix))
+        else {
+            return Ok(Some(root_tree));
+        };
+        let child_oid = entries[child_idx].oid;
+        path.push(NoteTreeHop {
+            entries,
+            child_index: child_idx,
+        });
+        offset += 2;
+        tree_oid = child_oid;
+    }
+}
+
+fn rewrite_note_path(
+    repo: &Repository,
+    path: &[NoteTreeHop],
+    leaf_entries: Vec<TreeEntry>,
+) -> Result<ObjectId> {
+    let mut oid = store_tree_entries(repo, &leaf_entries)?;
+    for hop in path.iter().rev() {
+        let mut entries = hop.entries.clone();
+        entries[hop.child_index].oid = oid;
+        oid = store_tree_entries(repo, &entries)?;
+    }
+    Ok(oid)
+}
+
+fn rewrite_note_path_or_drop(
+    repo: &Repository,
+    path: &[NoteTreeHop],
+    leaf_entries: Vec<TreeEntry>,
+) -> Result<ObjectId> {
+    if leaf_entries.is_empty() {
+        if let Some(hop) = path.last() {
+            let mut parent = hop.entries.clone();
+            parent.remove(hop.child_index);
+            let parent_path = &path[..path.len().saturating_sub(1)];
+            return rewrite_note_path_or_drop(repo, parent_path, parent);
+        }
+        return store_tree_entries(repo, &leaf_entries);
+    }
+    rewrite_note_path(repo, path, leaf_entries)
+}
+
 fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<ObjectId> {
     let mut children: BTreeMap<Vec<u8>, NotesTreeChild> = BTreeMap::new();
 
@@ -347,6 +743,13 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
 }
 
 /// Write `entries` as a notes tree, re-laying out note paths with the fanout their count needs.
+pub(crate) fn materialize_notes_tree(
+    repo: &Repository,
+    entries: &[NotesTreeEntry],
+) -> Result<ObjectId> {
+    write_notes_tree(repo, entries)
+}
+
 fn write_notes_tree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<ObjectId> {
     let fanout = notes_fanout(entries);
     let rewritten_entries: Vec<_> = entries
@@ -388,6 +791,15 @@ fn write_notes_commit_object(
     parents: Vec<ObjectId>,
 ) -> Result<ObjectId> {
     let tree = write_notes_tree(repo, entries)?;
+    write_notes_commit_object_on_tree(repo, tree, commit, parents)
+}
+
+fn write_notes_commit_object_on_tree(
+    repo: &Repository,
+    tree: ObjectId,
+    commit: &NotesCommit<'_>,
+    parents: Vec<ObjectId>,
+) -> Result<ObjectId> {
     let message = if commit.message.ends_with('\n') {
         commit.message.to_owned()
     } else {
@@ -407,6 +819,50 @@ fn write_notes_commit_object(
     };
     repo.odb()
         .write(ObjectKind::Commit, &serialize_commit(&data))
+}
+
+/// Like [`preview_notes_commit`], but the notes tree is already materialized.
+pub(crate) fn preview_notes_commit_on_tree(
+    repo: &Repository,
+    parent: Option<ObjectId>,
+    tree_oid: ObjectId,
+    commit: &NotesCommit<'_>,
+) -> Result<ObjectId> {
+    write_notes_commit_object_on_tree(repo, tree_oid, commit, parent.into_iter().collect())
+}
+
+pub(crate) fn write_notes_commit_idents_on_tree(
+    repo: &Repository,
+    notes_ref: &str,
+    parent: Option<ObjectId>,
+    tree_oid: ObjectId,
+    message: &str,
+    author: &str,
+    committer: &str,
+) -> Result<()> {
+    let oid = write_notes_commit_object_on_tree(
+        repo,
+        tree_oid,
+        &NotesCommit {
+            message,
+            author,
+            committer,
+        },
+        parent.into_iter().collect(),
+    )?;
+    repo.odb().flush_for_publish()?;
+    update_notes_ref(
+        repo,
+        notes_ref,
+        parent,
+        oid,
+        &NotesCommit {
+            message,
+            author,
+            committer,
+        },
+    )?;
+    Ok(())
 }
 
 /// Timestamp of a full identity line, for the reflog entry written next to it.
@@ -1552,6 +2008,7 @@ mod tests {
     use crate::environment::RepositoryOptions;
     use crate::objects::ObjectKind;
     use crate::repo::Repository;
+    use std::io::Write;
     use std::process::Command;
     use tempfile::TempDir;
 
@@ -2029,6 +2486,243 @@ mod tests {
             NotesRewriteMode::parse("nope").expect_err("bad"),
             Error::NotesRewriteMode(_)
         ));
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn uppercase_hex_note_leaf_matches_git() {
+        let tmp = TempDir::new().unwrap();
+        let repo = open_repo(tmp.path());
+        let commit = ObjectId::from_hex(
+            std::str::from_utf8(
+                &Command::new("git")
+                    .current_dir(tmp.path())
+                    .args(["rev-parse", "HEAD"])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim(),
+        )
+        .unwrap();
+        let note_blob = {
+            let mut child = Command::new("git")
+                .current_dir(tmp.path())
+                .args(["hash-object", "-w", "--stdin"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"upper note\n")
+                .unwrap();
+            String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout)
+                .trim()
+                .to_owned()
+        };
+        let upper = commit.to_hex().to_ascii_uppercase();
+        let tree_in = format!("100644 blob {note_blob}\t{upper}\n");
+        let tree_oid = {
+            let mut child = Command::new("git")
+                .current_dir(tmp.path())
+                .args(["mktree"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(tree_in.as_bytes())
+                .unwrap();
+            String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout)
+                .trim()
+                .to_owned()
+        };
+        let notes_commit = String::from_utf8_lossy(
+            &Command::new("git")
+                .current_dir(tmp.path())
+                .args(["commit-tree", &tree_oid, "-m", "uppercase leaf"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .trim()
+        .to_owned();
+        git(
+            tmp.path(),
+            &["update-ref", "refs/notes/commits", &notes_commit],
+        );
+        assert_eq!(
+            repo.notes()
+                .read(&NotesRef::commits(), &commit)
+                .unwrap()
+                .as_deref(),
+            Some(b"upper note\n" as &[u8])
+        );
+        assert!(matches!(
+            repo.notes()
+                .add(
+                    &NotesRef::commits(),
+                    &commit,
+                    b"x\n",
+                    &crate::repo_handles::NotesWriteOptions {
+                        message: "dup".into(),
+                        committer: "Test <t@example.com> 1700000000 +0000".parse().unwrap(),
+                        author: None,
+                    },
+                    false,
+                )
+                .expect_err("exists"),
+            Error::NoteAlreadyExists { .. }
+        ));
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn splice_replace_touches_one_fanout_subtree() {
+        let tmp = TempDir::new().unwrap();
+        git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+        git(tmp.path(), &["config", "user.email", "t@example.com"]);
+        git(tmp.path(), &["config", "user.name", "Test"]);
+        std::fs::write(tmp.path().join("seed"), b"s\n").unwrap();
+        git(tmp.path(), &["add", "seed"]);
+        git(tmp.path(), &["commit", "-qm", "seed"]);
+        for i in 0..300 {
+            std::fs::write(tmp.path().join("f"), format!("v{i}\n")).unwrap();
+            git(tmp.path(), &["add", "f"]);
+            git(tmp.path(), &["commit", "-qm", &format!("c{i}")]);
+            git(
+                tmp.path(),
+                &["notes", "add", "-m", &format!("note-{i}"), "HEAD"],
+            );
+        }
+        let head = ObjectId::from_hex(
+            std::str::from_utf8(
+                &Command::new("git")
+                    .current_dir(tmp.path())
+                    .args(["rev-parse", "HEAD"])
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim(),
+        )
+        .unwrap();
+        let repo = open_repo(tmp.path());
+        let before = root_tree_child_oids(&repo, "refs/notes/commits");
+        let opts = crate::repo_handles::NotesWriteOptions {
+            message: "replace".into(),
+            committer: "Test <t@example.com> 1700000000 +0000".parse().unwrap(),
+            author: None,
+        };
+        repo.notes()
+            .add(&NotesRef::commits(), &head, b"replaced\n", &opts, true)
+            .unwrap();
+        let after = root_tree_child_oids(&repo, "refs/notes/commits");
+        assert_eq!(before.len(), after.len());
+        let changed = before
+            .iter()
+            .zip(after.iter())
+            .filter(|((n0, o0), (n1, o1))| n0 == n1 && o0 != o1)
+            .count();
+        assert_eq!(changed, 1);
+        let show = Command::new("git")
+            .current_dir(tmp.path())
+            .args(["notes", "show", &head.to_hex()])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&show.stdout).trim(), "replaced");
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "benchmark; run with --features full-tests"
+    )]
+    #[test]
+    fn bench_notes_add_matches_git_order_of_magnitude() {
+        let tmp = TempDir::new().unwrap();
+        git(tmp.path(), &["init", "-q", "-b", "main", "."]);
+        git(tmp.path(), &["config", "user.email", "t@example.com"]);
+        git(tmp.path(), &["config", "user.name", "Test"]);
+        std::fs::write(tmp.path().join("seed"), b"s\n").unwrap();
+        git(tmp.path(), &["add", "seed"]);
+        git(tmp.path(), &["commit", "-qm", "seed"]);
+        for i in 0..500 {
+            std::fs::write(tmp.path().join("f"), format!("v{i}\n")).unwrap();
+            git(tmp.path(), &["add", "f"]);
+            git(tmp.path(), &["commit", "-qm", &format!("c{i}")]);
+            git(
+                tmp.path(),
+                &["notes", "add", "-m", &format!("note-{i}"), "HEAD"],
+            );
+        }
+        let head = std::str::from_utf8(
+            &Command::new("git")
+                .current_dir(tmp.path())
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim()
+        .to_owned();
+        let git_start = std::time::Instant::now();
+        for _ in 0..5 {
+            git(tmp.path(), &["notes", "add", "-f", "-m", "x", &head]);
+        }
+        let git_per = git_start.elapsed() / 5;
+
+        let repo = open_repo(tmp.path());
+        let object = ObjectId::from_hex(&head).unwrap();
+        let opts = crate::repo_handles::NotesWriteOptions {
+            message: "x".into(),
+            committer: "Test <t@example.com> 1700000000 +0000".parse().unwrap(),
+            author: None,
+        };
+        let grit_start = std::time::Instant::now();
+        for _ in 0..5 {
+            repo.notes()
+                .add(&NotesRef::commits(), &object, b"x\n", &opts, true)
+                .unwrap();
+        }
+        let grit_per = grit_start.elapsed() / 5;
+
+        eprintln!("git notes add: {git_per:?} per op");
+        eprintln!("grit notes add: {grit_per:?} per op");
+        assert!(
+            grit_per <= git_per * 10,
+            "grit add should stay within 10x of git, git={git_per:?} grit={grit_per:?}"
+        );
+        assert!(
+            grit_per.as_millis() < 50,
+            "grit add on ~500-note fanout should stay under 50ms, got {grit_per:?}"
+        );
+    }
+
+    fn root_tree_child_oids(repo: &Repository, notes_ref: &str) -> Vec<(Vec<u8>, ObjectId)> {
+        let tip = crate::refs::resolve_ref(repo.git_dir(), notes_ref).unwrap();
+        let tree_oid = notes_tree_oid(repo, &tip).unwrap();
+        read_tree_entries(repo, &tree_oid)
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.name, e.oid))
+            .collect()
     }
 
     #[test]
