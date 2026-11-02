@@ -15,6 +15,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, RemoteUnreadableReason};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::PullError;
+use grit_lib::prelude::Environment;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -338,6 +339,65 @@ fn clone_of_missing_local_path_is_remote_unreadable() {
     .expect_err("clone of missing path must fail");
     assert!(err.is_remote_unreadable(), "{err:?}");
     assert!(err.should_cleanup_failed_clone());
+}
+
+fn clone_env_in(cwd: &Path) -> Environment {
+    let mut env = Environment::empty();
+    env.cwd = cwd.to_path_buf();
+    env
+}
+
+#[test]
+fn clone_missing_relative_source_with_dest_basename_is_remote_unreadable() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).expect("mkdir work");
+    let source = "typo-repo";
+    let dest = work.join(source);
+    let mut opts = CloneOptions::new(source.to_owned(), dest.clone());
+    opts.environment = clone_env_in(&work);
+    let err = clone(opts, &mut NoProgress, &NeverCancel, None)
+        .expect_err("clone must fail before creating the destination");
+    assert!(err.is_remote_unreadable(), "{err:?}");
+    assert!(
+        !dest.exists(),
+        "destination must not be created when the source path is missing"
+    );
+}
+
+#[test]
+fn clone_existing_empty_dir_matching_source_is_remote_unreadable() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).expect("mkdir work");
+    let source = "typo-repo";
+    let dest = work.join(source);
+    std::fs::create_dir(&dest).expect("empty dir at clone destination");
+    let mut opts = CloneOptions::new(source.to_owned(), dest.clone());
+    opts.environment = clone_env_in(&work);
+    let err = clone(opts, &mut NoProgress, &NeverCancel, None)
+        .expect_err("clone must fail when source path is an empty directory");
+    assert!(err.is_remote_unreadable(), "{err:?}");
+    assert!(
+        dest.read_dir().expect("read dir").next().is_none(),
+        "empty destination must stay empty (no .git)"
+    );
+}
+
+#[test]
+fn clone_missing_file_url_before_dest_is_remote_unreadable() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).expect("mkdir work");
+    let missing = work.join("missing.git");
+    let url = format!("file://{}", missing.display());
+    let dest = work.join("dest");
+    let mut opts = CloneOptions::new(url, dest.clone());
+    opts.environment = clone_env_in(&work);
+    let err = clone(opts, &mut NoProgress, &NeverCancel, None)
+        .expect_err("file:// clone of missing path must fail");
+    assert!(err.is_remote_unreadable(), "{err:?}");
+    assert!(!dest.exists());
 }
 
 #[cfg(feature = "http-ureq")]

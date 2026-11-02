@@ -25,7 +25,8 @@ use crate::remote::{
 use crate::repo::{init_repository_with_object_format, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode, TransferStats};
 use crate::transport_path::{
-    absolute_local_clone_source_url, git_url_basename, resolve_local_remote_git_dir,
+    absolute_local_clone_source_url, git_url_basename, is_local_path_remote_url,
+    resolve_local_clone_source_path, resolve_local_remote_git_dir,
     should_store_absolute_local_clone_url, url_is_local_not_ssh, NoDirectoryName,
 };
 
@@ -760,6 +761,8 @@ pub fn clone(
             opts.remote_name.clone(),
         )));
     }
+
+    ensure_local_clone_source_readable(&opts.url, &opts.environment)?;
 
     let bare = opts.bare;
     CloneDestinationGuard::try_claim(&opts.dest, bare)?;
@@ -1579,6 +1582,30 @@ fn open_clone_repository(
         }
         Repository::open(git_dir, &open_opts)
     }
+}
+
+/// Refuse a local clone source that does not exist or is not a repository (or bundle) before
+/// the destination directory is created.
+fn ensure_local_clone_source_readable(
+    url: &str,
+    environment: &Environment,
+) -> std::result::Result<(), CloneError> {
+    let url = url.trim();
+    if !is_local_path_remote_url(url) {
+        return Ok(());
+    }
+    if !url.starts_with("file://") && !url_is_local_not_ssh(url) {
+        return Ok(());
+    }
+    let discovery_cwd = environment.discovery_cwd();
+    let source_path =
+        resolve_local_clone_source_path(url, &discovery_cwd).map_err(CloneError::Library)?;
+    if crate::bundle_remote::is_bundle_path(&source_path) {
+        return Ok(());
+    }
+    let probe_git = discovery_cwd.join(".git");
+    let remote_git = resolve_local_remote_git_dir(url, &probe_git, Some(&discovery_cwd));
+    crate::transfer::ensure_local_remote_repository(&remote_git).map_err(CloneError::Library)
 }
 
 /// When cloning from a local path, match the source repository's object hash up front.
