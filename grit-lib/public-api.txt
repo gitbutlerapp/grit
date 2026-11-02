@@ -2970,8 +2970,10 @@ pub const grit_lib::config::ConfigSet::BIG_FILE_THRESHOLD_DEFAULT: u64
 pub const grit_lib::config::ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT: i32
 pub fn grit_lib::config::ConfigSet::add_command_override(&mut self, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::ConfigSet::big_file_threshold(&self) -> grit_lib::error::Result<u64>
+pub fn grit_lib::config::ConfigSet::bool_or(&self, &str, bool) -> bool
 pub fn grit_lib::config::ConfigSet::effective_log_refs_config(&self) -> grit_lib::refs::LogRefsConfig
 pub fn grit_lib::config::ConfigSet::entries(&self) -> &[grit_lib::config::ConfigEntry]
+pub fn grit_lib::config::ConfigSet::file_mode(&self) -> bool
 pub fn grit_lib::config::ConfigSet::gc_auto_detach(&self) -> bool
 pub fn grit_lib::config::ConfigSet::gc_auto_pack_limit(&self) -> core::option::Option<usize>
 pub fn grit_lib::config::ConfigSet::gc_auto_threshold(&self) -> core::option::Option<usize>
@@ -2985,6 +2987,7 @@ pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option:
 pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
+pub fn grit_lib::config::ConfigSet::ignore_case(&self) -> bool
 pub fn grit_lib::config::ConfigSet::load(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::config::ConfigSet::load_protected(&grit_lib::config::environment::Environment, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::config::ConfigSet::load_repo_local_only(&std::path::Path) -> grit_lib::error::Result<Self>
@@ -3008,6 +3011,8 @@ pub fn grit_lib::config::ConfigSet::pack_window_memory_bytes(&self) -> u64
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_hash_cache(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_lookup_table(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_reverse_index_default(&self, &grit_lib::config::environment::Environment) -> bool
+pub fn grit_lib::config::ConfigSet::precompose_unicode(&self) -> bool
+pub fn grit_lib::config::ConfigSet::preload_index(&self) -> bool
 pub fn grit_lib::config::ConfigSet::quote_path_fully(&self) -> bool
 pub fn grit_lib::config::ConfigSet::read_early_config(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::try_pack_index_parallelism(&self) -> core::result::Result<grit_lib::parallel::Parallelism, grit_lib::error::ConfigError>
@@ -18048,8 +18053,10 @@ pub const grit_lib::config::ConfigSet::BIG_FILE_THRESHOLD_DEFAULT: u64
 pub const grit_lib::config::ConfigSet::LOOSE_OBJECTS_ZLIB_DEFAULT: i32
 pub fn grit_lib::config::ConfigSet::add_command_override(&mut self, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::ConfigSet::big_file_threshold(&self) -> grit_lib::error::Result<u64>
+pub fn grit_lib::config::ConfigSet::bool_or(&self, &str, bool) -> bool
 pub fn grit_lib::config::ConfigSet::effective_log_refs_config(&self) -> grit_lib::refs::LogRefsConfig
 pub fn grit_lib::config::ConfigSet::entries(&self) -> &[grit_lib::config::ConfigEntry]
+pub fn grit_lib::config::ConfigSet::file_mode(&self) -> bool
 pub fn grit_lib::config::ConfigSet::gc_auto_detach(&self) -> bool
 pub fn grit_lib::config::ConfigSet::gc_auto_pack_limit(&self) -> core::option::Option<usize>
 pub fn grit_lib::config::ConfigSet::gc_auto_threshold(&self) -> core::option::Option<usize>
@@ -18063,6 +18070,7 @@ pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option:
 pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
+pub fn grit_lib::config::ConfigSet::ignore_case(&self) -> bool
 pub fn grit_lib::config::ConfigSet::load(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::config::ConfigSet::load_protected(&grit_lib::config::environment::Environment, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::config::ConfigSet::load_repo_local_only(&std::path::Path) -> grit_lib::error::Result<Self>
@@ -18086,6 +18094,8 @@ pub fn grit_lib::config::ConfigSet::pack_window_memory_bytes(&self) -> u64
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_hash_cache(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_lookup_table(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_reverse_index_default(&self, &grit_lib::config::environment::Environment) -> bool
+pub fn grit_lib::config::ConfigSet::precompose_unicode(&self) -> bool
+pub fn grit_lib::config::ConfigSet::preload_index(&self) -> bool
 pub fn grit_lib::config::ConfigSet::quote_path_fully(&self) -> bool
 pub fn grit_lib::config::ConfigSet::read_early_config(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::try_pack_index_parallelism(&self) -> core::result::Result<grit_lib::parallel::Parallelism, grit_lib::error::ConfigError>

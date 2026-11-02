@@ -99,6 +99,52 @@ fn grit_file(path: &Path, content: &str) -> ConfigFile {
 }
 
 #[test]
+fn bool_or_agrees_with_git_type_bool() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("cfg");
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).expect("home");
+    let spellings = [
+        "true", "Yes", "on", "1", "false", "NO", "off", "0", "", "maybe", "2",
+    ];
+    write_file(&path, "[t]\n\tbare\n");
+    for (i, value) in spellings.iter().enumerate() {
+        let status = std::process::Command::new("git")
+            .args(["config", "--file", path.to_str().unwrap()])
+            .arg(format!("t.k{i}"))
+            .arg(value)
+            .env("GIT_CONFIG_GLOBAL", null_device())
+            .env("GIT_CONFIG_SYSTEM", null_device())
+            .status()
+            .expect("git set");
+        assert!(status.success(), "git config t.k{i} {value:?}");
+    }
+    let content = fs::read_to_string(&path).expect("read");
+    let mut set = ConfigSet::new();
+    set.merge(&grit_file(&path, &content));
+
+    let keys = std::iter::once("t.bare".to_owned())
+        .chain((0..spellings.len()).map(|i| format!("t.k{i}")))
+        .chain(std::iter::once("t.missing".to_owned()));
+    for key in keys {
+        let git = git_file_get_typed_with_home(&path, &key, "bool", &home).expect("git get");
+        for default in [false, true] {
+            let expected = match git.as_deref() {
+                Some("true") => true,
+                Some("false") => false,
+                Some(other) => panic!("git printed {other:?} for {key}"),
+                None => default,
+            };
+            assert_eq!(
+                set.bool_or(&key, default),
+                expected,
+                "{key} default {default}"
+            );
+        }
+    }
+}
+
+#[test]
 fn config_type_bool_int_path_canonicalize_like_git() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("cfg");

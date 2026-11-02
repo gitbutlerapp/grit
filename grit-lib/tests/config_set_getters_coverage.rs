@@ -53,6 +53,36 @@ fn typed_getters_and_merge_set() {
 }
 
 #[test]
+fn bool_or_and_core_bool_accessors_read_repo_config() {
+    let dir = tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+    )
+    .expect("init");
+    let git_dir = dir.path().join(".git");
+    let defaults = ConfigSet::load_repo_local_only(&git_dir).expect("load");
+    assert!(defaults.preload_index());
+    assert!(!defaults.precompose_unicode());
+    assert!(defaults.bool_or("grit.missing", true));
+
+    let mut cfg = fs::read_to_string(git_dir.join("config")).expect("read");
+    cfg.push_str(
+        "[core]\n\tignoreCase = true\n\tpreloadIndex = false\n\tfileMode = false\n\tprecomposeUnicode = true\n[grit]\n\tchangeIds = nope\n",
+    );
+    fs::write(git_dir.join("config"), cfg).expect("write");
+    let set = ConfigSet::load_repo_local_only(&git_dir).expect("load");
+    assert!(set.ignore_case());
+    assert!(!set.preload_index());
+    assert!(!set.file_mode());
+    assert!(set.precompose_unicode());
+    assert!(set.bool_or("grit.changeIds", true));
+    assert!(!set.bool_or("grit.changeIds", false));
+}
+
+#[test]
 fn load_cascade_hits_local_and_global_layers() {
     let dir = tempdir().expect("tempdir");
     let home = dir.path().join("home");

@@ -2018,31 +2018,69 @@ impl ConfigSet {
         Some(parse_bool(&v).map_err(|e| e.for_key(key)))
     }
 
+    /// Get a boolean value, falling back to `default` when `key` is unset or its value is not a
+    /// Git boolean.
+    ///
+    /// Use this for settings where Git also ignores a malformed value; use [`Self::get_bool`]
+    /// with `transpose()?` when a bad value must be reported.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: dotted config key, matched case-insensitively in its section and variable name.
+    /// - `default`: the value Git uses when the key is unset.
+    #[must_use]
+    pub fn bool_or(&self, key: &str, default: bool) -> bool {
+        self.get_bool(key)
+            .and_then(std::result::Result::ok)
+            .unwrap_or(default)
+    }
+
+    /// Whether path comparisons fold ASCII case (`core.ignoreCase`, default `false`).
+    #[must_use]
+    pub fn ignore_case(&self) -> bool {
+        self.bool_or("core.ignoreCase", false)
+    }
+
+    /// Whether paths are stored NFC-precomposed (`core.precomposeUnicode`, default `false`).
+    ///
+    /// This is the value in this set only; callers that may not have a loaded set use
+    /// [`effective_core_precomposeunicode_with_config`](crate::precompose_config::effective_core_precomposeunicode_with_config).
+    #[must_use]
+    pub fn precompose_unicode(&self) -> bool {
+        self.bool_or("core.precomposeUnicode", false)
+    }
+
+    /// Whether index refresh may stat entries in parallel (`core.preloadIndex`, default `true`).
+    #[must_use]
+    pub fn preload_index(&self) -> bool {
+        self.bool_or("core.preloadIndex", true)
+    }
+
+    /// Whether the executable bit in the work tree is trusted (`core.fileMode`, default `true`).
+    #[must_use]
+    pub fn file_mode(&self) -> bool {
+        self.bool_or("core.fileMode", true)
+    }
+
     /// Whether pathnames in human-readable output should fully C-quote non-ASCII bytes as octal.
     ///
     /// Maps to Git's `quote_path_fully` (`core.quotePath`, default true). When false, UTF-8 and
     /// other high bytes are emitted literally; only ASCII specials are escaped.
     #[must_use]
     pub fn quote_path_fully(&self) -> bool {
-        self.get_bool("core.quotePath")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
+        self.bool_or("core.quotePath", true)
     }
 
     /// Default for `pack.writeBitmapHashCache` (Git default: true).
     #[must_use]
     pub fn pack_write_bitmap_hash_cache(&self) -> bool {
-        self.get_bool("pack.writeBitmapHashCache")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
+        self.bool_or("pack.writeBitmapHashCache", true)
     }
 
     /// Default for `pack.writeBitmapLookupTable` (Git default: false).
     #[must_use]
     pub fn pack_write_bitmap_lookup_table(&self) -> bool {
-        self.get_bool("pack.writeBitmapLookupTable")
-            .and_then(|r| r.ok())
-            .unwrap_or(false)
+        self.bool_or("pack.writeBitmapLookupTable", false)
     }
 
     /// Values of `pack.preferBitmapTips` (may appear multiple times).
@@ -2085,9 +2123,7 @@ impl ConfigSet {
         {
             return false;
         }
-        self.get_bool("pack.writeReverseIndex")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
+        self.bool_or("pack.writeReverseIndex", true)
     }
 
     /// Resolved worker count for pack indexing (`pack.threads`, Git default: unset → all CPUs).
@@ -2165,18 +2201,14 @@ impl ConfigSet {
     /// (`gc.autoDetach`, default `true`).
     #[must_use]
     pub fn gc_auto_detach(&self) -> bool {
-        self.get_bool("gc.autoDetach")
-            .and_then(|v| v.ok())
-            .unwrap_or(true)
+        self.bool_or("gc.autoDetach", true)
     }
 
     /// Whether commands may start automatic maintenance at all (`maintenance.auto`, default
     /// `true`).
     #[must_use]
     pub fn maintenance_auto(&self) -> bool {
-        self.get_bool("maintenance.auto")
-            .and_then(|v| v.ok())
-            .unwrap_or(true)
+        self.bool_or("maintenance.auto", true)
     }
 
     /// [`crate::hash::Parallelism`] for pack indexing from merged config.
@@ -2231,9 +2263,7 @@ impl ConfigSet {
     /// Default for `pack.readReverseIndex` / `pack.readreverseindex` (Git default: true).
     #[must_use]
     pub fn pack_read_reverse_index_default(&self) -> bool {
-        self.get_bool("pack.readReverseIndex")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
+        self.bool_or("pack.readReverseIndex", true)
     }
 
     /// `core.logAllRefUpdates` as configured in this set, or [`refs::LogRefsConfig::Unset`] when
@@ -2254,12 +2284,7 @@ impl ConfigSet {
     #[must_use]
     pub fn effective_log_refs_config(&self) -> refs::LogRefsConfig {
         match self.log_refs_config() {
-            refs::LogRefsConfig::Unset
-                if self
-                    .get_bool("core.bare")
-                    .and_then(|r| r.ok())
-                    .unwrap_or(false) =>
-            {
+            refs::LogRefsConfig::Unset if self.bool_or("core.bare", false) => {
                 refs::LogRefsConfig::None
             }
             refs::LogRefsConfig::Unset => refs::LogRefsConfig::Normal,
@@ -4879,6 +4904,44 @@ mod value_error_tests {
         assert!(!set.pack_write_bitmap_hash_cache());
         assert!(!set.pack_read_reverse_index_default());
         assert_eq!(set.get_bool("Core.QuotePath"), Some(Ok(false)));
+    }
+
+    #[test]
+    fn bool_or_uses_the_default_only_when_unset_or_invalid() {
+        let set = set_from_snippet(
+            "[core]\n\tbare = sometimes\n\tlogAllRefUpdates\n[feature]\n\tmanyFiles = off\n",
+        );
+        for default in [false, true] {
+            assert_eq!(set.bool_or("core.missing", default), default);
+            assert_eq!(set.bool_or("core.bare", default), default);
+            assert!(set.bool_or("core.logallrefupdates", default));
+            assert!(!set.bool_or("FEATURE.MANYFILES", default));
+        }
+    }
+
+    #[test]
+    fn core_bool_accessors_use_git_defaults() {
+        let unset = set_from_snippet("");
+        assert!(!unset.ignore_case());
+        assert!(!unset.precompose_unicode());
+        assert!(unset.preload_index());
+        assert!(unset.file_mode());
+
+        let flipped = set_from_snippet(
+            "[core]\n\tignorecase = true\n\tprecomposeunicode = yes\n\tpreloadindex = 0\n\tfilemode = off\n",
+        );
+        assert!(flipped.ignore_case());
+        assert!(flipped.precompose_unicode());
+        assert!(!flipped.preload_index());
+        assert!(!flipped.file_mode());
+
+        let invalid = set_from_snippet(
+            "[core]\n\tignoreCase = maybe\n\tprecomposeUnicode = maybe\n\tpreloadIndex = maybe\n\tfileMode = maybe\n",
+        );
+        assert!(!invalid.ignore_case());
+        assert!(!invalid.precompose_unicode());
+        assert!(invalid.preload_index());
+        assert!(invalid.file_mode());
     }
 
     #[test]
