@@ -221,8 +221,23 @@ pub(crate) mod pack_cache {
         ALTERNATE_PACK_READ_STORE.with(|cell| cell.borrow().clone())
     }
 
-    fn catalog_store() -> std::sync::Arc<crate::pack_store::PackStore> {
+    pub(crate) fn catalog_store() -> std::sync::Arc<crate::pack_store::PackStore> {
         alternate_read_store().unwrap_or_else(crate::pack_store::PackStore::active_for_reads)
+    }
+
+    pub(crate) fn sync_thread_local_for_objects_dir(objects_dir: &Path) {
+        if pack_thread_locals_apply_to(objects_dir) {
+            sync_thread_local_with_store(&catalog_store());
+        }
+    }
+
+    /// Thread-local pack hints and monotonic index cursors apply to the primary read context
+    /// and to alternate object directories served through [`with_alternate_pack_store`].
+    pub(crate) fn pack_thread_locals_apply_to(objects_dir: &Path) -> bool {
+        if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return true;
+        }
+        alternate_read_store().is_some_and(|store| store.objects_dir() == objects_dir)
     }
 
     pub(crate) fn set_skip_store_tls_release(skip: bool) {
@@ -703,7 +718,7 @@ pub(crate) mod pack_cache {
     }
 
     pub(crate) fn remember_pack_hit(objects_dir: &Path, idx: &Arc<PackIndex>) {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return;
         }
         promote_pack_index(objects_dir, &idx.idx_path);
@@ -717,7 +732,7 @@ pub(crate) mod pack_cache {
         idx: &PackIndex,
         oid: &crate::objects::ObjectId,
     ) -> Result<Option<u64>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return idx.find_offset(oid);
         }
         PACK_MONOTONIC_CURSOR.with(|cell| {
@@ -735,7 +750,7 @@ pub(crate) mod pack_cache {
     /// The pack that served the last lookup in `objects_dir` ([`remember_pack_hit`]), when
     /// the active pack store reads that directory.
     pub(crate) fn hinted_pack_index(objects_dir: &Path) -> Option<Arc<PackIndex>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return None;
         }
         PACK_HIT_INDEX.with(|cell| {
@@ -4295,16 +4310,18 @@ pub(crate) fn read_packed_commit_header_block_into(
     oid: &ObjectId,
     out: &mut Vec<u8>,
 ) -> Result<bool> {
-    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
-        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
-    }
+    pack_cache::sync_thread_local_for_objects_dir(objects_dir);
     if let Some(idx) = pack_cache::hinted_pack_index(objects_dir) {
-        if let Some(offset) = idx.find_offset(oid)? {
+        if let Some(offset) =
+            pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
+        {
             return Ok(read_commit_header_block_at(&idx, offset, out));
         }
     }
     for idx in pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)? {
-        if let Some(offset) = idx.find_offset(oid)? {
+        if let Some(offset) =
+            pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
+        {
             pack_cache::remember_pack_hit(objects_dir, &idx);
             return Ok(read_commit_header_block_at(&idx, offset, out));
         }
@@ -4331,9 +4348,7 @@ pub(crate) fn read_packed_commit_header_blocks(
     if oids.is_empty() {
         return Ok(());
     }
-    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
-        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
-    }
+    pack_cache::sync_thread_local_for_objects_dir(objects_dir);
     let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
     let mut packs: Vec<Option<Option<Arc<PackData>>>> = vec![None; indexes.len()];
     let mut readers: Vec<Option<Option<crate::pack_index::PackIndexRowReader<'_>>>> =
@@ -5644,9 +5659,7 @@ pub(crate) fn try_read_object_info_from_packs_with_options(
     oid: &ObjectId,
     opts: PackLookupOptions,
 ) -> Result<ObjectInfo> {
-    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
-        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
-    }
+    pack_cache::sync_thread_local_for_objects_dir(objects_dir);
     if opts.allows_pack_shortcuts() {
         if let Some(info) = pack_cache::try_read_info_from_hinted_pack(objects_dir, oid)? {
             return Ok(info);
@@ -5676,9 +5689,7 @@ pub(crate) fn try_read_object_from_packs_with_options(
     oid: &ObjectId,
     opts: PackLookupOptions,
 ) -> Result<Object> {
-    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
-        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
-    }
+    pack_cache::sync_thread_local_for_objects_dir(objects_dir);
     if opts.allows_pack_shortcuts() {
         if let Some(obj) = pack_cache::try_read_object_via_single_pack_reader(objects_dir, oid)? {
             return Ok(obj);
@@ -5732,9 +5743,7 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
     populate_delta_lru: bool,
     buf: &mut Vec<u8>,
 ) -> Result<ObjectKind> {
-    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
-        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
-    }
+    pack_cache::sync_thread_local_for_objects_dir(objects_dir);
     if opts.allows_pack_shortcuts() {
         if let Some(kind) = pack_cache::try_read_object_via_single_pack_reader_into(
             objects_dir,

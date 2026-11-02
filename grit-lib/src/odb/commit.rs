@@ -85,6 +85,15 @@ impl Odb {
             {
                 return Ok(through_subject(data));
             }
+            let mut header = Vec::new();
+            if crate::pack::read_packed_commit_header_block_into(
+                &self.objects_dir,
+                oid,
+                &mut header,
+            )? && !header.is_empty()
+            {
+                return Ok(through_subject(header));
+            }
         }
         let object = self.read(oid)?;
         expect_commit(oid, object.kind)?;

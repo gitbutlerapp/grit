@@ -1014,9 +1014,64 @@ impl Odb {
 
     #[cold]
     #[inline(never)]
-    fn err_object_not_found(&self, oid: &ObjectId) -> Error {
+    fn try_read_primary_after_negative_revalidate(&self, oid: &ObjectId) -> Result<Option<Object>> {
         self.invalidate_loose_negative_cache(self.objects_dir.as_path());
-        Error::ObjectNotFound(oid.to_hex())
+        let primary = self.primary_writable()?;
+        self.with_primary_read_context(|| primary.read(oid))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn object_not_found_after_primary_revalidate(&self, oid: &ObjectId) -> Result<Object> {
+        if let Some(obj) = self.try_read_primary_after_negative_revalidate(oid)? {
+            return Ok(obj);
+        }
+        Err(Error::ObjectNotFound(oid.to_hex()))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn try_read_primary_info_after_negative_revalidate(
+        &self,
+        oid: &ObjectId,
+    ) -> Result<Option<ObjectInfo>> {
+        self.invalidate_loose_negative_cache(self.objects_dir.as_path());
+        let primary = self.primary_writable()?;
+        self.with_primary_read_context(|| primary.read_info(oid))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn try_read_primary_into_after_negative_revalidate(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
+        self.invalidate_loose_negative_cache(self.objects_dir.as_path());
+        let primary = self.primary_writable()?;
+        self.with_primary_read_context(|| primary.read_into(oid, buf))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn object_info_not_found_after_primary_revalidate(&self, oid: &ObjectId) -> Result<ObjectInfo> {
+        if let Some(info) = self.try_read_primary_info_after_negative_revalidate(oid)? {
+            return Ok(info);
+        }
+        Err(Error::ObjectNotFound(oid.to_hex()))
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn object_kind_not_found_after_primary_revalidate(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<ObjectKind> {
+        if let Some(kind) = self.try_read_primary_into_after_negative_revalidate(oid, buf)? {
+            return Ok(kind);
+        }
+        Err(Error::ObjectNotFound(oid.to_hex()))
     }
 
     #[cfg(test)]
@@ -2532,7 +2587,7 @@ impl Odb {
         let mut lazy_retries = 0u32;
         loop {
             let Some(res) = self.resolve_promisor_miss(oid, lazy_retries)? else {
-                return Err(self.err_object_not_found(oid));
+                return self.object_not_found_after_primary_revalidate(oid);
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::RetryAfterFetch => {
@@ -2542,7 +2597,7 @@ impl Odb {
                     }
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
-                    return Err(self.err_object_not_found(oid));
+                    return self.object_not_found_after_primary_revalidate(oid);
                 }
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
                     return Err(err);
@@ -2828,7 +2883,7 @@ impl Odb {
         let mut lazy_retries = 0u32;
         loop {
             let Some(res) = self.resolve_promisor_miss(oid, lazy_retries)? else {
-                return Err(self.err_object_not_found(oid));
+                return self.object_kind_not_found_after_primary_revalidate(oid, buf);
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::RetryAfterFetch => {
@@ -2838,7 +2893,7 @@ impl Odb {
                     }
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
-                    return Err(self.err_object_not_found(oid));
+                    return self.object_kind_not_found_after_primary_revalidate(oid, buf);
                 }
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
                     return Err(err);
@@ -3026,8 +3081,10 @@ impl Odb {
     /// Like [`Self::read_info`], but does not resolve promisor misses by fetching
     /// from a remote; missing local objects return [`Error::ObjectNotFound`].
     pub(crate) fn read_info_without_fetch(&self, oid: &ObjectId) -> Result<ObjectInfo> {
-        self.try_read_info_once(oid)?
-            .ok_or_else(|| self.err_object_not_found(oid))
+        match self.try_read_info_once(oid)? {
+            Some(info) => Ok(info),
+            None => self.object_info_not_found_after_primary_revalidate(oid),
+        }
     }
 
     /// Kind of `oid` when this database stores it, for checks that must not accept an
@@ -3073,14 +3130,14 @@ impl Odb {
         let mut lazy_retries = 0u32;
         loop {
             let Some(res) = self.resolve_promisor_miss(oid, lazy_retries)? else {
-                return Err(self.err_object_not_found(oid));
+                return self.object_info_not_found_after_primary_revalidate(oid);
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
                     return Err(err);
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
-                    return Err(self.err_object_not_found(oid));
+                    return self.object_info_not_found_after_primary_revalidate(oid);
                 }
                 crate::promisor_fetch::PromisorMissResolution::RetryAfterFetch => {
                     lazy_retries += 1;
@@ -6092,6 +6149,77 @@ mod tests {
             let obj = odb.read(&local_oid).expect("read local loose after warmup");
             assert_eq!(obj.data.as_slice(), fresh);
         });
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn external_loose_write_visible_on_first_read_after_alternate_warmup() {
+        use std::process::{Command, Stdio};
+
+        use crate::pack::clear_pack_cache;
+
+        let upstream = TempDir::new().unwrap();
+        git_in(upstream.path(), &["init", "-q", "-b", "main"]);
+        git_in(upstream.path(), &["config", "user.email", "t@example.com"]);
+        git_in(upstream.path(), &["config", "user.name", "T"]);
+        fs::write(upstream.path().join("seed.txt"), b"upstream seed").unwrap();
+        git_in(upstream.path(), &["add", "seed.txt"]);
+        git_in(upstream.path(), &["commit", "-m", "seed"]);
+        git_in(upstream.path(), &["repack", "-a", "-d"]);
+        let warm_oid = git_rev_parse_oid(upstream.path(), "HEAD");
+
+        let layout = TempDir::new().unwrap();
+        git_in(
+            layout.path(),
+            &[
+                "clone",
+                "-q",
+                "--shared",
+                upstream.path().to_str().unwrap(),
+                "shared",
+            ],
+        );
+        let objects = layout.path().join("shared/.git/objects");
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        odb.with_pack_read_context(|| {
+            odb.read(&warm_oid).expect("warm alternate-packed commit");
+        });
+
+        let payload = b"external loose after alternate warmup\n";
+        let local_oid = odb.hash(ObjectKind::Blob, payload).unwrap();
+        let mut child = Command::new("git")
+            .args(["hash-object", "-w", "--stdin"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .env("GIT_OBJECT_DIRECTORY", &objects)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .spawn()
+            .expect("git hash-object");
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(payload).unwrap();
+        }
+        let out = child.wait_with_output().expect("git wait");
+        assert!(
+            out.status.success(),
+            "git hash-object: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            local_oid.to_hex()
+        );
+
+        let obj = odb
+            .read(&local_oid)
+            .expect("first read after external primary loose write must succeed");
+        assert_eq!(obj.data.as_slice(), payload);
     }
 
     #[test]
