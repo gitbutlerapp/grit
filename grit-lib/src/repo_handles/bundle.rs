@@ -1,12 +1,11 @@
 //! Git bundle create/verify/list/unbundle scoped to a [`Repository`](crate::repo::Repository).
 
-use std::fs::File;
 use std::path::Path;
 
 use crate::bundle::bundle_remote::BundleCreateOptions;
 use crate::bundle::{
-    plan_bundle_create, plan_bundle_unbundle, write_bundle, Bundle, BundleCreatePlan, BundleError,
-    BundleSpec, BundleUnbundlePlan, BundleVerifyReport, UnbundleOutcome, UnbundledRef,
+    plan_bundle_create, plan_bundle_unbundle, Bundle, BundleCreatePlan, BundleError, BundleSpec,
+    BundleUnbundlePlan, BundleVerifyReport, UnbundleOutcome, UnbundledRef,
 };
 use crate::list_limit::Limited;
 use crate::objects::ObjectId;
@@ -80,6 +79,9 @@ impl<'repo> RepositoryBundles<'repo> {
 
     /// Write a bundle to `path` using `spec`.
     ///
+    /// Replaces an existing file at `path` only after the pack stream completes successfully
+    /// (writes to a sibling `*.bundle.part` first). On failure the previous file is unchanged.
+    ///
     /// # Errors
     ///
     /// Returns [`BundleError`] when `spec.include` is empty or pack generation fails.
@@ -102,9 +104,44 @@ impl<'repo> RepositoryBundles<'repo> {
     /// # }
     /// ```
     pub fn create(&self, spec: &BundleSpec, path: &Path) -> std::result::Result<(), BundleError> {
-        let file = File::create(path).map_err(|e| BundleError::Io(e.to_string()))?;
-        let mut out = std::io::BufWriter::new(file);
-        write_bundle(self.repo, spec, &mut out)
+        self.create_with_progress(spec, path, &mut NullProgress, &crate::progress::NeverCancel)?;
+        Ok(())
+    }
+
+    /// Like [`Self::create`], reporting pack enumeration and copy progress through `progress`.
+    ///
+    /// Returns the number of ref tips written to the bundle header.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::create`], plus [`BundleError::Cancelled`].
+    pub fn create_with_progress(
+        &self,
+        spec: &BundleSpec,
+        path: &Path,
+        progress: &mut dyn ProgressSink,
+        cancel: &dyn crate::progress::Cancel,
+    ) -> std::result::Result<usize, BundleError> {
+        crate::bundle::bundle_remote::write_bundle_spec_to_path_with_cancel(
+            self.repo, spec, path, progress, cancel,
+        )
+    }
+
+    /// Write a bundle from CLI-style [`BundleCreateOptions`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-list, ref resolution, and pack failures.
+    pub fn create_with_options(
+        &self,
+        options: &BundleCreateOptions,
+        path: &Path,
+        progress: &mut dyn ProgressSink,
+        cancel: &dyn crate::progress::Cancel,
+    ) -> std::result::Result<usize, BundleError> {
+        let spec = crate::bundle::bundle_remote::resolve_bundle_spec(self.repo, options)
+            .map_err(lib_error_to_bundle_error)?;
+        self.create_with_progress(&spec, path, progress, cancel)
     }
 
     /// Open and verify a bundle against this repository's object format and prerequisites.
@@ -184,6 +221,7 @@ impl<'repo> RepositoryBundles<'repo> {
 fn lib_error_to_bundle_error(err: crate::error::Error) -> BundleError {
     match err {
         crate::error::Error::BundleMissingPrerequisites => BundleError::PrerequisitesNotConnected,
+        crate::error::Error::ObjectNotFound(id) => BundleError::ObjectNotFound(id),
         other => BundleError::Io(other.to_string()),
     }
 }

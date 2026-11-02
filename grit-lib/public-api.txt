@@ -722,8 +722,10 @@ pub fn grit_lib::bundle::bundle_remote::plan_create_with_options(&grit_lib::repo
 pub fn grit_lib::bundle::bundle_remote::resolve_bundle_spec(&grit_lib::repo::Repository, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<grit_lib::bundle::BundleSpec>
 pub fn grit_lib::bundle::bundle_remote::split_revision_specs_for_bundle(&[alloc::string::String]) -> (alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)
 pub fn grit_lib::bundle::bundle_remote::write_bundle_from_rev_specs(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String]) -> grit_lib::error::Result<usize>
+pub fn grit_lib::bundle::bundle_remote::write_bundle_spec_to_path_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<usize, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<usize>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options_with_cancel(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<usize>
+pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options_with_progress(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<usize>
 #[non_exhaustive] pub enum grit_lib::bundle::BundleError
 pub grit_lib::bundle::BundleError::BadSignature
 pub grit_lib::bundle::BundleError::Cancelled
@@ -736,6 +738,7 @@ pub grit_lib::bundle::BundleError::MissingPrerequisites::commits: alloc::vec::Ve
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::bundle_name: &'static str
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::repo_name: &'static str
+pub grit_lib::bundle::BundleError::ObjectNotFound(alloc::string::String)
 pub grit_lib::bundle::BundleError::PrerequisitesNotConnected
 pub grit_lib::bundle::BundleError::UnsupportedCapability(alloc::string::String)
 pub grit_lib::bundle::BundleError::UnsupportedVersion
@@ -1028,7 +1031,7 @@ pub fn grit_lib::bundle::plan_bundle_unbundle(&grit_lib::bundle::Bundle, &grit_l
 pub fn grit_lib::bundle::read_header(&mut dyn alloc::io::buf_read::BufRead) -> core::result::Result<grit_lib::bundle::BundleHeader, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle_header(&mut dyn core::io::write::Write, grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectId, core::option::Option<alloc::string::String>)], &[(grit_lib::objects::ObjectId, alloc::string::String)]) -> core::result::Result<(), grit_lib::bundle::BundleError>
-pub fn grit_lib::bundle::write_bundle_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::write_bundle_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub mod grit_lib::change_id
 pub enum grit_lib::change_id::ChangeIdError
 pub grit_lib::change_id::ChangeIdError::HashCollision
@@ -27108,6 +27111,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RemoveOpti
 pub struct grit_lib::repo_handles::RepositoryBundles<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryBundles<'repo>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create(&self, &grit_lib::bundle::BundleSpec, &std::path::Path) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create_with_options(&self, &grit_lib::bundle::bundle_remote::BundleCreateOptions, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<usize, grit_lib::bundle::BundleError>
+pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create_with_progress(&self, &grit_lib::bundle::BundleSpec, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<usize, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::list_heads(&self, &std::path::Path, core::option::Option<usize>) -> core::result::Result<grit_lib::list_limit::Limited<grit_lib::repo_handles::bundle::BundleHead>, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::open(&self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<grit_lib::bundle::Bundle, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::plan_create(&self, &grit_lib::bundle::BundleSpec) -> core::result::Result<grit_lib::bundle::BundleCreatePlan, grit_lib::bundle::BundleError>

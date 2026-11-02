@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
-use grit_lib::bundle::bundle_remote::{self, BundleCreateOptions};
+use grit_lib::bundle::bundle_remote::BundleCreateOptions;
 use grit_lib::bundle::{Bundle, BundleError, BundleVerifyReport};
 use grit_lib::list_limit::Limited;
 use grit_lib::objects::ObjectId;
@@ -304,9 +304,11 @@ pub fn run_create(
         });
     }
     let interrupt = crate::interrupt::InterruptCancel::install();
-    let refs =
-        bundle_remote::write_bundle_with_options_with_cancel(&repo, &path, &options, &interrupt)
-            .map_err(map_lib_error)?;
+    let mut progress = grit_lib::progress::NullProgress;
+    let refs = repo
+        .bundles()
+        .create_with_options(&options, &path, &mut progress, &interrupt)
+        .map_err(map_bundle_error)?;
     Ok(BundleCreateOutcome {
         path: path.display().to_string(),
         refs,
@@ -450,17 +452,6 @@ fn map_bundle_error(err: BundleError) -> anyhow::Error {
         }),
         other if other.is_cancelled() => grit_lib::error::Error::Cancelled.into(),
         other => anyhow::Error::msg(other.to_string()),
-    }
-}
-
-fn map_lib_error(err: grit_lib::error::Error) -> anyhow::Error {
-    match err {
-        grit_lib::error::Error::BundleMissingPrerequisites => {
-            anyhow::Error::new(MissingPrerequisites {
-                commits: Vec::new(),
-            })
-        }
-        other => other.into(),
     }
 }
 

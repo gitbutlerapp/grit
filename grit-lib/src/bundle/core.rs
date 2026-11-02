@@ -180,6 +180,9 @@ pub enum BundleError {
     /// Underlying I/O failure.
     #[error("{0}")]
     Io(String),
+    /// A named object id is missing from the ODB.
+    #[error("object not found: {0}")]
+    ObjectNotFound(String),
     /// The operation was cancelled before the bundle finished unpacking.
     #[error("operation cancelled")]
     Cancelled,
@@ -728,6 +731,7 @@ fn bundle_header_parts(
 fn map_pack_error(e: Error) -> BundleError {
     match e {
         Error::Cancelled => BundleError::Cancelled,
+        Error::ObjectNotFound(id) => BundleError::ObjectNotFound(id),
         other => BundleError::Io(other.to_string()),
     }
 }
@@ -737,17 +741,45 @@ fn write_bundle_pack(
     spec: &BundleSpec,
     out: &mut dyn Write,
 ) -> std::result::Result<PackStats, BundleError> {
-    write_bundle_pack_with_cancel(repo, spec, out, &crate::progress::NeverCancel)
+    write_bundle_pack_with_cancel(
+        repo,
+        spec,
+        out,
+        &mut NullProgress,
+        &crate::progress::NeverCancel,
+    )
 }
 
 fn write_bundle_pack_with_cancel(
     repo: &Repository,
     spec: &BundleSpec,
     out: &mut dyn Write,
+    progress: &mut dyn ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> std::result::Result<PackStats, BundleError> {
+    use crate::pack_objects::PackProgress;
+
     let stop = crate::progress::CancelSignal::new(cancel);
     let io_err = map_pack_error;
+    let mut copying_started = false;
+    let mut on_pack = |ev: PackProgress| match ev {
+        PackProgress::Enumerated { total } => {
+            progress.start(ProgressPhase::EnumeratingObjects, Some(total as u64));
+            progress.set(total as u64);
+        }
+        PackProgress::PlannedDeltas => {
+            progress.finish();
+            progress.start(ProgressPhase::CopyingObjects, None);
+            copying_started = true;
+        }
+        PackProgress::WroteObject { written, total } => {
+            if !copying_started {
+                progress.start(ProgressPhase::CopyingObjects, Some(total as u64));
+                copying_started = true;
+            }
+            progress.set(written as u64);
+        }
+    };
     let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
     let mut haves: Vec<ObjectId> = spec
         .exclude
@@ -770,7 +802,7 @@ fn write_bundle_pack_with_cancel(
             None,
             &[],
             &pack_opts,
-            &mut |_| {},
+            &mut on_pack,
             out,
             &stop,
         )
@@ -823,7 +855,13 @@ pub fn write_bundle(
     spec: &BundleSpec,
     out: &mut dyn Write,
 ) -> std::result::Result<(), BundleError> {
-    write_bundle_with_cancel(repo, spec, out, &crate::progress::NeverCancel)
+    write_bundle_with_cancel(
+        repo,
+        spec,
+        out,
+        &mut NullProgress,
+        &crate::progress::NeverCancel,
+    )
 }
 
 /// Like [`write_bundle`], but stops pack generation when `cancel` is set.
@@ -835,13 +873,13 @@ pub fn write_bundle_with_cancel(
     repo: &Repository,
     spec: &BundleSpec,
     out: &mut dyn Write,
+    progress: &mut dyn ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> std::result::Result<(), BundleError> {
     if spec.include.is_empty() {
         return Err(BundleError::EmptyRefs);
     }
-    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
-        .map_err(map_pack_error)?;
+    crate::progress::poll_cancel(progress, cancel).map_err(map_pack_error)?;
     let header = bundle_header_parts(repo, spec)?;
     write_header(
         out,
@@ -851,7 +889,7 @@ pub fn write_bundle_with_cancel(
         &header.refs,
     )?;
 
-    write_bundle_pack_with_cancel(repo, spec, out, cancel)?;
+    write_bundle_pack_with_cancel(repo, spec, out, progress, cancel)?;
     Ok(())
 }
 

@@ -1165,6 +1165,86 @@ fn single_pack_idx(dir: &Path) -> std::path::PathBuf {
         .expect("pack index")
 }
 
+#[test]
+fn bundles_create_failure_preserves_existing_bundle_and_object_not_found_error() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (_, c2) = init_repo_with_two_commits(src);
+    let repo = grit_repo(src);
+    let bundle_path = src.join("precious.bundle");
+    repo.bundles()
+        .create(
+            &BundleSpec {
+                include: vec![(c2, "refs/heads/main".to_owned())],
+                ..Default::default()
+            },
+            &bundle_path,
+        )
+        .expect("good bundle");
+    let before = std::fs::read(&bundle_path).expect("read bundle");
+    assert!(before.len() > 256, "expected non-trivial bundle");
+
+    let bad: ObjectId = "1111111111111111111111111111111111111111"
+        .parse()
+        .expect("parse oid");
+    let err = repo
+        .bundles()
+        .create(
+            &BundleSpec {
+                include: vec![(bad, "refs/heads/nope".into())],
+                ..Default::default()
+            },
+            &bundle_path,
+        )
+        .expect_err("missing object");
+    assert!(
+        matches!(err, BundleError::ObjectNotFound(_)),
+        "expected ObjectNotFound, got {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(&bundle_path).expect("read after failure"),
+        before
+    );
+    git_ok(
+        src,
+        &["bundle", "verify", bundle_path.to_str().expect("utf8")],
+    );
+}
+
+#[test]
+fn bundles_create_cancelled_preserves_destination_and_removes_part_file() {
+    use grit_lib::progress::{FlagCancel, NullProgress};
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (_, c2) = init_repo_with_two_commits(src);
+    let repo = grit_repo(src);
+    let bundle_path = src.join("existing.bundle");
+    const SENTINEL: &[u8] = b"pre-existing bundle sentinel\n";
+    std::fs::write(&bundle_path, SENTINEL).expect("seed");
+
+    let flag = FlagCancel::new();
+    flag.cancel();
+    let err = repo
+        .bundles()
+        .create_with_progress(
+            &BundleSpec {
+                include: vec![(c2, "refs/heads/main".to_owned())],
+                ..Default::default()
+            },
+            &bundle_path,
+            &mut NullProgress,
+            &flag,
+        )
+        .expect_err("cancelled");
+    assert!(err.is_cancelled(), "expected cancelled, got {err:?}");
+    assert_eq!(std::fs::read(&bundle_path).expect("sentinel"), SENTINEL);
+    assert!(
+        !bundle_path.with_extension("bundle.part").exists(),
+        "part file left behind"
+    );
+}
+
 fn normalize_bundle_heads(s: &str) -> Vec<String> {
     let mut lines: Vec<String> = s
         .lines()
