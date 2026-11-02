@@ -382,7 +382,8 @@ impl Bundle {
     /// Like [`Self::unbundle`], reporting receive and index-pack progress through `progress`.
     ///
     /// Refuses to ingest the pack when [`Self::verify`] reports missing prerequisites or
-    /// disconnected prerequisite history (same checks as [`fetch_from_bundle_into`]).
+    /// disconnected prerequisite history (same checks as
+    /// [`fetch_from_bundle_with_progress`](crate::bundle::bundle_remote::fetch_from_bundle_with_progress)).
     pub fn unbundle_with_progress(
         &self,
         repo: &Repository,
