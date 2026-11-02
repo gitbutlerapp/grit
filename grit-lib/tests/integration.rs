@@ -2128,6 +2128,8 @@ mod wildmatch_vectors;
 #[cfg(feature = "full-tests")]
 #[path = "windows_symlinks_enabled_git_compat.rs"]
 mod windows_symlinks_enabled_git_compat;
+#[path = "worktree_add_cancel.rs"]
+mod worktree_add_cancel;
 #[cfg(feature = "full-tests")]
 #[path = "worktree_add_options_git_compat.rs"]
 mod worktree_add_options_git_compat;

@@ -12,15 +12,15 @@ use grit_lib::operation::Conflict;
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, HunkSelection};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    abort_rebase, absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_fixup_rewrite,
-    apply_rewrite, continue_rebase, drop as history_drop, fixup, format_hunk_range_header,
-    move_commit, plan_rebase, plan_rebase_check, rebase_run_request, reword_with, skip_rebase,
-    split, squash, staged_fixup_paths, start_rebase, start_rebase_with_exec, undo_last_rewrite,
-    verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec,
-    FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, PreRebase, RebaseCheckPlan,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
-    RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
-    StartRebaseOptions, UnassignedHunk,
+    abort_rebase, absorb, apply_absorb_rewrite_with_cancel, apply_fixup_hunk_selection_with_cancel,
+    apply_fixup_rewrite_with_cancel, apply_rewrite, continue_rebase, drop as history_drop, fixup,
+    format_hunk_range_header, move_commit, plan_rebase, plan_rebase_check, reword_with,
+    skip_rebase, split, squash, staged_fixup_paths, start_rebase, start_rebase_with_exec,
+    undo_last_rewrite_with_cancel, verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy,
+    ExecRunRecord, ExecSpec, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
+    PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
+    RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan, SplitOptions,
+    SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
@@ -841,13 +841,14 @@ pub fn run_move(
     )
     .map_err(on_err)?;
     if !shared.dry_run {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let message = format!("history move: {}", commit_oid.to_short_hex());
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("move", message)?,
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &interrupt,
         )
         .map_err(on_err)?;
     }
@@ -863,13 +864,14 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
     let plan = history_drop(&rewrite.repo, commit_oid, &rewrite.options).map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let message = format!("history drop: {}", rewrite.subject(commit_oid)?);
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("drop", message)?,
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &interrupt,
         )
         .map_err(on_err)?;
     }
@@ -912,13 +914,14 @@ pub fn run_reword(
         .replacement(commit_oid)
         .ok_or_else(|| anyhow::anyhow!("rewritten commit missing from plan"))?;
     if !shared.dry_run {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let message = format!("history reword: {}", rewrite.subject(new_oid)?);
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("reword", message)?,
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &interrupt,
         )
         .map_err(on_err)?;
     }
@@ -956,24 +959,32 @@ pub fn run_fixup(
     )
     .map_err(map_fixup_error)?;
     if !shared.dry_run {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let subject = match plan.replacement(commit_oid) {
             Some(new_oid) => rewrite.subject(new_oid)?,
             None => commit.to_owned(),
         };
         let apply_opts = rewrite.apply_options("fixup", format!("history fixup: {subject}"))?;
         if let Some(selection) = hunk_selection.as_ref() {
-            apply_fixup_hunk_selection(
+            apply_fixup_hunk_selection_with_cancel(
                 &rewrite.repo,
                 &plan,
                 &apply_opts,
                 selection,
                 &pathspec_list,
+                &interrupt,
             )
             .map_err(map_fixup_error)?;
         } else {
             let staged_paths = staged_fixup_paths(&rewrite.repo).map_err(on_err)?;
-            apply_fixup_rewrite(&rewrite.repo, &plan, &apply_opts, &staged_paths)
-                .map_err(on_err)?;
+            apply_fixup_rewrite_with_cancel(
+                &rewrite.repo,
+                &plan,
+                &apply_opts,
+                &staged_paths,
+                &interrupt,
+            )
+            .map_err(on_err)?;
         }
     }
     Ok(HistoryRewriteOutcome::new("fixup", &plan, shared.dry_run))
@@ -1025,6 +1036,7 @@ pub fn run_squash(
     .map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let subject = match plan.commits.first() {
             Some(first) => rewrite.subject(first.new.unwrap_or(first.old))?,
             None => "squash".into(),
@@ -1035,7 +1047,7 @@ pub fn run_squash(
             &plan,
             &rewrite.apply_options("squash", message)?,
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &interrupt,
         )
         .map_err(on_err)?;
     }
@@ -1070,13 +1082,14 @@ pub fn run_split(
     .map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let subject = rewrite.subject(commit_oid)?;
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("split", format!("history split: {subject}"))?,
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &interrupt,
         )
         .map_err(on_err)?;
     }
@@ -1286,6 +1299,7 @@ fn run_rebase_with_exec(
     start: &StartRebaseOptions,
     exec: &[String],
 ) -> Result<RebaseRunOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let spec = ExecSpec {
         commands: exec.to_vec(),
     };
@@ -1296,7 +1310,7 @@ fn run_rebase_with_exec(
         &spec,
         runner.as_ref(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &interrupt,
     ) {
         Ok(RebaseOutcome::Done { .. }) => {
             RebaseCliOutcome::from_rewrite(HistoryRewriteOutcome::up_to_date("rebase", false))
@@ -1371,6 +1385,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     let resume_apply = rewrite.apply_options("rebase", resume_message.into())?;
 
     if opts.continue_rebase || opts.skip {
+        let interrupt = crate::interrupt::InterruptCancel::install();
         let head_oid = resolve_commit(&rewrite.repo, "HEAD", "HEAD")?;
         let resume_opts = StartRebaseOptions {
             request: RebaseRequest {
@@ -1387,14 +1402,14 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                 &rewrite.repo,
                 &resume_opts,
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &interrupt,
             )
         } else {
             skip_rebase(
                 &rewrite.repo,
                 &resume_opts,
                 &mut grit_lib::progress::NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &interrupt,
             )
         };
         let rendered = match outcome {
@@ -1505,11 +1520,12 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
         };
     }
 
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = start_rebase(
         &rewrite.repo,
         &start_opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &interrupt,
     )
     .map_err(|err| map_rebase_session_error(&rewrite.repo, err))?;
     Ok(RebaseRunOutcome::Rebase(map_rebase_outcome(outcome)?))
@@ -1662,7 +1678,10 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryUndoOutcome> {
         record_operation: None,
         hooks: PostOperationHooks::Skip,
     };
-    let outcome = undo_last_rewrite(&rewrite.repo, &apply_opts, shared.dry_run).map_err(on_err)?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
+    let outcome =
+        undo_last_rewrite_with_cancel(&rewrite.repo, &apply_opts, shared.dry_run, &interrupt)
+            .map_err(on_err)?;
     let rewrite = HistoryRewriteOutcome {
         operation: "undo".into(),
         rewritten: Vec::new(),
@@ -1707,10 +1726,12 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
     )
     .map_err(on_err)?;
     if !shared.dry_run && !absorb_plan.plan.commits.is_empty() {
-        apply_absorb_rewrite(
+        let interrupt = crate::interrupt::InterruptCancel::install();
+        apply_absorb_rewrite_with_cancel(
             &rewrite.repo,
             &absorb_plan,
             &rewrite.apply_options("absorb", "history absorb".into())?,
+            &interrupt,
         )
         .map_err(on_err)?;
     }
@@ -1760,6 +1781,7 @@ pub(crate) fn history_error(
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
+        HistoryError::Library(lib) if lib.is_cancelled() => anyhow::Error::new(*lib),
         HistoryError::Library(lib) if matches!(*lib, LibError::Hook(_)) => anyhow::Error::new(*lib),
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
         HistoryError::NothingToReword => {

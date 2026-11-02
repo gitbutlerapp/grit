@@ -9135,12 +9135,14 @@ pub fn grit_lib::maintenance::collect_maintenance_object_roots(&grit_lib::repo::
 pub fn grit_lib::maintenance::drop_large_blobs_enabled(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<bool>
 pub fn grit_lib::maintenance::drop_promised_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 pub fn grit_lib::maintenance::gc(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
+pub fn grit_lib::maintenance::gc_with_cancel(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
 pub fn grit_lib::maintenance::gc_auto(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::AutoGcOutcome>
 pub fn grit_lib::maintenance::offload_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::OffloadOptions) -> grit_lib::error::Result<grit_lib::maintenance::OffloadReport>
 pub fn grit_lib::maintenance::pack_refs(&grit_lib::repo::Repository, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
 pub fn grit_lib::maintenance::prune_loose_objects(&grit_lib::repo::Repository, &grit_lib::maintenance::PruneOptions) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
 pub fn grit_lib::maintenance::repack(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::maintenance::repack_all(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackStats>
+pub fn grit_lib::maintenance::repack_all_with_cancel(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::RepackStats>
 pub fn grit_lib::maintenance::write_commit_graph(&grit_lib::repo::Repository, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
 pub fn grit_lib::maintenance::write_midx(&grit_lib::repo::Repository, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
 pub mod grit_lib::notes
@@ -14937,6 +14939,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::clean::CleanOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::clean::CleanOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::clean::CleanOutcome
 pub fn grit_lib::porcelain::clean::clean_untracked(&grit_lib::repo::Repository, &grit_lib::porcelain::clean::CleanOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::clean::CleanOutcome>
+pub fn grit_lib::porcelain::clean::clean_untracked_with_cancel(&grit_lib::repo::Repository, &grit_lib::porcelain::clean::CleanOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::clean::CleanOutcome>
 pub mod grit_lib::porcelain::commit
 pub enum grit_lib::porcelain::commit::CommitPatchError
 pub grit_lib::porcelain::commit::CommitPatchError::Apply(grit_lib::error::ApplyError)
@@ -28763,8 +28766,11 @@ pub fn grit_lib::revwalk::history::abort_interrupted_rewrite_apply(&grit_lib::re
 pub fn grit_lib::revwalk::history::abort_rebase(&grit_lib::repo::Repository, &grit_lib::ident::Signature) -> core::result::Result<grit_lib::revwalk::history::RebaseAbort, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::absorb(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbOptions) -> core::result::Result<grit_lib::revwalk::history::AbsorbPlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_absorb_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_absorb_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_fixup_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String], &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::commit_message_subject_line(&str) -> alloc::string::String
 pub fn grit_lib::revwalk::history::continue_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
@@ -28798,6 +28804,7 @@ pub fn grit_lib::revwalk::history::staged_fixup_paths(&grit_lib::repo::Repositor
 pub fn grit_lib::revwalk::history::start_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::start_rebase_with_exec(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &grit_lib::revwalk::history::ExecSpec, &dyn grit_lib::command_runner::CommandRunner, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::undo_last_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::ApplyOptions, bool) -> core::result::Result<grit_lib::revwalk::history::UndoOutcome, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::undo_last_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::ApplyOptions, bool, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::UndoOutcome, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::verify_rebase_with_exec(&grit_lib::repo::Repository, &mut grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ExecSpec, &grit_lib::revwalk::history::RewriteOptions, &dyn grit_lib::command_runner::CommandRunner) -> core::result::Result<grit_lib::revwalk::history::ExecReport, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::verify_rewrite_plan(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan) -> core::result::Result<(), grit_lib::revwalk::history::HistoryError>
 pub type grit_lib::revwalk::history::HistoryEdits = alloc::collections::btree::map::BTreeMap<grit_lib::objects::ObjectId, grit_lib::revwalk::history::CommitEdit>
@@ -32370,6 +32377,7 @@ impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeRepair
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeRepair
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeRepair
 pub fn grit_lib::worktree::add_linked_worktree(&grit_lib::repo::Repository, &grit_lib::worktree::AddLinkedWorktreeOptions) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
+pub fn grit_lib::worktree::add_linked_worktree_with_cancel(&grit_lib::repo::Repository, &grit_lib::worktree::AddLinkedWorktreeOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
 pub fn grit_lib::worktree::allocate_worktree_admin_dir(&std::path::Path, &std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::worktree::common_git_dir(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::worktree::copy_filtered_worktree_config(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>

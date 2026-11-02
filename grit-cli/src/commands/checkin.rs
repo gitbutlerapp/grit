@@ -7,7 +7,6 @@ use anyhow::{bail, Result};
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::porcelain::pull::PullError;
-use grit_lib::progress::NeverCancel;
 use grit_lib::remote::snapshot_checkout::{
     branches_with_work, give_change_ids, land_integration, push_for_checkin, same_branch_name,
     suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest, CheckinRule,
@@ -211,13 +210,14 @@ fn check_in(
     gave_change_ids: usize,
     mode: OutputMode,
 ) -> Result<CheckinOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = TerminalProgress::new(mode);
     let pushed = push_for_checkin(
         &co.repo,
         &co.marker,
         branches,
         &mut progress,
-        &NeverCancel,
+        &interrupt,
         Some(&crate::context::http_client_factory()),
     )
     .map_err(|e| match e {

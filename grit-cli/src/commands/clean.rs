@@ -2,7 +2,7 @@
 
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
-use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
+use grit_lib::porcelain::clean::{clean_untracked_with_cancel, CleanOptions, CleanScope};
 use grit_lib::progress::NullProgress;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -97,9 +97,10 @@ pub fn run(
     let dry_run = !force;
 
     let repo = context::discover()?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let resolved = args.resolve(&repo)?;
     let pathspecs = resolved.into_specs();
-    let lib_outcome = clean_untracked(
+    let lib_outcome = clean_untracked_with_cancel(
         &repo,
         &CleanOptions {
             pathspecs,
@@ -110,6 +111,7 @@ pub fn run(
             dry_run,
         },
         &mut NullProgress,
+        &interrupt,
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(CleanOutcome {

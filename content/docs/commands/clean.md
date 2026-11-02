@@ -19,6 +19,8 @@ Removes untracked files (and untracked directories) from the working tree. Track
 
 Without `-f` / `--force`, `grit clean` is a **dry run**: it prints what would be removed and leaves the work tree unchanged. This differs from Git’s `clean.requireForce` error on purpose — previewing is the default so you can see the impact before deleting anything. `--dry-run` is accepted explicitly (and conflicts with `-f`).
 
+While files are being deleted, Ctrl+C (or `SIGTERM` / `SIGHUP` on Unix) stops with `error: operation cancelled` and exit code **130**. Paths removed before the interrupt stay removed; there is no index lock to restore.
+
 Pass `-f` to actually delete the listed paths. Pass `--ignored` to also remove ignored files (similar to `git clean -x`). Pass `--only-ignored` to remove only ignored paths (similar to `git clean -X`); it cannot be combined with `--ignored`.
 
 Use `-e` / `--exclude` (repeatable) to add exclude patterns: matching paths are not removed (like `git clean -e`). Use `--files-only` to skip untracked directories (like `git clean` without `-d`).

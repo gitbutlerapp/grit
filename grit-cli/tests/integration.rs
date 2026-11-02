@@ -503,6 +503,9 @@ mod rebase_conflicts_cli;
 #[cfg(unix)]
 #[path = "rebase_exec_interrupt.rs"]
 mod rebase_exec_interrupt;
+#[cfg(unix)]
+#[path = "rebase_interrupt.rs"]
+mod rebase_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "receive_pack_deny_non_ff.rs"]
 mod receive_pack_deny_non_ff;
@@ -697,6 +700,8 @@ mod worktree_add_prune_flags;
 #[cfg(feature = "full-tests")]
 #[path = "worktree_cli.rs"]
 mod worktree_cli;
+#[path = "worktree_interrupt.rs"]
+mod worktree_interrupt;
 
 /// Fails when a file in `tests/` is neither a module above nor a `[[test]]`
 /// target in Cargo.toml: with `autotests = false` cargo would never build it.

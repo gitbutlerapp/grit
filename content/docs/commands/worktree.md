@@ -36,6 +36,8 @@ Paths in human, `--json`, and `--markdown` output use normal absolute paths (no 
 
 If `<path>` is already registered but its directory was deleted manually, grit refuses the add (same as Git). Use `-f` / `--force` to replace the stale registration, or `grit worktree prune` / `grit worktree remove` to clear it first.
 
+While `grit worktree add` is checking out files, Ctrl+C (or `SIGTERM` / `SIGHUP` on Unix) stops with `error: operation cancelled` and exit code **130**. Grit removes the half-created worktree registration, rolls back a newly created branch, and leaves no stale `index.lock` in the linked admin directory. A second interrupt terminates grit immediately without that cleanup.
+
 `grit worktree remove` deletes the linked worktree's admin directory and, with `-f`, the working tree even when it has local changes.
 
 `grit worktree prune` removes admin directories for linked worktrees whose working tree is missing (skips locked worktrees). Use `--dry-run` to list what would be pruned without deleting registrations.

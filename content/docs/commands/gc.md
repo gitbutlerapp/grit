@@ -25,6 +25,8 @@ grit gc drop-large-blobs [--min-size SIZE] [--older-than DATE] [--dry-run]
 
 Runs Git-compatible maintenance in-process (never shells out to the system `git` binary).
 
+Long-running phases check for Ctrl+C (and `SIGTERM` / `SIGHUP` on Unix). When interrupted before a new pack is published, grit exits with `error: operation cancelled` and code **130** without leaving a partial pack visible to readers.
+
 Bare **`grit gc`** runs, in order:
 
 1. **pack-refs** — merge loose refs into `packed-refs` (or compact reftable), unless `gc.packRefs` is `false`. Empty ref subdirectories are removed; `refs/heads`, `refs/tags`, and `refs/remotes` stay as directories even when empty, like Git.

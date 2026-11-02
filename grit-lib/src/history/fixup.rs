@@ -176,6 +176,25 @@ pub fn apply_fixup_hunk_selection(
     selection: &HunkSelection,
     pathspecs: &[String],
 ) -> Result<AppliedRewrite, HistoryError> {
+    apply_fixup_hunk_selection_with_cancel(
+        repo,
+        plan,
+        apply_opts,
+        selection,
+        pathspecs,
+        &crate::progress::NeverCancel,
+    )
+}
+
+/// Like [`apply_fixup_hunk_selection`], but stops when `cancel` is set.
+pub fn apply_fixup_hunk_selection_with_cancel(
+    repo: &Repository,
+    plan: &RewritePlan,
+    apply_opts: &ApplyOptions,
+    selection: &HunkSelection,
+    pathspecs: &[String],
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<AppliedRewrite, HistoryError> {
     let paths = fixup_selection_paths(repo, selection, pathspecs)?;
     let snapshot = capture_hunk_fixup_apply_snapshot(repo, &paths)?;
     let consumed = match apply_opts.record_operation {
@@ -190,11 +209,11 @@ pub fn apply_fixup_hunk_selection(
         pathspecs,
         diff_opts,
         false,
-        &crate::progress::NeverCancel,
+        cancel,
     ) {
         return Err(err.into());
     }
-    apply_fixup_rewrite_then(repo, plan, apply_opts, &paths, consumed, |repo| {
+    apply_fixup_rewrite_then(repo, plan, apply_opts, &paths, consumed, cancel, |repo| {
         restore_after_hunk_fixup_apply(repo, &snapshot)
     })
     .or_else(|err| {

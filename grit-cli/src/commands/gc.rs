@@ -7,12 +7,12 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 use grit_lib::config::git_date::approx::approxidate_careful_at;
 use grit_lib::maintenance::{
-    auto_gc_needed, drop_promised_blobs, gc, gc_auto, offload_blobs, pack_refs,
-    prune_loose_objects, repack_all, write_commit_graph, write_midx, AutoGcOutcome, AutoGcReason,
-    CommitGraphOptions, DropExpiry, DropPromisedBlobsOptions, DropPromisedBlobsReport,
-    DropPromisedBlobsSkip, GcLock, GcOptions, GcPhaseTimings, GcStats, MidxOptions, OffloadOptions,
-    OffloadPack, OffloadPackRole, OffloadRepo, OffloadReport, PackRefsOptions, PruneOptions,
-    RepackOptions,
+    auto_gc_needed, drop_promised_blobs, gc_auto, gc_with_cancel, offload_blobs, pack_refs,
+    prune_loose_objects, repack_all_with_cancel, write_commit_graph, write_midx, AutoGcOutcome,
+    AutoGcReason, CommitGraphOptions, DropExpiry, DropPromisedBlobsOptions,
+    DropPromisedBlobsReport, DropPromisedBlobsSkip, GcLock, GcOptions, GcPhaseTimings, GcStats,
+    MidxOptions, OffloadOptions, OffloadPack, OffloadPackRole, OffloadRepo, OffloadReport,
+    PackRefsOptions, PruneOptions, RepackOptions,
 };
 use grit_lib::objects::midx::MidxBitmapWriteOutcome;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -1158,7 +1158,9 @@ pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
         progress(mode, "Running garbage collection…");
     }
     let opts = GcOptions::full_run(dry_run, now);
-    let stats = gc(&repo, &opts).map_err(crate::json_error::map_lib_error)?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
+    let stats =
+        gc_with_cancel(&repo, &opts, &interrupt).map_err(crate::json_error::map_lib_error)?;
     let timings = stats.phase_timings;
     let tasks = tasks_from_gc_stats(stats, timings);
     Ok(GcOutcome {
@@ -1319,8 +1321,9 @@ pub fn run_repack(
     let mut opts = RepackOptions::with_dry_run(dry_run);
     opts.write_bitmap = bitmaps;
     opts.force_recompress = force;
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let (stats, elapsed) = timed(mode, "Repacking objects…", || {
-        repack_all(&repo, &opts).map_err(crate::json_error::map_lib_error)
+        repack_all_with_cancel(&repo, &opts, &interrupt).map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,

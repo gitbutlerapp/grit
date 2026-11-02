@@ -19,6 +19,8 @@ grit checkout <url> [<slice>] [-p|--path <path>]... [--into <dir>]
 - With `--path <dir>` (repeatable), it is everything under each path, plus the files directly in every directory above one, the top level included — the same files Git's cone-mode sparse checkout would have.
 - With a `<slice>` name, it is that [slice](../slice/)'s paths (plus any `--path`), and the directory defaults to the slice's name.
 
+Download and materialization honor Ctrl+C (and `SIGTERM` / `SIGHUP` on Unix) with `error: operation cancelled` and exit code **130**; a checkout directory grit created for this run is removed when materialization fails or is cancelled.
+
 The new repository's history is one commit, `Snapshot of <commit>: <subject>`, which stands for the real commit on the server. It is at `origin/<branch>` (which `origin/HEAD` names), and you are on a new **work branch** on top of it, named for your `user.email` and two random words (like `alice/amber-brook`). The server picks the final name: it numbers it (`alice/amber-brook-2`) when it already has that branch or has given the name to another checkout, and never gives a name out twice, even across restarts. There is no local copy of the target branch.
 
 `origin` is the repository URL, set up so that plain `git` and `grit` commands stay with the checkout's snapshots:

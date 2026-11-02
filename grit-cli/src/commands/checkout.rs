@@ -9,7 +9,6 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::short_hex;
-use grit_lib::progress::NeverCancel;
 use grit_lib::remote::resumable::{
     claim_resumable_download, discard_download, download_resumable, ResumableDownloadDest,
 };
@@ -239,12 +238,13 @@ pub fn run(
         ResumableDownloadDest::Shared { dest, lock } => (dest, Some(lock)),
         ResumableDownloadDest::Private(dest) => (dest, None),
     };
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let downloaded = download_resumable(
         http.as_ref(),
         &client.bundle_url(&info.id),
         &bundle,
         &mut progress,
-        &NeverCancel,
+        &interrupt,
     )?;
 
     let existed = dest.exists();
@@ -255,7 +255,7 @@ pub fn run(
         &client.url().repo_url,
         &work,
         &mut progress,
-        &NeverCancel,
+        &interrupt,
     );
     if let Err(e) = made {
         if !existed {

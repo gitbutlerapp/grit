@@ -22,6 +22,8 @@ Git bundles pack refs and objects into a single file. Use them to move history w
 
 When the repository's objects are already packed, `create` copies the existing deltas and whole objects straight from the packs instead of recomputing them, and streams the pack into the file. A bundle of a packed repository is close to a copy of its pack: it takes seconds and its memory is bounded by the pack index, not by the size of the history. Bundles with prerequisites are thin, so an object can be sent as a delta against a prerequisite's blob. Only objects that are not already stored as deltas (for example, loose objects from recent commits) go through a new delta search, as `git bundle create` does; it covers blobs, trees and commits and reads each object only while it is in the search window.
 
+`create` and `unbundle` honor Ctrl+C (and `SIGTERM` / `SIGHUP` on Unix) with `error: operation cancelled` and exit code **130**. A failed or cancelled `create` removes a partial destination file; `unbundle` rolls back before refs are updated.
+
 `verify` checks the pack checksum and, when run inside a repository, confirms prerequisite commits are present and connected to your history.
 
 `list` prints the refs recorded in the bundle header.

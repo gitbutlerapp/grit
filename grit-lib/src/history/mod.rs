@@ -71,7 +71,8 @@ pub use absorb::{
     DEFAULT_ABSORB_STACK_LIMIT,
 };
 pub use apply::{
-    abort_interrupted_rewrite_apply, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite,
+    abort_interrupted_rewrite_apply, apply_absorb_rewrite, apply_absorb_rewrite_with_cancel,
+    apply_fixup_rewrite, apply_fixup_rewrite_with_cancel, apply_rewrite,
     ensure_rewrite_apply_ready, recover_interrupted_rewrite_apply, rewrite_apply_journal_active,
     verify_rewrite_plan, RewriteApplyRecovery,
 };
@@ -79,7 +80,8 @@ pub use drop::drop;
 pub use error::HistoryError;
 pub use exec::{verify_rebase_with_exec, ExecReport, ExecRunRecord, ExecSpec};
 pub use fixup::{
-    apply_fixup_hunk_selection, fixup, fixup_selection_paths, staged_fixup_paths, FixupOptions,
+    apply_fixup_hunk_selection, apply_fixup_hunk_selection_with_cancel, fixup,
+    fixup_selection_paths, staged_fixup_paths, FixupOptions,
 };
 pub use last::{read_history_last, HistoryLastRecord};
 pub use plan::plan_rewrite;
@@ -105,7 +107,7 @@ pub use types::{
     Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
     SplitOptions, UndoOutcome,
 };
-pub use undo::undo_last_rewrite;
+pub use undo::{undo_last_rewrite, undo_last_rewrite_with_cancel};
 
 /// Read and parse commit `oid`.
 ///

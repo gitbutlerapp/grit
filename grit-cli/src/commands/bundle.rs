@@ -303,8 +303,16 @@ pub fn run_create(
             prerequisites,
         });
     }
-    let refs =
-        bundle_remote::write_bundle_with_options(&repo, &path, &options).map_err(map_lib_error)?;
+    let interrupt = crate::interrupt::InterruptCancel::install();
+    grit_lib::progress::poll_cancel(&mut grit_lib::progress::NullProgress, &interrupt)
+        .map_err(map_lib_error)?;
+    let refs = match bundle_remote::write_bundle_with_options(&repo, &path, &options) {
+        Ok(n) => n,
+        Err(e) => {
+            let _ = std::fs::remove_file(&path);
+            return Err(map_lib_error(e));
+        }
+    };
     Ok(BundleCreateOutcome {
         path: path.display().to_string(),
         refs,
@@ -368,13 +376,10 @@ pub fn run_unbundle(path: PathBuf, dry_run: bool) -> Result<BundleUnbundleOutcom
             missing_prerequisites,
         });
     }
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = repo
         .bundles()
-        .unbundle_with_progress(
-            &path,
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
-        )
+        .unbundle_with_progress(&path, &mut grit_lib::progress::NullProgress, &interrupt)
         .map_err(map_bundle_error)?;
     Ok(BundleUnbundleOutcome {
         path: path.display().to_string(),
@@ -446,6 +451,7 @@ fn map_bundle_error(err: BundleError) -> anyhow::Error {
         BundleError::MissingPrerequisite { .. } | BundleError::PrerequisitesNotConnected => {
             anyhow::Error::new(MissingPrerequisites)
         }
+        other if other.is_cancelled() => grit_lib::error::Error::Cancelled.into(),
         other => anyhow::Error::msg(other.to_string()),
     }
 }

@@ -27,6 +27,7 @@ grit history undo [--dry-run]
 
 Shared behavior for every subcommand:
 
+- **Interrupts** — while a rewrite is applying (checkout or ref updates), Ctrl+C (or `SIGTERM` / `SIGHUP` on Unix) stops with `error: operation cancelled` and exit code **130**. Partial work is rolled back and no stale `.git/index.lock` remains. A second interrupt terminates grit without that cleanup.
 - **Conflicts abort** — if replaying a descendant would conflict, nothing is applied (planned objects may already exist in the ODB from planning). The error names the commit that could not be replayed. When that commit is only on another branch that `--update-refs branches` would move (a branch built on top of the edited commit), the error also names that branch and hints at `--update-refs head`, which rewrites only the current branch and leaves the others where they are.
 - **`--dry-run`** — print which refs would move; refs, the index, and the worktree stay unchanged. New commit objects are still written during planning, matching Git’s `git history --dry-run` model. Commit signing is skipped during dry-run planning (no `gpg` / `ssh-keygen` invocation); a full run signs replacement commits when [`commit.gpgsign`](../commit/) is enabled, like [`grit commit`](../commit/).
 - **`--update-refs`** — `branches` (default) updates every local branch whose tip descends from the edited commit, except other branches at the same commit as `HEAD` (a `backup` branch made before the edit keeps the old history); `head` updates only the commit `HEAD` points at.

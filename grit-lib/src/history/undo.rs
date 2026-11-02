@@ -37,6 +37,16 @@ pub fn undo_last_rewrite(
     opts: &ApplyOptions,
     dry_run: bool,
 ) -> Result<UndoOutcome, HistoryError> {
+    undo_last_rewrite_with_cancel(repo, opts, dry_run, &crate::progress::NeverCancel)
+}
+
+/// Like [`undo_last_rewrite`], but stops when `cancel` is set and rolls back partial work.
+pub fn undo_last_rewrite_with_cancel(
+    repo: &Repository,
+    opts: &ApplyOptions,
+    dry_run: bool,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<UndoOutcome, HistoryError> {
     let record = read_history_last(repo)?.ok_or(HistoryError::NoUndoRecord)?;
     verify_record_still_valid(repo, &record)?;
     let work = if repo.is_bare() {
@@ -73,7 +83,7 @@ pub fn undo_last_rewrite(
     apply_opts.record_operation = Some("undo".into());
     apply_opts.reflog_message = "history undo".into();
     apply_opts.hooks = PostOperationHooks::Skip;
-    let applied = apply_undo_rewrite(repo, &plan, &apply_opts, work.as_ref())?;
+    let applied = apply_undo_rewrite(repo, &plan, &apply_opts, work.as_ref(), cancel)?;
     Ok(UndoOutcome {
         ref_updates: applied.ref_updates,
         head: applied.head,

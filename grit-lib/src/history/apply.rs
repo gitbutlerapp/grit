@@ -20,9 +20,8 @@ use crate::porcelain::checkout::{
     CheckoutRollbackRestore, LeadingDirCache,
 };
 use crate::porcelain::switch::{
-    checkout_tree_transition_allow_local, checkout_tree_transition_allow_local_with_preserved,
-    prepare_tree_transition_allow_local, verify_tree_transition_allow_local,
-    TreeTransitionPrepareError, TreeTransitionVerifyError,
+    checkout_tree_transition_allow_local_with_preserved, prepare_tree_transition_allow_local,
+    verify_tree_transition_allow_local, TreeTransitionPrepareError, TreeTransitionVerifyError,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::{poll_cancel, Cancel, NeverCancel, NullProgress, ProgressSink};
@@ -265,6 +264,16 @@ pub fn apply_absorb_rewrite(
     absorb: &AbsorbPlan,
     opts: &ApplyOptions,
 ) -> Result<AppliedRewrite, HistoryError> {
+    apply_absorb_rewrite_with_cancel(repo, absorb, opts, &NeverCancel)
+}
+
+/// Like [`apply_absorb_rewrite`], but stops when `cancel` is set and rolls back partial work.
+pub fn apply_absorb_rewrite_with_cancel(
+    repo: &Repository,
+    absorb: &AbsorbPlan,
+    opts: &ApplyOptions,
+    cancel: &dyn Cancel,
+) -> Result<AppliedRewrite, HistoryError> {
     let staged_paths = staged_absorb_paths(repo)?;
     let prestate = if !repo.is_bare() && !staged_paths.is_empty() {
         Some(FixupApplyPrestate::capture(repo, &staged_paths)?)
@@ -279,6 +288,7 @@ pub fn apply_absorb_rewrite(
         &staged_paths,
         prestate.as_ref(),
         consumed,
+        cancel,
     )
     .or_else(|err| {
         if let Some(pre) = prestate {
@@ -316,6 +326,7 @@ fn apply_absorb_refs_and_worktree(
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
     consumed: Option<Vec<PathState>>,
+    cancel: &dyn Cancel,
 ) -> Result<AppliedRewrite, HistoryError> {
     let plan = &absorb.plan;
     let (old_tree, new_tree) = head_tree_transition(plan);
@@ -331,8 +342,8 @@ fn apply_absorb_refs_and_worktree(
         opts,
         rewrite_journal::RewriteApplyKind::Absorb,
         &mut NullProgress,
-        &NeverCancel,
-        |repo, old_tree, new_tree, _progress, _cancel| {
+        cancel,
+        |repo, old_tree, new_tree, progress, apply_cancel| {
             let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
                 message: "missing old HEAD commit for absorb apply".into(),
             })?;
@@ -344,6 +355,8 @@ fn apply_absorb_refs_and_worktree(
                 absorb,
                 staged_paths,
                 prestate,
+                progress,
+                apply_cancel,
             )?;
             undo_work_after_command(repo, consumed)
         },
@@ -355,6 +368,7 @@ fn apply_absorb_refs_and_worktree(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_absorb_worktree_after_refs(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
@@ -363,17 +377,25 @@ fn apply_absorb_worktree_after_refs(
     absorb: &AbsorbPlan,
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<(), HistoryError> {
     if !staged_paths.is_empty() {
         clear_fixup_staging_after_apply(repo, old_head_commit, staged_paths)?;
         let old_head_tree = commit_tree_for_apply(repo, old_head_commit)?;
         align_worktree_to_head_for_paths(repo, old_head_tree, staged_paths)?;
     }
-    checkout_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: e.to_string(),
-        }
-    })?;
+    let force_preserve = HashSet::new();
+    checkout_tree_transition_allow_local_with_preserved(
+        repo,
+        from_tree,
+        to_tree,
+        &force_preserve,
+        None,
+        progress,
+        cancel,
+    )
+    .map_err(map_checkout_history_error)?;
     if staged_paths.is_empty() {
         return Ok(());
     }
@@ -433,8 +455,19 @@ pub fn apply_fixup_rewrite(
     opts: &ApplyOptions,
     staged_paths: &[String],
 ) -> Result<AppliedRewrite, HistoryError> {
+    apply_fixup_rewrite_with_cancel(repo, plan, opts, staged_paths, &NeverCancel)
+}
+
+/// Like [`apply_fixup_rewrite`], but stops when `cancel` is set and rolls back partial work.
+pub fn apply_fixup_rewrite_with_cancel(
+    repo: &Repository,
+    plan: &RewritePlan,
+    opts: &ApplyOptions,
+    staged_paths: &[String],
+    cancel: &dyn Cancel,
+) -> Result<AppliedRewrite, HistoryError> {
     let consumed = consumed_states_for_undo(repo, opts, staged_paths)?;
-    apply_fixup_rewrite_then(repo, plan, opts, staged_paths, consumed, |_| Ok(()))
+    apply_fixup_rewrite_then(repo, plan, opts, staged_paths, consumed, cancel, |_| Ok(()))
 }
 
 /// [`apply_fixup_rewrite`] with the undo sidecar's pre-command states supplied by the caller and
@@ -447,6 +480,7 @@ pub(crate) fn apply_fixup_rewrite_then(
     opts: &ApplyOptions,
     staged_paths: &[String],
     consumed: Option<Vec<PathState>>,
+    cancel: &dyn Cancel,
     finish: impl FnOnce(&Repository) -> Result<(), HistoryError>,
 ) -> Result<AppliedRewrite, HistoryError> {
     let prestate = if !repo.is_bare() && !staged_paths.is_empty() {
@@ -461,6 +495,7 @@ pub(crate) fn apply_fixup_rewrite_then(
         staged_paths,
         prestate.as_ref(),
         consumed,
+        cancel,
         finish,
     )
     .or_else(|err| {
@@ -762,6 +797,16 @@ impl FixupApplyPrestate {
     }
 }
 
+fn map_checkout_history_error(err: crate::error::Error) -> HistoryError {
+    match err {
+        crate::error::Error::Cancelled => HistoryError::from(err),
+        other => HistoryError::WorktreeApply {
+            message: other.to_string(),
+        },
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn apply_fixup_refs_and_worktree(
     repo: &Repository,
     plan: &RewritePlan,
@@ -769,6 +814,7 @@ fn apply_fixup_refs_and_worktree(
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
     consumed: Option<Vec<PathState>>,
+    cancel: &dyn Cancel,
     finish: impl FnOnce(&Repository) -> Result<(), HistoryError>,
 ) -> Result<AppliedRewrite, HistoryError> {
     let (old_tree, new_tree) = head_tree_transition(plan);
@@ -784,8 +830,8 @@ fn apply_fixup_refs_and_worktree(
         opts,
         rewrite_journal::RewriteApplyKind::Fixup,
         &mut NullProgress,
-        &NeverCancel,
-        |repo, old_tree, new_tree, _progress, _cancel| {
+        cancel,
+        |repo, old_tree, new_tree, progress, apply_cancel| {
             let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
                 message: "missing old HEAD commit for fixup apply".into(),
             })?;
@@ -796,6 +842,8 @@ fn apply_fixup_refs_and_worktree(
                 old_head_commit,
                 staged_paths,
                 prestate,
+                progress,
+                apply_cancel,
             )?;
             finish(repo)?;
             undo_work_after_command(repo, consumed)
@@ -808,6 +856,7 @@ fn apply_fixup_refs_and_worktree(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_fixup_worktree_after_refs(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
@@ -815,6 +864,8 @@ fn apply_fixup_worktree_after_refs(
     old_head_commit: ObjectId,
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<(), HistoryError> {
     if !staged_paths.is_empty() {
         clear_fixup_staging_after_apply(repo, old_head_commit, staged_paths)?;
@@ -838,12 +889,10 @@ fn apply_fixup_worktree_after_refs(
         to_tree,
         &force_preserve,
         None,
-        &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        progress,
+        cancel,
     )
-    .map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
+    .map_err(map_checkout_history_error)?;
     if !staged_paths.is_empty() {
         let head = repo.head_commit()?;
         clear_fixup_staging_after_apply(repo, head, staged_paths)?;
@@ -1066,6 +1115,7 @@ pub(crate) fn apply_undo_rewrite(
     plan: &RewritePlan,
     opts: &ApplyOptions,
     work: Option<&UndoWork>,
+    cancel: &dyn Cancel,
 ) -> Result<AppliedRewrite, HistoryError> {
     verify_live_head_matches_plan(repo, &plan.head)?;
     let before = verify_undo_worktree(repo, plan, work)?;
@@ -1076,17 +1126,10 @@ pub(crate) fn apply_undo_rewrite(
         opts,
         rewrite_journal::RewriteApplyKind::Standard,
         &mut NullProgress,
-        &NeverCancel,
-        |repo, old_tree, new_tree, _progress, _cancel| {
-            let checkout = |repo: &Repository| {
-                apply_head_tree_to_worktree(
-                    repo,
-                    old_tree,
-                    new_tree,
-                    None,
-                    &mut NullProgress,
-                    &NeverCancel,
-                )
+        cancel,
+        |repo, old_tree, new_tree, progress, apply_cancel| {
+            let mut checkout = |repo: &Repository| {
+                apply_head_tree_to_worktree(repo, old_tree, new_tree, None, progress, apply_cancel)
             };
             let Some(work) = work else {
                 checkout(repo)?;

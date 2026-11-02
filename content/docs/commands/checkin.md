@@ -19,6 +19,8 @@ With no branches named, every local branch with commits on top of the snapshot i
 
 A grafted commit has a new tree and new parents, so a signature (`gpgsig`) or merged tag (`mergetag`) it carried no longer holds and is dropped; every other header is kept. A merge commit, such as the one [`grit pull --no-rebase`](../pull/) makes, is grafted onto a three-way merge of its parents' grafts: what the target changed outside your paths since your older snapshot is kept, and inside your paths the merge's own result wins. A file that replaces a directory (or the other way round) checks in like any other change.
 
+The resumable push during check-in can be interrupted with Ctrl+C (or `SIGTERM` / `SIGHUP` on Unix); grit exits with `error: operation cancelled` and code **130** without leaving the server in a half-applied graft state from this command.
+
 Check-ins need write access to the repository.
 
 ### Change ids

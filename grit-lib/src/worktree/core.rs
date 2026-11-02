@@ -17,12 +17,12 @@ use crate::git_path::{absolute_path_for_gitfile_stored_path, path_for_disk_compa
 use crate::hooks::run_post_checkout;
 use crate::porcelain::branch::{resolve_create_tracking, TrackMode};
 use crate::porcelain::branch_error::BranchError;
-use crate::porcelain::checkout::checkout_between_trees;
+use crate::porcelain::checkout::{checkout_between_trees_with_progress, CheckoutOutcome};
 use crate::porcelain::checkout_reflog::{
     create_branch_ref_with_reflog, reset_branch_ref_with_reflog,
 };
 use crate::porcelain::status::{status, StatusOptions};
-use crate::progress::NullProgress;
+use crate::progress::{Cancel, NeverCancel, NullProgress};
 use crate::refs;
 use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
@@ -599,6 +599,23 @@ pub fn add_linked_worktree(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
 ) -> Result<WorktreeEntry> {
+    add_linked_worktree_with_cancel(repo, opts, &NeverCancel)
+}
+
+/// Register and populate a linked worktree, stopping when `cancel` is set.
+///
+/// On cancel or any failure after registration begins, removes the new admin directory,
+/// removes the working tree directory when this call created it, and rolls back a newly
+/// created branch ([`add_linked_worktree`]).
+///
+/// # Errors
+///
+/// Same as [`add_linked_worktree`], plus [`Error::Cancelled`](crate::error::Error::Cancelled).
+pub fn add_linked_worktree_with_cancel(
+    repo: &Repository,
+    opts: &AddLinkedWorktreeOptions,
+    cancel: &dyn Cancel,
+) -> Result<WorktreeEntry> {
     // Like Git, a bare repository can have linked worktrees.
     let common = common_git_dir(repo.git_dir());
 
@@ -635,6 +652,7 @@ pub fn add_linked_worktree(
         .transpose()?;
 
     let mut branch_rollback = None;
+    let mut add_rollback = LinkedWorktreeAddRollback::default();
     let finish = (|| -> Result<WorktreeEntry> {
         if let Some(ref bw) = plan.branch_write {
             let branch_ref = format!("refs/heads/{}", bw.branch_short);
@@ -658,10 +676,12 @@ pub fn add_linked_worktree(
         }
 
         fs::create_dir_all(&admin).map_err(Error::Io)?;
+        add_rollback.set_admin(&admin);
         if let Some(guard) = stale_guard.as_mut() {
             guard.set_new_admin(&admin);
         }
         fs::create_dir_all(&wt_path).map_err(Error::Io)?;
+        add_rollback.track_worktree(&wt_path, worktree_absent_before);
         if let Some(guard) = stale_guard.as_mut() {
             guard.track_replacement_worktree(&wt_path, worktree_absent_before);
         }
@@ -703,7 +723,13 @@ pub fn add_linked_worktree(
 
         if let (false, Some(tree_oid)) = (opts.no_checkout, tree_oid) {
             let linked = repo.open_linked_worktree(&admin, &wt_path)?;
-            checkout_between_trees(&linked, None, &tree_oid)?;
+            let _: CheckoutOutcome = checkout_between_trees_with_progress(
+                &linked,
+                None,
+                &tree_oid,
+                &mut NullProgress,
+                cancel,
+            )?;
         }
 
         linked_worktree_entry(repo, &admin)
@@ -711,6 +737,7 @@ pub fn add_linked_worktree(
 
     match finish {
         Ok(entry) => {
+            add_rollback.commit();
             if let Some(guard) = stale_guard.take() {
                 guard.commit();
             }
@@ -1146,6 +1173,46 @@ struct StaleWorktreeAdminBackup {
     moved_aside: Vec<(PathBuf, PathBuf)>,
     new_admin: Option<PathBuf>,
     replacement_worktree: Option<(PathBuf, bool)>,
+}
+
+/// On failure, remove a linked worktree admin dir and a working tree this add created.
+#[derive(Default)]
+struct LinkedWorktreeAddRollback {
+    admin: Option<PathBuf>,
+    worktree: Option<(PathBuf, bool)>,
+    committed: bool,
+}
+
+impl LinkedWorktreeAddRollback {
+    fn set_admin(&mut self, admin: &Path) {
+        self.admin = Some(admin.to_path_buf());
+    }
+
+    fn track_worktree(&mut self, path: &Path, absent_before: bool) {
+        self.worktree = Some((path.to_path_buf(), absent_before));
+    }
+
+    fn commit(&mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for LinkedWorktreeAddRollback {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        if let Some(admin) = self.admin.take() {
+            let _ = fs::remove_dir_all(admin);
+        }
+        if let Some((wt_path, absent_before)) = self.worktree.take() {
+            if absent_before {
+                let _ = fs::remove_dir_all(&wt_path);
+            } else if wt_path.join(".git").is_file() {
+                let _ = fs::remove_file(wt_path.join(".git"));
+            }
+        }
+    }
 }
 
 impl StaleWorktreeAdminBackup {

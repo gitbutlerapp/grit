@@ -34,7 +34,10 @@ use crate::error::{ConfigError, Error, Result};
 use crate::fsck as repo_fsck;
 use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats, S_IFDIR, S_IFMT};
 use crate::git_date::approx::approxidate_careful_at;
-use crate::index_pack::{install_pack_bytes, install_pack_path, IngestPackOptions};
+use crate::index_pack::{
+    install_pack_bytes, install_pack_bytes_with_progress, install_pack_path,
+    install_pack_path_with_progress, IngestPackOptions,
+};
 use crate::midx::{
     clear_pack_midx_state, midx_version_from_config, midx_write_version,
     write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
@@ -54,6 +57,7 @@ use crate::pack_object_select::{
 };
 use crate::pack_objects::{PackBuildOptions, SerializedDeltaPack};
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
+use crate::progress::{poll_cancel, Cancel, NeverCancel, NullProgress};
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::reflog::{
     expire_reflog_git_with_cache, load_gc_reflog_expire_config, reflog_refs_on_store,
@@ -897,10 +901,15 @@ pub struct GcStats {
 ///
 /// Propagates pack build/install failures, unsupported custom ODB backends, and I/O errors.
 pub fn repack(repo: &Repository, opts: &RepackOptions) -> Result<RepackReport> {
-    Ok(repack_detail(repo, opts)?.report)
+    Ok(repack_detail(repo, opts, &NeverCancel)?.report)
 }
 
-fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail> {
+fn repack_detail(
+    repo: &Repository,
+    opts: &RepackOptions,
+    cancel: &dyn Cancel,
+) -> Result<RepackDetail> {
+    poll_cancel(&mut NullProgress, cancel)?;
     let odb = repo.odb();
     odb.require_files_primary("repack")?;
     let objects_dir = odb
@@ -1014,6 +1023,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     } else {
         packs_holding_available_promises(odb, promised)?
     };
+    poll_cancel(&mut NullProgress, cancel)?;
     let built_pack = if run_incremental {
         let (loose, name_hashes) = named_reachable_loose_objects(odb, &reachable, &roots)?;
         write_staged_repack_pack(
@@ -1049,6 +1059,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     let mut installed_pack = None;
     let pack_trailer_len = 12 + odb.hash_algo().len();
     if pack_bytes_len > pack_trailer_len {
+        poll_cancel(&mut NullProgress, cancel)?;
         clear_pack_midx_state(&pack_dir)?;
 
         let trusted_rows = (!built_pack.index_rows.is_empty()).then_some(built_pack.index_rows);
@@ -1062,10 +1073,23 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             trusted_index_rows: trusted_rows,
             ..IngestPackOptions::default()
         };
+        let mut progress = NullProgress;
         let ingested = if let Some(staging) = built_pack.staging_path.as_ref() {
-            install_pack_path(staging, odb, &ingest_opts)?
+            install_pack_path_with_progress(
+                staging,
+                odb,
+                &ingest_opts,
+                Some(&mut progress),
+                Some(cancel),
+            )?
         } else {
-            install_pack_bytes(built_pack.bytes, odb, &ingest_opts)?
+            install_pack_bytes_with_progress(
+                built_pack.bytes,
+                odb,
+                &ingest_opts,
+                Some(&mut progress),
+                Some(cancel),
+            )?
         };
         report.packs_written = 1;
         report.objects = ingested.object_ids.len();
@@ -1188,6 +1212,15 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
 
 /// Like [`repack`], with legacy [`RepackStats`] fields for the CLI.
 pub fn repack_all(repo: &Repository, opts: &RepackOptions) -> Result<RepackStats> {
+    repack_all_with_cancel(repo, opts, &NeverCancel)
+}
+
+/// Like [`repack_all`], but returns [`Error::Cancelled`] before publishing a new pack.
+pub fn repack_all_with_cancel(
+    repo: &Repository,
+    opts: &RepackOptions,
+    cancel: &dyn Cancel,
+) -> Result<RepackStats> {
     let odb = repo.odb();
     let objects_dir = odb
         .files_objects_dir()
@@ -1201,11 +1234,11 @@ pub fn repack_all(repo: &Repository, opts: &RepackOptions) -> Result<RepackStats
         ..RepackStats::default()
     };
     if opts.dry_run {
-        let count = repack_detail(repo, opts)?.report.objects;
+        let count = repack_detail(repo, opts, cancel)?.report.objects;
         stats.objects_packed = (count > 0).then_some(count);
         return Ok(stats);
     }
-    let detail = repack_detail(repo, opts)?;
+    let detail = repack_detail(repo, opts, cancel)?;
     let report = detail.report;
     stats.objects_packed = (report.packs_written > 0).then_some(report.objects);
     stats.removed_pack_files = report.packs_removed;
@@ -1613,6 +1646,12 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 /// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock, plus failures
 /// from each maintenance step.
 pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
+    gc_with_cancel(repo, opts, &NeverCancel)
+}
+
+/// Like [`gc`], but returns [`Error::Cancelled`] between maintenance phases and before
+/// publishing a new pack.
+pub fn gc_with_cancel(repo: &Repository, opts: &GcOptions, cancel: &dyn Cancel) -> Result<GcStats> {
     repo.odb().require_files_primary("gc")?;
     let now = gc_now_unix(opts.now_unix);
     let _lock = if opts.repack.dry_run {
@@ -1623,7 +1662,7 @@ pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
             GcLockAttempt::Held(holder) => return Err(Error::MaintenanceRunning { holder }),
         }
     };
-    gc_locked(repo, opts, now)
+    gc_locked(repo, opts, now, cancel)
 }
 
 /// Why automatic maintenance is due, as decided by [`auto_gc_needed`].
@@ -1775,7 +1814,7 @@ pub fn gc_auto(repo: &Repository, opts: &GcOptions) -> Result<AutoGcOutcome> {
         run_opts.repack.incremental = true;
         run_opts.repack.write_bitmap = false;
     }
-    let stats = gc_locked(repo, &run_opts, now)?;
+    let stats = gc_locked(repo, &run_opts, now, &NeverCancel)?;
     Ok(AutoGcOutcome::Ran {
         reason,
         stats: Box::new(stats),
@@ -1934,7 +1973,13 @@ fn windows_dns_host_name() -> Option<String> {
     (ok != 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
 }
 
-fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
+fn gc_locked(
+    repo: &Repository,
+    opts: &GcOptions,
+    now: i64,
+    cancel: &dyn Cancel,
+) -> Result<GcStats> {
+    poll_cancel(&mut NullProgress, cancel)?;
     let mut stats = GcStats::default();
     let dry_run = opts.repack.dry_run;
     let _ = crate::porcelain::commit::reap_stale_next_index_files(repo, dry_run)?;
@@ -1947,6 +1992,7 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
         None
     };
     if opts.pack_refs && gc_should_pack_refs(repo, &cfg)? && !dry_run {
+        poll_cancel(&mut NullProgress, cancel)?;
         let start = Instant::now();
         stats.pack_refs = Some(pack_refs(repo, &PackRefsOptions::with_all(true))?);
         stats.phase_timings.pack_refs_ms = duration_ms(start.elapsed());
@@ -1969,8 +2015,9 @@ fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
     if !repack_opts.write_bitmap && !repack_opts.incremental {
         repack_opts.write_bitmap = gc_repack_writes_bitmap(repo, &cfg)?;
     }
+    poll_cancel(&mut NullProgress, cancel)?;
     let repack_start = Instant::now();
-    stats.repack = repack_all(repo, &repack_opts)?;
+    stats.repack = repack_all_with_cancel(repo, &repack_opts, cancel)?;
     let repack_total_ms = duration_ms(repack_start.elapsed());
     stats.phase_timings.prune_ms = stats.repack.unreachable_prune_ms;
     stats.phase_timings.repack_ms = repack_total_ms.saturating_sub(stats.phase_timings.prune_ms);

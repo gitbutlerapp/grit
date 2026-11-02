@@ -20,6 +20,8 @@ Packs local objects reachable from maintenance roots (refs, reflogs, and the ind
 
 Objects already stored in a pack keep their stored form: whole objects are copied byte for byte and deltas are copied with only their base reference rewritten, as long as the base is packed too and the chain stays within `pack.depth`. Only the remaining objects (loose objects, and deltas whose base is dropped) go through a delta search over `pack.window` neighbours, so repacking an already packed repository costs about as much as copying it. With `--force` (like `git repack -adf`) every delta is recomputed, which takes longer but can make a pack written by a weaker packer smaller. Both modes stream object payloads and the new pack instead of holding them in memory.
 
+Ctrl+C (or `SIGTERM` / `SIGHUP` on Unix) during repack stops before the new pack is installed, with `error: operation cancelled` and exit code **130**.
+
 Unreachable objects that lived only in removed packs are written loose first so they are not dropped silently; when [`grit gc`](./gc.md) runs with `gc.pruneExpire`, recently written unreachable objects are kept for the grace window before loose pruning.
 
 In a shallow clone (`grit clone --depth` or `git clone --depth`), the commits listed in `.git/shallow` (in the common Git directory, shared by linked worktrees) are history boundaries, as in Git: their trees are packed, but their parents are neither packed nor required to exist.

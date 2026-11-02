@@ -19,6 +19,8 @@ grit rebase|history rebase … [--check] [-X ours|theirs] [--dry-run] [--exec <c
 
 `grit rebase` replays commits reachable from `HEAD` but not from `<upstream>` onto `<upstream>` (or onto `--onto` when set). It uses the same history engine as [`grit history`](history.md). When every commit replays cleanly, grit writes new commit objects and updates refs in one batch.
 
+During checkout or replay, Ctrl+C (or `SIGTERM` / `SIGHUP` on Unix) stops with `error: operation cancelled` and exit code **130**. Partial ref moves and the worktree are rolled back, and no stale `.git/index.lock` is left behind. A second interrupt exits immediately without cleanup.
+
 Before it replays anything, grit runs the `pre-rebase` hook with the upstream as you typed it (`pre-rebase main`), or the configured upstream's full ref name (`pre-rebase refs/remotes/origin/main`) when you omitted it, as Git does. It runs once there is something to replay and before any commit is replayed, so a refusal comes before a replay conflict on every path (`-X` and `--exec` included): not when the branch is already up to date, and not for `--check`, `--dry-run`, `--continue`, `--skip` or `--abort`. When the hook exits non-zero, the rebase stops with exit **1** and a `hook_failed` error, and nothing changes. `--no-verify` skips it.
 
 ```console

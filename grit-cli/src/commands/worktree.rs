@@ -9,7 +9,7 @@ use grit_lib::refs::check_ref_format::validate_branch_short_name;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
-    add_linked_worktree, list_worktrees, move_linked_worktree, prune_linked_worktrees,
+    add_linked_worktree_with_cancel, list_worktrees, move_linked_worktree, prune_linked_worktrees,
     remove_linked_worktree, resolve_linked_worktree_add_path, resolve_move_destination,
     AddLinkedWorktreeOptions, MoveWorktreeOptions, PrunableReason, PruneWorktreesOptions,
     WorktreeBranch, WorktreeRepairKind,
@@ -227,7 +227,8 @@ pub fn run_add(
     let repo = context::discover()?;
     let relative_to = std::env::current_dir().context("could not read working directory")?;
     let path = resolve_linked_worktree_add_path(&path, &relative_to).map_err(anyhow::Error::new)?;
-    let entry = add_linked_worktree(
+    let interrupt = crate::interrupt::InterruptCancel::install();
+    let entry = add_linked_worktree_with_cancel(
         &repo,
         &AddLinkedWorktreeOptions {
             path,
@@ -240,6 +241,7 @@ pub fn run_add(
             no_checkout,
             track,
         },
+        &interrupt,
     )
     .map_err(anyhow::Error::new)?;
     let (branch_name, head_hex) = head_summary(&entry.head);
