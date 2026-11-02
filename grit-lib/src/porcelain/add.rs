@@ -848,15 +848,16 @@ fn stage_inner_on_index(
         for (path, plan) in worktree_updates {
             scope.poll()?;
             scope.sink().inc(1);
+            let raw_path = storage_bytes(&path);
             if has_unmerged
-                && unmerged_only_paths.contains(path.as_bytes())
+                && unmerged_only_paths.contains(raw_path.as_ref())
                 && opts.mode != StageMode::Update
             {
                 continue;
             }
             if icase_collisions
                 .as_ref()
-                .is_some_and(|map| map.is_auto_stage_loser(path.as_bytes()))
+                .is_some_and(|map| map.is_auto_stage_loser(&raw_path))
             {
                 continue;
             }
@@ -865,8 +866,8 @@ fn stage_inner_on_index(
                     outcome.removed.push(path);
                     continue;
                 }
-                if index.get(path.as_bytes(), 0).is_some() {
-                    index.remove(path.as_bytes());
+                if index.get(&raw_path, 0).is_some() {
+                    index.remove(&raw_path);
                     outcome.removed.push(path);
                 }
                 continue;
@@ -876,7 +877,7 @@ fn stage_inner_on_index(
                 continue;
             }
             if !dry_run {
-                icase_map.remove_alias_of(index, path.as_bytes());
+                icase_map.remove_alias_of(index, &raw_path);
             }
             apply_tracked_stage_plan(
                 repo,
@@ -1268,7 +1269,8 @@ fn apply_tracked_stage_plan(
     executable_hint: StageExecutableHint,
     matches: &impl Fn(&str) -> bool,
 ) -> Result<()> {
-    let abs = work_tree.join(rel_path);
+    let abs = crate::repo_relpath::worktree_abs(work_tree, rel_path);
+    let raw_path = storage_bytes(rel_path);
 
     if plan.gitlink {
         let meta = fs::symlink_metadata(&abs).map_err(|e| {
@@ -1290,7 +1292,7 @@ fn apply_tracked_stage_plan(
     let oid = plan.oid;
     let mode = mode_with_executable_hint(plan.mode, rel_path, executable_hint, matches);
     let mut entry = if let Some(stat) = cached_stat {
-        stat.index_entry(rel_path.as_bytes(), oid, mode)
+        stat.index_entry(&raw_path, oid, mode)
     } else {
         let meta = fs::symlink_metadata(&abs).map_err(|e| {
             Error::Io(std::io::Error::new(
@@ -1298,7 +1300,7 @@ fn apply_tracked_stage_plan(
                 format!("could not read {rel_path}: {e}"),
             ))
         })?;
-        entry_from_metadata(&meta, rel_path.as_bytes(), oid, mode)
+        entry_from_metadata(&meta, &raw_path, oid, mode)
     };
     entry.mode = mode;
     if has_unmerged {

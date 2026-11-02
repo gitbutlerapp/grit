@@ -9,6 +9,40 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Commit previews compare object ids only (2026-11-02)
+
+`commit/dry-run@synth-10k` previews a commit of 100 modified files in a 10,000-file clone (`grit commit --dry-run`, against `git commit --dry-run -a`). Grit took twice as long as Git, and longer than the real commit it previewed (`commit/small@synth-10k`, 16 ms). Two leftovers from when the preview diffed trees with rename detection did the extra work:
+
+- **Every index entry was looked up in the object store.** Before listing files, the preview put the object store in its in-memory mode and checked that each of the 10,000 staged blobs existed, re-hashing any it could not find. A blob staged by the preview is never written, so the 100 modified files were read and hashed a second time, and every other path cost a failed loose-object `stat` plus a pack-index lookup: 9,961 failed `statx` calls per run. Nothing after that step reads blob content, because the file list compares object ids and modes. The step is gone.
+- **The file list flattened the whole parent tree.** It read all 102 trees of `HEAD` and put every path into a map of owned strings, 10,000 allocations to find 100 changes. It now comes from [`diff_index_to_tree`](rustdoc:grit_lib::diff::diff_index_to_tree), which walks the parent tree against the index and skips each directory whose cache-tree entry is still valid, so it reads only the three trees on the changed path (`/`, `data`, `data/d0000`). A root commit lists the index directly. The preview also skips the separate empty-commit check, which ran the same diff a second time; it rejects an empty commit from its own file list with the same error.
+
+That diff pairs and reports paths as lossy UTF-8, while commit file lists use the stored form, which hex-encodes names that are not valid UTF-8. When an index path is not valid UTF-8, or the diff reports a path the lossy form cannot represent, the preview compares raw path bytes against the whole parent tree instead, the old cost. Checking the index paths adds about 1.5% to the preview's instructions on this fixture. Writing a test for that case turned up a staging bug the removed blob check had hidden: dry-run staging handled a modified or deleted tracked file with a non-UTF-8 name under its encoded path, so the preview failed with an I/O error. Staging now decodes the path, and the preview lists those files as the commit does.
+
+Under valgrind the preview runs 51.7 million instructions instead of 165.9 million, and makes 12,611 system calls instead of 22,653. Its heap peaks at 1.7 MB instead of 4.4 MB, with 39,000 allocations instead of 161,000. The rest of its resident set is code and read-only data from the binary: `/usr/bin/time` puts `grit` alone at 10.9 MB instead of 14.0 MB, against Git's 7.9 MB.
+
+Rows from `grit-bench daily` on `dist` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0, page cache dropped before the session. "base" is `d4395a836`. Times are medians of all samples from two alternating rounds (20 runs per round for the target, 15 for the related rows), and peak RSS is the median of the rounds' peaks; the harness runs each command through `sh`, so these peaks are higher than for `grit` alone. Values are **milliseconds / MB**. Reports (first round): `daily-commit-dry-run-6560-before.json` → `daily-commit-dry-run-6560-after.json` and `daily-commit-dry-run-6560-related-before.json` → `daily-commit-dry-run-6560-related-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `commit/dry-run@synth-10k` | 10.73 / 14.6 | 21.32 / 16.6 | **6.84** / **14.1** | 1.99 → 0.64 | 1.14× → 0.96× |
+| `add/dry-run@synth-10k` | 7.14 / 13.2 | 9.09 / 14.7 | 8.98 / 15.0 | 1.27 → 1.26 | 1.11× → 1.13× |
+| `commit/paths@synth-10k` | 20.88 / 16.8 | 20.64 / 20.3 | 21.14 / 20.3 | 0.99 → 1.01 | 1.21× → 1.21× |
+| `commit/small@small` | 4.92 / 12.2 | 4.15 / 11.8 | 4.18 / 11.8 | 0.84 → 0.85 | 0.97× → 0.97× |
+| `commit/small@synth-100k` | 895.07 / 38.1 | 123.84 / 33.4 | 123.25 / 33.4 | 0.14 → 0.14 | 0.88× → 0.88× |
+| `commit/small@synth-10k` | 26.27 / 14.0 | 15.85 / 17.2 | 15.22 / 16.6 | 0.60 → 0.58 | 1.23× → 1.19× |
+| `commit/staged@synth-100k` | 71.36 / 38.3 | 72.20 / 33.2 | 71.48 / 33.1 | 1.01 → 1.00 | 0.87× → 0.86× |
+| `status/clean@synth-10k` | 6.51 / 9.7 | 6.29 / 12.8 | 6.30 / 12.2 | 0.97 → 0.97 | 1.32× → 1.26× |
+| `status/dirty@synth-10k` | 9.97 / 9.8 | 6.51 / 12.8 | 6.61 / 12.8 | 0.65 → 0.66 | 1.32× → 1.32× |
+
+Apart from the preview, a real commit gained one boolean test, and staging decodes each changed tracked path, which borrows the string for UTF-8 names. The other rows moved within noise. Under valgrind, `grit commit -- <100 paths>` (`commit/paths`) runs 160.6–161.1 million instructions on either build, and `commit/small@small` 7.89 million on either build, within 0.1%. Peak RSS of `commit/small@synth-10k` and `status/*@synth-10k` is the largest of their runs and varies by run for either build, as described below.
+
+```bash
+./target/release/grit-bench daily --only commit/dry-run@synth-10k \
+  --min-runs 20 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-commit-dry-run-6560-after.json
+./target/release/grit-bench daily --only commit/paths@synth-10k,commit/small@small,commit/small@synth-100k,commit/small@synth-10k,commit/staged@synth-100k,add/dry-run@synth-10k,status/clean@synth-10k,status/dirty@synth-10k \
+  --min-runs 15 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-commit-dry-run-6560-related-after.json
+```
+
 ## Status code layout by workload set (2026-11-01)
 
 `status/clean@synth-10k` runs `grit status` on a clean 10,000-file clone. Grit took as long as Git but peaked 2 to 6 MB higher. Its heap peaks at only 1.7 MB; most of the rest is the binary's own pages, and on a `release` build `grit status` left 6.9 MB of code and read-only data resident. Three things kept the [hot text layout](benchmarking.md#hot-text-layout) from doing its job, and a fourth cost only the first status after a checkout:
