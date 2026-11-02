@@ -7,10 +7,11 @@ use crate::diff::{DiffEntry, DiffOptions, DiffStat};
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::porcelain::stash::{
-    apply_stash_entry, apply_stash_oid, clear_stashes, create_stash, drop_stash, list_stashes,
-    pop_stash_entry, preview_stash, push_stash, stash_branch, stash_diff, stash_diff_stat,
-    StashApplyOptions, StashApplyOutcome, StashBranchOutcome, StashDiffOptions, StashEntry,
-    StashPreview, StashPushOptions, StashPushResult,
+    apply_stash_entry, apply_stash_oid, apply_stash_reference, clear_stashes, create_stash,
+    drop_stash, list_stashes, parse_stash_reference, pop_stash_entry, pop_stash_reference,
+    preview_stash, push_stash, stash_branch, stash_branch_reference, stash_diff, stash_diff_stat,
+    stash_index_for_oid, StashApplyOptions, StashApplyOutcome, StashBranchOutcome,
+    StashDiffOptions, StashEntry, StashPreview, StashPushOptions, StashPushResult, StashReference,
 };
 use crate::progress::{Cancel, ProgressSink};
 use crate::repo::Repository;
@@ -197,11 +198,62 @@ impl<'repo> RepositoryStash<'repo> {
 
     /// Remove `stash@{index}`, moving `refs/stash` to the next entry (or deleting it).
     ///
+    /// # Returns
+    ///
+    /// The W commit object id of the removed entry (for logging or recovery via
+    /// [`Self::apply_commit`]).
+    ///
     /// # Errors
     ///
     /// Returns [`crate::error::Error::StashNotFound`] when `index` is out of range.
-    pub fn drop(&self, index: usize) -> Result<()> {
+    pub fn drop(&self, index: usize) -> Result<ObjectId> {
         drop_stash(self.repo, index)
+    }
+
+    /// Parse a stash selector (`stash@{{n}}`, decimal index, or commit id).
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`parse_stash_reference`] failures.
+    pub fn parse_reference(&self, spec: Option<&str>) -> Result<StashReference> {
+        parse_stash_reference(self.repo, spec)
+    }
+
+    /// Newest-first index of a stash W commit on `refs/stash`, if present.
+    #[must_use]
+    pub fn index_for_oid(&self, oid: &ObjectId) -> Option<usize> {
+        stash_index_for_oid(self.repo, oid)
+    }
+
+    /// Apply a parsed stash reference without dropping it.
+    pub fn apply_reference(
+        &self,
+        reference: StashReference,
+        options: &StashApplyOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &dyn Cancel,
+    ) -> Result<StashApplyOutcome> {
+        apply_stash_reference(self.repo, reference, options, progress, cancel)
+    }
+
+    /// Pop a parsed stash reference; commit ids must still be on `refs/stash`.
+    pub fn pop_reference(
+        &self,
+        reference: StashReference,
+        options: &StashApplyOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &dyn Cancel,
+    ) -> Result<StashApplyOutcome> {
+        pop_stash_reference(self.repo, reference, options, progress, cancel)
+    }
+
+    /// Create a branch from a parsed stash reference (on- or off-stack).
+    pub fn branch_reference(
+        &self,
+        name: &str,
+        reference: StashReference,
+    ) -> Result<StashBranchOutcome> {
+        stash_branch_reference(self.repo, name, reference)
     }
 
     /// Remove every stash entry, returning how many were removed.

@@ -1666,11 +1666,11 @@ pub fn print_stash_apply_outcome(
     outln!(w, "## Stash apply");
     outln!(w);
     if outcome.conflicts {
-        outln!(
-            w,
-            "- **stash@{{{}}}** · stopped with conflicts",
-            outcome.index
-        );
+        if let Some(n) = outcome.index {
+            outln!(w, "- **stash@{{{n}}}** · stopped with conflicts");
+        } else {
+            outln!(w, "- stash **`{}`** · stopped with conflicts", outcome.oid);
+        }
         for path in &outcome.conflict_paths {
             outln!(w, "  - `{path}`");
         }
@@ -1679,8 +1679,10 @@ pub fn print_stash_apply_outcome(
             w,
             "→ resolve conflicts, then `grit add PATH` to mark them resolved"
         );
+    } else if let Some(n) = outcome.index {
+        outln!(w, "- Applied **stash@{{{n}}}**");
     } else {
-        outln!(w, "- Applied **stash@{{{}}}**", outcome.index);
+        outln!(w, "- Applied stash **`{}`**", outcome.oid);
     }
     Ok(())
 }
@@ -1718,7 +1720,12 @@ pub fn print_stash_drop_outcome(
 ) -> anyhow::Result<()> {
     outln!(w, "## Stash drop");
     outln!(w);
-    outln!(w, "- Dropped **stash@{{{}}}**", outcome.index);
+    outln!(
+        w,
+        "- Dropped **stash@{{{}}}** (`{}`)",
+        outcome.index,
+        outcome.oid
+    );
     Ok(())
 }
 

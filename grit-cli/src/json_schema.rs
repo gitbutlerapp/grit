@@ -64,6 +64,9 @@ const SCHEMA_V2_COMMANDS: &[&str] = &[
     "remote.set-url",
     "remote.show",
     "switch",
+    "stash.apply",
+    "stash.branch",
+    "stash.drop",
     "stash.list",
     "tag",
     "worktree.prune",
@@ -524,6 +527,18 @@ pub fn schema_key_for_doc_example(
         }
         if let Some(obj) = instance.as_object() {
             if obj.len() == 1 && obj.contains_key("index") {
+                return Some("stash.drop".into());
+            }
+            if obj.contains_key("index")
+                && obj.contains_key("oid")
+                && !obj.contains_key("conflicts")
+                && !obj.contains_key("dropped")
+                && !obj.contains_key("branch")
+                && !obj.contains_key("base")
+                && !obj.contains_key("index_restored")
+                && !obj.contains_key("message")
+                && !obj.contains_key("stashed")
+            {
                 return Some("stash.drop".into());
             }
         }

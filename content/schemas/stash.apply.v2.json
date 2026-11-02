@@ -1,0 +1,37 @@
+{
+  "$id": "https://grit-scm.com/schemas/stash.apply/v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit stash apply`.",
+  "properties": {
+    "conflict_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "conflicts": {
+      "type": "boolean"
+    },
+    "index": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "index_restored": {
+      "type": "boolean"
+    },
+    "oid": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "conflicts",
+    "index_restored",
+    "oid"
+  ],
+  "title": "StashApplyOutcome",
+  "type": "object"
+}

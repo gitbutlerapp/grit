@@ -7,7 +7,9 @@ use grit_lib::porcelain::branch_error::BranchError;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
-use grit_lib::stash::{StashApplyOptions, StashDiffOptions, StashPushOptions};
+use grit_lib::stash::{
+    parse_stash_reference, StashApplyOptions, StashDiffOptions, StashPushOptions, StashReference,
+};
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -243,6 +245,62 @@ fn drop_stash_oldest_entry_rechains_reflog_like_git() {
     assert_eq!(
         grit_log, git_log,
         "oldest stash drop must rewrite the reflog like git"
+    );
+}
+
+#[test]
+fn drop_stash_returns_oid_and_apply_commit_recover_after_drop() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f"), "1\n").expect("write");
+    git_cmd(dir.path(), &["add", "f"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+
+    std::fs::write(dir.path().join("f"), "2\n").expect("modify");
+    git_cmd(dir.path(), &["stash", "push", "-m", "important"]);
+
+    let repo = open_grit(dir.path());
+    let git_oid = git_cmd(dir.path(), &["rev-parse", "stash@{0}"])
+        .trim()
+        .to_owned();
+    let dropped = repo.stash().drop(0).expect("drop");
+    assert_eq!(dropped.to_hex(), git_oid);
+
+    let git_dir = tempfile::tempdir().expect("git copy");
+    copy_repo(dir.path(), git_dir.path());
+    git_cmd(git_dir.path(), &["stash", "apply", &git_oid]);
+
+    let grit_dir = tempfile::tempdir().expect("grit copy");
+    copy_repo(dir.path(), grit_dir.path());
+    let grit_repo = open_grit(grit_dir.path());
+    grit_repo
+        .stash()
+        .apply_commit(
+            &dropped,
+            &StashApplyOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("apply dropped oid");
+    assert_eq!(
+        std::fs::read_to_string(grit_dir.path().join("f")).expect("read"),
+        "2\n"
+    );
+    assert_fsck_strict(grit_dir.path());
+}
+
+#[test]
+fn parse_stash_reference_treats_all_decimal_as_index() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let repo = open_grit(dir.path());
+    assert_eq!(
+        parse_stash_reference(&repo, Some("0")).expect("parse"),
+        StashReference::Index(0)
+    );
+    assert_eq!(
+        parse_stash_reference(&repo, Some("stash@{1}")).expect("parse"),
+        StashReference::Index(1)
     );
 }
 

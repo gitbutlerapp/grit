@@ -6143,6 +6143,8 @@ pub grit_lib::error::Error::StashIndexConflict
 pub grit_lib::error::Error::StashIndexWrite(alloc::string::String)
 pub grit_lib::error::Error::StashMissingHead
 pub grit_lib::error::Error::StashNoInitialCommit
+pub grit_lib::error::Error::StashCommitNotOnStack
+pub grit_lib::error::Error::StashCommitNotOnStack::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::StashNotFound
 pub grit_lib::error::Error::StashNotFound::n: usize
 pub grit_lib::error::Error::StashOptionConflict(alloc::string::String)
@@ -16622,7 +16624,8 @@ pub grit_lib::porcelain::stash::StashBranchOutcome::base: grit_lib::objects::Obj
 pub grit_lib::porcelain::stash::StashBranchOutcome::branch: alloc::string::String
 pub grit_lib::porcelain::stash::StashBranchOutcome::conflict_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::stash::StashBranchOutcome::conflicts: bool
-pub grit_lib::porcelain::stash::StashBranchOutcome::index: usize
+pub grit_lib::porcelain::stash::StashBranchOutcome::index: core::option::Option<usize>
+pub grit_lib::porcelain::stash::StashBranchOutcome::stash_oid: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::stash::StashBranchOutcome
 pub fn grit_lib::stash::StashBranchOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::stash::StashBranchOutcome
@@ -16662,6 +16665,11 @@ pub struct grit_lib::porcelain::stash::StashEntry
 pub grit_lib::porcelain::stash::StashEntry::index: usize
 pub grit_lib::porcelain::stash::StashEntry::message: alloc::string::String
 pub grit_lib::porcelain::stash::StashEntry::oid: grit_lib::objects::ObjectId
+pub enum grit_lib::porcelain::stash::StashReference
+pub grit_lib::porcelain::stash::StashReference::Commit
+pub grit_lib::porcelain::stash::StashReference::Index
+pub fn grit_lib::porcelain::stash::parse_stash_reference(&grit_lib::repo::Repository, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::porcelain::stash::StashReference>
+pub fn grit_lib::porcelain::stash::stash_index_for_oid(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> core::option::Option<usize>
 impl core::clone::Clone for grit_lib::stash::StashEntry
 pub fn grit_lib::stash::StashEntry::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::stash::StashEntry
@@ -27017,7 +27025,12 @@ pub fn grit_lib::repo_handles::RepositoryStash<'repo>::clear(&self) -> grit_lib:
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::create(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::diff(&self, usize, &grit_lib::stash::StashDiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::diff_stat(&self, usize, &grit_lib::stash::StashDiffOptions, grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::DiffStat>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::drop(&self, usize) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply_reference(&self, grit_lib::stash::StashReference, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::branch_reference(&self, &str, grit_lib::stash::StashReference) -> grit_lib::error::Result<grit_lib::stash::StashBranchOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::drop(&self, usize) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::index_for_oid(&self, &grit_lib::objects::ObjectId) -> core::option::Option<usize>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::parse_reference(&self, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::stash::StashReference>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop_reference(&self, grit_lib::stash::StashReference, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::list(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop(&self, usize, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::preview(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPreview>>
@@ -30372,7 +30385,8 @@ pub grit_lib::stash::StashBranchOutcome::base: grit_lib::objects::ObjectId
 pub grit_lib::stash::StashBranchOutcome::branch: alloc::string::String
 pub grit_lib::stash::StashBranchOutcome::conflict_paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::stash::StashBranchOutcome::conflicts: bool
-pub grit_lib::stash::StashBranchOutcome::index: usize
+pub grit_lib::stash::StashBranchOutcome::index: core::option::Option<usize>
+pub grit_lib::stash::StashBranchOutcome::stash_oid: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::stash::StashBranchOutcome
 pub fn grit_lib::stash::StashBranchOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::stash::StashBranchOutcome

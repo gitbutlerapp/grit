@@ -463,8 +463,10 @@ pub struct StashBranchOutcome {
     pub branch: String,
     /// Stash base commit (parent 1 of the W commit).
     pub base: ObjectId,
-    /// Stash index that was branched.
-    pub index: usize,
+    /// Stash W commit that was applied.
+    pub stash_oid: ObjectId,
+    /// Stash reflog index when the commit was on `refs/stash`.
+    pub index: Option<usize>,
     /// Whether applying the stash left merge conflicts.
     pub conflicts: bool,
     /// Paths with unmerged index entries when [`Self::conflicts`] is true.
@@ -482,6 +484,59 @@ pub struct StashEntry {
     pub oid: ObjectId,
     /// Reflog message (what `git stash list` prints after the colon).
     pub message: String,
+}
+
+/// How to address a stash entry or a stash-shaped commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StashReference {
+    /// Newest-first reflog index (`stash@{{n}}`).
+    Index(usize),
+    /// A stash W commit, on or off the stack.
+    Commit(ObjectId),
+}
+
+/// Parse a stash selector.
+///
+/// Missing input defaults to index `0`. `stash@{{n}}` and an all-decimal token select an index
+/// (matching Git: an all-digit token is never treated as a short object id). Any other token is
+/// resolved with [`crate::rev_parse::resolve_revision_as_commit`].
+///
+/// # Errors
+///
+/// Invalid index syntax, unknown revision, or ref parse failures.
+pub fn parse_stash_reference(repo: &Repository, spec: Option<&str>) -> Result<StashReference> {
+    let raw = spec.map(str::trim).unwrap_or("0");
+    if raw.is_empty() {
+        return Ok(StashReference::Index(0));
+    }
+    let digits = if let Some(inner) = raw
+        .strip_prefix("stash@{")
+        .and_then(|s| s.strip_suffix('}'))
+    {
+        inner
+    } else {
+        raw
+    };
+    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+        let n = digits
+            .parse::<usize>()
+            .map_err(|source| Error::ReflogInvalidIndex {
+                spec: raw.to_owned(),
+                source,
+            })?;
+        return Ok(StashReference::Index(n));
+    }
+    let oid = crate::rev_parse::resolve_revision_as_commit(repo, raw)?;
+    Ok(StashReference::Commit(oid))
+}
+
+/// Newest-first index of `oid` on `refs/stash`, if present.
+pub fn stash_index_for_oid(repo: &Repository, oid: &ObjectId) -> Option<usize> {
+    list_stashes(repo)
+        .ok()?
+        .into_iter()
+        .find(|e| e.oid == *oid)
+        .map(|e| e.index)
 }
 
 fn head_branch_label(head: &HeadState) -> String {
@@ -1831,12 +1886,9 @@ pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> Result<ObjectId> {
 /// # Errors
 ///
 /// Returns [`Error::StashNotFound`] when `n` is out of range.
-pub(crate) fn drop_stash(repo: &Repository, n: usize) -> Result<()> {
+pub(crate) fn drop_stash(repo: &Repository, n: usize) -> Result<ObjectId> {
+    let oid = stash_oid_at(repo, n)?;
     let store = repo.refs();
-    let entries = read_reflog_on_store(store, STASH_REF)?;
-    if n >= entries.len() {
-        return Err(Error::StashNotFound { n });
-    }
     delete_reflog_entries_rechain_on_store(store, STASH_REF, &[n])?;
     let remaining = read_reflog_on_store(store, STASH_REF)?;
     if let Some(top_entry) = remaining.last() {
@@ -1844,7 +1896,7 @@ pub(crate) fn drop_stash(repo: &Repository, n: usize) -> Result<()> {
     } else {
         delete_ref_on_store(store, STASH_REF)?;
     }
-    Ok(())
+    Ok(oid)
 }
 
 /// Tree diff of stash W against its `HEAD` parent (`stash show` without `--index`).
@@ -2013,10 +2065,119 @@ pub(crate) fn stash_branch(repo: &Repository, name: &str, n: usize) -> Result<St
     Ok(StashBranchOutcome {
         branch: name.to_owned(),
         base,
-        index: n,
+        stash_oid,
+        index: Some(n),
         conflicts: applied.has_conflicts(),
         conflict_paths: applied.conflicts.into_iter().map(|c| c.path).collect(),
     })
+}
+
+fn stash_branch_from_commit(
+    repo: &Repository,
+    name: &str,
+    stash_oid: ObjectId,
+) -> Result<StashBranchOutcome> {
+    validate_branch_short_name(name)
+        .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
+    let branch_ref = format!("refs/heads/{name}");
+    if repo.resolve_ref_oid(&branch_ref).is_ok() {
+        return Err(BranchError::AlreadyExists {
+            name: name.to_owned(),
+        }
+        .into());
+    }
+    if repo.work_tree().is_none() {
+        return Err(Error::StashBareRepository);
+    }
+    let stash_commit = repo.odb().read_commit(&stash_oid)?;
+    let base = *stash_commit
+        .parents
+        .first()
+        .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
+
+    switch_repository(
+        repo,
+        &SwitchOptions {
+            mode: SwitchMode::Create {
+                branch: name.to_owned(),
+                start_oid: base,
+                create_source_label: stash_oid.to_short_hex(),
+                track_upstream: None,
+            },
+            dry_run: false,
+            hooks: crate::hooks::PostOperationHooks::Run,
+        },
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )?;
+
+    let applied = apply_stash_oid(
+        repo,
+        &stash_oid,
+        &StashApplyOptions {
+            restore_index: true,
+            ..Default::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )?;
+    Ok(StashBranchOutcome {
+        branch: name.to_owned(),
+        base,
+        stash_oid,
+        index: None,
+        conflicts: applied.has_conflicts(),
+        conflict_paths: applied.conflicts.into_iter().map(|c| c.path).collect(),
+    })
+}
+
+/// Apply a parsed stash reference without dropping it.
+pub(crate) fn apply_stash_reference(
+    repo: &Repository,
+    reference: StashReference,
+    options: &StashApplyOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<StashApplyOutcome> {
+    match reference {
+        StashReference::Index(n) => apply_stash_entry(repo, n, options, progress, cancel),
+        StashReference::Commit(oid) => apply_stash_oid(repo, &oid, options, progress, cancel),
+    }
+}
+
+/// Pop a parsed stash reference; commit ids must still be on `refs/stash`.
+pub(crate) fn pop_stash_reference(
+    repo: &Repository,
+    reference: StashReference,
+    options: &StashApplyOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<StashApplyOutcome> {
+    let index = match reference {
+        StashReference::Index(n) => n,
+        StashReference::Commit(oid) => {
+            stash_index_for_oid(repo, &oid).ok_or(Error::StashCommitNotOnStack { oid })?
+        }
+    };
+    pop_stash_entry(repo, index, options, progress, cancel)
+}
+
+/// Branch from a parsed stash reference (on- or off-stack).
+pub(crate) fn stash_branch_reference(
+    repo: &Repository,
+    name: &str,
+    reference: StashReference,
+) -> Result<StashBranchOutcome> {
+    match reference {
+        StashReference::Index(n) => stash_branch(repo, name, n),
+        StashReference::Commit(oid) => {
+            if let Some(n) = stash_index_for_oid(repo, &oid) {
+                stash_branch(repo, name, n)
+            } else {
+                stash_branch_from_commit(repo, name, oid)
+            }
+        }
+    }
 }
 
 /// Delete `refs/stash` and its reflog, removing every stash entry.
@@ -3356,7 +3517,8 @@ mod coverage_tests {
         assert_eq!(listed[0].oid, oid);
         let diffs = stash_diff(&repo, 0, &StashDiffOptions::default()).expect("diff");
         assert!(!diffs.is_empty());
-        drop_stash(&repo, 0).expect("drop");
+        let dropped = drop_stash(&repo, 0).expect("drop");
+        assert_eq!(dropped, oid);
         assert!(list_stashes(&repo).expect("list").is_empty());
     }
 

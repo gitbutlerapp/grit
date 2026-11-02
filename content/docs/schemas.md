@@ -97,13 +97,13 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `show` | [v1](/schemas/show/v1.json) |
 | `skill` | [v1](/schemas/skill/v1.json) |
 | `stash` | [v1](/schemas/stash/v1.json) |
-| `stash.apply` | [v1](/schemas/stash.apply/v1.json) |
-| `stash.drop` | [v1](/schemas/stash.drop/v1.json) |
+| `stash.apply` | [v2](/schemas/stash.apply/v2.json), [v1](/schemas/stash.apply/v1.json) |
+| `stash.branch` | [v2](/schemas/stash.branch/v2.json), [v1](/schemas/stash.branch/v1.json) |
+| `stash.drop` | [v2](/schemas/stash.drop/v2.json), [v1](/schemas/stash.drop/v1.json) |
 | `stash.list` | [v2](/schemas/stash.list/v2.json), [v1](/schemas/stash.list/v1.json) |
 | `stash.pop` | [v1](/schemas/stash.pop/v1.json) |
 | `stash.push` | [v1](/schemas/stash.push/v1.json) |
 | `stash.show` | [v1](/schemas/stash.show/v1.json) |
-| `stash.branch` | [v1](/schemas/stash.branch/v1.json) |
 | `stash.clear` | [v1](/schemas/stash.clear/v1.json) |
 | `status` | [v1](/schemas/status/v1.json) |
 | `switch` | [v2](/schemas/switch/v2.json), [v1](/schemas/switch/v1.json) |

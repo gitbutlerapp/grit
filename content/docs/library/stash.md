@@ -3,7 +3,7 @@ title: Stash
 summary: Stash stack read/write through RepositoryStash, with option and result types in porcelain::stash.
 ---
 
-The stash stack is Git-compatible ref and commit machinery. There is one API for it: `Repository::stash` returns a [`RepositoryStash`](rustdoc:grit_lib::repo_handles::RepositoryStash) handle with `list`, `push`, `preview`, `create`, `apply`, `apply_commit`, `pop`, `drop`, `clear`, `diff` and `branch`. The option and result types live in [`porcelain::stash`](rustdoc:grit_lib::porcelain::stash) (also re-exported as [`stash`](rustdoc:grit_lib::stash)). Entries are addressed by their newest-first index (`0` is `stash@{0}`), and the handle works on the repository's own work tree, so there is no separate work-tree argument.
+The stash stack is Git-compatible ref and commit machinery. There is one API for it: `Repository::stash` returns a [`RepositoryStash`](rustdoc:grit_lib::repo_handles::RepositoryStash) handle with `list`, `push`, `preview`, `create`, `apply`, `apply_commit`, `pop`, `drop`, `clear`, `diff` and `branch`. The option and result types live in [`porcelain::stash`](rustdoc:grit_lib::porcelain::stash) (also re-exported as [`stash`](rustdoc:grit_lib::stash)). Entries are addressed by their newest-first index (`0` is `stash@{0}`), and the handle works on the repository's own work tree, so there is no separate work-tree argument. [`parse_stash_reference`](rustdoc:grit_lib::stash::parse_stash_reference) and [`StashReference`](rustdoc:grit_lib::stash::StashReference) parse the same selectors as the CLI (`stash@{{n}}`, an all-decimal index, or any other revision as a commit id). `apply_reference`, `pop_reference`, and `branch_reference` take a parsed reference; `drop` returns the removed W commit id.
 
 ## Push and list
 
@@ -15,7 +15,7 @@ The stash stack is Git-compatible ref and commit machinery. There is one API for
 
 `RepositoryStash::apply` applies `stash@{n}` and keeps the entry. `RepositoryStash::pop` applies it and drops it only when it applied cleanly. Both take one [`StashApplyOptions`](rustdoc:grit_lib::porcelain::stash::StashApplyOptions) (`restore_index` restores the stashed index, like `git stash apply --index`; `overwrite_identical_untracked` skips untracked collisions when on-disk bytes already match the stashed copy) and return a [`StashApplyOutcome`](rustdoc:grit_lib::porcelain::stash::StashApplyOutcome) whose `conflicts` lists each path left with conflict stages in the index as an [`operation::Conflict`](rustdoc:grit_lib::operation::Conflict), the same paths `git ls-files -u` shows afterwards, with the same [`ConflictKind`](rustdoc:grit_lib::operation::ConflictKind) `status` reports for them. `has_conflicts()` is true exactly when a pop kept the entry. `RepositoryStash::apply_commit` applies any stash-shaped commit, such as one built by `RepositoryStash::create`, without touching `refs/stash`. An index past the end of the stack is [`Error::StashNotFound`](rustdoc:grit_lib::error::Error::StashNotFound).
 
-Dropping an entry rewrites the `refs/stash` reflog without adding a new entry, so `drop`, `pop` and `branch` take no identity.
+Dropping an entry rewrites the `refs/stash` reflog without adding a new entry, so `drop`, `pop` and `branch` take no identity. `drop` returns that entry's W commit id so embedders can log it or recover with `apply_commit`.
 
 ```rust
 use grit_lib::porcelain::stash::StashApplyOptions;
