@@ -31,7 +31,6 @@ use std::path::Path;
 
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
-use crate::diagnostics::Warning;
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_merge, PostOperationHooks};
 use crate::ident::{parse_signature_times, Signature};
@@ -67,8 +66,11 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::refs;
-use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
-use crate::refs::update_detached_head_for_commit_on_store;
+use crate::refs::store::RawRef;
+use crate::refs::{
+    update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
+    BranchCommitRefUpdate,
+};
 use crate::repo::Repository;
 use crate::rev_parse_error::RevParseError;
 use crate::state::{
@@ -2130,17 +2132,13 @@ pub(crate) fn ensure_branch_tip(
 }
 
 /// Point the checked-out branch `branch_ref` from `expected_old` (`None`: unborn) at `new`
-/// with a compare-and-swap through the repository's ref store, then append branch and `HEAD`
-/// reflog lines (per `core.logAllRefUpdates`) stamped with the repository's committer identity.
-///
-/// The reflog lines are appended rather than written in the ref transaction, because the
-/// files store reloads and rewrites a ref's whole reflog when a transaction logs to it. Once
-/// the ref has moved the operation has happened, so a failed append is reported as
-/// [`Warning::ReflogNotWritten`] on the repository's diagnostics sink instead of an error.
+/// with a compare-and-swap through the repository's ref store, recording branch and `HEAD`
+/// reflog lines (per `core.logAllRefUpdates`) in the same transaction as the branch move.
 ///
 /// # Errors
 ///
-/// Config load and compare-and-swap failures, all before the ref changes.
+/// Config load, compare-and-swap, and reflog failures; the branch tip is not advanced when
+/// logging is enabled and a reflog entry cannot be written.
 pub(crate) fn update_checked_out_branch(
     repo: &Repository,
     branch_ref: &str,
@@ -2151,36 +2149,17 @@ pub(crate) fn update_checked_out_branch(
     let config = repo.config()?;
     let identity =
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
-    refs::commit_ref_update_on_store(
+    update_branch_for_commit_on_store(
         repo.refs(),
-        RefUpdate {
-            name: branch_ref.to_owned(),
-            new_value: Some(RawRef::Direct(new)),
-            expected: expected_old.map_or(Expected::Missing, Expected::Oid),
-            reflog: None,
-            flags: RefUpdateFlags::default(),
+        &BranchCommitRefUpdate {
+            branch_ref,
+            expected_old,
+            new_oid: new,
+            identity: &identity,
+            reflog_message: reason,
         },
-    )?;
-    let old = expected_old.unwrap_or_else(crate::diff::zero_oid);
-    for name in [branch_ref, "HEAD"] {
-        let autocreate = refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), name);
-        if let Err(err) = refs::append_reflog_on_store(
-            repo.refs(),
-            name,
-            &old,
-            &new,
-            &identity,
-            reason,
-            autocreate,
-            &config,
-        ) {
-            repo.diagnostics().warn(Warning::ReflogNotWritten {
-                refname: name.to_owned(),
-                detail: err.to_string(),
-            });
-        }
-    }
-    Ok(())
+        config.as_ref(),
+    )
 }
 
 #[cfg(test)]

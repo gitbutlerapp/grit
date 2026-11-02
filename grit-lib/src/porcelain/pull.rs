@@ -1577,33 +1577,26 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
-    fn reflog_failure_after_ref_update_is_a_warning() {
+    fn reflog_failure_aborts_branch_update() {
         let tmp = TempDir::new().expect("tempdir");
         let (origin, clone) = origin_and_clone(&tmp);
-        let tip = commit(&origin, "b.txt", "two");
+        let _tip = commit(&origin, "b.txt", "two");
+        let before = git(&clone, &["rev-parse", "main"]);
         let branch_log = clone.join(".git/logs/refs/heads/main");
         std::fs::remove_file(&branch_log).expect("remove branch reflog");
         std::fs::create_dir(&branch_log).expect("replace reflog with directory");
 
-        let mut repo = open(&clone);
-        let sink = std::sync::Arc::new(crate::diagnostics::CollectingDiagnostics::new());
-        repo.set_diagnostics(sink.clone());
-        let outcome = pull(
+        let repo = open(&clone);
+        let err = pull(
             &repo,
             &pull_options(&repo),
             &mut NoProgress,
             &NeverCancel,
             None,
         )
-        .expect("pull completes");
-        assert_eq!(outcome.result, PullResult::FastForward);
-        assert_eq!(outcome.oid, Some(tip));
-        assert_eq!(git(&clone, &["rev-parse", "main"]), tip.to_hex());
-        assert!(sink.warnings().iter().any(|warning| matches!(
-            warning,
-            crate::diagnostics::Warning::ReflogNotWritten { refname, .. }
-                if refname == "refs/heads/main"
-        )));
+        .expect_err("pull fails when branch reflog cannot be written");
+        assert!(matches!(err, PullError::Repository(_)), "{err:?}");
+        assert_eq!(git(&clone, &["rev-parse", "main"]), before);
     }
 
     /// A clone whose `main` has three commits appending to `a.txt`, and an upstream commit
