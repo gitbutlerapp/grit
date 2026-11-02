@@ -643,6 +643,7 @@ fn stash_worktree_diff_opts(
     Ok(DiffIndexToWorktreeOptions {
         index_mtime,
         ignore_submodule_untracked: true,
+        simplify_gitlinks: true,
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
         config: repo.config().ok(),
         worktree_rules: Some(rules_arc),

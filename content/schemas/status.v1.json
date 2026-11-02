@@ -17,6 +17,17 @@
         },
         "status": {
           "$ref": "#/definitions/ChangeStatus"
+        },
+        "submodule": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubmoduleChangeJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present for gitlink worktree changes (`160000`)."
         }
       },
       "required": [
@@ -494,6 +505,26 @@
       },
       "required": [
         "ref"
+      ],
+      "type": "object"
+    },
+    "SubmoduleChangeJson": {
+      "description": "Submodule detail on a gitlink change in status/diff JSON output.",
+      "properties": {
+        "modified": {
+          "type": "boolean"
+        },
+        "new_commits": {
+          "type": "boolean"
+        },
+        "untracked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "modified",
+        "new_commits",
+        "untracked"
       ],
       "type": "object"
     },

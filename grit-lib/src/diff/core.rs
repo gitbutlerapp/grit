@@ -2785,6 +2785,18 @@ pub enum DiffStatus {
     Unmerged,
 }
 
+/// Unstaged status letter for a worktree diff entry (gitlink `m` vs `M` for submodules).
+#[must_use]
+pub fn gitlink_unstaged_status_letter(entry: &DiffEntry) -> char {
+    if entry.old_mode.is_gitlink() && entry.status == DiffStatus::Modified {
+        if entry.new_oid.is_zero() {
+            return 'm';
+        }
+        return 'M';
+    }
+    entry.status.letter()
+}
+
 impl DiffStatus {
     /// Single-character status letter used in raw diff output.
     #[must_use]
@@ -6130,6 +6142,7 @@ fn worktree_diff_pass1_index_entry(
     work_tree: &Path,
     ie: &IndexEntry,
     path_str_ref: &str,
+    config: &ConfigSet,
     simplify_gitlinks: bool,
     ignore_submodule_untracked: bool,
     error_on_broken_gitlinks: bool,
@@ -6235,6 +6248,11 @@ fn worktree_diff_pass1_index_entry(
         let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
         if ignore_submodule_untracked {
             flags.untracked = false;
+        }
+        let ignore =
+            crate::submodule_ignore::submodule_ignore_for_path(config, work_tree, path_str_ref);
+        if crate::submodule_ignore::gitlink_worktree_change_suppressed(ignore, ref_matches, flags) {
+            return Ok(());
         }
         let inner_dirty = flags.modified || flags.untracked;
         if !ref_matches || inner_dirty {
@@ -6469,6 +6487,7 @@ fn diff_index_to_worktree_inner(
                 work_tree,
                 ie,
                 path.as_str(),
+                &config,
                 simplify_gitlinks,
                 ignore_submodule_untracked,
                 error_on_broken_gitlinks,
@@ -6503,6 +6522,7 @@ fn diff_index_to_worktree_inner(
                 work_tree,
                 ie,
                 &path_stored,
+                &config,
                 simplify_gitlinks,
                 ignore_submodule_untracked,
                 error_on_broken_gitlinks,
@@ -9139,6 +9159,18 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                     // Default tree↔worktree diff matches Git: untracked-only paths inside a
                     // checked-out submodule do not make the gitlink differ (see `git diff <tree>`).
                     let sub_flags = submodule_porcelain_flags(work_tree, path, te.oid);
+                    let ignore = crate::submodule_ignore::submodule_ignore_for_path(
+                        &config, work_tree, path,
+                    );
+                    if index_matches_tree
+                        && crate::submodule_ignore::gitlink_worktree_change_suppressed(
+                            ignore,
+                            ref_matches,
+                            sub_flags,
+                        )
+                    {
+                        continue;
+                    }
                     let dirty_while_aligned =
                         index_matches_tree && ref_matches && sub_flags.modified;
                     if !ref_matches || dirty_while_aligned {

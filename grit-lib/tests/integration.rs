@@ -1979,6 +1979,9 @@ mod status_unreadable_tracked_file_2107;
 mod structured_diff_git_compat;
 #[path = "submodule_gitdir_sweep.rs"]
 mod submodule_gitdir_sweep;
+#[cfg(feature = "full-tests")]
+#[path = "submodule_ignore_git_compat.rs"]
+mod submodule_ignore_git_compat;
 #[path = "supporting_modules_sweep.rs"]
 mod supporting_modules_sweep;
 #[path = "supporting_public_fn_coverage.rs"]

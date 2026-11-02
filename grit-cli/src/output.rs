@@ -20,6 +20,7 @@ use grit_lib::diff::{DiffEntry, DiffStatus};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::{ErrorKind, IsTerminal, Write};
+use std::path::Path;
 use time::OffsetDateTime;
 
 use crate::cli_messages::human_error_message;
@@ -388,6 +389,14 @@ pub struct CommitJson {
     pub change_id_stored: bool,
 }
 
+/// Submodule detail on a gitlink change in status/diff JSON output.
+#[derive(Serialize, JsonSchema)]
+pub struct SubmoduleChangeJson {
+    pub new_commits: bool,
+    pub modified: bool,
+    pub untracked: bool,
+}
+
 /// A single worktree/index change in JSON output.
 #[derive(Serialize, JsonSchema)]
 pub struct ChangeJson {
@@ -396,6 +405,9 @@ pub struct ChangeJson {
     /// Previous path for renames and copies (`null` when not applicable).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub old_path: Option<String>,
+    /// Present for gitlink worktree changes (`160000`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submodule: Option<SubmoduleChangeJson>,
 }
 
 /// Machine-readable diff change status (`--json` / `--markdown` contract).
@@ -446,15 +458,34 @@ impl From<&DiffStatus> for ChangeStatus {
 }
 
 /// Serialize a [`DiffEntry`] as a [`ChangeJson`].
+#[allow(dead_code)] // thin wrapper kept for callers that do not have a work tree path
 pub fn change_json(entry: &DiffEntry) -> ChangeJson {
+    change_json_with_worktree(entry, None)
+}
+
+/// Like [`change_json`], with optional superproject work tree for gitlink submodule detail.
+pub fn change_json_with_worktree(entry: &DiffEntry, work_tree: Option<&Path>) -> ChangeJson {
     let old_path = match entry.status {
         DiffStatus::Renamed | DiffStatus::Copied => entry.old_path.clone(),
         _ => None,
     };
+    let submodule = work_tree.and_then(|wt| {
+        if !entry.old_mode.is_gitlink() || entry.status != DiffStatus::Modified {
+            return None;
+        }
+        let path = entry_path(entry);
+        let flags = grit_lib::diff::submodule_porcelain_flags(wt, path, entry.old_oid);
+        Some(SubmoduleChangeJson {
+            new_commits: flags.new_commits,
+            modified: flags.modified,
+            untracked: flags.untracked,
+        })
+    });
     ChangeJson {
         path: entry_path(entry).to_owned(),
         status: entry.status.into(),
         old_path,
+        submodule,
     }
 }
 

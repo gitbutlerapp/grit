@@ -26,7 +26,8 @@ use crate::context::{self, CommitSummary};
 use crate::json_error::LockHolderJson;
 use crate::markdown;
 use crate::output::{
-    change_json, outln, ChangeJson, CommitJson, HumanRender, MarkdownRender, RenderContext,
+    change_json_with_worktree, outln, ChangeJson, CommitJson, HumanRender, MarkdownRender,
+    RenderContext,
 };
 use crate::pathspec_args::PathspecArgs;
 use crate::ui::{self, PathDisplayOptions};
@@ -1153,8 +1154,17 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         crate::commits_json::CommitJsonLoader::for_listed_commits().load(&repo, &ahead_oids, now)?
     };
 
-    let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
-    let unstaged: Vec<ChangeJson> = model.unstaged.iter().map(change_json).collect();
+    let work_tree = repo.work_tree();
+    let staged: Vec<ChangeJson> = model
+        .staged
+        .iter()
+        .map(|e| change_json_with_worktree(e, work_tree))
+        .collect();
+    let unstaged: Vec<ChangeJson> = model
+        .unstaged
+        .iter()
+        .map(|e| change_json_with_worktree(e, work_tree))
+        .collect();
     let clean = model.is_clean();
     let guidance = model.guidance(&standing);
 

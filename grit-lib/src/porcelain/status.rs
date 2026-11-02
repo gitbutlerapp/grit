@@ -2680,7 +2680,7 @@ pub fn format_porcelain_v2(
             .unwrap_or('.');
         let y = unstaged_by_path
             .get(path.as_str())
-            .map(|e| e.status.letter())
+            .map(|e| crate::diff::gitlink_unstaged_status_letter(e))
             .unwrap_or('.');
         if x == '.' && y == '.' {
             continue;
@@ -2892,7 +2892,9 @@ pub fn short_status_lines(model: &StatusModel) -> Vec<StatusShortLine> {
         let staged = staged_by_path.get(path.as_str());
         let unstaged = unstaged_by_path.get(path.as_str());
         let x = staged.map(|e| e.status.letter()).unwrap_or('.');
-        let y = unstaged.map(|e| e.status.letter()).unwrap_or('.');
+        let y = unstaged
+            .map(|e| crate::diff::gitlink_unstaged_status_letter(e))
+            .unwrap_or('.');
         if x == '.' && y == '.' {
             continue;
         }

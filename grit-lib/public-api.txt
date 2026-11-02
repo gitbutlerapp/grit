@@ -5585,6 +5585,7 @@ pub fn grit_lib::diff::for_each_tree_diff_structured(&grit_lib::objects::odb::Od
 pub fn grit_lib::diff::format_mode(u32) -> alloc::string::String
 pub fn grit_lib::diff::format_raw(&grit_lib::diff::DiffEntry) -> alloc::string::String
 pub fn grit_lib::diff::format_raw_abbrev(&grit_lib::diff::DiffEntry, usize) -> alloc::string::String
+pub fn grit_lib::diff::gitlink_unstaged_status_letter(&grit_lib::diff::DiffEntry) -> char
 pub fn grit_lib::diff::hash_worktree_file(&grit_lib::objects::odb::Odb, &std::path::Path, &std::fs::Metadata, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &str, core::option::Option<&grit_lib::index::IndexEntry>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::diff::head_path_states(&grit_lib::objects::odb::Odb, core::option::Option<&grit_lib::objects::ObjectId>) -> grit_lib::error::Result<alloc::collections::btree::map::BTreeMap<alloc::string::String, (u32, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::diff::hunk_diff_bundle(&grit_lib::repo::Repository, &[alloc::string::String], grit_lib::diff::DiffOptions) -> grit_lib::error::Result<grit_lib::diff::HunkDiffBundle>
@@ -31665,6 +31666,34 @@ pub fn grit_lib::state::split_commit_in_progress(&std::path::Path, &grit_lib::st
 pub fn grit_lib::state::status_operation(&grit_lib::state::WtStatusState, bool) -> core::option::Option<grit_lib::state::Operation>
 pub fn grit_lib::state::write_orig_head(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::state::wt_status_get_state(&std::path::Path, &grit_lib::state::HeadState, bool) -> grit_lib::error::Result<grit_lib::state::WtStatusState>
+pub mod grit_lib::submodule_ignore
+pub enum grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub grit_lib::submodule_ignore::SubmoduleIgnoreMode::All
+pub grit_lib::submodule_ignore::SubmoduleIgnoreMode::Dirty
+pub grit_lib::submodule_ignore::SubmoduleIgnoreMode::None
+pub grit_lib::submodule_ignore::SubmoduleIgnoreMode::Untracked
+impl core::clone::Clone for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::SubmoduleIgnoreMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::cmp::PartialEq for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::SubmoduleIgnoreMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::SubmoduleIgnoreMode::default() -> Self
+impl core::fmt::Debug for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::SubmoduleIgnoreMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::marker::StructuralPartialEq for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::marker::Freeze for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::marker::Send for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::marker::Sync for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::marker::Unpin for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::marker::UnsafeUnpin for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::gitlink_worktree_change_suppressed(grit_lib::submodule_ignore::SubmoduleIgnoreMode, bool, grit_lib::diff::SubmodulePorcelainFlags) -> bool
+pub fn grit_lib::submodule_ignore::parse_submodule_ignore_value(&str) -> grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::submodule_ignore_for_path(&grit_lib::config::ConfigSet, &std::path::Path, &str) -> grit_lib::submodule_ignore::SubmoduleIgnoreMode
+pub fn grit_lib::submodule_ignore::submodule_name_for_gitlink_path(&grit_lib::config::ConfigSet, &str) -> alloc::string::String
 pub mod grit_lib::tree_sha256
 #[non_exhaustive] pub enum grit_lib::tree_sha256::MissingSubmoduleReason
 pub grit_lib::tree_sha256::MissingSubmoduleReason::MissingCommit
