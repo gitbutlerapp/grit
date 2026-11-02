@@ -124,10 +124,12 @@ impl BundleVerifyReport {
     ///
     /// # Errors
     ///
-    /// Returns the first missing prerequisite, or [`BundleError::PrerequisitesNotConnected`].
+    /// Returns missing prerequisites, or [`BundleError::PrerequisitesNotConnected`].
     pub fn into_result(self) -> std::result::Result<(), BundleError> {
-        if let Some((oid, subject)) = self.missing_prerequisites.into_iter().next() {
-            return Err(BundleError::MissingPrerequisite { oid, subject });
+        if !self.missing_prerequisites.is_empty() {
+            return Err(BundleError::MissingPrerequisites {
+                commits: self.missing_prerequisites,
+            });
         }
         if self.prerequisites_not_connected {
             return Err(BundleError::PrerequisitesNotConnected);
@@ -160,13 +162,11 @@ pub enum BundleError {
         /// Format configured for the open repository.
         repo_name: &'static str,
     },
-    /// A prerequisite commit is absent from the ODB.
-    #[error("missing prerequisite commit {oid}")]
-    MissingPrerequisite {
-        /// Required commit oid.
-        oid: ObjectId,
-        /// Optional subject from the header line.
-        subject: Option<String>,
+    /// One or more prerequisite commits are absent from the ODB.
+    #[error("repository lacks these prerequisite commits: {}", format_missing_prerequisite_commits(.commits))]
+    MissingPrerequisites {
+        /// Required commits from the bundle header (oid and optional subject).
+        commits: Vec<(ObjectId, Option<String>)>,
     },
     /// Prerequisite objects exist but are not connected to local refs.
     #[error("prerequisite commits are not connected to local refs")]
@@ -193,6 +193,14 @@ impl From<std::io::Error> for BundleError {
 
 fn io_open_path(path: &Path, source: std::io::Error) -> BundleError {
     BundleError::Io(format!("could not open '{}': {source}", path.display()))
+}
+
+fn format_missing_prerequisite_commits(commits: &[(ObjectId, Option<String>)]) -> String {
+    commits
+        .iter()
+        .map(|(oid, _)| oid.to_hex())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 impl BundleError {
@@ -372,6 +380,9 @@ impl Bundle {
     }
 
     /// Like [`Self::unbundle`], reporting receive and index-pack progress through `progress`.
+    ///
+    /// Refuses to ingest the pack when [`Self::verify`] reports missing prerequisites or
+    /// disconnected prerequisite history (same checks as [`fetch_from_bundle_into`]).
     pub fn unbundle_with_progress(
         &self,
         repo: &Repository,
@@ -385,6 +396,7 @@ impl Bundle {
                 repo_name: repo.odb().hash_algo().name(),
             });
         }
+        self.verify(repo)?.into_result()?;
         let ingested = if repo.odb().uses_files_primary() {
             self.install_pack(repo, progress, cancel)?
         } else {
@@ -1233,7 +1245,7 @@ mod tests {
             prerequisites_not_connected: false,
         };
         let err = report.into_result().unwrap_err();
-        assert!(matches!(err, BundleError::MissingPrerequisite { .. }));
+        assert!(matches!(err, BundleError::MissingPrerequisites { .. }));
     }
 
     fn write_bundle_file(bytes: &[u8]) -> tempfile::NamedTempFile {

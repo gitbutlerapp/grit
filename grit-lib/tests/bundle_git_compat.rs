@@ -197,8 +197,25 @@ fn git_created_bundles_parse_verify_unbundle_fsck() {
     let err = report.into_result().unwrap_err();
     assert!(matches!(
         err,
-        BundleError::MissingPrerequisite { oid, .. } if oid == c1
+        BundleError::MissingPrerequisites { commits } if commits.iter().any(|(oid, _)| *oid == c1)
     ));
+
+    let bundle = Bundle::open(&inc).expect("open inc for unbundle");
+    let err = bundle
+        .unbundle(&empty)
+        .expect_err("unbundle without prerequisites");
+    assert!(matches!(
+        err,
+        BundleError::MissingPrerequisites { commits } if commits.iter().any(|(oid, _)| *oid == c1)
+    ));
+    let pack_dir = empty_git.path().join("objects/pack");
+    assert!(
+        !pack_dir.exists()
+            || std::fs::read_dir(&pack_dir)
+                .map(|mut d| d.next().is_none())
+                .unwrap_or(true),
+        "unbundle must not install pack files when prerequisites are missing"
+    );
 
     // Consumer already has the full object graph from the first unbundle; c1 is
     // reachable via refs/heads/main, so incremental verify/unbundle should succeed.

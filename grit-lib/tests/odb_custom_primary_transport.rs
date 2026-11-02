@@ -333,11 +333,30 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
         ],
     );
     let opened = grit_lib::bundle::Bundle::open(&incremental).expect("open bundle");
-    assert!(opened
-        .verify(&repo)
-        .expect("verify")
-        .missing_prerequisites
-        .is_empty());
+    let disconnected = opened.verify(&repo).expect("verify");
+    assert!(disconnected.missing_prerequisites.is_empty());
+    assert!(disconnected.prerequisites_not_connected);
+    assert_eq!(
+        disconnected.into_result().unwrap_err(),
+        BundleError::PrerequisitesNotConnected
+    );
+    assert!(matches!(
+        repo.bundles()
+            .unbundle(&incremental)
+            .expect_err("unbundle without connected prerequisite"),
+        BundleError::PrerequisitesNotConnected
+    ));
+
+    grit_lib::refs::update_direct_ref_on_store(
+        repo.refs(),
+        repo.git_dir(),
+        "refs/heads/main",
+        &tip,
+    )
+    .expect("connect prerequisite to local ref");
+    let connected = opened.verify(&repo).expect("verify after ref");
+    assert!(connected.is_ok(), "{connected:?}");
+
     let new_tip = rev_parse(upstream.path(), "main");
     let outcome = repo
         .bundles()

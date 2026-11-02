@@ -28,7 +28,7 @@ When the repository's objects are already packed, `create` copies the existing d
 
 `list` prints the refs recorded in the bundle header.
 
-`unbundle` ingests the embedded pack into the current repository (objects only; refs in the header are reported but not updated on disk). Run inside the destination repository.
+`unbundle` ingests the embedded pack into the current repository (objects only; refs in the header are reported but not updated on disk). Run inside the destination repository. When prerequisite commits from an incremental bundle are missing locally, `unbundle` refuses before reading the pack (same checks as `verify`) with exit **128** and a message listing the missing commit ids—it does not report pack corruption or leave partial objects behind.
 
 You can also treat a bundle path like a remote: [`grit fetch`](../fetch/) and [`grit clone`](../clone/) accept a path to a bundle file.
 
