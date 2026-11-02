@@ -842,7 +842,8 @@ impl Remote {
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
                 let client = http_client_for_operation(http_factory, repo, connect.cancel.clone())?;
                 let transport = SmartHttpTransport::new(client);
-                let mut conn = transport.connect(u, Service::UploadPack, &connect)?;
+                let mut conn =
+                    transport.connect_with_owner(u, Service::UploadPack, &connect, cancel)?;
                 Ok(fetch_remote_into(repo, &mut *conn, opts, progress, cancel)?)
             }
             RemoteUrl::Git(u) => {
@@ -890,7 +891,8 @@ impl Remote {
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
                 let client = http_client_for_operation(http_factory, repo, connect.cancel.clone())?;
                 let transport = SmartHttpTransport::new(Arc::clone(&client));
-                let mut conn = transport.connect(u, Service::ReceivePack, &connect)?;
+                let mut conn =
+                    transport.connect_with_owner(u, Service::ReceivePack, &connect, cancel)?;
                 Ok(crate::push::push_remote_with(
                     repo,
                     &mut *conn,

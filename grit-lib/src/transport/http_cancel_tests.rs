@@ -19,7 +19,7 @@ use crate::repo::{InitOptions, Repository};
 use crate::transport::http::http_client_arc;
 use crate::transport::http::ureq_client::UreqHttpClient;
 use crate::transport::http::SmartHttpTransport;
-use crate::transport::{ConnectOptions, Service, StackCancelFatPtr, Transport};
+use crate::transport::{ConnectOptions, Connection, Service, Transport};
 
 const TEST_HARD_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -170,10 +170,11 @@ fn discover_cancels_with_deadline_cancel_without_shared_watch() {
             };
             connect.bind_stack_cancel(&cancel);
             let started = Instant::now();
-            let err = match transport.connect(&url, Service::UploadPack, &connect) {
-                Ok(_) => panic!("stalling discovery must not succeed"),
-                Err(e) => e,
-            };
+            let err =
+                match transport.connect_with_owner(&url, Service::UploadPack, &connect, &cancel) {
+                    Ok(_) => panic!("stalling discovery must not succeed"),
+                    Err(e) => e,
+                };
             stop.store(true, Ordering::Relaxed);
             drop(listener);
             assert!(
@@ -381,17 +382,6 @@ fn remote_fetch_cancels_during_stalled_upload_pack_post_without_shared_watch() {
 }
 
 #[test]
-fn stack_cancel_fat_ptr_reads_expired_deadline() {
-    let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(50));
-    let fat = StackCancelFatPtr::capture(&cancel);
-    thread::sleep(Duration::from_millis(80));
-    assert!(
-        fat.as_cancel().is_cancelled(),
-        "fat pointer must observe expired deadline cancel"
-    );
-}
-
-#[test]
 fn stateless_upload_pack_post_wait_cancels_without_full_fetch() {
     run_with_hard_timeout(
         "stateless_upload_pack_post_wait_cancels_without_full_fetch",
@@ -433,23 +423,19 @@ fn stateless_upload_pack_post_wait_cancels_without_full_fetch() {
             connect.bind_stack_cancel(&cancel);
             let started = Instant::now();
             let mut conn = transport
-                .connect(&url, Service::UploadPack, &connect)
+                .connect_with_owner(&url, Service::UploadPack, &connect, &cancel)
                 .expect("connect");
-            conn.set_http_stack_cancel(&cancel);
             let wants = b"0032want aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n0000";
-            let err = match conn
-                .writer()
-                .write_all(wants)
-                .and_then(|_| conn.writer().flush())
-            {
-                Ok(()) => panic!("stalled POST must not succeed"),
-                Err(e) => e,
-            };
+            conn.writer().write_all(wants).expect("write");
+            conn.writer().flush().expect("flush");
+            let err = conn
+                .drain_pending_http(&cancel)
+                .expect_err("stalled POST must not succeed");
             stop.store(true, Ordering::Relaxed);
             drop(listener);
             assert!(
-                err.to_string() == crate::transport::stateless_http::TRANSPORT_IO_CANCELLED,
-                "expected transport cancel io error, got {err:?}"
+                matches!(err, Error::Cancelled),
+                "expected Cancelled, got {err:?}"
             );
             assert!(
                 started.elapsed() < Duration::from_secs(2),

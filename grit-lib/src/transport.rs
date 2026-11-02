@@ -82,30 +82,6 @@ pub struct ConnectOptions {
     pub cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
     /// Flag mirrored from the stack [`Cancel`] on the owning thread during HTTP waits.
     pub(crate) stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Stack [`Cancel`] fat pointer (owning thread only); see [`Self::bind_stack_cancel`].
-    pub(crate) stack_cancel: Option<StackCancelFatPtr>,
-}
-
-/// Two-word fat pointer to a stack [`Cancel`]; not dereferenced off the owning thread.
-#[derive(Clone, Copy)]
-pub(crate) struct StackCancelFatPtr {
-    data: *const (),
-    vtable: *const (),
-}
-
-impl StackCancelFatPtr {
-    pub(crate) fn capture(cancel: &dyn Cancel) -> Self {
-        let ptr: *const dyn Cancel = cancel;
-        let (data, vtable) =
-            unsafe { std::mem::transmute::<*const dyn Cancel, (*const (), *const ())>(ptr) };
-        Self { data, vtable }
-    }
-
-    pub(crate) fn as_cancel(&self) -> &dyn Cancel {
-        let ptr: *const dyn Cancel = unsafe { std::mem::transmute((self.data, self.vtable)) };
-        // SAFETY: dereferenced only on the thread that called [`Self::capture`].
-        unsafe { &*ptr }
-    }
 }
 
 impl Default for ConnectOptions {
@@ -117,20 +93,14 @@ impl Default for ConnectOptions {
             network_trace: false,
             cancel: None,
             stack_watch: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            stack_cancel: None,
         }
     }
 }
 
 impl ConnectOptions {
-    /// Record `cancel` for HTTP waits on the calling thread until connect/fetch ends.
+    /// Seed `stack_watch` from a stack-scoped [`Cancel`] before connect/fetch.
     pub(crate) fn bind_stack_cancel(&mut self, cancel: &dyn Cancel) {
         crate::progress::mirror_stack_cancel(cancel, &self.stack_watch);
-        self.stack_cancel = Some(StackCancelFatPtr::capture(cancel));
-    }
-
-    pub(crate) fn stack_cancel(&self) -> Option<&dyn Cancel> {
-        self.stack_cancel.as_ref().map(StackCancelFatPtr::as_cancel)
     }
 }
 
@@ -181,9 +151,21 @@ pub trait Connection {
     /// (v0/v1 connections, where the server closes after the single response).
     fn finish_send(&mut self) {}
 
-    /// Record the stack [`Cancel`] for smart-HTTP POST waits (owning thread only).
-    fn set_http_stack_cancel(&mut self, cancel: &dyn Cancel) {
+    /// Mirror a stack-scoped [`Cancel`] into [`Self::http_stack_watch`] before
+    /// writes that may block on smart HTTP (upload-pack POST on flush).
+    fn mirror_http_cancel(&mut self, cancel: &dyn Cancel) {
+        if let Some(watch) = self.http_stack_watch() {
+            crate::progress::mirror_stack_cancel(cancel, watch);
+        }
+    }
+
+    /// Complete any deferred smart-HTTP request still waiting on the owning thread.
+    ///
+    /// Stateless upload-pack POSTs are started on flush and finished here so the
+    /// scoped `cancel` borrow can be polled while the HTTP worker blocks.
+    fn drain_pending_http(&mut self, cancel: &dyn Cancel) -> crate::error::Result<()> {
         let _ = cancel;
+        Ok(())
     }
 
     /// Shared flag mirrored from the stack [`Cancel`] during smart-HTTP waits.

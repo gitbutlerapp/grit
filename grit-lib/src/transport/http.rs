@@ -1013,7 +1013,7 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
         service: Service,
         git_protocol: Option<&str>,
         cancel: &dyn Cancel,
-        stack: Option<&dyn Cancel>,
+        owner: &dyn Cancel,
         stack_watch: &std::sync::atomic::AtomicBool,
     ) -> Result<(String, Discovery)> {
         let info_url = info_refs_url_for_service(repo_url, service);
@@ -1023,14 +1023,14 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
             &info_url,
             gp,
             cancel,
-            stack,
+            owner,
             stack_watch,
         )?;
         if let Some(new_base) = rebased_base_from_redirect(repo_url, final_url.as_deref()) {
             let _redirect = format!("http(s): redirected base {repo_url} -> {new_base}");
             self.client.reset_auth_after_redirect_rebase();
             let url = info_refs_url_for_service(&new_base, service);
-            let body = get_interruptible(&self.client, &url, gp, cancel, stack, stack_watch)?;
+            let body = get_interruptible(&self.client, &url, gp, cancel, owner, stack_watch)?;
             let stripped = strip_service_advertisement_for_discovery(&body, None)?;
             let disc = parse_advertisement(stripped)?;
             return Ok((new_base, disc));
@@ -1052,10 +1052,10 @@ fn get_interruptible<C: HttpClient + Clone + 'static>(
     url: &str,
     git_protocol: Option<&str>,
     cancel: &dyn Cancel,
-    stack: Option<&dyn Cancel>,
+    owner: &dyn Cancel,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<u8>> {
-    get_with_final_url_interruptible(client, url, git_protocol, cancel, stack, stack_watch)
+    get_with_final_url_interruptible(client, url, git_protocol, cancel, owner, stack_watch)
         .map(|(body, _)| body)
 }
 
@@ -1064,7 +1064,7 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
     url: &str,
     git_protocol: Option<&str>,
     cancel: &dyn Cancel,
-    stack: Option<&dyn Cancel>,
+    owner: &dyn Cancel,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> Result<(Vec<u8>, Option<String>)> {
     let client = client.clone();
@@ -1074,7 +1074,7 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
         client.get_with_final_url(&url, git_protocol.as_deref())
     })
     .map_err(Error::Io)?
-    .wait_with_stack(cancel, stack, Some(stack_watch))
+    .wait_with_watch(cancel, Some(owner), Some(stack_watch))
 }
 
 fn info_refs_url_for_service(repo_url: &str, service: Service) -> String {
@@ -1096,12 +1096,14 @@ fn git_protocol_for_version(version: u8) -> Option<String> {
     }
 }
 
-impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
-    fn connect(
+impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
+    /// Connect while `owner` remains in scope for interruptible discovery GETs.
+    pub(crate) fn connect_with_owner(
         &self,
         url: &str,
         service: Service,
         opts: &ConnectOptions,
+        owner: &dyn Cancel,
     ) -> Result<Box<dyn Connection>> {
         crate::net_trace::net_trace!(
             opts.network_trace,
@@ -1112,13 +1114,12 @@ impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
         );
         let gp = git_protocol_for_version(opts.protocol_version);
         let cancel = connect_cancel(opts);
-        let stack = opts.stack_cancel();
         let (repo_url, disc) = self.discover_with_redirect(
             url,
             service,
             gp.as_deref(),
             cancel,
-            stack,
+            owner,
             opts.stack_watch.as_ref(),
         )?;
         let adv_refs: Vec<(String, ObjectId)> = disc
@@ -1147,8 +1148,19 @@ impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
             gp,
             opts.cancel.clone(),
             std::sync::Arc::clone(&opts.stack_watch),
-            opts.stack_cancel,
         )))
+    }
+}
+
+impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
+    fn connect(
+        &self,
+        url: &str,
+        service: Service,
+        opts: &ConnectOptions,
+    ) -> Result<Box<dyn Connection>> {
+        let cancel = connect_cancel(opts);
+        self.connect_with_owner(url, service, opts, cancel)
     }
 }
 

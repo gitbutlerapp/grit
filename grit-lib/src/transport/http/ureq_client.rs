@@ -450,12 +450,6 @@ fn default_user_agent() -> String {
     format!("grit-lib/{}", env!("CARGO_PKG_VERSION"))
 }
 
-/// Per-response stall detection while waiting for response headers (time to first byte).
-///
-/// This is not a total body budget; long transfers rely on [`LowSpeedReader`] and
-/// operation [`Cancel`] polling instead of [`ureq::ConfigBuilder::timeout_recv_body`].
-const RECV_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
-
 /// Git-shaped HTTP timeouts and optional low-speed abort thresholds (`http.*` config).
 #[derive(Clone)]
 struct HttpTransportTimeouts {
@@ -666,7 +660,6 @@ fn agent_from_timeouts(
     ureq::Agent::config_builder()
         .timeout_connect(Some(timeouts.connect))
         .timeout_global(timeouts.global)
-        .timeout_recv_response(Some(RECV_RESPONSE_TIMEOUT))
         // Return >= 400 responses as `Ok` so the auth-retry logic can inspect the
         // status and `WWW-Authenticate` headers rather than treating them as hard
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
@@ -972,11 +965,7 @@ impl UreqHttpClient {
             req = req.header(*name, value);
         }
         if request.long_running {
-            req = req
-                .config()
-                .timeout_global(None)
-                .timeout_recv_response(Some(RECV_RESPONSE_TIMEOUT))
-                .build();
+            req = req.config().timeout_global(None).build();
         }
         req
     }

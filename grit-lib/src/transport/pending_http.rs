@@ -32,21 +32,22 @@ impl<T: Send + 'static> PendingHttp<T> {
     /// The result, or [`Error::Cancelled`] once `cancel` fires first. A cancelled
     /// request is left to finish on its own thread.
     pub(crate) fn wait(&self, cancel: &dyn Cancel) -> Result<T> {
-        self.wait_with_stack(cancel, None, None)
+        self.wait_with_watch(cancel, None, None)
     }
 
-    /// Like [`Self::wait`], but also mirrors `stack` into `stack_watch` on the owning thread.
-    pub(crate) fn wait_with_stack(
+    /// Like [`Self::wait`], but mirrors `owner` into `stack_watch` on each poll
+    /// (when both are set) and checks the shared watch flag.
+    pub(crate) fn wait_with_watch(
         &self,
         cancel: &dyn Cancel,
-        stack: Option<&dyn Cancel>,
+        owner: Option<&dyn Cancel>,
         stack_watch: Option<&std::sync::atomic::AtomicBool>,
     ) -> Result<T> {
         cancel.poll_before_wait();
         let signal = CancelSignal::new(cancel);
         loop {
-            if let (Some(stack), Some(watch)) = (stack, stack_watch) {
-                mirror_stack_cancel(stack, watch);
+            if let (Some(owner), Some(watch)) = (owner, stack_watch) {
+                mirror_stack_cancel(owner, watch);
             }
             if stack_watch.is_some_and(|w| w.load(std::sync::atomic::Ordering::Relaxed)) {
                 return Err(Error::Cancelled);
