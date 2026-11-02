@@ -7,10 +7,14 @@ Git bundle files combine a header and thin pack for offline transfer. The [`bund
 
 | Method | Role |
 | --- | --- |
-| `create` | Write a bundle from `BundleSpec` tips |
+| `create` | Write a bundle from `BundleSpec` tips (atomic replace via `*.bundle.part`) |
+| `create_with_progress` | Like `create`, with `ProgressSink` + `Cancel`; returns ref count |
+| `create_with_options` | Like `bundle create` revision flags (`BundleCreateOptions`) |
 | `verify` | Check prerequisites and connectivity (`BundleVerifyReport`) |
 | `list_heads` | Parse ref tips from the header |
 | `unbundle` | Ingest the pack without updating refs |
+
+Failed or cancelled `create` calls leave an existing destination file unchanged. Grit writes to a sibling `path.bundle.part` and renames onto `path` only after the pack stream succeeds (same policy as `bundle_remote::write_bundle_with_options_with_cancel`). Missing objects surface as [`BundleError::ObjectNotFound`](rustdoc:grit_lib::bundle::BundleError::ObjectNotFound), not a generic I/O string.
 
 With a files-backed repository `unbundle` installs the pack under `objects/pack/`. With a custom primary object store it writes every object of the pack into that store instead (see [Object stores](object-stores.md#receiving-packs-into-a-custom-store)).
 

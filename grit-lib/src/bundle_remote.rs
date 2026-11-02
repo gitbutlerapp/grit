@@ -9,6 +9,7 @@ use crate::bundle::{plan_bundle_create, Bundle, BundleCreatePlan, BundleError, B
 use crate::error::{Error, Result};
 use crate::fetch::{NoProgress, Progress};
 use crate::objects::ObjectId;
+use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::transfer::{
     apply_tag_mode, classify_update, prune_tracking_refs, FetchOptions, FetchOutcome, RefUpdate,
@@ -145,23 +146,63 @@ pub fn write_bundle_with_options_with_cancel(
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<usize> {
     let spec = resolve_bundle_spec(repo, options)?;
+    write_bundle_spec_to_path_with_cancel(
+        repo,
+        &spec,
+        path,
+        &mut crate::progress::NullProgress,
+        cancel,
+    )
+    .map_err(map_bundle_err)
+}
+
+/// Write `spec` to `path`, replacing any existing file only after a successful pack stream.
+///
+/// On failure or cancel, removes the temporary `*.bundle.part` file and leaves an existing
+/// destination byte-for-byte unchanged. A panic during the write also removes the part file;
+/// SIGKILL may leave only the part file (same contract as [`write_bundle_with_options_with_cancel`]).
+///
+/// # Errors
+///
+/// Propagates [`BundleError`] from header/pack generation, including [`BundleError::ObjectNotFound`].
+pub fn write_bundle_spec_to_path_with_cancel(
+    repo: &Repository,
+    spec: &BundleSpec,
+    path: &Path,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> std::result::Result<usize, BundleError> {
     let temp = path.with_extension("bundle.part");
     if temp.exists() {
-        std::fs::remove_file(&temp).map_err(Error::Io)?;
+        std::fs::remove_file(&temp).map_err(BundleError::from)?;
     }
-    let result = (|| -> Result<usize> {
-        let file = File::create(&temp).map_err(Error::Io)?;
-        let mut out = BufWriter::new(file);
-        crate::bundle::write_bundle_with_cancel(repo, &spec, &mut out, cancel)
-            .map_err(map_bundle_err)?;
-        out.flush().map_err(Error::Io)?;
-        std::fs::rename(&temp, path).map_err(Error::Io)?;
-        Ok(spec.include.len())
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
+    struct PartCleanup<'a>(&'a Path);
+    impl Drop for PartCleanup<'_> {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(self.0);
+        }
     }
-    result
+    let _cleanup = PartCleanup(&temp);
+    let file = File::create(&temp).map_err(BundleError::from)?;
+    let mut out = BufWriter::new(file);
+    crate::bundle::write_bundle_with_cancel_and_progress(repo, spec, &mut out, progress, cancel)?;
+    out.flush().map_err(BundleError::from)?;
+    crate::atomic_replace::replace_file(&temp, path).map_err(BundleError::from)?;
+    std::mem::forget(_cleanup);
+    Ok(spec.include.len())
+}
+
+/// Like [`write_bundle_with_options_with_cancel`], reporting progress through `progress`.
+pub fn write_bundle_with_options_with_progress(
+    repo: &Repository,
+    path: &Path,
+    options: &BundleCreateOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<usize> {
+    let spec = resolve_bundle_spec(repo, options)?;
+    write_bundle_spec_to_path_with_cancel(repo, &spec, path, progress, cancel)
+        .map_err(map_bundle_err)
 }
 
 fn strip_all_rev_flag(tokens: &[String]) -> (Vec<String>, bool) {
@@ -604,6 +645,7 @@ fn preflight_bundle_fetch_refspecs(bundle: &Bundle, opts: &FetchOptions) -> Resu
 fn map_bundle_err(e: BundleError) -> Error {
     match e {
         BundleError::Cancelled => Error::Cancelled,
+        BundleError::ObjectNotFound(id) => Error::ObjectNotFound(id),
         BundleError::MissingPrerequisites { .. } | BundleError::PrerequisitesNotConnected => {
             Error::BundleMissingPrerequisites
         }
