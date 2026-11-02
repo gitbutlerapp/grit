@@ -516,6 +516,122 @@ mod raw_stash_paths {
             assert_state_matches_git(root.path(), expected.path(), &path);
         }
     }
+
+    #[test]
+    fn push_untracked_literal_pathhex_apply_restores_exact_filename() {
+        use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
+
+        let root = tempfile::tempdir().unwrap();
+        init_repo(root.path());
+        std::fs::write(root.path().join("tracked.txt"), b"ok\n").unwrap();
+        git_cmd(root.path(), &["add", "tracked.txt"]);
+        git_cmd(root.path(), &["commit", "-qm", "base"]);
+
+        let literal = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"grit+pathhex:6162"));
+        std::fs::write(root.path().join(&literal), b"secret\n").unwrap();
+
+        let identity: grit_lib::ident::Signature =
+            "Test <t@example.com> 1000000000 +0000".parse().unwrap();
+        open(root.path())
+            .stash()
+            .push(
+                &StashPushOptions {
+                    message: Some("untracked literal".into()),
+                    include_untracked: true,
+                    identity,
+                    selection: None,
+                    pathspecs: Vec::new(),
+                    dry_run: false,
+                    mode: StashMode::default(),
+                },
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .unwrap()
+            .expect("stash changes");
+
+        assert!(
+            !root.path().join(&literal).exists(),
+            "push -u must remove the untracked literal path from the worktree"
+        );
+
+        open(root.path())
+            .stash()
+            .apply(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(root.path().join(&literal)).unwrap(),
+            b"secret\n"
+        );
+        let pathhex_entries: Vec<_> = std::fs::read_dir(root.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("grit+pathhex:"))
+            .collect();
+        assert_eq!(
+            pathhex_entries.len(),
+            1,
+            "must not duplicate literal pathhex name as an encoded path"
+        );
+        git_cmd(root.path(), &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn push_untracked_non_utf8_apply_restores_raw_bytes() {
+        use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
+
+        let root = tempfile::tempdir().unwrap();
+        init_repo(root.path());
+        std::fs::write(root.path().join("tracked.txt"), b"ok\n").unwrap();
+        git_cmd(root.path(), &["add", "tracked.txt"]);
+        git_cmd(root.path(), &["commit", "-qm", "base"]);
+
+        let raw = std::path::PathBuf::from(std::ffi::OsStr::from_bytes(b"nested/\xff.txt"));
+        std::fs::create_dir_all(root.path().join(raw.parent().unwrap())).unwrap();
+        std::fs::write(root.path().join(&raw), b"raw-bytes\n").unwrap();
+
+        let identity: grit_lib::ident::Signature =
+            "Test <t@example.com> 1000000000 +0000".parse().unwrap();
+        open(root.path())
+            .stash()
+            .push(
+                &StashPushOptions {
+                    message: Some("untracked non-utf8".into()),
+                    include_untracked: true,
+                    identity,
+                    selection: None,
+                    pathspecs: Vec::new(),
+                    dry_run: false,
+                    mode: StashMode::default(),
+                },
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .unwrap()
+            .expect("stash changes");
+
+        open(root.path())
+            .stash()
+            .apply(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(root.path().join(&raw)).unwrap(),
+            b"raw-bytes\n"
+        );
+        git_cmd(root.path(), &["fsck", "--strict"]);
+    }
 }
 
 #[cfg(unix)]

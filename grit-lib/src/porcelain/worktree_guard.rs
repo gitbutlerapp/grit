@@ -161,7 +161,10 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         );
         base.into_iter()
             .filter(|path| {
-                index.get(path.as_bytes(), 0).is_some() || added_tree_paths.contains(path)
+                index
+                    .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
+                    .is_some()
+                    || added_tree_paths.contains(path)
             })
             .filter(|path| {
                 !delete_path_trusted_without_worktree_stat(
@@ -255,7 +258,7 @@ fn touched_paths_include_gitlinks(index: &Index, paths: &BTreeSet<String>) -> bo
     use crate::index::MODE_GITLINK;
     paths.iter().any(|path| {
         index
-            .get(path.as_bytes(), 0)
+            .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
             .is_some_and(|ie| ie.stage() == 0 && ie.mode == MODE_GITLINK)
     })
 }
@@ -277,7 +280,6 @@ fn switch_worktree_clean_for_paths(
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
 ) -> Result<SwitchWorktreeClean> {
-    use crate::diff::index_entry_worktree_abs;
     use crate::index::MODE_GITLINK;
     use crate::worktree_scan::{
         collect_blob_lookup_batches, for_each_blob_by_directory,
@@ -293,13 +295,13 @@ fn switch_worktree_clean_for_paths(
     let mut dirty: BTreeSet<String> = BTreeSet::new();
     if small {
         for path in paths {
-            let Some(ie) = index.get(path.as_bytes(), 0) else {
+            let Some(ie) = index.get(crate::repo_relpath::storage_bytes(path).as_ref(), 0) else {
                 continue;
             };
             if !indexed_path_needs_worktree_stat_check(ie) || ie.mode != MODE_GITLINK {
                 continue;
             }
-            let abs = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
+            let abs = crate::repo_relpath::worktree_abs(work_tree, path);
             if !fs::symlink_metadata(&abs).is_ok_and(|meta| meta.is_dir()) {
                 dirty.insert(path.clone());
             }
@@ -313,10 +315,10 @@ fn switch_worktree_clean_for_paths(
         }
         match lookup {
             BlobDiskLookup::Missing => {
-                dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
+                dirty.insert(crate::repo_relpath::storage_string(&ie.path));
             }
             BlobDiskLookup::Io(_) => {
-                dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
+                dirty.insert(crate::repo_relpath::storage_string(&ie.path));
             }
             BlobDiskLookup::Present(stat) => {
                 let mismatch = if ie.mode == MODE_GITLINK {
@@ -331,7 +333,7 @@ fn switch_worktree_clean_for_paths(
                     !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy)
                 };
                 if mismatch {
-                    dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
+                    dirty.insert(crate::repo_relpath::storage_string(&ie.path));
                 } else if entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
                     racy.push((entry_index, stat.git_mode));
                 }
@@ -424,7 +426,7 @@ fn racy_entries_with_changed_content(
     ignorecase: bool,
 ) -> Result<Vec<String>> {
     use crate::crlf;
-    use crate::diff::index_entry_worktree_abs;
+    use crate::diff::index_entry_worktree_abs_bytes;
 
     struct RacyCheck<'a> {
         entry: &'a IndexEntry,
@@ -444,12 +446,12 @@ fn racy_entries_with_changed_content(
         .iter()
         .map(|&(entry_index, worktree_mode)| {
             let entry = &index.entries[entry_index];
-            let rel_path = String::from_utf8_lossy(&entry.path).into_owned();
+            let rel_path = crate::repo_relpath::storage_string(&entry.path);
             RacyCheck {
                 entry,
-                abs_path: index_entry_worktree_abs(
+                abs_path: index_entry_worktree_abs_bytes(
                     work_tree,
-                    &rel_path,
+                    &entry.path,
                     precompose_unicode,
                     ignorecase,
                 ),
@@ -537,12 +539,12 @@ fn added_tree_path_missing_on_disk(
     if !added_tree_paths.contains(path) {
         return false;
     }
-    !work_tree.join(path).exists()
+    !crate::repo_relpath::worktree_abs(work_tree, path).exists()
 }
 
 /// True when the path has no directory entry in the work tree (symlinks are not followed).
 pub(crate) fn worktree_path_absent_for_trusted_delete(work_tree: &Path, path: &str) -> bool {
-    match fs::symlink_metadata(work_tree.join(path)) {
+    match fs::symlink_metadata(crate::repo_relpath::worktree_abs(work_tree, path)) {
         Err(err) => err.kind() == std::io::ErrorKind::NotFound,
         Ok(_) => false,
     }
@@ -562,7 +564,7 @@ fn index_matches_head_without_worktree_stat(
     else {
         return false;
     };
-    let Some(ie) = index.get(path.as_bytes(), 0) else {
+    let Some(ie) = index.get(crate::repo_relpath::storage_bytes(path).as_ref(), 0) else {
         return false;
     };
     if ie.oid != oid || crate::index::canon_mode(ie.mode) != crate::index::canon_mode(mode) {
@@ -602,8 +604,8 @@ fn staged_diff_for_tree_switch_paths(
 ) -> Result<Vec<DiffEntry>> {
     let mut staged = Vec::new();
     for path in paths {
-        let path_bytes = path.as_bytes();
-        let index_entry = index.get(path_bytes, 0);
+        let path_bytes = crate::repo_relpath::storage_bytes(path);
+        let index_entry = index.get(path_bytes.as_ref(), 0);
         if index_entry.is_some_and(|e| e.intent_to_add()) {
             continue;
         }
@@ -1053,16 +1055,21 @@ fn index_entry_under_root(path: &[u8], root: &[u8]) -> bool {
 }
 
 fn count_indexed_paths_under_root(index: &Index, root: &str) -> usize {
-    let root_bytes = root.as_bytes();
-    let prefix = format!("{root}/");
-    let prefix_bytes = prefix.as_bytes();
+    let root_owned = crate::repo_relpath::storage_bytes(root).into_owned();
+    let prefix_bytes: std::borrow::Cow<'_, [u8]> = if root_owned.is_empty() {
+        std::borrow::Cow::Borrowed(b"")
+    } else {
+        let mut p = root_owned.clone();
+        p.push(b'/');
+        std::borrow::Cow::Owned(p)
+    };
     if index.entries_sorted {
         let mut count = 0usize;
         let start = index
             .entries
-            .partition_point(|e| e.path.as_slice() < prefix_bytes);
+            .partition_point(|e| e.path.as_slice() < prefix_bytes.as_ref());
         for entry in &index.entries[start..] {
-            if !entry.path.starts_with(prefix_bytes) {
+            if !entry.path.starts_with(prefix_bytes.as_ref()) {
                 break;
             }
             if entry.stage() == 0 {
@@ -1071,7 +1078,7 @@ fn count_indexed_paths_under_root(index: &Index, root: &str) -> usize {
         }
         if let Ok(pos) = index
             .entries
-            .binary_search_by(|e| e.path.as_slice().cmp(root_bytes))
+            .binary_search_by(|e| e.path.as_slice().cmp(root_owned.as_slice()))
         {
             if index.entries[pos].stage() == 0 {
                 count += 1;
@@ -1083,7 +1090,7 @@ fn count_indexed_paths_under_root(index: &Index, root: &str) -> usize {
         .entries
         .iter()
         .filter(|e| e.stage() == 0)
-        .filter(|e| index_entry_under_root(&e.path, root_bytes))
+        .filter(|e| index_entry_under_root(&e.path, root_owned.as_slice()))
         .count()
 }
 

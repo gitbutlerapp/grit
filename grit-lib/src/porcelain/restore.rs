@@ -205,8 +205,12 @@ pub(crate) fn restore_paths_with_lock(
     let tracked_before_index_restore: HashSet<Vec<u8>> = if restore_worktree {
         matched
             .iter()
-            .filter(|path| index.get(path.as_bytes(), 0).is_some())
-            .map(|path| path.as_bytes().to_vec())
+            .filter(|path| {
+                index
+                    .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
+                    .is_some()
+            })
+            .map(|path| crate::repo_relpath::storage_bytes(path).into_owned())
             .collect()
     } else {
         HashSet::new()
@@ -347,20 +351,20 @@ fn collect_conflict_matched_paths(
         if entry.stage() == 0 {
             continue;
         }
-        let path = String::from_utf8_lossy(&entry.path);
+        let path = crate::repo_relpath::storage_string(&entry.path);
         if matcher.matches_entry(&path, entry.mode) {
-            paths.insert(path.into_owned());
+            paths.insert(path);
         }
     }
     if include_resolved_undo {
         if let Some(undo) = &index.resolve_undo {
             for path_bytes in undo.keys() {
-                let path = String::from_utf8_lossy(path_bytes);
+                let path = crate::repo_relpath::storage_string(path_bytes);
                 let mode = index.get(path_bytes, 0).map(|e| e.mode).unwrap_or(
                     crate::porcelain::pathspec_match::index_stage0_mode_or_regular(index, &path),
                 );
                 if matcher.matches_entry(&path, mode) {
-                    paths.insert(path.into_owned());
+                    paths.insert(path);
                 }
             }
         }
@@ -414,8 +418,8 @@ fn restore_conflict_side(
         ConflictSide::Ours => 2u8,
         ConflictSide::Theirs => 3u8,
     };
-    let path_bytes = path.as_bytes();
-    let Some(entry) = index.get(path_bytes, stage) else {
+    let path_bytes = crate::repo_relpath::storage_bytes(path);
+    let Some(entry) = index.get(path_bytes.as_ref(), stage) else {
         return Err(match side {
             ConflictSide::Ours => Error::RestoreConflictMissingOurs {
                 path: path.to_string(),
@@ -426,7 +430,10 @@ fn restore_conflict_side(
         });
     };
     if entry.mode == MODE_GITLINK {
-        checkout_submodule_worktree_to_commit(&work_tree.join(path), entry.oid)?;
+        checkout_submodule_worktree_to_commit(
+            &crate::repo_relpath::worktree_abs(work_tree, path),
+            entry.oid,
+        )?;
         outcome.restored.push(path.to_string());
         return Ok(());
     }
@@ -474,14 +481,17 @@ fn restore_conflict_remerge(
     outcome: &mut RestoreOutcome,
     index_dirty: &mut bool,
 ) -> Result<()> {
-    let path_bytes = path.as_bytes();
-    if index.get(path_bytes, 0).is_some()
-        && !path_has_unmerged(index, path_bytes)
-        && index.unmerge_path_from_resolve_undo(path_bytes)
+    let path_bytes = crate::repo_relpath::storage_bytes(path);
+    if index.get(path_bytes.as_ref(), 0).is_some()
+        && !path_has_unmerged(index, path_bytes.as_ref())
+        && index.unmerge_path_from_resolve_undo(path_bytes.as_ref())
     {
         *index_dirty = true;
     }
-    let (Some(ours), Some(theirs)) = (index.get(path_bytes, 2), index.get(path_bytes, 3)) else {
+    let (Some(ours), Some(theirs)) = (
+        index.get(path_bytes.as_ref(), 2),
+        index.get(path_bytes.as_ref(), 3),
+    ) else {
         return Err(Error::RestoreConflictNotUnmerged {
             path: path.to_string(),
         });
@@ -490,7 +500,7 @@ fn restore_conflict_remerge(
         return Ok(());
     }
     if index
-        .get(path_bytes, 1)
+        .get(path_bytes.as_ref(), 1)
         .is_some_and(|e| e.mode == MODE_GITLINK)
     {
         return Ok(());
@@ -498,7 +508,7 @@ fn restore_conflict_remerge(
 
     let ours_blob = repo.odb().read(&ours.oid)?;
     let theirs_blob = repo.odb().read(&theirs.oid)?;
-    let base_bytes = match index.get(path_bytes, 1) {
+    let base_bytes = match index.get(path_bytes.as_ref(), 1) {
         None => Vec::new(),
         Some(base) => repo.odb().read(&base.oid)?.data,
     };
@@ -579,9 +589,9 @@ fn collect_matched_paths(
             if entry.stage() != 0 || entry.skip_worktree() {
                 continue;
             }
-            let path = String::from_utf8_lossy(&entry.path);
+            let path = crate::repo_relpath::storage_string(&entry.path);
             if matcher.matches_entry(&path, entry.mode) {
-                paths.insert(path.into_owned());
+                paths.insert(path);
             }
         }
     }
@@ -674,25 +684,25 @@ fn apply_index_restore(
     let mut replacements: Vec<IndexEntry> = Vec::new();
 
     for path in matched {
-        let path_bytes = path.as_bytes();
+        let path_bytes = crate::repo_relpath::storage_bytes(path);
         if let Some(src) = flat_tree_lookup(source_entries, path) {
             if index
-                .get(path_bytes, 0)
+                .get(path_bytes.as_ref(), 0)
                 .is_some_and(|e| e.oid == src.oid && e.mode == src.mode)
             {
                 continue;
             }
             let size = blob_index_size(repo, src)?;
             let mut entry = index_entry_from_flat(path, src, size);
-            if let Some(existing) = index.get(path_bytes, 0) {
+            if let Some(existing) = index.get(path_bytes.as_ref(), 0) {
                 entry.base_index_pos = existing.base_index_pos;
             }
-            paths_to_remove.push(path_bytes.to_vec());
+            paths_to_remove.push(path_bytes.into_owned());
             replacements.push(entry);
             outcome.restored.push(path.clone());
             *index_dirty = true;
-        } else if index.get(path_bytes, 0).is_some() {
-            paths_to_remove.push(path_bytes.to_vec());
+        } else if index.get(path_bytes.as_ref(), 0).is_some() {
+            paths_to_remove.push(path_bytes.into_owned());
             outcome.removed.push(path.clone());
             *index_dirty = true;
         }
@@ -800,13 +810,17 @@ fn apply_worktree_restore_inner(
         progress.finish();
         for path in matched {
             poll_cancel(progress, cancel)?;
-            if index_out.get(path.as_bytes(), 0).is_some() {
+            if index_out
+                .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
+                .is_some()
+            {
                 continue;
             }
-            if !tracked_for_worktree_deletion.contains(path.as_bytes()) {
+            let path_bytes = crate::repo_relpath::storage_bytes(path);
+            if !tracked_for_worktree_deletion.contains(path_bytes.as_ref()) {
                 continue;
             }
-            let abs = work_tree.join(path);
+            let abs = crate::repo_relpath::worktree_abs(work_tree, path);
             let Ok(meta) = fs::symlink_metadata(&abs) else {
                 continue;
             };
@@ -826,7 +840,7 @@ fn apply_worktree_restore_inner(
         poll_cancel(progress, cancel)?;
         progress.inc(1);
         if index_out
-            .get(path.as_bytes(), 0)
+            .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
             .is_some_and(|e| e.skip_worktree())
         {
             continue;
@@ -836,7 +850,9 @@ fn apply_worktree_restore_inner(
             .cloned();
         match src {
             Some(entry) => {
-                let existing = index_out.get(path.as_bytes(), 0).cloned();
+                let existing = index_out
+                    .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
+                    .cloned();
                 restore_worktree_entry(
                     repo,
                     work_tree,
@@ -853,7 +869,8 @@ fn apply_worktree_restore_inner(
                 )?;
             }
             None => {
-                if !tracked_for_worktree_deletion.contains(path.as_bytes()) {
+                let path_bytes = crate::repo_relpath::storage_bytes(path);
+                if !tracked_for_worktree_deletion.contains(path_bytes.as_ref()) {
                     continue;
                 }
                 if remove_worktree_path_for_restore(work_tree, path, journal)? {
@@ -873,7 +890,7 @@ fn remove_worktree_path_for_restore(
     path: &str,
     journal: &CheckoutJournal,
 ) -> Result<bool> {
-    let abs = work_tree.join(path);
+    let abs = crate::repo_relpath::worktree_abs(work_tree, path);
     let Ok(meta) = fs::symlink_metadata(&abs) else {
         return Ok(false);
     };
@@ -1002,7 +1019,7 @@ fn restore_worktree_entry(
             let symlink_target_len = symlink_target_byte_len(repo, &existing.oid, existing.mode)?;
             index_out.add_or_replace(index_entry_from_worktree_write(
                 &meta,
-                path.as_bytes(),
+                crate::repo_relpath::storage_bytes(path).as_ref(),
                 existing.oid,
                 existing.mode,
                 symlink_target_len,
@@ -1013,7 +1030,7 @@ fn restore_worktree_entry(
         let symlink_target_len = symlink_target_byte_len(repo, &entry.oid, entry.mode)?;
         index_out.add_or_replace(index_entry_from_worktree_write(
             &meta,
-            path.as_bytes(),
+            crate::repo_relpath::storage_bytes(path).as_ref(),
             entry.oid,
             entry.mode,
             symlink_target_len,
@@ -1046,7 +1063,7 @@ fn index_entry_from_flat(path: &str, src: &FlatTreeEntry, size: u32) -> IndexEnt
         oid: src.oid,
         flags: path.len().min(0xFFF) as u16,
         flags_extended: None,
-        path: path.as_bytes().to_vec(),
+        path: crate::repo_relpath::storage_bytes(path).into_owned(),
         base_index_pos: 0,
     }
 }

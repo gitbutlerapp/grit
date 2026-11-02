@@ -19,6 +19,7 @@ use std::io::Write;
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::PathspecArgs;
+use crate::ui::PathDisplayOptions;
 
 /// CLI result (mirrors [`RestoreOutcome`] or [`RestoreHunksOutcome`]).
 #[derive(Serialize, JsonSchema, Clone)]
@@ -31,6 +32,8 @@ pub struct RestoreCliOutcome {
     pub restored_lines: BTreeMap<String, Vec<String>>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dry_run: bool,
+    #[serde(skip)]
+    pub path_display: Option<PathDisplayOptions>,
 }
 
 impl From<RestoreOutcome> for RestoreCliOutcome {
@@ -41,6 +44,7 @@ impl From<RestoreOutcome> for RestoreCliOutcome {
             restored_hunks: BTreeMap::new(),
             restored_lines: BTreeMap::new(),
             dry_run: false,
+            path_display: None,
         }
     }
 }
@@ -58,6 +62,7 @@ impl From<RestoreHunksOutcome> for RestoreCliOutcome {
             restored_hunks,
             restored_lines: value.restored_lines,
             dry_run: value.dry_run,
+            path_display: None,
         }
     }
 }
@@ -70,10 +75,20 @@ impl HumanRender for RestoreCliOutcome {
             "Restored"
         };
         for path in &self.restored {
-            outln!(w, "{prefix} {path}");
+            let shown = self
+                .path_display
+                .as_ref()
+                .map(|d| d.format_path_for_human(path))
+                .unwrap_or_else(|| path.clone());
+            outln!(w, "{prefix} {shown}");
         }
         for path in &self.removed {
-            outln!(w, "Removed {path}");
+            let shown = self
+                .path_display
+                .as_ref()
+                .map(|d| d.format_path_for_human(path))
+                .unwrap_or_else(|| path.clone());
+            outln!(w, "Removed {shown}");
         }
         Ok(())
     }
@@ -131,7 +146,9 @@ pub fn run_hunks(
     selection.ranges = super::add::parse_line_range_list(lines)?;
     let outcome = restore_hunks(&repo, &selection, &pathspecs, staged, worktree, dry_run)
         .map_err(map_hunk_error)?;
-    Ok(outcome.into())
+    let mut cli: RestoreCliOutcome = outcome.into();
+    cli.path_display = PathDisplayOptions::from_repo(&repo).ok();
+    Ok(cli)
 }
 
 /// Run `grit restore` with the given flags and path arguments.
@@ -199,7 +216,9 @@ pub fn run(
         &interrupt,
     )
     .map_err(map_restore_error)?;
-    Ok(outcome.into())
+    let mut cli: RestoreCliOutcome = outcome.into();
+    cli.path_display = PathDisplayOptions::from_repo(&repo).ok();
+    Ok(cli)
 }
 
 fn map_restore_error(err: LibError) -> anyhow::Error {

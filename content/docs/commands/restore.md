@@ -101,8 +101,8 @@ Pass `--json` for scripting:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `restored` | array of strings | Paths created or updated. |
-| `removed` | array of strings | Paths removed because the source had no entry. |
+| `restored` | array of strings | Paths created or updated (non-UTF-8 names use reversible `grit+pathhex:` encoding, same as [`grit status`](status.md)). |
+| `removed` | array of strings | Paths removed because the source had no entry (same encoding as `restored`). |
 | `restored_hunks` | object | When `--hunks` was used: map of path → hunk id strings. |
 | `restored_lines` | object | When `--lines` was used: map of path → range strings (`start` or `start-end`). |
 | `dry_run` | boolean | True when `--dry-run` was passed with hunk/line selection. |

@@ -294,7 +294,7 @@ fn build_worktree_tree(repo: &Repository, include_untracked: bool) -> Result<Obj
     let mut paths: BTreeSet<Vec<u8>> = source.entries.iter().map(|e| e.path.clone()).collect();
     if include_untracked {
         for path in collect_untracked_paths(repo, work_tree)? {
-            paths.insert(path.into_bytes());
+            paths.insert(crate::repo_relpath::storage_bytes(&path).into_owned());
         }
     }
     let mut out = Index::new();
@@ -356,18 +356,18 @@ fn stage_worktree_path_for_tree(
         precompose_unicode,
     );
     let abs = resolved.abs;
-    let index_path = resolved.index_relpath;
+    let attrs_path = crate::repo_relpath::as_utf8_for_matching(rel_path);
     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
     if meta.is_dir() {
         return Ok(());
     }
-    let recorded_mode = index.get(index_path.as_bytes(), 0).map(|e| e.mode);
+    let recorded_mode = index.get(index_relpath, 0).map(|e| e.mode);
     let mode = crate::index::WorktreeModePolicy::from_config(rules.config())
         .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
     if mode == MODE_TREE {
         return Ok(());
     }
-    let file_attrs = rules.file_attrs(&index_path, false);
+    let file_attrs = rules.file_attrs(&attrs_path, false);
     let conv = rules.conversion();
     let filter_fp = Some(rules.filter_process());
     let oid = if meta.file_type().is_symlink() {
@@ -381,7 +381,7 @@ fn stage_worktree_path_for_tree(
             &meta,
             conv,
             &file_attrs,
-            &index_path,
+            &attrs_path,
             None,
             filter_fp,
         )?
@@ -466,7 +466,7 @@ fn build_pre_restore_disk_tree(
     let protect = ProtectOptions::default();
     let mut paths: BTreeSet<Vec<u8>> = source.entries.iter().map(|e| e.path.clone()).collect();
     for entry in flatten_tree_full(repo.odb(), snapshot_worktree_tree, "", protect)? {
-        paths.insert(entry.path.into_bytes());
+        paths.insert(crate::repo_relpath::storage_bytes(&entry.path).into_owned());
     }
     let mut out = Index::new();
     let rules = crate::worktree_rules::WorktreeRules::from_repository(repo, source)?;
@@ -947,6 +947,67 @@ mod tests {
         let _ = git_cmd(&["cat-file", "-t", &tree_hex])
             .in_dir(root)
             .with_status(128);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restore_recreates_untracked_literal_pathhex_and_non_utf8_paths() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        use std::path::Path;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        git(root, &["config", "user.email", "t@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        fs::write(root.join("tracked.txt"), b"ok\n").unwrap();
+        git(root, &["add", "tracked.txt"]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let literal = Path::new(OsStr::from_bytes(b"grit+pathhex:6162"));
+        let nested = Path::new(OsStr::from_bytes(b"dir/\xfe.txt"));
+        fs::create_dir_all(root.join("dir")).unwrap();
+        fs::write(root.join(literal), b"lit\n").unwrap();
+        fs::write(root.join(nested), b"nested\n").unwrap();
+
+        let repo =
+            Repository::discover(Some(root), &crate::environment::RepositoryOptions::empty())
+                .unwrap();
+        let snap = capture_workspace_snapshot(
+            &repo,
+            &WorkspaceCaptureOptions {
+                refs: vec!["refs/heads/main".into()],
+                include_untracked: true,
+            },
+        )
+        .unwrap();
+
+        fs::remove_file(root.join(literal)).unwrap();
+        fs::remove_file(root.join(nested)).unwrap();
+        let _ = fs::remove_dir(root.join("dir"));
+
+        restore_workspace_snapshot(
+            &repo,
+            &snap,
+            &WorkspaceRestoreOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(root.join(literal)).unwrap(), b"lit\n");
+        assert_eq!(fs::read(root.join(nested)).unwrap(), b"nested\n");
+        let pathhex_count = fs::read_dir(root)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("grit+pathhex:"))
+            .count();
+        assert_eq!(
+            pathhex_count, 1,
+            "literal pathhex filename must not be duplicated under encoded spelling"
+        );
+        git(root, &["fsck"]);
     }
 
     #[cfg(feature = "serde-models")]
