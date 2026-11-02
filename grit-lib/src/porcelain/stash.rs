@@ -69,13 +69,16 @@ use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes;
 use crate::progress::{
     poll_cancel, Cancel, NeverCancel, NullProgress, ProgressPhase, ProgressScope, ProgressSink,
 };
 use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store};
 use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
 use crate::repo::Repository;
+use crate::repo_relpath::{
+    as_utf8_for_matching, storage_bytes, storage_string, stored_directory_marker_parent,
+    stored_path_is_directory_marker, worktree_abs,
+};
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
@@ -141,6 +144,61 @@ pub(crate) fn flatten_tree_full_for_repo(
 pub fn flat_tree_lookup<'a>(entries: &'a [FlatTreeEntry], path: &str) -> Option<&'a FlatTreeEntry> {
     entries
         .binary_search_by(|e| e.path.as_str().cmp(path))
+        .ok()
+        .map(|i| &entries[i])
+}
+
+/// Blob entry from a recursively flattened tree, with raw Git path bytes.
+struct RawFlatTreeEntry {
+    path: Vec<u8>,
+    mode: u32,
+    oid: ObjectId,
+}
+
+fn flatten_tree_full_raw(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    prefix: &[u8],
+    protect: crate::path_validate::ProtectOptions,
+) -> Result<Vec<RawFlatTreeEntry>> {
+    let obj = odb.read(tree_oid)?;
+    let entries = parse_tree(&obj.data)?;
+    let mut result = Vec::new();
+    for entry in entries {
+        let full_path = if prefix.is_empty() {
+            entry.name.clone()
+        } else {
+            crate::repo_relpath::join_rel(prefix, &entry.name)
+        };
+        crate::path_population::validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
+        if entry.mode == 0o40000 {
+            let sub = flatten_tree_full_raw(odb, &entry.oid, &full_path, protect)?;
+            result.extend(sub);
+        } else {
+            result.push(RawFlatTreeEntry {
+                path: full_path,
+                mode: entry.mode,
+                oid: entry.oid,
+            });
+        }
+    }
+    Ok(result)
+}
+
+fn flatten_tree_full_raw_for_repo(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+) -> Result<Vec<RawFlatTreeEntry>> {
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+    flatten_tree_full_raw(repo.odb(), tree_oid, b"", protect)
+}
+
+fn raw_flat_tree_lookup<'a>(
+    entries: &'a [RawFlatTreeEntry],
+    path: &[u8],
+) -> Option<&'a RawFlatTreeEntry> {
+    entries
+        .binary_search_by(|e| e.path.as_slice().cmp(path))
         .ok()
         .map(|i| &entries[i])
 }
@@ -776,7 +834,7 @@ fn apply_worktree_diff_to_index(
         scope.sink().inc(1);
         let path = entry.path();
         if entry.status == DiffStatus::Deleted {
-            index.remove(path.as_bytes());
+            index.remove(storage_bytes(path).as_ref());
             continue;
         }
         stage_tracked_path_for_stash(
@@ -808,18 +866,22 @@ fn stage_tracked_path_for_stash(
     };
     use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
+    if stored_path_is_directory_marker(rel_path) {
+        return Ok(());
+    }
+    let index_path = storage_bytes(rel_path);
     let conv = rules.conversion().clone();
     let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
     let abs = resolved.abs;
     let meta = match fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            index.remove(rel_path.as_bytes());
+            index.remove(index_path.as_ref());
             return Ok(());
         }
         Err(e) => return Err(e.into()),
     };
-    let Some(ie) = index.get(rel_path.as_bytes(), 0).cloned() else {
+    let Some(ie) = index.get(index_path.as_ref(), 0).cloned() else {
         return stage_untracked_path_for_stash(
             repo,
             work_tree,
@@ -831,7 +893,7 @@ fn stage_tracked_path_for_stash(
     };
     let staged_mode = crate::index::WorktreeModePolicy::from_config(rules.config())
         .index_mode_for_worktree(mode_from_metadata(&meta), Some(ie.mode));
-    let file_attrs = rules.file_attrs(rel_path, false);
+    let file_attrs = rules.file_attrs(&as_utf8_for_matching(rel_path), false);
     let refresh = classify_worktree_entry_for_add(&WorktreeAddRefreshParams {
         odb: repo.odb(),
         ie: &ie,
@@ -847,15 +909,15 @@ fn stage_tracked_path_for_stash(
     match refresh {
         WorktreeAddRefresh::UpToDate => Ok(()),
         WorktreeAddRefresh::ModeOnly { mode } => {
-            if let Some(entry) = index.get_mut(rel_path.as_bytes(), 0) {
+            if let Some(entry) = index.get_mut(index_path.as_ref(), 0) {
                 entry.mode = mode;
-                index.invalidate_cache_tree_for_path(rel_path.as_bytes());
+                index.invalidate_cache_tree_for_path(index_path.as_ref());
             }
             Ok(())
         }
         WorktreeAddRefresh::StatOnly => {
             let updated =
-                crate::index::entry_from_metadata(&meta, rel_path.as_bytes(), ie.oid, ie.mode);
+                crate::index::entry_from_metadata(&meta, index_path.as_ref(), ie.oid, ie.mode);
             index.add_or_replace(updated);
             Ok(())
         }
@@ -882,24 +944,25 @@ fn stage_untracked_path_for_stash(
     use crate::index::entry_from_stat;
     use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
-    if rel_path.ends_with('/') {
+    if stored_path_is_directory_marker(rel_path) {
         return Ok(());
     }
     let resolved = resolve_worktree_path_for_staging(work_tree, rel_path, precompose_unicode);
     let abs = resolved.abs;
     let index_relpath = resolved.index_relpath;
+    let index_path = storage_bytes(&index_relpath);
     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
     if meta.is_dir() {
         return Ok(());
     }
-    let recorded_mode = index.get(index_relpath.as_bytes(), 0).map(|e| e.mode);
+    let recorded_mode = index.get(index_path.as_ref(), 0).map(|e| e.mode);
     let mode = crate::index::WorktreeModePolicy::from_config(rules.config())
         .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
     if mode == MODE_TREE {
         return Ok(());
     }
 
-    let file_attrs = rules.file_attrs(&index_relpath, false);
+    let file_attrs = rules.file_attrs(&as_utf8_for_matching(&index_relpath), false);
     let conv = rules.conversion();
     let filter_fp = Some(rules.filter_process());
     let oid = if meta.file_type().is_symlink() {
@@ -919,7 +982,7 @@ fn stage_untracked_path_for_stash(
         )
         .map_err(|e| materialize_stash_blob_err(e, &index_relpath))?
     };
-    let entry = entry_from_stat(&abs, index_relpath.as_bytes(), oid, mode)?;
+    let entry = entry_from_stat(&abs, index_path.as_ref(), oid, mode)?;
     index.add_or_replace(entry);
     Ok(())
 }
@@ -979,7 +1042,12 @@ fn remove_stashed_untracked(repo: &Repository, work_tree: &Path, paths: &[String
         if path_in_nested_git_worktree(work_tree, path) {
             continue;
         }
-        let file_path = work_tree.join(path.trim_end_matches('/'));
+        let stored = if stored_path_is_directory_marker(path) {
+            stored_directory_marker_parent(path)
+        } else {
+            path.clone()
+        };
+        let file_path = worktree_abs(work_tree, &stored);
         if file_path.is_dir() {
             if is_nested_git_worktree(&file_path) {
                 continue;
@@ -1025,9 +1093,10 @@ fn refresh_index_stat_from_worktree(
     oid: ObjectId,
     mode: u32,
 ) -> Result<()> {
-    let abs = work_tree.join(path);
+    let abs = worktree_abs(work_tree, path);
     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-    let entry = crate::index::entry_from_metadata(&meta, path.as_bytes(), oid, mode);
+    let index_path = storage_bytes(path);
+    let entry = crate::index::entry_from_metadata(&meta, index_path.as_ref(), oid, mode);
     index.add_or_replace(entry);
     Ok(())
 }
@@ -1043,7 +1112,7 @@ fn apply_staged_worktree_only_reset(
     if staged_paths.is_empty() {
         return Ok(());
     }
-    let head_entries = flatten_tree_full_for_repo(repo, head_tree, "")?;
+    let head_entries = flatten_tree_full_raw_for_repo(repo, head_tree)?;
     let index = repo.load_index()?;
     let worktree_rules = WorktreeRules::from_repository(repo, &index)?;
     progress.start(
@@ -1053,10 +1122,11 @@ fn apply_staged_worktree_only_reset(
     for path in staged_paths {
         poll_cancel(progress, cancel)?;
         progress.inc(1);
-        if let Some(entry) = flat_tree_lookup(&head_entries, path) {
-            materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
+        let raw = storage_bytes(path);
+        if let Some(entry) = raw_flat_tree_lookup(&head_entries, raw.as_ref()) {
+            materialize_raw_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
         } else {
-            let file_path = work_tree.join(path);
+            let file_path = worktree_abs(work_tree, path);
             if file_path.is_dir() {
                 if !is_nested_git_worktree(&file_path) {
                     let _ = fs::remove_dir_all(&file_path);
@@ -1087,7 +1157,7 @@ fn apply_staged_only_reset(
     if staged_paths.is_empty() {
         return Ok(());
     }
-    let head_entries = flatten_tree_full_for_repo(repo, head_tree, "")?;
+    let head_entries = flatten_tree_full_raw_for_repo(repo, head_tree)?;
     let mut index = repo.load_index()?;
     let worktree_rules = WorktreeRules::from_repository(repo, &index)?;
     progress.start(
@@ -1097,12 +1167,13 @@ fn apply_staged_only_reset(
     for path in staged_paths {
         poll_cancel(progress, cancel)?;
         progress.inc(1);
-        if let Some(entry) = flat_tree_lookup(&head_entries, path) {
-            materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
+        let raw = storage_bytes(path);
+        if let Some(entry) = raw_flat_tree_lookup(&head_entries, raw.as_ref()) {
+            materialize_raw_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
             refresh_index_stat_from_worktree(&mut index, work_tree, path, entry.oid, entry.mode)?;
         } else {
-            index.remove(path.as_bytes());
-            let file_path = work_tree.join(path);
+            index.remove(raw.as_ref());
+            let file_path = worktree_abs(work_tree, path);
             if file_path.is_dir() {
                 if !is_nested_git_worktree(&file_path) {
                     let _ = fs::remove_dir_all(&file_path);
@@ -1341,7 +1412,7 @@ fn apply_worktree_diff_to_index_for_pathspecs(
             continue;
         }
         if entry.status == DiffStatus::Deleted {
-            index.remove(path.as_bytes());
+            index.remove(storage_bytes(path).as_ref());
             continue;
         }
         stage_tracked_path_for_stash(
@@ -2235,26 +2306,21 @@ fn write_smudged_regular_file_replacing_symlink(
     Ok(())
 }
 
-fn materialize_flat_entry_in_worktree(
+fn materialize_raw_flat_entry_in_worktree(
     repo: &Repository,
     work_tree: &Path,
     rules: &WorktreeRules,
-    entry: &FlatTreeEntry,
+    entry: &RawFlatTreeEntry,
 ) -> Result<()> {
-    let file_path = work_tree.join(&entry.path);
+    let stored = storage_string(&entry.path);
+    let file_path = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
     if let Some(parent) = file_path.parent() {
         if let Ok(rel) = parent.strip_prefix(work_tree) {
             let mut cur = work_tree.to_path_buf();
             for comp in rel.components() {
                 cur.push(comp);
                 if cur.exists() && !cur.is_dir() {
-                    let path = cur
-                        .strip_prefix(work_tree)
-                        .ok()
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("")
-                        .to_owned();
-                    return Err(Error::StashCouldNotRestoreUntracked { path });
+                    return Err(Error::StashCouldNotRestoreUntracked { path: stored });
                 }
             }
         }
@@ -2276,13 +2342,7 @@ fn materialize_flat_entry_in_worktree(
             .map_err(Error::Io)?;
     } else {
         write_smudged_regular_file_replacing_symlink(
-            repo,
-            rules,
-            &entry.path,
-            &file_path,
-            entry.mode,
-            &blob.data,
-            &entry.oid,
+            repo, rules, &stored, &file_path, entry.mode, &blob.data, &entry.oid,
         )?;
     }
     Ok(())
@@ -2382,16 +2442,16 @@ fn collect_worktree_paths_blocking_stash_untracked_restore(
     repo: &Repository,
     work_tree: &Path,
     index: &mut Index,
-) -> Result<Vec<String>> {
+) -> Result<Vec<Vec<u8>>> {
     let mut paths = HashSet::new();
     for entry in index.entries() {
         if entry.stage() != 0 {
             continue;
         }
-        let path = String::from_utf8_lossy(&entry.path).into_owned();
-        let wt = work_tree.join(&path);
+        let stored = storage_string(&entry.path);
+        let wt = worktree_abs(work_tree, &stored);
         if wt.exists() || wt.symlink_metadata().is_ok() {
-            paths.insert(path);
+            paths.insert(entry.path.clone());
         }
     }
     let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
@@ -2411,11 +2471,50 @@ fn collect_worktree_paths_blocking_stash_untracked_restore(
         &worktree_rules,
         None,
     )?;
-    paths.extend(untracked);
-    paths.extend(ignored);
-    let mut sorted: Vec<String> = paths.into_iter().collect();
+    for path in untracked.into_iter().chain(ignored) {
+        paths.insert(storage_bytes(&path).into_owned());
+    }
+    let mut sorted: Vec<Vec<u8>> = paths.into_iter().collect();
     sorted.sort();
     Ok(sorted)
+}
+
+fn is_component_prefix_bytes(prefix: &[u8], path: &[u8]) -> bool {
+    if path.len() <= prefix.len() {
+        return false;
+    }
+    path.starts_with(prefix) && path.get(prefix.len()) == Some(&b'/')
+}
+
+fn added_stash_path_collides_with_worktree_path(added: &[u8], existing: &[u8]) -> bool {
+    let existing = existing.strip_suffix(b"/").unwrap_or(existing);
+    if existing.is_empty() {
+        return false;
+    }
+    added == existing
+        || is_component_prefix_bytes(added, existing)
+        || is_component_prefix_bytes(existing, added)
+}
+
+fn untracked_stash_restore_collisions(
+    existing_paths: &[Vec<u8>],
+    ut_entries: &[RawFlatTreeEntry],
+) -> Vec<Vec<u8>> {
+    let mut collisions = Vec::new();
+    for entry in ut_entries {
+        if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
+            continue;
+        }
+        let added = entry.path.as_slice();
+        for existing in existing_paths {
+            if added_stash_path_collides_with_worktree_path(added, existing) {
+                collisions.push(added.to_vec());
+            }
+        }
+    }
+    collisions.sort();
+    collisions.dedup();
+    collisions
 }
 
 /// Refuse when restoring the stash untracked-files parent would clobber an existing worktree path.
@@ -2439,23 +2538,23 @@ fn check_stash_untracked_restore(
     }
     let ut_oid = &stash_commit.parents[2];
     let ut_tree = repo.odb().commit_tree(ut_oid)?;
-    let ut_entries = flatten_tree_full_for_repo(repo, &ut_tree, "")?;
+    let ut_entries = flatten_tree_full_raw_for_repo(repo, &ut_tree)?;
     if ut_entries.is_empty() {
         return Ok(());
     }
-    let ut_file_paths: HashSet<String> = ut_entries
+    let ut_file_paths: HashSet<&[u8]> = ut_entries
         .iter()
         .filter(|e| e.mode != MODE_GITLINK && e.mode != MODE_TREE)
-        .map(|e| e.path.clone())
+        .map(|e| e.path.as_slice())
         .collect();
-    let existing_paths: Vec<String> =
+    let existing_paths: Vec<Vec<u8>> =
         collect_worktree_paths_blocking_stash_untracked_restore(repo, work_tree, index)?
             .into_iter()
-            .filter(|path| {
+            .filter(|path_bytes| {
                 for ut_file in &ut_file_paths {
-                    if path != ut_file
-                        && path.starts_with(&format!("{ut_file}/"))
-                        && wt_deletions.contains(path.as_bytes())
+                    if path_bytes.as_slice() != *ut_file
+                        && is_component_prefix_bytes(ut_file, path_bytes)
+                        && wt_deletions.contains(path_bytes)
                     {
                         return false;
                     }
@@ -2463,27 +2562,15 @@ fn check_stash_untracked_restore(
                 true
             })
             .collect();
-    let tree_changes: Vec<DiffEntry> = ut_entries
-        .iter()
-        .map(|entry| DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(entry.path.clone()),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(entry.mode),
-            old_oid: ObjectId::zero(),
-            new_oid: entry.oid,
-            score: None,
-        })
-        .collect();
-    let collisions = untracked_would_be_overwritten_by_tree_changes(&existing_paths, &tree_changes);
-    for path in &collisions {
+    let collisions = untracked_stash_restore_collisions(&existing_paths, &ut_entries);
+    for path_bytes in collisions {
+        let path = storage_string(&path_bytes);
         if options.overwrite_identical_untracked
-            && untracked_on_disk_matches_stash(repo, work_tree, index, ut_oid, &ut_entries, path)?
+            && untracked_on_disk_matches_stash(repo, work_tree, index, ut_oid, &ut_entries, &path)?
         {
             continue;
         }
-        return Err(Error::StashCouldNotRestoreUntracked { path: path.clone() });
+        return Err(Error::StashCouldNotRestoreUntracked { path });
     }
     Ok(())
 }
@@ -2493,17 +2580,18 @@ fn untracked_on_disk_matches_stash(
     work_tree: &Path,
     index: &Index,
     ut_commit: &ObjectId,
-    ut_entries: &[FlatTreeEntry],
+    ut_entries: &[RawFlatTreeEntry],
     path: &str,
 ) -> Result<bool> {
     let _ = ut_commit;
-    let Some(entry) = ut_entries.iter().find(|e| e.path == path) else {
+    let Some(entry) = ut_entries.iter().find(|e| storage_string(&e.path) == path) else {
         return Ok(false);
     };
     if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
         return Ok(false);
     }
-    let abs = crate::index::worktree_path_from_index_rel(work_tree, path.as_bytes());
+    let stored = storage_string(&entry.path);
+    let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
     let meta = match fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(_) => return Ok(false),
@@ -2516,7 +2604,7 @@ fn untracked_on_disk_matches_stash(
     let worktree_bytes = smudge_bytes_for_worktree_path(
         repo,
         &rules,
-        path,
+        &stored,
         entry.mode,
         &stash_blob.data,
         &entry.oid,
@@ -3195,9 +3283,9 @@ fn apply_stash_commit(
     if stash_commit.parents.len() >= 3 {
         let ut_oid = &stash_commit.parents[2];
         let ut_tree = repo.odb().commit_tree(ut_oid)?;
-        let ut_entries = flatten_tree_full_for_repo(repo, &ut_tree, "")?;
+        let ut_entries = flatten_tree_full_raw_for_repo(repo, &ut_tree)?;
         for entry in &ut_entries {
-            materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
+            materialize_raw_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
         }
     }
 
