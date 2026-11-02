@@ -33,7 +33,7 @@ use crate::objects::FileMode;
 use crate::objects::{Object, ObjectId, TreeEntry};
 use crate::odb::{BoundedRead, Odb};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp, ParallelOptions};
-use crate::path_icase::paths_equal;
+use crate::path_icase::ScheduledDeletePathLookup;
 use crate::path_population::{validate_tree_walk_entry, validate_worktree_path};
 use crate::path_validate::ProtectOptions;
 use crate::progress::{
@@ -2902,6 +2902,7 @@ pub(crate) fn wholesale_deleted_directories(
         return BTreeSet::new();
     }
     let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
+    let delete_lookup = ScheduledDeletePathLookup::new(&delete_set, false);
     let mut wholesale = BTreeSet::new();
     if index.entries_sorted {
         for (dir, del_count) in &deleted_under {
@@ -2927,7 +2928,7 @@ pub(crate) fn wholesale_deleted_directories(
                     all_scheduled = false;
                     break;
                 };
-                if !delete_path_is_scheduled(path, &delete_set, false) {
+                if !delete_path_is_scheduled(path, &delete_lookup) {
                     all_scheduled = false;
                     break;
                 }
@@ -2954,7 +2955,7 @@ pub(crate) fn wholesale_deleted_directories(
             continue;
         }
         *indexed_under.entry(dir.to_owned()).or_default() += 1;
-        if !delete_path_is_scheduled(path, &delete_set, false) {
+        if !delete_path_is_scheduled(path, &delete_lookup) {
             blocked.insert(dir.to_owned());
         }
     }
@@ -3013,14 +3014,8 @@ fn resolve_wholesale_blocked_dirs(
 }
 
 /// True when every file under `work_tree`/`dir` is listed in `delete_paths` (Git keeps untracked/ignored extras).
-fn delete_path_is_scheduled(rel: &str, delete_paths: &HashSet<String>, ignorecase: bool) -> bool {
-    if ignorecase {
-        delete_paths
-            .iter()
-            .any(|del| paths_equal(rel.as_bytes(), del.as_bytes(), true))
-    } else {
-        delete_paths.contains(rel)
-    }
+fn delete_path_is_scheduled(rel: &str, delete_paths: &ScheduledDeletePathLookup<'_>) -> bool {
+    delete_paths.contains(rel)
 }
 
 /// Untracked and ignored paths collected under wholesale delete trees before switch checkout.
@@ -3061,6 +3056,7 @@ pub(crate) fn wholesale_directory_safe_to_remove(
     delete_paths: &HashSet<String>,
     ignorecase: bool,
 ) -> bool {
+    let delete_lookup = ScheduledDeletePathLookup::new(delete_paths, ignorecase);
     let abs_dir = work_tree.join(dir);
     let mut stack = vec![abs_dir];
     while let Some(current) = stack.pop() {
@@ -3089,7 +3085,7 @@ pub(crate) fn wholesale_directory_safe_to_remove(
                 return false;
             };
             let rel = rel.to_string_lossy();
-            if !delete_path_is_scheduled(rel.as_ref(), delete_paths, ignorecase) {
+            if !delete_path_is_scheduled(rel.as_ref(), &delete_lookup) {
                 return false;
             }
         }
@@ -6446,6 +6442,102 @@ mod tests {
             &HashSet::new(),
         );
         assert!(wholesale.is_empty());
+    }
+
+    #[test]
+    fn wholesale_directory_safe_to_remove_ignorecase_matches_disk_spelling() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("d")).expect("mkdir");
+        let mut delete_paths = Vec::new();
+        for i in 0..4 {
+            let scheduled = format!("d/file{i}.txt");
+            let disk = format!("d/File{i}.txt");
+            let abs = wt.join(&disk);
+            std::fs::write(&abs, format!("v{i}\n")).expect("write");
+            delete_paths.push(scheduled);
+        }
+        let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
+        assert!(super::wholesale_directory_safe_to_remove(
+            wt,
+            "d",
+            &delete_set,
+            true
+        ));
+    }
+
+    #[test]
+    fn wholesale_directory_safe_to_remove_ignorecase_rejects_extra_file() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("d")).expect("mkdir");
+        let mut delete_paths = Vec::new();
+        for i in 0..4 {
+            let rel = format!("d/f{i}.txt");
+            std::fs::write(wt.join(&rel), format!("v{i}\n")).expect("write");
+            delete_paths.push(rel);
+        }
+        std::fs::write(wt.join("d/extra.txt"), b"x\n").expect("extra");
+        let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
+        assert!(!super::wholesale_directory_safe_to_remove(
+            wt,
+            "d",
+            &delete_set,
+            true
+        ));
+    }
+
+    #[test]
+    fn wholesale_directory_safe_to_remove_ignorecase_scales_linearly() {
+        use std::time::{Duration, Instant};
+
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        std::fs::create_dir_all(wt.join("big")).expect("mkdir");
+        let file_count = 4000usize;
+        let mut delete_paths = Vec::with_capacity(file_count);
+        for i in 0..file_count {
+            let rel = format!("big/f{i}.txt");
+            std::fs::write(wt.join(&rel), b"x\n").expect("write");
+            delete_paths.push(rel);
+        }
+        let delete_set: HashSet<String> = delete_paths.iter().cloned().collect();
+        let start = Instant::now();
+        assert!(super::wholesale_directory_safe_to_remove(
+            wt,
+            "big",
+            &delete_set,
+            true
+        ));
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "ignorecase wholesale safety walk took {elapsed:?}; expected O(n), not O(n²)"
+        );
     }
 
     #[test]

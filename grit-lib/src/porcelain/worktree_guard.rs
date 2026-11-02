@@ -21,6 +21,7 @@ use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
+use crate::path_icase::ScheduledDeletePathLookup;
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
 use crate::porcelain::status::{collect_untracked_and_ignored_with_cache, IgnoredMode};
 use crate::repo::Repository;
@@ -992,20 +993,6 @@ fn delete_paths_from_tree_changes(tree_changes: &[DiffEntry]) -> HashSet<String>
         .collect()
 }
 
-fn delete_path_scheduled_for_removal(
-    rel: &str,
-    delete_paths: &HashSet<String>,
-    ignorecase: bool,
-) -> bool {
-    if ignorecase {
-        delete_paths
-            .iter()
-            .any(|del| crate::path_icase::paths_equal(rel.as_bytes(), del.as_bytes(), true))
-    } else {
-        delete_paths.contains(rel)
-    }
-}
-
 /// Scan wholesale-delete directory trees for extra untracked/ignored files without a full status walk.
 ///
 /// Every on-disk file under `delete_roots` must appear in `delete_paths` (scheduled removal). Any
@@ -1176,6 +1163,7 @@ fn scan_wholesale_delete_root(
         )
     });
     let index_aligned = indexed > 0 && indexed == deletes;
+    let delete_lookup = ScheduledDeletePathLookup::new(delete_paths, ignorecase);
     let mut untracked = Vec::new();
     let mut needs_ignore_rules = Vec::new();
     let abs_root = work_tree.join(root);
@@ -1202,7 +1190,7 @@ fn scan_wholesale_delete_root(
             }
             rel_buf.push_str(&name);
             let rel = rel_buf.as_str();
-            if index_aligned && delete_path_scheduled_for_removal(rel, delete_paths, ignorecase) {
+            if index_aligned && delete_lookup.contains(rel) {
                 // Indexed file deletes need no file_type (issue #1613). Always descend when
                 // other scheduled deletes live under this path; otherwise probe only when the
                 // path is not a known indexed blob (directory deletes, missing index rows).
@@ -1211,10 +1199,7 @@ fn scan_wholesale_delete_root(
                     rel,
                     delete_prefix_dirs,
                     ignorecase,
-                ) || (!skip_probe
-                    && (delete_paths.contains(rel)
-                        || (ignorecase
-                            && delete_paths.iter().any(|del| del.eq_ignore_ascii_case(rel)))));
+                ) || (!skip_probe && delete_lookup.contains(rel));
                 if needs_descent {
                     let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
                     if is_dir {
@@ -1237,7 +1222,7 @@ fn scan_wholesale_delete_root(
                 continue;
             }
             if !file_type.is_file() && !file_type.is_symlink() {
-                if delete_path_scheduled_for_removal(rel, delete_paths, ignorecase) {
+                if delete_lookup.contains(rel) {
                     rel_buf.truncate(rel_start);
                     continue;
                 }
@@ -1250,7 +1235,7 @@ fn scan_wholesale_delete_root(
                 rel_buf.truncate(rel_start);
                 continue;
             }
-            if delete_path_scheduled_for_removal(rel, delete_paths, ignorecase) {
+            if delete_lookup.contains(rel) {
                 rel_buf.truncate(rel_start);
                 continue;
             }
@@ -3208,6 +3193,40 @@ mod tests {
             scan.untracked.iter().any(|p| p == "wh/nested/block.pipe"),
             "special files under a scheduled-delete directory must be discovered"
         );
+    }
+
+    #[test]
+    fn scan_wholesale_delete_root_ignorecase_matches_scheduled_spelling() {
+        use crate::index::entry_from_stat;
+        use crate::objects::ObjectKind;
+
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt");
+        let root = "ic";
+        std::fs::create_dir_all(wt.join(root)).expect("mkdir");
+        let mut delete_paths = HashSet::new();
+        let mut index = repo.load_index().expect("index");
+        for i in 0..8 {
+            let scheduled = format!("{root}/file{i}.txt");
+            let disk = format!("{root}/File{i}.txt");
+            let abs = wt.join(&disk);
+            std::fs::write(&abs, format!("v{i}\n")).expect("write");
+            let oid = repo
+                .odb()
+                .write(ObjectKind::Blob, format!("v{i}\n").as_bytes())
+                .expect("blob");
+            index.add_or_replace(
+                entry_from_stat(&abs, scheduled.as_bytes(), oid, crate::index::MODE_REGULAR)
+                    .expect("entry"),
+            );
+            delete_paths.insert(scheduled);
+        }
+        index.sort();
+        let prefix_dirs = delete_path_directory_prefixes(&delete_paths, true);
+        let scan =
+            scan_wholesale_delete_root(&index, wt, root, &delete_paths, &prefix_dirs, true, None);
+        assert!(scan.untracked.is_empty());
+        assert!(scan.needs_ignore_rules.is_empty());
     }
 
     fn git_in(dir: &Path, args: &[&str]) -> String {
