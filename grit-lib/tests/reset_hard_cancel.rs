@@ -120,8 +120,7 @@ fn ref_and_index(repo: &Repository) -> (Vec<u8>, Vec<u8>) {
     (read("refs/heads/main"), read("index"))
 }
 
-/// The system `git` sees no staged, unstaged or untracked change.
-fn assert_git_status_clean(repo: &Repository) {
+fn git_status_porcelain(repo: &Repository) -> String {
     let out = std::process::Command::new("git")
         .args(["status", "--porcelain", "--untracked-files=all"])
         .current_dir(repo.work_tree().expect("work tree"))
@@ -131,7 +130,12 @@ fn assert_git_status_clean(repo: &Repository) {
         .output()
         .expect("git status");
     assert!(out.status.success());
-    let status = String::from_utf8_lossy(&out.stdout);
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// The system `git` sees no staged, unstaged or untracked change.
+fn assert_git_status_clean(repo: &Repository) {
+    let status = git_status_porcelain(repo);
     assert!(
         status.is_empty(),
         "git status after cancelled reset:\n{status}"
@@ -276,4 +280,137 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
         "cancelled reset must restore every file it deleted"
     );
     assert_git_status_clean(&repo);
+}
+
+fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<ObjectId>) -> ObjectId {
+    let wt = repo.work_tree().expect("wt");
+    let mut index = repo.index_handle().load().expect("index");
+    for (path, contents) in updates {
+        let abs = wt.join(path);
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
+        std::fs::write(&abs, contents).expect("write");
+        let oid = repo
+            .odb()
+            .write(objects::ObjectKind::Blob, contents.as_bytes())
+            .expect("blob");
+        let entry = grit_lib::index::entry_from_stat(
+            &abs,
+            path.as_bytes(),
+            oid,
+            grit_lib::index::MODE_REGULAR,
+        )
+        .expect("entry");
+        index.add_or_replace(entry);
+    }
+    index.sort();
+    let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
+        .expect("tree");
+    repo.index_handle().write(&mut index).expect("write index");
+    let commit = objects::CommitData {
+        tree,
+        parents: parent.into_iter().collect(),
+        author: identity_line(),
+        committer: identity_line(),
+        author_raw: vec![],
+        committer_raw: vec![],
+        encoding: None,
+        message: "c\n".into(),
+        raw_message: None,
+        extra_headers: Vec::new(),
+    };
+    let co = repo
+        .odb()
+        .write(
+            objects::ObjectKind::Commit,
+            &objects::serialize_commit(&commit),
+        )
+        .expect("commit");
+    refs::write_ref(repo.git_dir(), "refs/heads/main", &co).expect("branch");
+    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+    co
+}
+
+/// Cancel during coalesced wholesale removal of a tracked directory must roll back every file.
+#[test]
+fn hard_reset_cancel_restores_coalesced_directory_delete() {
+    const FILES_IN_D: usize = 600;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = Repository::init(
+        tmp.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let wt = repo.work_tree().expect("work tree");
+    let commit_a = commit_tree(&repo, &[("base.txt", "base\n")], None);
+    let mut paths_and_contents: Vec<(String, String)> = Vec::new();
+    for i in 1..=FILES_IN_D {
+        paths_and_contents.push((format!("d/f{i}.txt"), format!("{i}\n")));
+    }
+    let updates: Vec<(&str, &str)> = paths_and_contents
+        .iter()
+        .map(|(p, c)| (p.as_str(), c.as_str()))
+        .collect();
+    let mut commit_b_updates: Vec<(&str, &str)> = updates;
+    commit_b_updates.push(("d/dirty.txt", "tracked baseline\n"));
+    let commit_b = commit_tree(&repo, &commit_b_updates, Some(commit_a));
+
+    let dirty_path = "d/dirty.txt";
+    let dirty_bytes = "unstaged local edit\n";
+    std::fs::write(wt.join(dirty_path), dirty_bytes).expect("dirty write");
+    let git_status_before = git_status_porcelain(&repo);
+
+    struct CancelOnAnyCheckoutInc {
+        flag: FlagCancel,
+    }
+    impl ProgressSink for CancelOnAnyCheckoutInc {
+        fn inc(&mut self, _: u64) {
+            self.flag.cancel();
+        }
+        fn should_cancel(&self) -> bool {
+            self.flag.is_cancelled()
+        }
+    }
+
+    let before = ref_and_index(&repo);
+    let flag = FlagCancel::new();
+    let mut progress = CancelOnAnyCheckoutInc { flag: flag.clone() };
+    let err = reset_to_commit(
+        &repo,
+        &ResetOptions::new(commit_a, ResetMode::Hard, reset_identity(), "reset"),
+        &mut progress,
+        &flag,
+    )
+    .expect_err("cancel during coalesced directory delete");
+    assert!(
+        matches!(err, grit_lib::error::Error::Cancelled),
+        "expected cancelled reset, got {err:?}"
+    );
+    assert_eq!(
+        ref_and_index(&repo),
+        before,
+        "cancelled reset moved the branch or index"
+    );
+    assert_eq!(
+        refs::resolve_ref(repo.git_dir(), "HEAD").expect("HEAD"),
+        commit_b,
+        "cancelled reset must not move HEAD"
+    );
+    for i in 1..=FILES_IN_D {
+        let contents = std::fs::read_to_string(wt.join(format!("d/f{i}.txt"))).unwrap_or_default();
+        assert_eq!(contents, format!("{i}\n"), "d/f{i}.txt must be restored");
+    }
+    assert_eq!(
+        std::fs::read_to_string(wt.join(dirty_path)).expect("dirty"),
+        dirty_bytes,
+        "unstaged bytes under a coalesced delete must survive cancel"
+    );
+    assert_eq!(
+        git_status_porcelain(&repo),
+        git_status_before,
+        "cancelled reset must leave git status unchanged"
+    );
 }
