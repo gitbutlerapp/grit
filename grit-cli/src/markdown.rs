@@ -777,6 +777,30 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
     Ok(())
 }
 
+fn print_pull_conflict_bullets(
+    w: &mut dyn Write,
+    outcome: &crate::commands::pull::PullOutcome,
+) -> anyhow::Result<()> {
+    let path_opts = crate::ui::path_display_for_discovered_repo();
+    if let Some(sources) = &outcome.conflict_sources {
+        crate::operation_output::render_conflicts_markdown(
+            sources,
+            outcome.conflict_merge_label.as_deref(),
+            path_opts.as_ref(),
+            w,
+        )?;
+    } else if let Some(paths) = outcome.conflicts.as_deref() {
+        for path in paths {
+            let shown = path_opts
+                .as_ref()
+                .map(|opts| format_inline_code(&opts.format_path_for_human(path)))
+                .unwrap_or_else(|| format_inline_code(path));
+            outln!(w, "- {shown}");
+        }
+    }
+    Ok(())
+}
+
 /// Result of `grit pull`.
 pub fn print_pull_outcome(
     w: &mut dyn Write,
@@ -843,19 +867,7 @@ pub fn print_pull_outcome(
         PullResult::Conflicts => {
             outln!(w, "- Pull **`{}`** stopped with conflicts", outcome.branch);
             outln!(w);
-            if let Some(details) = &outcome.conflict_details {
-                for item in details {
-                    if let Some(summary) = &item.summary {
-                        outln!(w, "- **{}** — {summary}", item.kind);
-                    } else {
-                        outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
-                    }
-                }
-            } else {
-                for path in outcome.conflicts.as_deref().unwrap_or(&[]) {
-                    outln!(w, "- `{path}`");
-                }
-            }
+            print_pull_conflict_bullets(w, outcome)?;
             if outcome.operation.as_deref() == Some("rebase") {
                 if let Some(commit) = &outcome.commit {
                     outln!(
@@ -921,9 +933,7 @@ pub fn print_pull_outcome(
                 outcome.branch
             );
             outln!(w);
-            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
-                outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
-            }
+            print_pull_conflict_bullets(w, outcome)?;
             outln!(
                 w,
                 "→ resolve the conflicts, `grit add` the files, then `grit rebase --continue`; or `grit rebase --abort` to put the branch back"
@@ -1035,9 +1045,7 @@ fn print_pull_server_branch(
                 outcome.branch
             );
             outln!(w);
-            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
-                outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
-            }
+            print_pull_conflict_bullets(w, outcome)?;
             outln!(
                 w,
                 "→ resolve the conflicts, `grit add` the files, then `grit rebase --continue`; or `grit rebase --abort` to put the branch back"
@@ -1051,9 +1059,7 @@ fn print_pull_server_branch(
                 outcome.branch
             );
             outln!(w);
-            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
-                outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
-            }
+            print_pull_conflict_bullets(w, outcome)?;
             outln!(
                 w,
                 "→ the index or worktree has changes of its own, so nothing changed; commit or stash them, then `grit pull {}` again",

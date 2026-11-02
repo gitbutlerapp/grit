@@ -105,6 +105,7 @@ impl HumanRender for CommitOutcome {
             ctx.mode,
             &self.embedded_gitlinks,
             self.dry_run,
+            None,
         );
         if self.dry_run {
             outln!(
@@ -152,6 +153,7 @@ impl MarkdownRender for CommitOutcome {
             ctx.mode,
             &self.embedded_gitlinks,
             self.dry_run,
+            None,
         );
         markdown::print_commit_outcome(w, self)?;
         Ok(())

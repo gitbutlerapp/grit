@@ -118,6 +118,7 @@ impl HumanRender for AddOutcome {
             ctx.mode,
             &self.embedded_gitlinks,
             self.dry_run,
+            self.path_display.as_ref(),
         );
         let prefix = if self.dry_run {
             "Would stage"
@@ -148,6 +149,7 @@ impl MarkdownRender for AddOutcome {
             ctx.mode,
             &self.embedded_gitlinks,
             self.dry_run,
+            self.path_display.as_ref(),
         );
         markdown::print_add_outcome(w, self, self.path_display.as_ref())?;
         Ok(())
