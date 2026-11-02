@@ -18,7 +18,9 @@ use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
-use crate::repo_relpath::{self, format_path_stored, storage_bytes, storage_string, worktree_abs};
+use crate::repo_relpath::{
+    self, directory_marker_stored, format_path_stored, storage_bytes, storage_string, worktree_abs,
+};
 
 /// `DIR_SHOW_OTHER_DIRECTORIES` constant.
 pub const DIR_SHOW_OTHER_DIRECTORIES: u32 = 1 << 1;
@@ -732,18 +734,12 @@ fn has_tracked_under(
     gitlinks: &BTreeSet<String>,
     rel_dir: &str,
 ) -> bool {
-    let prefix = if rel_dir.is_empty() {
-        String::new()
-    } else {
-        format!("{rel_dir}/")
-    };
     tracked
-        .range::<String, _>(prefix.clone()..)
-        .next()
-        .is_some_and(|t| t.starts_with(&prefix))
-        || gitlinks.iter().any(|g| {
-            g.as_str() == rel_dir || (!rel_dir.is_empty() && g.starts_with(&format!("{rel_dir}/")))
-        })
+        .iter()
+        .any(|t| stored_path_is_strictly_under(t, rel_dir))
+        || gitlinks
+            .iter()
+            .any(|g| g.as_str() == rel_dir || stored_path_is_strictly_under(g, rel_dir))
 }
 
 fn has_hidden_untracked_file_or_dir(
@@ -869,6 +865,31 @@ fn join_stored_paths(parent: &str, child: &str) -> String {
 fn stored_dir_name(rel: &str) -> String {
     let bytes = storage_bytes(rel);
     storage_string(repo_relpath::file_name(&bytes))
+}
+
+fn stored_path_is_strictly_under(path: &str, dir: &str) -> bool {
+    if dir.is_empty() {
+        return !path.is_empty();
+    }
+    let dir_bytes = storage_bytes(dir);
+    let path_bytes = storage_bytes(path);
+    path_bytes.len() > dir_bytes.len()
+        && path_bytes.starts_with(dir_bytes.as_ref())
+        && path_bytes[dir_bytes.len()] == b'/'
+}
+
+#[cfg(unix)]
+fn append_stored_component(abs: &Path, comp: &str) -> PathBuf {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let mut child = abs.to_path_buf();
+    child.push(OsStr::from_bytes(&storage_bytes(comp)));
+    child
+}
+
+#[cfg(not(unix))]
+fn append_stored_component(abs: &Path, comp: &str) -> PathBuf {
+    abs.join(std::str::from_utf8(&storage_bytes(comp)).unwrap_or(comp))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1465,7 +1486,7 @@ fn visit_untracked_directory_uc(
                 check_only_tree_has_visible_untracked(repo, index, matcher, rel, candidate)?;
             parent_ucd.dirs[idx].recurse = true;
             if has_visible {
-                let collapsed = format!("{name}/");
+                let collapsed = directory_marker_stored(rel);
                 if !parent_ucd.untracked.iter().any(|u| u == &collapsed) {
                     parent_ucd.untracked.push(collapsed);
                 }
@@ -1589,7 +1610,7 @@ fn visit_untracked_directory_uc(
         // reopening directories and overcounting `opendir` trace stats.
         let child = lookup_or_create_child(parent_ucd, &name, uc);
         populate_check_only_subtree(child, rel, abs, &sub_untracked, uc);
-        let collapsed = format!("{name}/");
+        let collapsed = directory_marker_stored(rel);
         if !parent_ucd.untracked.iter().any(|u| u == &collapsed) {
             parent_ucd.untracked.push(collapsed);
         }
@@ -1621,7 +1642,7 @@ fn populate_check_only_subtree(
     let prefix = if rel.is_empty() {
         String::new()
     } else {
-        format!("{rel}/")
+        directory_marker_stored(rel)
     };
     for full in sub_untracked {
         let rest = if prefix.is_empty() {
@@ -1638,7 +1659,7 @@ fn populate_check_only_subtree(
         if parts.is_empty() {
             continue;
         }
-        insert_check_only_path(root, abs, &parts, uc);
+        insert_check_only_path(root, abs, rel, &parts, uc);
     }
     sort_untracked_tree(root);
 }
@@ -1646,6 +1667,7 @@ fn populate_check_only_subtree(
 fn insert_check_only_path(
     dir: &mut UntrackedCacheDir,
     dir_abs: &Path,
+    dir_stored: &str,
     parts: &[&str],
     uc: &mut UntrackedCache,
 ) {
@@ -1661,11 +1683,12 @@ fn insert_check_only_path(
     }
 
     let comp = parts[0];
-    let collapsed = format!("{comp}/");
+    let collapsed = directory_marker_stored(comp);
     if !dir.untracked.iter().any(|u| u == &collapsed) {
         dir.untracked.push(collapsed);
     }
-    let child_abs = dir_abs.join(comp);
+    let child_stored = join_stored_paths(dir_stored, comp);
+    let child_abs = append_stored_component(dir_abs, comp);
     let child = lookup_or_create_child(dir, comp, uc);
     child.recurse = true;
     child.check_only = true;
@@ -1674,7 +1697,7 @@ fn insert_check_only_path(
     if let Ok(meta) = fs::symlink_metadata(&child_abs) {
         child.stat_data = stat_data_from_meta(&meta);
     }
-    insert_check_only_path(child, &child_abs, &parts[1..], uc);
+    insert_check_only_path(child, &child_abs, &child_stored, &parts[1..], uc);
 }
 
 fn sort_untracked_tree(dir: &mut UntrackedCacheDir) {
@@ -1693,14 +1716,12 @@ fn check_only_tree_has_visible_untracked(
     rel: &str,
     dir: &UntrackedCacheDir,
 ) -> Result<bool> {
-    let prefix = if rel.is_empty() {
-        String::new()
-    } else {
-        format!("{rel}/")
-    };
-
     for file in &dir.untracked {
-        let path = format!("{prefix}{file}");
+        let path = if rel.is_empty() {
+            file.clone()
+        } else {
+            join_stored_paths(rel, file)
+        };
         let (is_ignored, _) = matcher.check_path(repo, Some(index), &path, false)?;
         if !is_ignored {
             return Ok(true);
@@ -1711,7 +1732,7 @@ fn check_only_tree_has_visible_untracked(
         let child_rel = if rel.is_empty() {
             child.name.clone()
         } else {
-            format!("{rel}/{}", child.name)
+            join_stored_paths(rel, &child.name)
         };
         if check_only_tree_has_visible_untracked(repo, index, matcher, &child_rel, child)? {
             return Ok(true);
@@ -1840,7 +1861,7 @@ fn visit_untracked_directory_collect(
         && !rel.is_empty()
         && matcher.is_path_ignored(repo, Some(index), rel, true)?
     {
-        ignored_out.push(format!("{rel}/"));
+        ignored_out.push(directory_marker_stored(rel));
         return Ok(());
     }
 
@@ -1888,7 +1909,7 @@ fn visit_untracked_directory_collect(
         let collapse_matching = ignored_mode == UntrackedIgnoredMode::Matching && dir_excluded;
         let collapse_traditional = ignored_mode == UntrackedIgnoredMode::Traditional;
         if collapse_matching || collapse_traditional {
-            ignored_out.push(format!("{rel}/"));
+            ignored_out.push(directory_marker_stored(rel));
         } else {
             ignored_out.append(&mut sub_i);
         }
@@ -1899,7 +1920,7 @@ fn visit_untracked_directory_collect(
         if rel.is_empty() {
             untracked_out.append(&mut sub_u);
         } else {
-            untracked_out.push(format!("{rel}/"));
+            untracked_out.push(directory_marker_stored(rel));
         }
     }
 
@@ -1960,7 +1981,7 @@ fn traditional_normal_directory_only(
         }
     }
     if any_file {
-        Ok(Some(format!("{rel}/")))
+        Ok(Some(directory_marker_stored(rel)))
     } else {
         Ok(None)
     }

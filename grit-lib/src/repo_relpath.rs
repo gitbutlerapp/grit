@@ -78,8 +78,17 @@ pub fn storage_string(path: &[u8]) -> String {
 /// Canonical stored path for a sparse-directory index row (mode `040000`, trailing slash).
 #[must_use]
 pub fn sparse_directory_stored_path(dir: &str) -> String {
-    let trimmed = dir.strip_suffix('/').unwrap_or(dir);
-    format!("{trimmed}/")
+    directory_marker_stored(dir.strip_suffix('/').unwrap_or(dir))
+}
+
+/// Stored path for a directory entry with a trailing slash (untracked `dir/` markers, prefixes).
+#[must_use]
+pub fn directory_marker_stored(stored: &str) -> String {
+    let mut bytes = storage_bytes(stored).into_owned();
+    if bytes.last() != Some(&b'/') {
+        bytes.push(b'/');
+    }
+    storage_string(&bytes)
 }
 
 /// Decode a path previously produced by [`storage_string`].
@@ -194,5 +203,13 @@ mod tests {
         assert_ne!(stored, "grit+pathhex:6162");
         assert!(stored.starts_with(STORAGE_PREFIX));
         assert_eq!(storage_bytes(&stored)[..], literal[..]);
+    }
+
+    #[test]
+    fn directory_marker_stored_appends_slash_in_raw_bytes() {
+        let dir = storage_string(b"\xfe");
+        let marked = directory_marker_stored(&dir);
+        assert_eq!(marked, "grit+pathhex:fe2f");
+        assert_eq!(storage_bytes(&marked)[..], b"\xfe/"[..]);
     }
 }
