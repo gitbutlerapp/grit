@@ -442,9 +442,12 @@ fn report_to_outcome(
 
 fn map_bundle_error(err: BundleError) -> anyhow::Error {
     match err {
-        BundleError::MissingPrerequisite { .. } | BundleError::PrerequisitesNotConnected => {
-            anyhow::Error::new(MissingPrerequisites)
+        BundleError::MissingPrerequisites { commits } => {
+            anyhow::Error::new(MissingPrerequisites { commits })
         }
+        BundleError::PrerequisitesNotConnected => anyhow::Error::new(MissingPrerequisites {
+            commits: Vec::new(),
+        }),
         other if other.is_cancelled() => grit_lib::error::Error::Cancelled.into(),
         other => anyhow::Error::msg(other.to_string()),
     }
@@ -453,7 +456,9 @@ fn map_bundle_error(err: BundleError) -> anyhow::Error {
 fn map_lib_error(err: grit_lib::error::Error) -> anyhow::Error {
     match err {
         grit_lib::error::Error::BundleMissingPrerequisites => {
-            anyhow::Error::new(MissingPrerequisites)
+            anyhow::Error::new(MissingPrerequisites {
+                commits: Vec::new(),
+            })
         }
         other => other.into(),
     }
@@ -461,11 +466,25 @@ fn map_lib_error(err: grit_lib::error::Error) -> anyhow::Error {
 
 /// Marker error for bundle prerequisite failures (`exit 128`).
 #[derive(Debug)]
-pub struct MissingPrerequisites;
+pub struct MissingPrerequisites {
+    /// Missing prerequisite commits when known (empty for disconnected-prerequisite failures).
+    pub commits: Vec<(grit_lib::objects::ObjectId, Option<String>)>,
+}
 
 impl std::fmt::Display for MissingPrerequisites {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("repository lacks these prerequisite commits")
+        if self.commits.is_empty() {
+            return f.write_str("prerequisite commits are not connected to local refs");
+        }
+        write!(
+            f,
+            "repository lacks these prerequisite commits: {}",
+            self.commits
+                .iter()
+                .map(|(oid, _)| oid.to_hex())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
     }
 }
 

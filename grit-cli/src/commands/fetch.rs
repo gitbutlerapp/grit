@@ -565,7 +565,9 @@ pub(crate) fn map_remote_error(err: RemoteError) -> anyhow::Error {
     }
     match err {
         RemoteError::Library(grit_lib::error::Error::BundleMissingPrerequisites) => {
-            anyhow::Error::new(crate::commands::bundle::MissingPrerequisites)
+            anyhow::Error::new(crate::commands::bundle::MissingPrerequisites {
+                commits: Vec::new(),
+            })
         }
         RemoteError::Library(grit_lib::error::Error::HashCollision { oid }) => {
             crate::json_error::map_lib_error(grit_lib::error::Error::HashCollision { oid })

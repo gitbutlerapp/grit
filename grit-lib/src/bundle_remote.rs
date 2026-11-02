@@ -604,7 +604,7 @@ fn preflight_bundle_fetch_refspecs(bundle: &Bundle, opts: &FetchOptions) -> Resu
 fn map_bundle_err(e: BundleError) -> Error {
     match e {
         BundleError::Cancelled => Error::Cancelled,
-        BundleError::MissingPrerequisite { .. } | BundleError::PrerequisitesNotConnected => {
+        BundleError::MissingPrerequisites { .. } | BundleError::PrerequisitesNotConnected => {
             Error::BundleMissingPrerequisites
         }
         other => Error::Message(other.to_string()),

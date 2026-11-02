@@ -731,9 +731,8 @@ pub grit_lib::bundle::BundleError::EmptyRefs
 pub grit_lib::bundle::BundleError::Io(alloc::string::String)
 pub grit_lib::bundle::BundleError::MalformedLine(alloc::string::String)
 pub grit_lib::bundle::BundleError::MissingPack
-pub grit_lib::bundle::BundleError::MissingPrerequisite
-pub grit_lib::bundle::BundleError::MissingPrerequisite::oid: grit_lib::objects::ObjectId
-pub grit_lib::bundle::BundleError::MissingPrerequisite::subject: core::option::Option<alloc::string::String>
+pub grit_lib::bundle::BundleError::MissingPrerequisites
+pub grit_lib::bundle::BundleError::MissingPrerequisites::commits: alloc::vec::Vec<(grit_lib::objects::ObjectId, core::option::Option<alloc::string::String>)>
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::bundle_name: &'static str
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::repo_name: &'static str
