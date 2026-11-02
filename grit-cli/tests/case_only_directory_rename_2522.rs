@@ -2,7 +2,7 @@
 //! case-insensitive volumes when switching, merging, picking, or restoring from a tree.
 
 use std::error::Error;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -55,7 +55,7 @@ struct CmdOutput {
 }
 
 fn gs(dir: &Path, args: &[&str]) -> Result<CmdOutput, Box<dyn Error>> {
-    let args: Vec<OsString> = args.iter().map(OsStr::from).map(OsString::from).collect();
+    let args: Vec<OsString> = args.iter().map(|s| OsString::from(*s)).collect();
     let out = Command::new(GS)
         .args(&args)
         .current_dir(dir)
@@ -136,12 +136,23 @@ fn init_issue_2522_fixture(scratch: &Scratch) -> Result<(String, String), Box<dy
     git_ok(repo, &["config", "core.ignorecase", "true"])?;
     fs::create_dir_all(repo.join("Foo"))?;
     fs::write(repo.join("Foo/a.txt"), "1\n")?;
+    fs::write(repo.join("Foo/b.txt"), "2\n")?;
     git_ok(repo, &["add", "."])?;
     git_ok(repo, &["commit", "-qm", "base"])?;
-    let blob_oid = {
+    let blob_a = {
         let out = Command::new("git")
             .current_dir(repo)
             .args(["rev-parse", "HEAD:Foo/a.txt"])
+            .env("GIT_CONFIG_GLOBAL", null_device())
+            .env("GIT_CONFIG_SYSTEM", null_device())
+            .output()?;
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    let blob_b = {
+        let out = Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", "HEAD:Foo/b.txt"])
             .env("GIT_CONFIG_GLOBAL", null_device())
             .env("GIT_CONFIG_SYSTEM", null_device())
             .output()?;
@@ -156,7 +167,16 @@ fn init_issue_2522_fixture(scratch: &Scratch) -> Result<(String, String), Box<dy
             "update-index",
             "--add",
             "--cacheinfo",
-            &format!("100644,{blob_oid},foo/a.txt"),
+            &format!("100644,{blob_a},foo/a.txt"),
+        ],
+    )?;
+    git_ok(
+        repo,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!("100644,{blob_b},foo/b.txt"),
         ],
     )?;
     git_ok(repo, &["commit", "-qm", "lower"])?;
@@ -213,6 +233,8 @@ fn switch_merge_pick_restore_use_lower_case_directory_spelling() -> TestResult {
     let repo = restore_scratch.path();
     gs_ok(repo, &["restore", "--source", "lower", "--", "foo"])?;
     assert_directory_spelled_foo(repo)?;
+    assert!(repo.join("foo/a.txt").is_file());
+    assert!(repo.join("foo/b.txt").is_file());
 
     Ok(())
 }

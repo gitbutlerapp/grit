@@ -1,9 +1,9 @@
 //! Restore working tree and/or index paths from the index, `HEAD`, or another tree
 //! (`git restore` semantics).
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::diff::{
@@ -16,7 +16,7 @@ use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, 
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
-use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
+use crate::path_icase::{paths_equal, IcaseIndexCollisionGroups};
 use crate::pathspec::{pathspec_is_exclude, PathspecMatchContext};
 use crate::porcelain::checkout::{
     checkout_between_trees, index_entry_from_worktree_write, remove_empty_parent_dirs,
@@ -24,6 +24,7 @@ use crate::porcelain::checkout::{
     CheckoutJournal, LeadingDirCache,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
+use crate::porcelain::paths::case_only_worktree_rename;
 use crate::porcelain::pathspec_match::{
     index_path_mode_for_pathspec, positive_pathspec_matches_any_path,
     positive_spec_matches_any_entries, PathspecMatchEntry, RepositoryPathspecFilter,
@@ -734,6 +735,174 @@ struct WorktreeRestoreContext<'a> {
     cancel: &'a dyn Cancel,
 }
 
+/// Ignorecase collision cleanup planned once per work-tree restore pass (issue #2522).
+#[derive(Debug, Default)]
+struct RestoreIcaseCollisionPlan {
+    enabled: bool,
+    file_removals: Vec<String>,
+    directory_renames: Vec<(String, String)>,
+}
+
+fn index_stage0_paths_under(index: &Index, prefix: &str) -> Vec<String> {
+    let plen = prefix.len();
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter_map(|e| {
+            let path = String::from_utf8_lossy(&e.path);
+            if path == prefix {
+                return Some(path.into_owned());
+            }
+            if path.len() > plen && path.starts_with(prefix) && path.as_bytes()[plen] == b'/' {
+                Some(path.into_owned())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn build_restore_icase_collision_plan(
+    work_tree: &Path,
+    index: &Index,
+    ignorecase: bool,
+    write_destinations: &[String],
+) -> RestoreIcaseCollisionPlan {
+    let mut plan = RestoreIcaseCollisionPlan::default();
+    if !ignorecase || write_destinations.is_empty() {
+        return plan;
+    }
+    if !crate::path_icase::worktree_filesystem_case_insensitive(work_tree) {
+        return plan;
+    }
+    plan.enabled = true;
+    let groups = IcaseIndexCollisionGroups::from_index(index, true);
+    let mut to_remove = BTreeSet::new();
+    for dest in write_destinations {
+        for member in groups.collision_sibling_paths_except(dest) {
+            to_remove.insert(member);
+        }
+    }
+    for entry in index.entries.iter().filter(|e| e.stage() == 0) {
+        let path = String::from_utf8_lossy(&entry.path);
+        if write_destinations
+            .iter()
+            .any(|dest| path != *dest && paths_equal(entry.path.as_slice(), dest.as_bytes(), true))
+        {
+            to_remove.insert(path.into_owned());
+        }
+    }
+    if to_remove.is_empty() {
+        plan.enabled = false;
+        return plan;
+    }
+
+    let mut dir_pairs: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
+    for old in &to_remove {
+        let Some(old_dir) = old.split('/').next() else {
+            continue;
+        };
+        for dest in write_destinations {
+            if !paths_equal(old.as_bytes(), dest.as_bytes(), true) {
+                continue;
+            }
+            let Some(new_dir) = dest.split('/').next() else {
+                continue;
+            };
+            if old_dir == new_dir {
+                continue;
+            }
+            dir_pairs
+                .entry((old_dir.to_owned(), new_dir.to_owned()))
+                .or_default()
+                .insert(old.clone());
+            break;
+        }
+    }
+
+    let mut dir_renamed_paths = BTreeSet::new();
+    for ((old_dir, new_dir), paired_old_paths) in dir_pairs {
+        if !paths_equal(old_dir.as_bytes(), new_dir.as_bytes(), true) {
+            continue;
+        }
+        let indexed_under_old = index_stage0_paths_under(index, &old_dir);
+        if indexed_under_old.is_empty() {
+            continue;
+        }
+        if !indexed_under_old
+            .iter()
+            .all(|path| to_remove.contains(path))
+        {
+            continue;
+        }
+        if paired_old_paths.len() != indexed_under_old.len() {
+            continue;
+        }
+        let expected_dests: BTreeSet<String> = indexed_under_old
+            .iter()
+            .filter_map(|old_path| {
+                write_destinations
+                    .iter()
+                    .find(|dest| paths_equal(old_path.as_bytes(), dest.as_bytes(), true))
+            })
+            .cloned()
+            .collect();
+        if expected_dests.len() != indexed_under_old.len() {
+            continue;
+        }
+        if !expected_dests
+            .iter()
+            .all(|dest| dest.starts_with(&format!("{new_dir}/")) || dest == &new_dir)
+        {
+            continue;
+        }
+        plan.directory_renames.push((old_dir, new_dir));
+        dir_renamed_paths.extend(indexed_under_old);
+    }
+
+    plan.file_removals = to_remove
+        .into_iter()
+        .filter(|path| !dir_renamed_paths.contains(path))
+        .collect();
+    plan
+}
+
+fn apply_restore_icase_collision_plan(
+    work_tree: &Path,
+    index_out: &mut Index,
+    plan: &RestoreIcaseCollisionPlan,
+    journal: &mut CheckoutJournal,
+    outcome: &mut RestoreOutcome,
+    index_dirty: &mut bool,
+) -> Result<()> {
+    if !plan.enabled {
+        return Ok(());
+    }
+    for (old_dir, new_dir) in &plan.directory_renames {
+        let from = work_tree.join(old_dir);
+        let to = work_tree.join(new_dir);
+        if from.is_dir() {
+            case_only_worktree_rename(&from, &to).map_err(Error::Io)?;
+        }
+        for path in index_stage0_paths_under(index_out, old_dir) {
+            index_out.remove_path_all_stages(path.as_bytes());
+            *index_dirty = true;
+            outcome.removed.push(path);
+        }
+    }
+    let mut removed_abs: Vec<PathBuf> = Vec::with_capacity(plan.file_removals.len());
+    for path in &plan.file_removals {
+        journal.spool_remove(path)?;
+        removed_abs.push(work_tree.join(path));
+        index_out.remove_path_all_stages(path.as_bytes());
+        *index_dirty = true;
+        outcome.removed.push(path.clone());
+    }
+    remove_empty_parent_dirs_batch(work_tree, &removed_abs);
+    Ok(())
+}
+
 fn apply_worktree_restore(ctx: WorktreeRestoreContext<'_>) -> Result<()> {
     let repo = ctx.repo;
     let work_tree = ctx.work_tree;
@@ -761,6 +930,7 @@ fn apply_worktree_restore_inner(
         cancel,
     } = ctx;
     let config = repo.config()?;
+    let ignorecase = config.ignore_case();
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
 
     if !worktree_from_tree {
@@ -785,6 +955,24 @@ fn apply_worktree_restore_inner(
             }
             to_write.push(pos);
         }
+        let write_destinations: Vec<String> = to_write
+            .iter()
+            .map(|&pos| crate::repo_relpath::storage_string(&index_out.entries[pos].path))
+            .collect();
+        let icase_plan = build_restore_icase_collision_plan(
+            work_tree,
+            index_out,
+            ignorecase,
+            &write_destinations,
+        );
+        apply_restore_icase_collision_plan(
+            work_tree,
+            index_out,
+            &icase_plan,
+            journal,
+            outcome,
+            index_dirty,
+        )?;
         if !to_write.is_empty() {
             outcome.restored.reserve(to_write.len());
         }
@@ -837,6 +1025,25 @@ fn apply_worktree_restore_inner(
     }
 
     let rules = WorktreeRules::from_repository(repo, index_out)?;
+    let write_destinations: Vec<String> = matched
+        .iter()
+        .filter(|path| {
+            tree_source
+                .and_then(|entries| flat_tree_lookup(entries, path))
+                .is_some()
+        })
+        .cloned()
+        .collect();
+    let icase_plan =
+        build_restore_icase_collision_plan(work_tree, index_out, ignorecase, &write_destinations);
+    apply_restore_icase_collision_plan(
+        work_tree,
+        index_out,
+        &icase_plan,
+        journal,
+        outcome,
+        index_dirty,
+    )?;
     progress.start(ProgressPhase::CheckingOutFiles, Some(matched.len() as u64));
     for path in matched {
         poll_cancel(progress, cancel)?;
@@ -883,51 +1090,6 @@ fn apply_worktree_restore_inner(
     }
     progress.finish();
 
-    Ok(())
-}
-
-/// Drop index rows and work-tree files whose spelling differs from `dest_path` but matches
-/// under `core.ignorecase` on a folding volume (issue #2522).
-fn remove_icase_spelling_collisions_before_restore(
-    work_tree: &Path,
-    index_out: &mut Index,
-    dest_path: &str,
-    ignorecase: bool,
-    journal: &mut CheckoutJournal,
-    outcome: &mut RestoreOutcome,
-    index_dirty: &mut bool,
-) -> Result<()> {
-    if !ignorecase || !worktree_filesystem_case_insensitive(work_tree) {
-        return Ok(());
-    }
-    let dest_bytes = dest_path.as_bytes();
-    let mut collision_paths: Vec<String> = index_out
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0)
-        .filter_map(|e| {
-            let path = String::from_utf8_lossy(&e.path);
-            if e.path.as_slice() != dest_bytes && paths_equal(&e.path, dest_bytes, true) {
-                Some(path.into_owned())
-            } else {
-                None
-            }
-        })
-        .collect();
-    if collision_paths.is_empty() {
-        return Ok(());
-    }
-    collision_paths.sort();
-    collision_paths.dedup();
-    let mut removed_abs = Vec::with_capacity(collision_paths.len());
-    for path in &collision_paths {
-        journal.spool_remove(path)?;
-        removed_abs.push(work_tree.join(path));
-        index_out.remove_path_all_stages(path.as_bytes());
-        *index_dirty = true;
-        outcome.removed.push(path.clone());
-    }
-    remove_empty_parent_dirs_batch(work_tree, &removed_abs);
     Ok(())
 }
 
@@ -1023,16 +1185,6 @@ fn restore_worktree_blob_from_index(
     if mode == MODE_GITLINK {
         return Ok(());
     }
-    let ignorecase = repo.config()?.ignore_case();
-    remove_icase_spelling_collisions_before_restore(
-        work_tree,
-        index_out,
-        path,
-        ignorecase,
-        journal,
-        outcome,
-        index_dirty,
-    )?;
     journal.preserve_before_write(path)?;
     let meta = restore_blob_to_worktree(repo, rules, work_tree, path, &oid, mode, dir_cache)?;
     let index_path = crate::repo_relpath::storage_bytes(path);
@@ -1067,16 +1219,6 @@ fn restore_worktree_entry(
     if entry.mode == MODE_GITLINK {
         return Ok(());
     }
-    let ignorecase = repo.config()?.ignore_case();
-    remove_icase_spelling_collisions_before_restore(
-        work_tree,
-        index_out,
-        path,
-        ignorecase,
-        journal,
-        outcome,
-        index_dirty,
-    )?;
     journal.preserve_before_write(path)?;
     let meta = restore_blob_to_worktree(
         repo, rules, work_tree, path, &entry.oid, entry.mode, dir_cache,

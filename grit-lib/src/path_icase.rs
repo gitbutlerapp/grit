@@ -656,6 +656,18 @@ impl IcaseIndexCollisionGroups {
     pub(crate) fn has_collision_sibling(&self, index_rel: &str) -> bool {
         self.path_to_group.contains_key(index_rel.as_bytes())
     }
+
+    /// Other members of this path's ignorecase collision group, excluding `path` itself.
+    pub(crate) fn collision_sibling_paths_except(&self, path: &str) -> Vec<String> {
+        let Some(&group_id) = self.path_to_group.get(path.as_bytes()) else {
+            return Vec::new();
+        };
+        self.members_by_group[group_id]
+            .iter()
+            .filter(|member| member.as_str() != path)
+            .cloned()
+            .collect()
+    }
 }
 
 /// Ignorecase checkout collision map for auto-stage: group membership and dentry winner.

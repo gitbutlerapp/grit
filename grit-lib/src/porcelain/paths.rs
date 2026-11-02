@@ -1584,7 +1584,7 @@ fn rename_worktree_entry(from: &Path, to: &Path, ignorecase: bool) -> std::io::R
     }
 }
 
-fn case_only_worktree_rename(from: &Path, to: &Path) -> std::io::Result<()> {
+pub(crate) fn case_only_worktree_rename(from: &Path, to: &Path) -> std::io::Result<()> {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static CASE_MV_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);

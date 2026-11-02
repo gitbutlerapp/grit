@@ -6741,13 +6741,7 @@ mod tests {
         let oid = repo.odb().write(ObjectKind::Blob, &blob).expect("blob");
         let mut index = repo.load_index().expect("index");
         index.add_or_replace(
-            entry_from_stat(
-                &wt.join("Foo/a.txt"),
-                b"Foo/a.txt",
-                oid,
-                MODE_REGULAR,
-            )
-            .expect("entry"),
+            entry_from_stat(&wt.join("Foo/a.txt"), b"Foo/a.txt", oid, MODE_REGULAR).expect("entry"),
         );
         index.sort();
         repo.write_index(&mut index).expect("write index");
