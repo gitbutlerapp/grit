@@ -1580,7 +1580,7 @@ impl ConfigFile {
     pub fn rename_section(&mut self, old_name: &str, new_name: &str) -> Result<bool> {
         let (old_sec, old_sub) = parse_section_name(old_name);
         let (new_sec, new_sub) = parse_section_name(new_name);
-        validate_section_name(new_sec, new_sub)?;
+        validate_section_name(new_name, new_sec, new_sub)?;
         let old_lower = old_sec.to_lowercase();
 
         let mut found = false;
@@ -4635,7 +4635,9 @@ pub fn config_lock_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{file_name}.lock"))
 }
 
-fn validate_section_name(section: &str, subsection: Option<&str>) -> Result<()> {
+/// Reject a section name whose section part is not ASCII letters, digits and `-`, or whose
+/// subsection is present but empty. `name` is the caller's full input, kept for the error.
+fn validate_section_name(name: &str, section: &str, subsection: Option<&str>) -> Result<()> {
     if section.is_empty()
         || !section
             .chars()
