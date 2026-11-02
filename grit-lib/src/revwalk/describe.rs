@@ -36,6 +36,7 @@ pub struct DescribeOptions {
 
 /// Result of a successful describe: nearest tag by exact range count.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct DescribedCommit {
     /// Full tag ref name (`refs/tags/…`).
     pub tag: RefName,

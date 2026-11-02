@@ -14891,6 +14891,8 @@ pub struct grit_lib::porcelain::commit::CommitAuthorInfo
 pub grit_lib::porcelain::commit::CommitAuthorInfo::date: alloc::string::String
 pub grit_lib::porcelain::commit::CommitAuthorInfo::email: alloc::string::String
 pub grit_lib::porcelain::commit::CommitAuthorInfo::name: alloc::string::String
+impl grit_lib::porcelain::commit::CommitAuthorInfo
+pub fn grit_lib::porcelain::commit::CommitAuthorInfo::signature(&self) -> grit_lib::ident::Signature
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitAuthorInfo
 pub fn grit_lib::porcelain::commit::CommitAuthorInfo::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::commit::CommitAuthorInfo
@@ -14930,9 +14932,11 @@ pub grit_lib::porcelain::commit::CommitOutcome::author: grit_lib::porcelain::com
 pub grit_lib::porcelain::commit::CommitOutcome::branch: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::commit::CommitOutcome::changes: usize
+pub grit_lib::porcelain::commit::CommitOutcome::committer: grit_lib::porcelain::commit::CommitAuthorInfo
 pub grit_lib::porcelain::commit::CommitOutcome::embedded_gitlinks: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitOutcome::files: alloc::vec::Vec<grit_lib::porcelain::commit::CommitFile>
 pub grit_lib::porcelain::commit::CommitOutcome::hooks_run: alloc::vec::Vec<grit_lib::command_runner::hooks::HookName>
+pub grit_lib::porcelain::commit::CommitOutcome::message: alloc::string::String
 pub grit_lib::porcelain::commit::CommitOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::commit::CommitOutcome::parent: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::commit::CommitOutcome::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
@@ -20369,10 +20373,11 @@ pub fn grit_lib::refs::store::backend::apply_transaction(&mut grit_lib::refs::st
 pub fn grit_lib::refs::store::backend::check_transaction(&grit_lib::refs::store::backend::RefBatchState, &grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::expected_matches(core::option::Option<&grit_lib::refs::store::RawRef>, &grit_lib::refs::store::Expected) -> bool
 pub fn grit_lib::refs::store::backend::is_per_ref_rejectable(&grit_lib::refs::store::RefStoreError) -> bool
-pub fn grit_lib::refs::store::backend::partition_updates_allowing_failures(&grit_lib::refs::store::backend::RefBatchState, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>) -> core::result::Result<(alloc::vec::Vec<grit_lib::refs::store::RefUpdate>, alloc::vec::Vec<(alloc::string::String, grit_lib::refs::store::RefStoreError)>), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::partition_updates_allowing_failures(&grit_lib::refs::store::backend::RefBatchState, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>, core::option::Option<&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>>) -> core::result::Result<(alloc::vec::Vec<grit_lib::refs::store::RefUpdate>, alloc::vec::Vec<(alloc::string::String, grit_lib::refs::store::RefStoreError)>), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::resolve_symbolic(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &str) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::validate_storable_refname(&str) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::validate_transaction(&grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::verify_create_casefold_conflicts(bool, &alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::verify_create_conflicts(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub mod grit_lib::refs::store::paths
 pub const grit_lib::refs::store::paths::LOGS_REFS_BISECT: &str
@@ -22895,6 +22900,7 @@ pub grit_lib::remote::serve::RefUpdateRefusal::NonFastForward
 pub grit_lib::remote::serve::RefUpdateRefusal::Policy(alloc::string::String)
 pub grit_lib::remote::serve::RefUpdateRefusal::PreReceiveHookDeclined
 pub grit_lib::remote::serve::RefUpdateRefusal::RefStore(alloc::string::String)
+pub grit_lib::remote::serve::RefUpdateRefusal::ReferenceAlreadyExists
 pub grit_lib::remote::serve::RefUpdateRefusal::ShallowUpdateNotAllowed
 pub grit_lib::remote::serve::RefUpdateRefusal::StaleInfo
 pub grit_lib::remote::serve::RefUpdateRefusal::TargetBranch

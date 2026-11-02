@@ -40,6 +40,16 @@ impl std::fmt::Display for RefName {
     }
 }
 
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for RefName {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// Storage-level ref value without DWIM or resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize, serde::Deserialize))]

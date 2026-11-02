@@ -6,7 +6,7 @@ use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_lin
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::objects::{parse_commit, short_hex};
+use grit_lib::objects::short_hex;
 use grit_lib::porcelain::commit::{
     commit_with_patch, commit_with_scope, default_commit_scope, pending_commit_message,
     CommitPatchError, CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
@@ -23,7 +23,7 @@ use crate::context::{self, subject_line};
 use crate::error_kind::ErrorKind;
 use crate::json_error::{StructuredCliError, StructuredJsonError};
 use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
+use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 
 /// JSON scope label for [`CommitOutcome::scope`].
@@ -48,12 +48,14 @@ pub struct CommitAuthorOutcome {
 fn author_outcome_json(
     author: &grit_lib::porcelain::commit::CommitAuthorInfo,
 ) -> CommitAuthorOutcome {
-    let line = format!("{} <{}> {}", author.name, author.email, author.date);
-    let person = Person::from_identity_line(&line);
+    let sig = author.signature();
+    let date = sig
+        .format_rfc3339()
+        .unwrap_or_else(|| grit_lib::commit::format_git_timestamp(sig.time));
     CommitAuthorOutcome {
-        name: person.name,
-        email: person.email,
-        date: person.date,
+        name: sig.name,
+        email: sig.email,
+        date,
     }
 }
 
@@ -212,7 +214,6 @@ pub fn run_hunks(
     if selection.ids.is_empty() && selection.ranges.is_empty() {
         bail!("--hunks or --lines requires at least one hunk id or line range");
     }
-    let message_for_outcome = message.clone();
     let req = build_commit_request(
         &repo,
         message,
@@ -240,14 +241,7 @@ pub fn run_hunks(
         &interrupt,
     )
     .map_err(map_patch_error)?;
-    finish_commit_outcome(
-        &repo,
-        req,
-        outcome,
-        CommitScopeJson::Patch,
-        dry_run,
-        message_for_outcome,
-    )
+    finish_commit_outcome(req, outcome, CommitScopeJson::Patch, dry_run)
 }
 
 /// Run `grit commit --patch-file`.
@@ -275,7 +269,6 @@ pub fn run_patch_file(
     if patches.is_empty() {
         bail!("patch file contains no applicable hunks");
     }
-    let message_for_outcome = message.clone();
     let req = build_commit_request(
         &repo,
         message,
@@ -303,14 +296,7 @@ pub fn run_patch_file(
         &interrupt,
     )
     .map_err(map_patch_error)?;
-    finish_commit_outcome(
-        &repo,
-        req,
-        outcome,
-        CommitScopeJson::Patch,
-        dry_run,
-        message_for_outcome,
-    )
+    finish_commit_outcome(req, outcome, CommitScopeJson::Patch, dry_run)
 }
 
 /// Fail when `HEAD` is on a GitButler workspace: GitButler rewrites that branch, so a commit
@@ -354,7 +340,6 @@ pub fn run(
 
     let scope = resolve_commit_scope(&repo, all, staged, &paths)?;
     let scope_json = scope_json(&scope);
-    let message_for_outcome = message.clone();
     let req = build_commit_request(
         &repo,
         message,
@@ -375,14 +360,7 @@ pub fn run(
     let interrupt = crate::interrupt::InterruptCancel::install();
     let outcome =
         commit_with_scope(&repo, &req, scope, progress, &interrupt).map_err(map_commit_error)?;
-    finish_commit_outcome(
-        &repo,
-        req,
-        outcome,
-        scope_json,
-        dry_run,
-        message_for_outcome,
-    )
+    finish_commit_outcome(req, outcome, scope_json, dry_run)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -485,35 +463,13 @@ fn build_commit_request(
 }
 
 fn finish_commit_outcome(
-    repo: &grit_lib::repo::Repository,
     req: CommitRequest,
     outcome: grit_lib::porcelain::commit::CommitOutcome,
     scope_json: CommitScopeJson,
     dry_run: bool,
-    message: Option<String>,
 ) -> Result<CommitOutcome> {
     let amend = req.amend;
-    let message_text = req.message.clone();
-    let subject = if dry_run && amend && message.as_ref().is_none_or(|m| m.trim().is_empty()) {
-        let head = resolve_head(repo.git_dir()).context("resolve HEAD")?;
-        if let HeadState::Branch { oid: Some(tip), .. } | HeadState::Detached { oid: tip } = head {
-            let obj = repo.odb().read(&tip).context("read HEAD commit")?;
-            subject_line(
-                &parse_commit(&obj.data)
-                    .context("parse HEAD commit")?
-                    .message,
-            )
-        } else {
-            subject_line(&format!("{}\n", message_text.trim()))
-        }
-    } else if dry_run {
-        subject_line(&format!("{}\n", message_text.trim()))
-    } else if let Some(m) = message.as_ref().filter(|m| !m.trim().is_empty()) {
-        subject_line(&format!("{}\n", m.trim()))
-    } else {
-        let obj = repo.odb().read(&outcome.oid).context("read new commit")?;
-        subject_line(&parse_commit(&obj.data).context("parse new commit")?.message)
-    };
+    let subject = subject_line(&outcome.message);
 
     let files = outcome
         .files

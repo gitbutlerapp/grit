@@ -4925,6 +4925,123 @@ impl BlameResult {
     }
 }
 
+#[cfg(feature = "serde-models")]
+fn blame_line_bytes_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for BlameAttributedLine {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let field_count = if self.content_bytes.is_some() { 10 } else { 9 };
+        let mut out = serializer.serialize_struct("BlameAttributedLine", field_count)?;
+        out.serialize_field("commit", &self.commit)?;
+        out.serialize_field("original_line", &self.original_line)?;
+        out.serialize_field("final_line", &self.final_line)?;
+        out.serialize_field("original_path", &self.original_path)?;
+        out.serialize_field("content", &self.content)?;
+        out.serialize_field("encoding_lossy", &self.encoding_lossy)?;
+        if let Some(bytes) = &self.content_bytes {
+            out.serialize_field("content_bytes", &blame_line_bytes_hex(bytes))?;
+        }
+        out.serialize_field("ignored", &self.ignored)?;
+        out.serialize_field("unblamable", &self.unblamable)?;
+        out.serialize_field("not_committed", &self.not_committed)?;
+        out.end()
+    }
+}
+
+#[cfg(feature = "serde-models")]
+#[derive(serde::Serialize)]
+struct BlameHunkLineRange {
+    start: usize,
+    end: usize,
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for BlameHunk {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let lines = BlameHunkLineRange {
+            start: self.lines.start,
+            end: self.lines.end,
+        };
+        let mut out = serializer.serialize_struct("BlameHunk", 9)?;
+        out.serialize_field("commit", &self.commit)?;
+        out.serialize_field("original_path", &self.original_path)?;
+        out.serialize_field("original_start", &self.original_start)?;
+        out.serialize_field("final_start", &self.final_start)?;
+        out.serialize_field("count", &self.count)?;
+        out.serialize_field("ignored", &self.ignored)?;
+        out.serialize_field("unblamable", &self.unblamable)?;
+        out.serialize_field("not_committed", &self.not_committed)?;
+        out.serialize_field("lines", &lines)?;
+        out.end()
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for BlameCommitInfo {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use crate::ident::Signature;
+        use serde::ser::SerializeStruct;
+
+        let author = Signature::from_header_lossy(&self.author);
+        let mut out = serializer.serialize_struct("BlameCommitInfo", 2)?;
+        out.serialize_field("author", &author)?;
+        out.serialize_field("summary", &self.summary)?;
+        out.end()
+    }
+}
+
+#[cfg(feature = "serde-models")]
+struct SortedBlameCommits<'a>(&'a HashMap<ObjectId, BlameCommitInfo>);
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for SortedBlameCommits<'_> {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let mut keys: Vec<_> = self.0.keys().collect();
+        keys.sort_by_key(|oid| oid.as_bytes());
+        let mut map = serializer.serialize_map(Some(keys.len()))?;
+        for oid in keys {
+            map.serialize_entry(&oid.to_hex(), &self.0[oid])?;
+        }
+        map.end()
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for BlameResult {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut out = serializer.serialize_struct("BlameResult", 2)?;
+        out.serialize_field("lines", &self.lines)?;
+        out.serialize_field("commits", &SortedBlameCommits(&self.commits))?;
+        out.end()
+    }
+}
+
 fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine) -> bool {
     prev.commit == next.commit
         && prev.original_path == next.original_path
