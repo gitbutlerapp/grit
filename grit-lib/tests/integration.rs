@@ -1475,6 +1475,8 @@ mod refs_list_empty_prefix_git;
 mod refs_listing_public_coverage;
 #[path = "refs_lock_coverage.rs"]
 mod refs_lock_coverage;
+#[path = "refs_loose_casefold_2502.rs"]
+mod refs_loose_casefold_2502;
 #[cfg(feature = "full-tests")]
 #[path = "refs_loose_symref.rs"]
 mod refs_loose_symref;

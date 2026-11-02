@@ -35,11 +35,14 @@ use super::{RawRef, RefUpdate};
 
 type PartitionUpdatesResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
 
+pub(crate) type CasefoldLookup<'a> =
+    Option<&'a dyn Fn(&str) -> std::result::Result<Option<String>, RefStoreError>>;
+
 pub use super::apply::RefBatchState;
 pub use super::transaction::expected_matches;
 pub use super::validation::{
     verify_create_casefold_against_existing, verify_create_casefold_conflicts,
-    verify_create_conflicts,
+    verify_create_casefold_same_batch, verify_create_casefold_with_lookup, verify_create_conflicts,
 };
 
 /// Reject `name` when Git refuses to store it (path traversal, illegal components, a
@@ -198,11 +201,11 @@ fn names_branch(name: &str) -> bool {
 pub(crate) fn check_transaction_updates(
     state: &RefBatchState,
     updates: &[RefUpdate],
-    ascii_casefold_existing: Option<&BTreeMap<String, RawRef>>,
+    ascii_casefold_lookup: CasefoldLookup<'_>,
 ) -> Result<(), RefStoreError> {
     verify_create_conflicts(&state.refs, updates)?;
-    if let Some(existing) = ascii_casefold_existing {
-        verify_create_casefold_conflicts(true, existing, updates)?;
+    if let Some(lookup) = ascii_casefold_lookup {
+        verify_create_casefold_with_lookup(true, &state.refs, updates, |name| lookup(name))?;
     }
     simulate_batch_apply(state, updates, &[], &[])
 }
@@ -228,8 +231,11 @@ pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
 pub fn partition_updates_allowing_failures(
     state: &RefBatchState,
     updates: Vec<RefUpdate>,
-    ascii_casefold_existing: Option<&BTreeMap<String, RawRef>>,
+    ascii_casefold_lookup: CasefoldLookup<'_>,
 ) -> Result<PartitionUpdatesResult, RefStoreError> {
+    if ascii_casefold_lookup.is_some() {
+        verify_create_casefold_same_batch(&updates)?;
+    }
     let mut working = state.clone();
     let mut accepted = Vec::with_capacity(updates.len());
     let mut rejected = Vec::new();
@@ -238,7 +244,7 @@ pub fn partition_updates_allowing_failures(
         match check_transaction_updates(
             &working,
             std::slice::from_ref(&update),
-            ascii_casefold_existing,
+            ascii_casefold_lookup,
         ) {
             Ok(()) => {
                 apply_update(&mut working, &update)?;
