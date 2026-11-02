@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
-use grit_lib::gitbutler::GitButlerWorkspace;
+use grit_lib::gitbutler::{GitButlerWorkspace, WorkspaceStanding};
 use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
@@ -15,7 +15,7 @@ use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, Standing, StandingHeader, StandingOptions,
-    StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TipComparison, TrackedComparison,
+    StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation, NextStep};
 use schemars::JsonSchema;
@@ -1003,31 +1003,28 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         _ => standing.branch.clone(),
     };
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let newest_ahead = standing
-        .target
-        .as_ref()
-        .map(|t| t.newest_ahead.as_slice())
-        .unwrap_or(&[]);
-    let mut commit_rows = context::commit_summaries(&repo, newest_ahead)?;
-    // On a GitButler workspace its merge commit is bookkeeping: the applied branches stand in
-    // for it, and it is left out of the commits ahead.
     let workspace = GitButlerWorkspace::detect(&repo).context("could not read HEAD")?;
-    if let Some(workspace) = &workspace {
-        commit_rows.retain(|c| c.oid != workspace.commit);
-    }
+    let workspace_standing = match (&workspace, &standing.target) {
+        (Some(workspace), Some(target)) => Some(
+            workspace
+                .standing(&repo, target)
+                .context("could not compare a workspace branch with the target")?,
+        ),
+        _ => None,
+    };
+    let (ahead, newest_ahead) = match (&workspace_standing, &standing.target) {
+        (Some(ws), _) => (ws.ahead, ws.newest_ahead.as_slice()),
+        (None, Some(target)) => (target.ahead, target.newest_ahead.as_slice()),
+        (None, None) => (None, &[][..]),
+    };
+    let commit_rows = context::commit_summaries(&repo, newest_ahead)?;
     let workspace_rows = match &workspace {
         Some(workspace) => context::commit_summaries(&repo, &workspace.head_commits())?,
         None => Vec::new(),
     };
-    let gitbutler_workspace = match &workspace {
-        Some(workspace) => Some(workspace_json(
-            &repo,
-            workspace,
-            &workspace_rows,
-            standing.target.as_ref().filter(|_| show_counts),
-        )?),
-        None => None,
-    };
+    let gitbutler_workspace = workspace
+        .as_ref()
+        .map(|workspace| workspace_json(workspace, &workspace_rows, workspace_standing.as_ref()));
     let ahead_oids: Vec<_> = commit_rows.iter().map(|c| c.oid).collect();
     let commits = if ahead_oids.is_empty() {
         Vec::new()
@@ -1075,14 +1072,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         head: model.head.oid().map(ObjectId::to_hex),
         head_short,
         target: standing.target.as_ref().map(|t| t.name.clone()),
-        ahead: standing
-            .target
-            .as_ref()
-            .and_then(|t| t.ahead)
-            .map(|n| match &workspace {
-                Some(_) => n.saturating_sub(1),
-                None => n,
-            }),
+        ahead,
         behind: standing.target.as_ref().and_then(|t| t.behind),
         upstream: standing.upstream.as_ref().map(tracked_to_upstream_json),
         commits,
@@ -1118,33 +1108,26 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
 
 /// `grit status --json`'s view of `workspace`; `rows` are its heads' summaries, in order.
 fn workspace_json(
-    repo: &grit_lib::repo::Repository,
     workspace: &GitButlerWorkspace,
     rows: &[CommitSummary],
-    target: Option<&TrackedComparison>,
-) -> Result<GitButlerWorkspaceJson> {
+    standing: Option<&WorkspaceStanding>,
+) -> GitButlerWorkspaceJson {
     let heads = workspace
         .heads
         .iter()
         .zip(rows)
-        .map(|(head, row)| {
-            let ahead = target
-                .map(|target| TipComparison::compute(repo, head.commit, target.oid, 0))
-                .transpose()
-                .context("could not compare a workspace branch with the target")?
-                .map(|comparison| comparison.ahead);
-            Ok(WorkspaceHeadJson {
-                commit: head.commit.to_hex(),
-                branches: head.branches.clone(),
-                subject: row.subject.clone(),
-                ahead,
-            })
+        .enumerate()
+        .map(|(i, (head, row))| WorkspaceHeadJson {
+            commit: head.commit.to_hex(),
+            branches: head.branches.clone(),
+            subject: row.subject.clone(),
+            ahead: standing.and_then(|s| s.heads_ahead.get(i).copied().flatten()),
         })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(GitButlerWorkspaceJson {
+        .collect();
+    GitButlerWorkspaceJson {
         commit: workspace.commit.to_hex(),
         heads,
-    })
+    }
 }
 
 /// The branch names at a workspace head, or `(no branch)` when none points there.

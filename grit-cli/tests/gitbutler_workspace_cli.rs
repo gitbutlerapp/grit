@@ -92,6 +92,9 @@ fn status_lists_the_applied_branches_instead_of_the_workspace_commit() {
     );
     assert_eq!(heads[0]["subject"], "one 1");
     assert_eq!(heads[1]["branches"], serde_json::json!(["two"]));
+    assert_eq!(heads[0]["ahead"], 2, "{v}");
+    assert_eq!(heads[1]["ahead"], 1, "{v}");
+    assert_eq!(v["ahead"], 3, "the workspace commit is not counted: {v}");
     assert!(
         v["commits"]
             .as_array()
@@ -115,6 +118,18 @@ fn status_lists_the_applied_branches_instead_of_the_workspace_commit() {
         !human.contains("GitButler Workspace Commit"),
         "workspace commit hidden: {human}"
     );
+}
+
+#[test]
+fn status_without_counts_leaves_workspace_counts_out() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    workspace_repo(root, "GitButler Workspace Commit");
+    let v = grit_json(root, &["status", "--no-ahead-behind", "--json"]);
+    assert!(v["ahead"].is_null(), "{v}");
+    let heads = v["gitbutler_workspace"]["heads"].as_array().expect("heads");
+    assert_eq!(heads.len(), 2, "{v}");
+    assert!(heads.iter().all(|head| head["ahead"].is_null()), "{v}");
 }
 
 #[test]
