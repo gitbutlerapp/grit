@@ -211,6 +211,8 @@ fn file_diff_from_entry(
         old_oid: entry.old_oid,
         new_oid: entry.new_oid,
         binary,
+        old_size: old_bytes.byte_len(),
+        new_size: new_bytes.byte_len(),
         content_changed: entry.old_oid != entry.new_oid,
         old_encoding_lossy,
         new_encoding_lossy,

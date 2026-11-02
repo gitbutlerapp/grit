@@ -5085,12 +5085,14 @@ pub grit_lib::diff::FileDiff::binary: bool
 pub grit_lib::diff::FileDiff::content_changed: bool
 pub grit_lib::diff::FileDiff::hunks: alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>
 pub grit_lib::diff::FileDiff::line_stat: core::option::Option<grit_lib::diff::LineStat>
+pub grit_lib::diff::FileDiff::new_size: u64
 pub grit_lib::diff::FileDiff::new_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::new_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::new_oid: grit_lib::objects::ObjectId
 pub grit_lib::diff::FileDiff::old_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::old_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::old_oid: grit_lib::objects::ObjectId
+pub grit_lib::diff::FileDiff::old_size: u64
 pub grit_lib::diff::FileDiff::old_path: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::path: alloc::string::String
 pub grit_lib::diff::FileDiff::status: grit_lib::diff::DiffStatus

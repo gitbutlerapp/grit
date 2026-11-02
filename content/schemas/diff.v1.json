@@ -75,6 +75,15 @@
             "null"
           ]
         },
+        "new_size": {
+          "description": "New-side byte length when [`Self::binary`] is true.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "old_encoding_lossy": {
           "description": "True when old side bytes were decoded with lossy UTF-8.",
           "type": "boolean"
@@ -90,6 +99,15 @@
           "description": "Pre-rename path, when different from `path`.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "old_size": {
+          "description": "Old-side byte length when [`Self::binary`] is true.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
             "null"
           ]
         },

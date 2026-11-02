@@ -132,3 +132,43 @@ fn diff_no_index_missing_path_exits_two() {
         "errors must not use exit 1 (same as 'files differ')"
     );
 }
+
+fn git_diff_no_index_stat(old: &str, new: &str) -> String {
+    let out = Command::new("git")
+        .args(["diff", "--no-index", "--stat", old, new])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn diff_no_index_stat_binary_byte_sizes_match_git() {
+    let dir = TempDir::new().expect("tempdir");
+    let old = dir.path().join("old.bin");
+    let new = dir.path().join("new.bin");
+    std::fs::write(&old, vec![0u8; 17]).expect("write");
+    std::fs::write(&new, vec![0u8; 31]).expect("write");
+    let old_s = old.to_string_lossy().into_owned();
+    let new_s = new.to_string_lossy().into_owned();
+    let git_stat = git_diff_no_index_stat(&old_s, &new_s);
+    assert!(
+        git_stat.contains("Bin 17 -> 31 bytes"),
+        "git stat: {git_stat:?}"
+    );
+    let (code, grit_stat) = grit_diff_no_index(dir.path(), &["--stat", &old_s, &new_s]);
+    assert_eq!(code, 1);
+    assert!(
+        grit_stat.contains("Bin 17 -> 31 bytes"),
+        "grit stat: {grit_stat:?}"
+    );
+    let (json_code, json_out) =
+        grit_diff_no_index(dir.path(), &["--stat", "--json", &old_s, &new_s]);
+    assert_eq!(json_code, 1);
+    let value: serde_json::Value = serde_json::from_str(&json_out).expect("json");
+    let file = &value["files"][0];
+    assert_eq!(file["binary"], true);
+    assert_eq!(file["old_size"], 17);
+    assert_eq!(file["new_size"], 31);
+}

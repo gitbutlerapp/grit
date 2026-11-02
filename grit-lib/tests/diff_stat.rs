@@ -70,11 +70,6 @@ fn stat_and_patch_details_give_the_same_diffstat() {
     let from_patch = DiffStat::from_files(&listed(&repo, &old, &new, DiffDetail::Patch));
     assert_eq!(from_stat, from_patch);
 
-    let rows: Vec<_> = from_stat
-        .files()
-        .iter()
-        .map(|f| (f.path.as_str(), f.status, f.binary, f.lines))
-        .collect();
     let lines = |insertions, deletions| LineStat {
         insertions,
         deletions,
