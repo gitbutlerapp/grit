@@ -213,17 +213,81 @@ impl Diff<'_> {
             return Ok(Vec::new());
         }
         let odb = self.repository().odb();
+        let inputs = oids
+            .iter()
+            .map(|oid| {
+                let commit = odb.read_commit(oid)?;
+                Ok(CommitFilesManyInput {
+                    oid: *oid,
+                    parents: commit.parents,
+                    tree: commit.tree,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.commit_files_many_work(&inputs, pathspecs, opts, config, thread_policy)
+    }
+
+    /// Lines each commit added and removed against its first parent, in input order.
+    ///
+    /// This is the per-commit summary of `git log --shortstat`: a root commit is compared with
+    /// the empty tree, and a merge (two or more parents) is not diffed at all and gets `None`.
+    /// Commits that change no lines (or only binary files) get `Some` totals with zero
+    /// insertions and deletions, so callers decide whether to show them.
+    ///
+    /// # Parameters
+    ///
+    /// - `oids`: commits to summarize; newest-first linear history reuses each parent tree.
+    /// - `pathspecs`: resolved pathspecs limiting the counted paths (empty counts every path).
+    /// - `diff_options`: rename and line-diff settings, usually [`DiffOptions::from_config`].
+    /// - `config`: repository configuration for attributes and parallelism.
+    /// - `thread_policy`: worker limits for the batch.
+    ///
+    /// # Errors
+    ///
+    /// Propagates object read (including a non-commit `oid`), tree diff, and parallel pool
+    /// errors.
+    pub fn commit_line_totals(
+        &self,
+        oids: &[ObjectId],
+        pathspecs: &[String],
+        diff_options: DiffOptions,
+        config: &ConfigSet,
+        thread_policy: &ThreadPolicy,
+    ) -> Result<Vec<Option<DiffTotals>>> {
+        let odb = self.repository().odb();
         let mut inputs = Vec::with_capacity(oids.len());
+        let mut slots = Vec::with_capacity(oids.len());
         for oid in oids {
-            let raw = odb.read(oid)?;
-            let commit = parse_commit(&raw.data)?;
+            let commit = odb.read_commit(oid)?;
+            if commit.parents.len() > 1 {
+                slots.push(None);
+                continue;
+            }
+            slots.push(Some(inputs.len()));
             inputs.push(CommitFilesManyInput {
                 oid: *oid,
-                parents: commit.parents.clone(),
+                parents: commit.parents,
                 tree: commit.tree,
             });
         }
-        self.commit_files_many_work(&inputs, pathspecs, opts, config, thread_policy)
+        let opts = CommitFilesManyOptions {
+            diff_options,
+            detail: DiffDetail::Stat,
+            skip_merge_patches: true,
+        };
+        let results =
+            self.commit_files_many_work(&inputs, pathspecs, opts, config, thread_policy)?;
+        Ok(slots
+            .into_iter()
+            .map(|slot| {
+                let output = &results.get(slot?)?.output;
+                Some(
+                    output
+                        .totals
+                        .unwrap_or_else(|| DiffTotals::from_files(&output.files)),
+                )
+            })
+            .collect())
     }
 
     /// Like [`Self::commit_files_many`] when commit trees and parents are already loaded.
@@ -389,6 +453,79 @@ mod tests {
                 .commit_files_many(&batch, &[], opts, &config, &policy_serial)?;
         assert_eq!(many_par.len(), 3);
         assert_eq!(many_par, many_serial);
+        Ok(())
+    }
+
+    #[test]
+    fn commit_line_totals_skip_merges_and_honor_pathspecs() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let root_tree = tree_with(&repo, &[("a.txt", b"1\n2\n"), ("b.txt", b"x\n")]);
+        let root = write_commit(&repo, root_tree, vec![], "root");
+        let edit_tree = tree_with(&repo, &[("a.txt", b"1\nchanged\n3\n"), ("b.txt", b"x\n")]);
+        let edit = write_commit(&repo, edit_tree, vec![root], "edit a");
+        let side_tree = tree_with(&repo, &[("a.txt", b"1\n2\n"), ("b.txt", b"y\n")]);
+        let side = write_commit(&repo, side_tree, vec![root], "edit b");
+        let merge = write_commit(&repo, edit_tree, vec![edit, side], "merge");
+        let binary_tree = tree_with(
+            &repo,
+            &[
+                ("a.txt", b"1\nchanged\n3\n"),
+                ("b.txt", b"x\n"),
+                ("c.bin", b"\0"),
+            ],
+        );
+        let binary = write_commit(&repo, binary_tree, vec![merge], "add binary");
+        let oids = [binary, merge, side, edit, root];
+
+        let config = ConfigSet::default();
+        let totals = repo.diff().commit_line_totals(
+            &oids,
+            &[],
+            DiffOptions::default(),
+            &config,
+            &ThreadPolicy::default(),
+        )?;
+        let lines = |t: Option<DiffTotals>| t.map(|t| (t.files_changed, t.insertions, t.deletions));
+        assert_eq!(
+            totals.into_iter().map(lines).collect::<Vec<_>>(),
+            vec![
+                Some((1, 0, 0)),
+                None,
+                Some((1, 1, 1)),
+                Some((1, 2, 1)),
+                Some((2, 3, 0)),
+            ]
+        );
+
+        let only_b = repo.diff().commit_line_totals(
+            &oids,
+            &["b.txt".to_owned()],
+            DiffOptions::default(),
+            &config,
+            &ThreadPolicy::with_threads_override(Some(1)),
+        )?;
+        assert_eq!(
+            only_b.into_iter().map(lines).collect::<Vec<_>>(),
+            vec![
+                Some((0, 0, 0)),
+                None,
+                Some((1, 1, 1)),
+                Some((0, 0, 0)),
+                Some((1, 1, 0)),
+            ]
+        );
+
+        assert!(repo
+            .diff()
+            .commit_line_totals(
+                &[root_tree],
+                &[],
+                DiffOptions::default(),
+                &config,
+                &ThreadPolicy::default(),
+            )
+            .is_err());
         Ok(())
     }
 }

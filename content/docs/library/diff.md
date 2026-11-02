@@ -67,6 +67,8 @@ println!("{} files, +{} -{}", totals.files_changed, totals.insertions, totals.de
 
 Under any whitespace rule (`-w`, `-b`, `--ignore-space-at-eol`, `--ignore-blank-lines`), Git leaves out of `--stat` any modified text file whose changes were all ignored. [`FileDiff::changes_all_ignored`](rustdoc:grit_lib::diff::ListedFileDiff::changes_all_ignored) tells you which rows those are. Additions, deletions, renames, mode changes and binary files stay listed. For a stash, [`RepositoryStash::diff_stat`](rustdoc:grit_lib::repo_handles::RepositoryStash::diff_stat) returns the finished `DiffStat` of `stash@{n}` against its base (`git stash show --stat`). It counts lines without building hunks and applies that whitespace rule.
 
+For history listings, [`Diff::commit_files_many`](rustdoc:grit_lib::diff::Diff::commit_files_many) diffs a batch of commits against their first parents in parallel, reusing each parent tree when the commits are newest-first linear history; `grit log --stat`, `--numstat` and `-p` use it. When you only need per-commit counts, [`Diff::commit_line_totals`](rustdoc:grit_lib::diff::Diff::commit_line_totals) returns one [`DiffTotals`](rustdoc:grit_lib::diff::DiffTotals) per commit (the numbers in `git log --shortstat`), limited to the pathspecs you pass. Merges are not diffed and get `None`; a root commit is compared with the empty tree. A terminal `grit log` draws these as the `+added -removed` column and hides commits whose totals are zero.
+
 ## Porcelain models
 
 - **Status** — combines index vs HEAD and index vs worktree scans into structured sections (the CLI maps them to default / `--json` / `--markdown` output).
