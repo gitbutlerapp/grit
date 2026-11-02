@@ -923,6 +923,13 @@ fn clone_after_claim(
     if cancel.is_cancelled() {
         return Err(CloneError::Library(Error::Cancelled));
     }
+    if let crate::bundle_uri::BundleSeed::Failed { reason, .. } = &bundle {
+        if crate::transport::pending_http::is_low_speed_transport_message(reason) {
+            return Err(CloneError::Remote(RemoteError::Library(Error::Message(
+                reason.clone(),
+            ))));
+        }
+    }
     let mut fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
     if let crate::bundle_uri::BundleSeed::Seeded(seeded) = &bundle {
         crate::bundle_uri::remove_bundle_refs(&repo).map_err(CloneError::Library)?;

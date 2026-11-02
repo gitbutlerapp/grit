@@ -714,9 +714,11 @@ enum SilentStallMode {
     HeadersContentLength,
 }
 
-fn spawn_silent_stall_server(mode: SilentStallMode) -> (u16, Arc<AtomicBool>) {
+fn spawn_silent_stall_server(mode: SilentStallMode) -> (u16, Arc<AtomicBool>, Arc<AtomicUsize>) {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_server = Arc::clone(&stop);
+    let connections = Arc::new(AtomicUsize::new(0));
+    let connections_server = Arc::clone(&connections);
     let (port_tx, port_rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent stall server");
@@ -729,6 +731,7 @@ fn spawn_silent_stall_server(mode: SilentStallMode) -> (u16, Arc<AtomicBool>) {
                 thread::sleep(Duration::from_millis(10));
                 continue;
             };
+            connections_server.fetch_add(1, Ordering::SeqCst);
             thread::spawn(move || {
                 stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
                 let mut buf = [0u8; 65536];
@@ -749,7 +752,7 @@ fn spawn_silent_stall_server(mode: SilentStallMode) -> (u16, Arc<AtomicBool>) {
     let port = port_rx
         .recv_timeout(Duration::from_secs(1))
         .expect("stall server port");
-    (port, stop)
+    (port, stop, connections)
 }
 
 fn low_speed_test_env() -> Environment {
@@ -784,7 +787,7 @@ fn smart_http_connect_aborts_on_silent_stall_with_low_speed_env() {
     run_with_hard_timeout(
         "smart_http_connect_aborts_on_silent_stall_with_low_speed_env",
         || {
-            let (port, stop) = spawn_silent_stall_server(SilentStallMode::Silent);
+            let (port, stop, _connections) = spawn_silent_stall_server(SilentStallMode::Silent);
             let env = low_speed_test_env();
             let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
                 .expect("client");
@@ -808,7 +811,8 @@ fn smart_http_connect_aborts_on_headers_stall_with_low_speed_env() {
     run_with_hard_timeout(
         "smart_http_connect_aborts_on_headers_stall_with_low_speed_env",
         || {
-            let (port, stop) = spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
+            let (port, stop, _connections) =
+                spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
             let env = low_speed_test_env();
             let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
                 .expect("client");
@@ -828,19 +832,22 @@ fn smart_http_connect_aborts_on_headers_stall_with_low_speed_env() {
 }
 
 #[test]
-fn clone_aborts_on_silent_stall_with_low_speed_env_without_bundle_cache() {
+fn clone_aborts_on_silent_stall_with_low_speed_env_and_bundle_cache() {
     run_with_hard_timeout(
-        "clone_aborts_on_silent_stall_with_low_speed_env_without_bundle_cache",
+        "clone_aborts_on_silent_stall_with_low_speed_env_and_bundle_cache",
         || {
-            let (port, stop) = spawn_silent_stall_server(SilentStallMode::Silent);
+            let (port, stop, connections) = spawn_silent_stall_server(SilentStallMode::Silent);
             let env = low_speed_test_env();
             let factory = DefaultHttpClientFactory::with_environment(env.clone());
             let tmp = tempfile::tempdir().expect("tempdir");
             let dest = tmp.path().join("cl");
+            let cache = tmp.path().join("bundle-cache");
+            std::fs::create_dir_all(&cache).expect("cache dir");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let started = Instant::now();
             let err = clone(
                 CloneOptions {
+                    bundle_cache: Some(cache),
                     checkout: false,
                     environment: env,
                     ..CloneOptions::new(url, dest)
@@ -859,6 +866,11 @@ fn clone_aborts_on_silent_stall_with_low_speed_env_without_bundle_cache() {
             let msg = format!("{err}");
             assert!(msg.contains("HTTP transfer speed below http.lowSpeedLimit"));
             assert_low_speed_elapsed(started);
+            assert_eq!(
+                connections.load(Ordering::SeqCst),
+                1,
+                "clone must not open a second HTTP connection after a low-speed bundle probe failure"
+            );
         },
     );
 }
@@ -868,7 +880,7 @@ fn remote_fetch_aborts_on_silent_stall_with_low_speed_env() {
     run_with_hard_timeout(
         "remote_fetch_aborts_on_silent_stall_with_low_speed_env",
         || {
-            let (port, stop) = spawn_silent_stall_server(SilentStallMode::Silent);
+            let (port, stop, _connections) = spawn_silent_stall_server(SilentStallMode::Silent);
             let env = low_speed_test_env();
             let tmp = tempfile::tempdir().expect("tempdir");
             let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
@@ -906,7 +918,8 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
     run_with_hard_timeout(
         "remote_fetch_aborts_on_headers_stall_with_low_speed_env",
         || {
-            let (port, stop) = spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
+            let (port, stop, _connections) =
+                spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
             let env = low_speed_test_env();
             let tmp = tempfile::tempdir().expect("tempdir");
             let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");

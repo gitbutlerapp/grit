@@ -15,6 +15,11 @@ pub(crate) const HTTP_CANCEL_POLL: Duration = Duration::from_millis(20);
 pub(crate) const LOW_SPEED_STALL_MSG: &str =
     "HTTP transfer speed below http.lowSpeedLimit for http.lowSpeedTime";
 
+/// Whether `msg` is (or wraps) a low-speed transport failure from HTTP.
+pub(crate) fn is_low_speed_transport_message(msg: &str) -> bool {
+    msg.contains(LOW_SPEED_STALL_MSG)
+}
+
 /// Run blocking HTTP work on a worker thread while polling `cancel` on the caller.
 pub(crate) fn run_interruptible<T, F>(
     thread_name: &str,
