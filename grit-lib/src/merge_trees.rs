@@ -731,20 +731,24 @@ fn augment_renames_with_same_blob(
     pairs: &mut Vec<RenamePathPair>,
 ) {
     use crate::porcelain::cherry_pick::same_blob_renames_from_entries;
-    for (old, new) in same_blob_renames_from_entries(
+    let candidates: Vec<(Vec<u8>, Vec<u8>)> = same_blob_renames_from_entries(
         base.iter(),
         side.iter(),
         |path| base.contains_key(path),
         |path| side.contains_key(path),
-    ) {
-        if pairs
+    );
+    let additions: Vec<RenamePathPair> = {
+        let known: HashSet<(&[u8], &[u8])> = pairs
             .iter()
-            .any(|(o, n, _)| o.as_slice() == old.as_slice() && n.as_slice() == new.as_slice())
-        {
-            continue;
-        }
-        pairs.push((old, new, 100));
-    }
+            .map(|(o, n, _)| (o.as_slice(), n.as_slice()))
+            .collect();
+        candidates
+            .into_iter()
+            .filter(|(old, new)| !known.contains(&(old.as_slice(), new.as_slice())))
+            .map(|(old, new)| (old, new, 100))
+            .collect()
+    };
+    pairs.extend(additions);
 }
 
 /// Base files each side renamed to a different, otherwise unoccupied destination.
