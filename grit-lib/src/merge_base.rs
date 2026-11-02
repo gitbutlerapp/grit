@@ -618,18 +618,31 @@ fn reflog_commits_for_fork_point(
     for entry in &entries {
         if initial {
             initial = false;
-            if seen.insert(entry.old_oid) {
-                commits.push(entry.old_oid);
-            }
+            push_reflog_fork_commit(repo, &mut commits, &mut seen, entry.old_oid);
         }
-        if seen.insert(entry.new_oid) {
-            commits.push(entry.new_oid);
-        }
+        push_reflog_fork_commit(repo, &mut commits, &mut seen, entry.new_oid);
     }
     if commits.is_empty() {
-        commits.push(upstream_tip);
+        push_reflog_fork_commit(repo, &mut commits, &mut seen, upstream_tip);
     }
     Ok(commits)
+}
+
+/// Records `oid` for fork-point scanning when it is a non-null commit (Git's `add_one_commit`).
+fn push_reflog_fork_commit(
+    repo: &Repository,
+    commits: &mut Vec<ObjectId>,
+    seen: &mut OidHashSet,
+    oid: ObjectId,
+) {
+    if oid.is_zero() || seen.contains(&oid) {
+        return;
+    }
+    if ensure_is_commit(repo, oid).is_err() {
+        return;
+    }
+    seen.insert(oid);
+    commits.push(oid);
 }
 
 /// Reflog-only fork point for rebase restrict revision (matches `git get_fork_point`).
@@ -650,7 +663,7 @@ pub fn try_reflog_fork_point(
     head: ObjectId,
 ) -> Result<Option<ObjectId>> {
     let commits = reflog_commits_for_fork_point(repo, reflog_ref, upstream_tip)?;
-    let bases = merge_bases_first_vs_rest(repo, head, &commits)?;
+    let bases = merge_bases_all_vs_union(repo, head, &commits)?;
     if bases.len() != 1 {
         return Ok(None);
     }

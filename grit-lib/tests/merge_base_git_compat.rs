@@ -12,7 +12,7 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::merge_base::{
     fork_point, independent_commits, is_ancestor, merge_bases_all, merge_bases_first_vs_rest,
-    merge_bases_octopus, resolve_fork_point_reflog_ref,
+    merge_bases_octopus, resolve_fork_point_reflog_ref, try_reflog_fork_point,
 };
 
 use support::{
@@ -149,6 +149,32 @@ fn merge_base_disconnected_histories_with_commit_graph_matches_git() {
 
 fn git(wt: &std::path::Path, args: &[&str]) {
     support::git(wt, args);
+}
+
+fn git_fork_point_optional(
+    wt: &std::path::Path,
+    upstream: &str,
+    head: Option<&str>,
+) -> Option<ObjectId> {
+    let mut args = vec!["merge-base", "--fork-point", upstream];
+    if let Some(h) = head {
+        args.push(h);
+    }
+    let output = Command::new("git")
+        .current_dir(wt)
+        .args(&args)
+        .output()
+        .expect("git merge-base --fork-point");
+    if !output.status.success() {
+        return None;
+    }
+    let line = std::str::from_utf8(&output.stdout)
+        .expect("utf8 stdout")
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim();
+    line.parse().ok()
 }
 
 fn empty_commit(wt: &std::path::Path, msg: &str) {
@@ -366,5 +392,66 @@ fn fork_point_reflog_matches_git_t6010_fixture() {
     assert_eq!(
         resolve_fork_point_reflog_ref(&repo, "base"),
         "refs/heads/base"
+    );
+    for (idx, derived_tip) in derived.iter().enumerate() {
+        let upstream = git_rev_parse_verify(wt, "base").expect("base");
+        let grit_fp = try_reflog_fork_point(&repo, "refs/heads/base", upstream, *derived_tip)
+            .expect("try_reflog_fork_point");
+        assert_eq!(
+            grit_fp,
+            Some(expect[idx]),
+            "try_reflog_fork_point vs git on derived #{idx}"
+        );
+        assert_eq!(
+            grit_fp,
+            git_fork_point_optional(wt, "base", Some(&derived_tip.to_hex())),
+            "try_reflog_fork_point must match git merge-base --fork-point"
+        );
+    }
+    let head = git_rev_parse_verify(wt, "HEAD").expect("derived");
+    let upstream = git_rev_parse_verify(wt, "base").expect("base");
+    assert_eq!(
+        try_reflog_fork_point(&repo, "refs/heads/base", upstream, head).expect("try"),
+        git_fork_point_optional(wt, "base", None),
+        "default HEAD fork point"
+    );
+}
+
+fn setup_t6099_criss_cross(wt: &std::path::Path) {
+    git(wt, &["commit", "--allow-empty", "-m", "C"]);
+    git(wt, &["tag", "C"]);
+    git(wt, &["branch", "d-chain"]);
+    git(wt, &["commit", "--allow-empty", "-m", "d1"]);
+    git(wt, &["commit", "--allow-empty", "-m", "B"]);
+    git(wt, &["tag", "B"]);
+    git(wt, &["checkout", "-b", "e-path", "C"]);
+    git(wt, &["commit", "--allow-empty", "-m", "e1"]);
+    git(wt, &["commit", "--allow-empty", "-m", "e2"]);
+    git(wt, &["checkout", "-b", "f-path", "C"]);
+    git(wt, &["commit", "--allow-empty", "-m", "f1"]);
+    git(wt, &["commit", "--allow-empty", "-m", "f2"]);
+    git(wt, &["checkout", "-b", "branch-A", "e-path"]);
+    git(wt, &["merge", "--no-edit", "B"]);
+    git(wt, &["checkout", "-b", "branch-X", "f-path"]);
+    git(wt, &["merge", "--no-edit", "B"]);
+    git(wt, &["tag", "A", "branch-A"]);
+    git(wt, &["tag", "X", "branch-X"]);
+}
+
+#[test]
+fn try_reflog_fork_point_none_when_git_has_no_fork_point() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    setup_t6099_criss_cross(wt);
+    git(wt, &["checkout", "branch-X"]);
+    git(wt, &["branch", "-f", "upstream", "branch-A"]);
+    let repo = open_grit(wt);
+    let head = git_rev_parse_verify(wt, "HEAD").expect("HEAD");
+    let upstream = git_rev_parse_verify(wt, "upstream").expect("upstream");
+    let git_fp = git_fork_point_optional(wt, "upstream", None);
+    let grit_fp = try_reflog_fork_point(&repo, "refs/heads/upstream", upstream, head).expect("try");
+    assert_eq!(
+        grit_fp, git_fp,
+        "grit must agree with git when fork-point is ambiguous or missing"
     );
 }

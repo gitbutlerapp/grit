@@ -11,8 +11,9 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    abort_rebase, continue_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome,
-    RebaseRequest, RefScope, RewriteOptions, StartRebaseOptions,
+    abort_rebase, continue_rebase, plan_rebase, rebase_run_request, ApplyOptions, EmptyPolicy,
+    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
 use std::fs;
@@ -852,6 +853,28 @@ fn pull_rebase_lands_on_upstream_when_only_local_patch_is_upstream() {
 }
 
 #[test]
+fn pull_rebase_implicit_upstream_up_to_date_after_fetch() {
+    let (grit_dir, _git_dir) = setup_tracked_pair("up-to-date-after-fetch");
+    git(&grit_dir, &["fetch", "-q"]);
+    let repo = open(&grit_dir);
+    let head = rev(&grit_dir, "HEAD");
+    let upstream = rev(&grit_dir, "origin/main");
+    let request =
+        rebase_run_request(&repo, head, upstream, None, None, false, None).expect("request");
+    let opts = RebaseOntoOptions::new(RewriteOptions {
+        scope: RefScope::Head,
+        empty: EmptyPolicy::Drop,
+        committer: test_sig(),
+        preserve_committer: false,
+        sign: false,
+    });
+    let plan = plan_rebase(&repo, &request, &opts).expect("plan");
+    assert!(
+        matches!(plan, RebasePlan::UpToDate),
+        "implicit rebase after fetch should be up to date, got {plan:?}"
+    );
+}
+
 #[test]
 fn pull_rebase_respects_fork_point_after_force_push_drops_upstream_commit() {
     let root = unique_tmp("pull-rebase-fork-point", "2488");
@@ -967,6 +990,7 @@ fn pull_rebase_respects_fork_point_after_force_push_drops_upstream_commit() {
     );
 }
 
+#[test]
 fn pull_rebase_drops_merge_of_upstream_without_local_commits() {
     let (grit_dir, git_dir) = setup_tracked_pair("merge-only");
     let origin = grit_dir.parent().unwrap().join("origin");
