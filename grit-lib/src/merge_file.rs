@@ -168,7 +168,7 @@ pub fn merge(input: &MergeInput<'_>) -> Result<MergeOutput> {
     // Zealous diff3 (`adjust_zealous_hunks`) assumes the raw `compute_hunks` sequence.
     if !matches!(input.style, ConflictStyle::ZealousDiff3) {
         hunks = merge_adjacent_replace_and_trailing_insert_conflicts(hunks);
-        hunks = merge_repeated_anchor_eof_insert_conflicts(hunks, &base_lines);
+        hunks = merge_repeated_anchor_eof_insert_conflicts(hunks);
         hunks = fold_adjacent_inserts_into_conflict(hunks);
         hunks = merge_adjacent_one_sided_line_changes_to_conflict(hunks);
     }
@@ -1254,13 +1254,11 @@ fn merge_adjacent_one_sided_line_changes_to_conflict(hunks: Vec<Hunk>) -> Vec<Hu
 }
 
 /// When merge-ort slides a deletion onto a repeated anchor line, an EOF insert on the other
-/// side overlaps that region. Only fold this pattern if the anchor line also appears inside
-/// the one-sided tail change (repeated-line alignment), not for unique tail blocks.
-fn merge_repeated_anchor_eof_insert_conflicts(
-    hunks: Vec<Hunk>,
-    base_lines: &[Vec<u8>],
-) -> Vec<Hunk> {
-    let Some(conflict) = try_repeated_anchor_eof_insert_conflict(&hunks, base_lines) else {
+/// side overlaps that region. Only fold when change-compaction slid the unchanged closer into
+/// the adjacent one-sided hunk (matching git `group_slide_down`), not when the closer is a
+/// real boundary left outside the tail edit.
+fn merge_repeated_anchor_eof_insert_conflicts(hunks: Vec<Hunk>) -> Vec<Hunk> {
+    let Some(conflict) = try_repeated_anchor_eof_insert_conflict(&hunks) else {
         return hunks;
     };
     let mut out = hunks[..conflict.start].to_vec();
@@ -1273,24 +1271,6 @@ struct RepeatedAnchorEofConflict {
     hunk: Hunk,
 }
 
-fn merge_hunk_base_ranges(hunks: &[Hunk]) -> Vec<std::ops::Range<usize>> {
-    let mut pos = 0usize;
-    hunks
-        .iter()
-        .map(|hunk| {
-            let len = match hunk {
-                Hunk::Unchanged(lines) => lines.len(),
-                Hunk::OnlyOurs { base, .. }
-                | Hunk::OnlyTheirs { base, .. }
-                | Hunk::Conflict { base, .. } => base.len(),
-            };
-            let start = pos;
-            pos += len;
-            start..pos
-        })
-        .collect()
-}
-
 fn hunk_is_one_sided_tail_change(hunk: &Hunk) -> bool {
     match hunk {
         Hunk::OnlyOurs { base, .. } if !base.is_empty() => true,
@@ -1299,68 +1279,46 @@ fn hunk_is_one_sided_tail_change(hunk: &Hunk) -> bool {
     }
 }
 
-/// Smallest base index touched by one-sided hunks in the EOF tail cluster (insert + anchor + deletions).
-fn one_sided_eof_tail_min_base(hunks: &[Hunk], ranges: &[std::ops::Range<usize>]) -> Option<usize> {
-    let last_idx = hunks.len().checked_sub(1)?;
-    let Hunk::OnlyTheirs {
-        base: ins_base,
-        theirs: ins,
-    } = &hunks[last_idx]
-    else {
-        return None;
-    };
-    if !ins_base.is_empty() || ins.is_empty() {
-        return None;
-    }
-    let anchor_idx = last_idx.checked_sub(1)?;
-    let Hunk::Unchanged(anchor) = &hunks[anchor_idx] else {
-        return None;
-    };
-    if anchor.len() != 1 {
-        return None;
-    }
-    let mut min = ranges[anchor_idx].start;
-    let mut idx = anchor_idx;
-    loop {
-        if idx == 0 {
-            break;
-        }
-        match &hunks[idx - 1] {
-            h if hunk_is_one_sided_tail_change(h) => {
-                min = min.min(ranges[idx - 1].start);
-                idx -= 1;
-            }
-            Hunk::Unchanged(_) if idx >= 2 && hunk_is_one_sided_tail_change(&hunks[idx - 2]) => {
-                idx -= 1;
-            }
-            _ => break,
-        }
-    }
-    Some(min)
+fn merge_lines_match_for_slide(a: &[u8], b: &[u8], ws: &WhitespaceMode) -> bool {
+    line_content_for_merge_compare(a, ws) == line_content_for_merge_compare(b, ws)
 }
 
-fn anchor_line_repeats_in_base_suffix(
-    base_lines: &[Vec<u8>],
-    from_base: usize,
-    anchor_key: &[u8],
+fn merge_line_is_blank_for_slide(line: &[u8], ws: &WhitespaceMode) -> bool {
+    line_content_for_merge_compare(line, ws).is_empty()
+}
+
+/// True when git change-compaction slid this unchanged closer into the neighboring one-sided hunk
+/// (`group_slide_down`: the anchor record matches the first line of the adjacent changed group).
+fn anchor_is_slid_into_adjacent_tail_change(
+    anchor_line: &[u8],
+    adjacent_change: &Hunk,
     ws: &WhitespaceMode,
 ) -> bool {
-    let mut matches = 0usize;
-    for line in base_lines.iter().skip(from_base) {
-        if line_content_for_merge_compare(line, ws) == anchor_key {
-            matches += 1;
-            if matches >= 2 {
+    match adjacent_change {
+        Hunk::OnlyOurs { base, ours } if !base.is_empty() => {
+            if merge_lines_match_for_slide(anchor_line, &base[0], ws) {
                 return true;
             }
+            if let Some(o0) = ours.first() {
+                if merge_lines_match_for_slide(anchor_line, o0, ws) {
+                    return true;
+                }
+            }
+            merge_line_is_blank_for_slide(anchor_line, ws)
+                && base
+                    .first()
+                    .is_some_and(|l| merge_line_is_blank_for_slide(l, ws))
         }
+        Hunk::OnlyTheirs { base, theirs } if !base.is_empty() && theirs.is_empty() => {
+            merge_lines_match_for_slide(anchor_line, &base[0], ws)
+                || (merge_line_is_blank_for_slide(anchor_line, ws)
+                    && merge_line_is_blank_for_slide(&base[0], ws))
+        }
+        _ => false,
     }
-    false
 }
 
-fn try_repeated_anchor_eof_insert_conflict(
-    hunks: &[Hunk],
-    base_lines: &[Vec<u8>],
-) -> Option<RepeatedAnchorEofConflict> {
+fn try_repeated_anchor_eof_insert_conflict(hunks: &[Hunk]) -> Option<RepeatedAnchorEofConflict> {
     let last = hunks.last()?;
     let Hunk::OnlyTheirs {
         base: ins_base,
@@ -1420,10 +1378,8 @@ fn try_repeated_anchor_eof_insert_conflict(
     }
     let anchor_line = &anchors[anchors.len() - 1];
     let ws = WhitespaceMode::default();
-    let anchor_key = line_content_for_merge_compare(anchor_line, &ws);
-    let ranges = merge_hunk_base_ranges(hunks);
-    let tail_min_base = one_sided_eof_tail_min_base(hunks, &ranges)?;
-    if !anchor_line_repeats_in_base_suffix(base_lines, tail_min_base, &anchor_key, &ws) {
+    let change_idx = hunks.len().checked_sub(3)?;
+    if !anchor_is_slid_into_adjacent_tail_change(anchor_line, &hunks[change_idx], &ws) {
         return None;
     }
 
@@ -2509,7 +2465,23 @@ mod tests {
     }
 
     #[test]
-    fn issue_2397_build_delete_tail_vs_append_conflicts_like_merge_ort() {
+    fn issue_2397_build_delete_tail_vs_append_myers_matches_merge_file() {
+        let base = include_str!("../tests/fixtures/issue_2397_build_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2397_build_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2397_build_theirs.rs");
+        assert_merge_matches_git(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2397 cargo build.rs myers vs merge-file",
+        );
+    }
+
+    #[test]
+    fn issue_2397_build_delete_tail_vs_append_histogram_conflicts_like_merge_ort() {
         let base = include_str!("../tests/fixtures/issue_2397_build_base.rs");
         let ours = include_str!("../tests/fixtures/issue_2397_build_ours.rs");
         let theirs = include_str!("../tests/fixtures/issue_2397_build_theirs.rs");
@@ -2523,7 +2495,7 @@ mod tests {
             favor: MergeFavor::None,
             style: ConflictStyle::Merge,
             marker_size: 7,
-            diff_algorithm: None,
+            diff_algorithm: Some("histogram".into()),
             ignore_all_space: false,
             ignore_space_change: false,
             ignore_space_at_eol: false,
@@ -2537,7 +2509,23 @@ mod tests {
     }
 
     #[test]
-    fn issue_2397_fae836_delete_tail_vs_append_conflicts_like_merge_ort() {
+    fn issue_2397_fae836_delete_tail_vs_append_myers_matches_merge_file() {
+        let base = include_str!("../tests/fixtures/issue_2397_fae836_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2397_fae836_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2397_fae836_theirs.rs");
+        assert_merge_matches_git(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2397 cargo features.rs myers vs merge-file",
+        );
+    }
+
+    #[test]
+    fn issue_2397_fae836_delete_tail_vs_append_histogram_conflicts_like_merge_ort() {
         let base = include_str!("../tests/fixtures/issue_2397_fae836_base.rs");
         let ours = include_str!("../tests/fixtures/issue_2397_fae836_ours.rs");
         let theirs = include_str!("../tests/fixtures/issue_2397_fae836_theirs.rs");
@@ -2551,7 +2539,7 @@ mod tests {
             favor: MergeFavor::None,
             style: ConflictStyle::Merge,
             marker_size: 7,
-            diff_algorithm: None,
+            diff_algorithm: Some("histogram".into()),
             ignore_all_space: false,
             ignore_space_change: false,
             ignore_space_at_eol: false,
@@ -3547,5 +3535,76 @@ mod tests {
             rendered, "1\n2\n3\n4\n5\n5.5\n6\n7\n8\n9\n10\n10.5\n",
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn issue_2484_cargo_build_script_eof_append_matches_git_merge_file() {
+        let base = include_str!("../tests/fixtures/issue_2484_build_script_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2484_build_script_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2484_build_script_theirs.rs");
+        assert_merge_matches_git(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2484 cargo build_script.rs myers vs merge-file",
+        );
+        let hist = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: Some("histogram".into()),
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(
+            hist.conflicts, 0,
+            "histogram merge must stay clean like git merge-tree"
+        );
+    }
+
+    #[test]
+    fn issue_2484_cargo_fix_rs_eof_append_matches_git_merge_file() {
+        let base = include_str!("../tests/fixtures/issue_2484_fix_base.rs");
+        let ours = include_str!("../tests/fixtures/issue_2484_fix_ours.rs");
+        let theirs = include_str!("../tests/fixtures/issue_2484_fix_theirs.rs");
+        assert_merge_matches_git(
+            base.as_bytes(),
+            ours.as_bytes(),
+            theirs.as_bytes(),
+            &[],
+            ConflictStyle::Merge,
+            MergeFavor::None,
+            "issue 2484 cargo fix.rs myers vs merge-file",
+        );
+        let hist = merge(&MergeInput {
+            base: base.as_bytes(),
+            ours: ours.as_bytes(),
+            theirs: theirs.as_bytes(),
+            label_ours: "ours",
+            label_base: "base",
+            label_theirs: "theirs",
+            favor: MergeFavor::None,
+            style: ConflictStyle::Merge,
+            marker_size: 7,
+            diff_algorithm: Some("histogram".into()),
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        })
+        .unwrap();
+        assert_eq!(hist.conflicts, 0);
     }
 }
