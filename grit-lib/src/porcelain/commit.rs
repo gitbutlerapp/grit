@@ -16,8 +16,8 @@ use crate::config::ident_resolve::IdentRole;
 use crate::config::ConfigSet;
 use crate::diff::refresh_index_stat_content_verified_with_rules;
 use crate::diff::{
-    diff_tree_path_change_count, diff_trees_with_renames, flatten_tree_entries,
-    materialize_worktree_blob, zero_oid, DiffEntry, DiffStatus,
+    diff_index_to_tree, diff_tree_path_change_count, diff_trees_with_renames, zero_oid, DiffEntry,
+    DiffStatus,
 };
 use crate::error::ApplyError;
 use crate::error::{Error, Result};
@@ -31,12 +31,12 @@ use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
     prepare_commit_identity_line, replace_identity_date_suffix, Signature,
 };
-use crate::index::{Index, IndexLock, MODE_GITLINK};
+use crate::index::{Index, IndexLock};
 use crate::notes::{
     apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
 };
 use crate::objects::odb::Odb;
-use crate::objects::{parse_commit, serialize_commit, CommitData, FileMode, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{
     stage_on_index, validate_commit_staging_pathspecs, StageMode, StageOptions,
@@ -67,7 +67,6 @@ use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{
     cache_tree_extension_valid, is_empty_tree_oid, write_tree_update_index, WriteTreeFlags,
 };
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -1158,43 +1157,13 @@ fn commit_files_index_vs_parent_tree(
     index: &Index,
     parent_tree: Option<&ObjectId>,
 ) -> Result<Vec<CommitFile>> {
-    let mut parent: BTreeMap<String, (FileMode, ObjectId)> = BTreeMap::new();
-    if let Some(tree) = parent_tree {
-        for (path, mode, oid) in flatten_tree_entries(odb, tree)? {
-            parent.insert(path, (mode, oid));
+    if parent_tree.is_none() {
+        if let Some(files) = root_commit_files_from_index(index) {
+            return Ok(files);
         }
     }
-    let mut files = Vec::new();
-    for entry in index.entries() {
-        if entry.stage() != 0 || entry.intent_to_add() {
-            continue;
-        }
-        let path = crate::repo_relpath::storage_string(&entry.path);
-        match parent.remove(&path) {
-            None => files.push(CommitFile {
-                path,
-                status: DiffStatus::Added,
-                old_path: None,
-            }),
-            Some((old_mode, old_oid)) if old_oid != entry.oid || entry.mode != old_mode.bits() => {
-                files.push(CommitFile {
-                    path,
-                    status: DiffStatus::for_content_change(old_mode.bits(), entry.mode),
-                    old_path: None,
-                });
-            }
-            _ => {}
-        }
-    }
-    for (path, _) in parent {
-        files.push(CommitFile {
-            path,
-            status: DiffStatus::Deleted,
-            old_path: None,
-        });
-    }
-    files.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(files)
+    let entries = diff_index_to_tree(odb, index, parent_tree, false)?;
+    Ok(commit_files_from_diff_entries(&entries))
 }
 
 struct MemOverlayGuard<'a>(&'a Odb);
@@ -1203,42 +1172,6 @@ impl Drop for MemOverlayGuard<'_> {
     fn drop(&mut self) {
         self.0.disable_mem_overlay();
     }
-}
-
-fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index) -> Result<()> {
-    let odb = repo.odb();
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let rules = WorktreeRules::from_repository(repo, index)?;
-    for entry in index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0 && !e.intent_to_add() && e.mode != MODE_GITLINK)
-    {
-        if odb.contains(&entry.oid)? {
-            continue;
-        }
-        let path = crate::repo_relpath::storage_string(&entry.path);
-        let rel_match = crate::repo_relpath::as_utf8_for_matching(&path);
-        let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
-        let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-        let file_attrs = rules.file_attrs(rel_match.as_ref(), false);
-        let stored = materialize_worktree_blob(
-            odb,
-            &abs,
-            &meta,
-            rules.conversion(),
-            &file_attrs,
-            rel_match.as_ref(),
-            Some(entry),
-            Some(rules.filter_process()),
-        )?;
-        if stored != entry.oid {
-            return Err(Error::Message(format!(
-                "internal error: staged oid mismatch for {path}"
-            )));
-        }
-    }
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1260,11 +1193,7 @@ fn finish_commit_dry_run(
     reuse_author_raw: Vec<u8>,
     reuse_message: Option<String>,
 ) -> Result<CommitOutcome> {
-    let odb = repo.odb();
-    odb.enable_mem_overlay();
-    let _overlay = MemOverlayGuard(odb);
-    materialize_missing_index_blobs_for_overlay(repo, index)?;
-    let files = commit_files_index_vs_parent_tree(odb, index, parent_tree.as_ref())?;
+    let files = commit_files_index_vs_parent_tree(repo.odb(), index, parent_tree.as_ref())?;
 
     if !req.allow_empty && !req_amend {
         if parent_tree.is_none() && index.entries.is_empty() {
@@ -1626,7 +1555,9 @@ fn create_commit_with_index(
         .map(|parent_oid| repo.odb().commit_tree(parent_oid))
         .transpose()?;
 
-    if !req.allow_empty && !req.amend && !concluding_merge {
+    // A dry run derives its file list from the same index-vs-parent diff and rejects an empty
+    // one there, so it skips this pass.
+    if !req.dry_run && !req.allow_empty && !req.amend && !concluding_merge {
         let skip_tree_match = req.assume_worktree_synced && req.skip_pre_commit_tree_match;
         if !skip_tree_match {
             if let Some(ref old) = parent_tree {
@@ -3415,6 +3346,125 @@ mod tests {
         Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap()
     }
 
+    #[cfg(unix)]
+    #[test]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    fn dry_run_files_match_commit_and_git_with_and_without_cache_tree() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for keep_cache_tree in [true, false] {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            system_git(root, &["init", "-q", "-b", "main"]);
+            for dir in ["a", "b", "c", "e"] {
+                fs::create_dir(root.join(dir)).unwrap();
+            }
+            for (path, body) in [
+                ("a/x", "x\n"),
+                ("a/y", "y\n"),
+                ("b/z", "z\n"),
+                ("c/w", "w\n"),
+                ("e/keep", "keep\n"),
+                ("top", "top\n"),
+            ] {
+                fs::write(root.join(path), body).unwrap();
+            }
+            system_git(root, &["add", "."]);
+            system_git(root, &["commit", "-qm", "init"]);
+            let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+            let mut index = repo.load_index().unwrap();
+            assert!(index.cache_tree.is_some(), "git writes a cache-tree");
+            if !keep_cache_tree {
+                index.cache_tree = None;
+                index.cache_tree_root = None;
+                repo.write_index(&mut index).unwrap();
+            }
+
+            fs::write(root.join("a/x"), b"x changed\n").unwrap();
+            fs::remove_file(root.join("b/z")).unwrap();
+            fs::create_dir(root.join("d")).unwrap();
+            fs::write(root.join("d/new"), b"brand new\n").unwrap();
+            fs::write(root.join("added-top"), b"also new\n").unwrap();
+            let mut perms = fs::metadata(root.join("c/w")).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(root.join("c/w"), perms).unwrap();
+
+            let before = repo_snapshot(&repo);
+            let preview = commit_worktree(
+                &repo,
+                &dry_run_req("mixed"),
+                &mut NullProgress,
+                &crate::progress::NeverCancel,
+            )
+            .unwrap();
+            assert_eq!(repo_snapshot(&repo), before, "dry run must not write");
+            let listed: Vec<(&str, DiffStatus)> = preview
+                .files
+                .iter()
+                .map(|f| (f.path.as_str(), f.status))
+                .collect();
+            assert_eq!(
+                listed,
+                vec![
+                    ("a/x", DiffStatus::Modified),
+                    ("added-top", DiffStatus::Added),
+                    ("b/z", DiffStatus::Deleted),
+                    ("c/w", DiffStatus::Modified),
+                    ("d/new", DiffStatus::Added),
+                ],
+                "cache-tree kept: {keep_cache_tree}"
+            );
+            assert_eq!(preview.changes, preview.files.len());
+
+            let committed = commit_worktree(
+                &repo,
+                &commit_req("mixed"),
+                &mut NullProgress,
+                &crate::progress::NeverCancel,
+            )
+            .unwrap();
+            assert_eq!(committed.files, preview.files);
+            let git_listed = system_git(root, &["diff", "--name-status", "--no-renames", "HEAD~1"]);
+            let expected: Vec<String> = preview
+                .files
+                .iter()
+                .map(|f| format!("{}\t{}", f.status.letter(), f.path))
+                .collect();
+            assert_eq!(git_listed.lines().collect::<Vec<_>>(), expected);
+        }
+    }
+
+    #[test]
+    fn dry_run_root_commit_lists_every_index_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir(root.join("dir")).unwrap();
+        fs::write(root.join("dir/b"), b"b\n").unwrap();
+        fs::write(root.join("a"), b"a\n").unwrap();
+        let preview = commit_worktree(
+            &repo,
+            &dry_run_req("root"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+        let listed: Vec<(&str, DiffStatus)> = preview
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.status))
+            .collect();
+        assert_eq!(
+            listed,
+            vec![("a", DiffStatus::Added), ("dir/b", DiffStatus::Added)]
+        );
+        assert!(preview.parents.is_empty());
+        assert!(resolve_ref(repo.git_dir(), "refs/heads/main").is_err());
+    }
+
     fn f1_paths() -> ResolvedPathspecs {
         ResolvedPathspecs {
             specs: vec!["f1.txt".into()],
@@ -4770,7 +4820,7 @@ mod tests {
     }
 
     fn tree_blob(repo: &Repository, tree_oid: &ObjectId, path: &str) -> Vec<u8> {
-        for (p, _mode, oid) in flatten_tree_entries(repo.odb(), tree_oid).unwrap() {
+        for (p, _mode, oid) in crate::diff::flatten_tree_entries(repo.odb(), tree_oid).unwrap() {
             if p == path {
                 return repo.odb().read(&oid).unwrap().data;
             }
