@@ -5,9 +5,7 @@
 //! the next page. On a terminal it shows the whole history through the pager.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::diff::{
-    CommitFilesManyInput, CommitFilesManyOptions, DiffDetail, DiffOptions, DiffTotals,
-};
+use grit_lib::diff::{CommitFilesManyOptions, DiffOptions};
 use grit_lib::gitbutler::GitButlerWorkspace;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::CommitReuse;
@@ -1058,27 +1056,8 @@ pub(crate) fn load_commits_with_format_for_oids(
         (loader.load_reusing(repo, oids, now, parsed)?, Vec::new())
     };
 
-    let detail = format.detail_for_log();
-
-    let mut commit_inputs = Vec::new();
-    if detail.is_some() {
-        for oid in oids {
-            let commit = context::read_commit(repo, oid)?;
-            commit_inputs.push(CommitFilesManyInput {
-                oid: *oid,
-                parents: commit.parents.clone(),
-                tree: commit.tree,
-            });
-        }
-    }
-
-    let pathspecs = if path_args.is_empty() {
-        Vec::new()
-    } else {
-        resolve_commit_diff_pathspecs(repo, path_args)?
-    };
-
-    let many_results = if let Some(detail) = detail {
+    let pathspecs = resolve_commit_diff_pathspecs(repo, path_args)?;
+    let many_results = if let Some(detail) = format.detail_for_log() {
         let config = repo.config().context("could not load config")?;
         let thread_policy = repo.thread_policy();
         let mut diff_options = DiffOptions::from_config(config.as_ref());
@@ -1092,13 +1071,7 @@ pub(crate) fn load_commits_with_format_for_oids(
         Some((
             detail,
             repo.diff()
-                .commit_files_many_work(
-                    &commit_inputs,
-                    &pathspecs,
-                    opts,
-                    config.as_ref(),
-                    &thread_policy,
-                )
+                .commit_files_many(oids, &pathspecs, opts, config.as_ref(), &thread_policy)
                 .context("could not diff commits")?,
         ))
     } else {
@@ -1110,7 +1083,7 @@ pub(crate) fn load_commits_with_format_for_oids(
     for (i, commit) in commit_json_rows.into_iter().enumerate() {
         if let Some((detail, ref results)) = many_results {
             let outcome = cli_outcome_from_lib(repo, results[i].output.clone(), detail, format)?;
-            let stat = if format.stat && commit_inputs[i].parents.len() < 2 {
+            let stat = if format.stat && results[i].parent_count < 2 {
                 Some(diffstat(&outcome))
             } else {
                 None
@@ -1181,11 +1154,7 @@ fn build_commit_outcome(
     };
 
     if format.log_patch_text() {
-        let pathspecs = if path_args.is_empty() {
-            Vec::new()
-        } else {
-            resolve_commit_diff_pathspecs(repo, path_args)?
-        };
+        let pathspecs = resolve_commit_diff_pathspecs(repo, path_args)?;
         return Ok(LogOutcome {
             commits: Vec::new(),
             groups: None,
@@ -1356,53 +1325,27 @@ fn commit_line_counts(
     oids: &[ObjectId],
     path_args: &[String],
 ) -> Result<Vec<Option<ui::LineCounts>>> {
-    let mut inputs = Vec::with_capacity(oids.len());
-    let mut slots = Vec::with_capacity(oids.len());
-    for oid in oids {
-        let commit = context::read_commit(repo, oid)?;
-        if commit.parents.len() > 1 {
-            slots.push(None);
-            continue;
-        }
-        slots.push(Some(inputs.len()));
-        inputs.push(CommitFilesManyInput {
-            oid: *oid,
-            parents: commit.parents,
-            tree: commit.tree,
-        });
-    }
-    let pathspecs = if path_args.is_empty() {
-        Vec::new()
-    } else {
-        resolve_commit_diff_pathspecs(repo, path_args)?
-    };
+    let pathspecs = resolve_commit_diff_pathspecs(repo, path_args)?;
     let config = repo.config().context("could not load config")?;
-    let opts = CommitFilesManyOptions {
-        diff_options: DiffOptions::from_config(config.as_ref()),
-        detail: DiffDetail::Stat,
-        skip_merge_patches: true,
-    };
-    let results = repo
+    let totals = repo
         .diff()
-        .commit_files_many_work(
-            &inputs,
+        .commit_line_totals(
+            oids,
             &pathspecs,
-            opts,
+            DiffOptions::from_config(config.as_ref()),
             config.as_ref(),
             &repo.thread_policy(),
         )
         .context("could not diff commits")?;
-    Ok(slots
+    Ok(totals
         .into_iter()
-        .map(|slot| {
-            let output = &results.get(slot?)?.output;
-            let totals = output
-                .totals
-                .unwrap_or_else(|| DiffTotals::from_files(&output.files));
-            (totals.insertions + totals.deletions > 0).then_some(ui::LineCounts {
-                added: totals.insertions,
-                removed: totals.deletions,
-            })
+        .map(|totals| {
+            totals
+                .filter(|t| t.insertions + t.deletions > 0)
+                .map(|t| ui::LineCounts {
+                    added: t.insertions,
+                    removed: t.deletions,
+                })
         })
         .collect())
 }
