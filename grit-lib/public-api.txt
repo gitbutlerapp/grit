@@ -15679,6 +15679,7 @@ pub fn grit_lib::porcelain::merge::plan_branch_merge(&grit_lib::repo::Repository
 pub fn grit_lib::porcelain::merge::predict_merge(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergePrediction>
 pub fn grit_lib::porcelain::merge::resolve_merge_conflict_style(&grit_lib::repo::Repository, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> grit_lib::diff::merge_file::ConflictStyle
 pub fn grit_lib::porcelain::merge::resolve_merge_source(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergeSource>
+pub fn grit_lib::porcelain::merge::squash_conflict_merge_in_progress(&std::path::Path) -> bool
 pub fn grit_lib::porcelain::merge::tree_to_index_entries(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::index::IndexEntry>>
 pub fn grit_lib::porcelain::merge::tree_to_map(alloc::vec::Vec<grit_lib::index::IndexEntry>) -> std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>
 pub fn grit_lib::porcelain::merge::write_merge_tree(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::WrittenMergeTree>
@@ -22838,6 +22839,31 @@ impl core::marker::Unpin for grit_lib::remote::serve::DeepenNotError
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::DeepenNotError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::DeepenNotError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::DeepenNotError
+pub enum grit_lib::remote::serve::DenyCurrentBranch
+pub grit_lib::remote::serve::DenyCurrentBranch::Ignore
+pub grit_lib::remote::serve::DenyCurrentBranch::Refuse
+pub grit_lib::remote::serve::DenyCurrentBranch::UpdateInstead
+pub grit_lib::remote::serve::DenyCurrentBranch::Warn
+impl grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::refuses_checked_out_update(self) -> bool
+impl core::clone::Clone for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::serve::DenyCurrentBranch
+impl core::cmp::PartialEq for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::serve::DenyCurrentBranch
+pub fn grit_lib::remote::serve::DenyCurrentBranch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::StructuralPartialEq for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Freeze for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Send for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Sync for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::Unpin for grit_lib::remote::serve::DenyCurrentBranch
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::DenyCurrentBranch
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::DenyCurrentBranch
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::DenyCurrentBranch
 #[non_exhaustive] pub enum grit_lib::remote::serve::MissingObjectReason
 pub grit_lib::remote::serve::MissingObjectReason::LazyFetchFailed
 pub grit_lib::remote::serve::MissingObjectReason::NoFetcher
@@ -22898,12 +22924,12 @@ pub grit_lib::remote::serve::RefUpdateRefusal::InvalidRefName
 pub grit_lib::remote::serve::RefUpdateRefusal::MissingObjects
 pub grit_lib::remote::serve::RefUpdateRefusal::NonFastForward
 pub grit_lib::remote::serve::RefUpdateRefusal::Policy(alloc::string::String)
+pub grit_lib::remote::serve::RefUpdateRefusal::PreReceiveHookDeclined
 pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutFailed
 pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutHookDeclined
 pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutStagedChanges
 pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutUnstagedChanges
 pub grit_lib::remote::serve::RefUpdateRefusal::PushCheckoutUpToDateFailed
-pub grit_lib::remote::serve::RefUpdateRefusal::PreReceiveHookDeclined
 pub grit_lib::remote::serve::RefUpdateRefusal::RefStore(alloc::string::String)
 pub grit_lib::remote::serve::RefUpdateRefusal::ReferenceAlreadyExists
 pub grit_lib::remote::serve::RefUpdateRefusal::ShallowUpdateNotAllowed
@@ -23075,31 +23101,6 @@ impl core::marker::Unpin for grit_lib::remote::serve::ReceiveOutcome
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::ReceiveOutcome
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ReceiveOutcome
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ReceiveOutcome
-pub enum grit_lib::remote::serve::DenyCurrentBranch
-pub grit_lib::remote::serve::DenyCurrentBranch::Ignore
-pub grit_lib::remote::serve::DenyCurrentBranch::Refuse
-pub grit_lib::remote::serve::DenyCurrentBranch::UpdateInstead
-pub grit_lib::remote::serve::DenyCurrentBranch::Warn
-impl grit_lib::remote::serve::DenyCurrentBranch
-pub fn grit_lib::remote::serve::DenyCurrentBranch::refuses_checked_out_update(self) -> bool
-impl core::clone::Clone for grit_lib::remote::serve::DenyCurrentBranch
-pub fn grit_lib::remote::serve::DenyCurrentBranch::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::remote::serve::DenyCurrentBranch
-impl core::cmp::PartialEq for grit_lib::remote::serve::DenyCurrentBranch
-pub fn grit_lib::remote::serve::DenyCurrentBranch::eq(&self, &Self) -> bool
-impl core::default::Default for grit_lib::remote::serve::DenyCurrentBranch
-pub fn grit_lib::remote::serve::DenyCurrentBranch::default() -> Self
-impl core::fmt::Debug for grit_lib::remote::serve::DenyCurrentBranch
-pub fn grit_lib::remote::serve::DenyCurrentBranch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::remote::serve::DenyCurrentBranch
-impl core::marker::StructuralPartialEq for grit_lib::remote::serve::DenyCurrentBranch
-impl core::marker::Freeze for grit_lib::remote::serve::DenyCurrentBranch
-impl core::marker::Send for grit_lib::remote::serve::DenyCurrentBranch
-impl core::marker::Sync for grit_lib::remote::serve::DenyCurrentBranch
-impl core::marker::Unpin for grit_lib::remote::serve::DenyCurrentBranch
-impl core::marker::UnsafeUnpin for grit_lib::remote::serve::DenyCurrentBranch
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::DenyCurrentBranch
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::DenyCurrentBranch
 pub struct grit_lib::remote::serve::ReceivePolicy
 pub grit_lib::remote::serve::ReceivePolicy::deny_current_branch: grit_lib::remote::serve::DenyCurrentBranch
 pub grit_lib::remote::serve::ReceivePolicy::deny_delete_current: bool
@@ -30507,6 +30508,26 @@ impl core::marker::Unpin for grit_lib::state::NextStep
 impl core::marker::UnsafeUnpin for grit_lib::state::NextStep
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::NextStep
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::NextStep
+pub struct grit_lib::state::FinishMergeStateResult
+pub grit_lib::state::FinishMergeStateResult::autostash_left_conflicts: bool
+pub grit_lib::state::FinishMergeStateResult::rerere: alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>
+impl core::clone::Clone for grit_lib::state::FinishMergeStateResult
+pub fn grit_lib::state::FinishMergeStateResult::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::state::FinishMergeStateResult
+impl core::cmp::PartialEq for grit_lib::state::FinishMergeStateResult
+pub fn grit_lib::state::FinishMergeStateResult::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::state::FinishMergeStateResult
+pub fn grit_lib::state::FinishMergeStateResult::default() -> Self
+impl core::fmt::Debug for grit_lib::state::FinishMergeStateResult
+pub fn grit_lib::state::FinishMergeStateResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::state::FinishMergeStateResult
+impl core::marker::Freeze for grit_lib::state::FinishMergeStateResult
+impl core::marker::Send for grit_lib::state::FinishMergeStateResult
+impl core::marker::Sync for grit_lib::state::FinishMergeStateResult
+impl core::marker::Unpin for grit_lib::state::FinishMergeStateResult
+impl core::marker::UnsafeUnpin for grit_lib::state::FinishMergeStateResult
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::FinishMergeStateResult
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::FinishMergeStateResult
 pub struct grit_lib::state::Operation
 pub grit_lib::state::Operation::alternatives: alloc::vec::Vec<grit_lib::state::NextStep>
 pub grit_lib::state::Operation::kind: grit_lib::state::InProgressOperation
@@ -30579,26 +30600,6 @@ pub fn grit_lib::state::clear_in_progress(&grit_lib::repo::Repository) -> grit_l
 pub fn grit_lib::state::clear_merge_state(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::state::clear_replay_state(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::state::detect_in_progress(&std::path::Path) -> alloc::vec::Vec<grit_lib::state::InProgressOperation>
-pub struct grit_lib::state::FinishMergeStateResult
-pub grit_lib::state::FinishMergeStateResult::autostash_left_conflicts: bool
-pub grit_lib::state::FinishMergeStateResult::rerere: alloc::vec::Vec<grit_lib::diff::rerere::RerereEvent>
-impl core::clone::Clone for grit_lib::state::FinishMergeStateResult
-pub fn grit_lib::state::FinishMergeStateResult::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::state::FinishMergeStateResult
-impl core::cmp::PartialEq for grit_lib::state::FinishMergeStateResult
-pub fn grit_lib::state::FinishMergeStateResult::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::state::FinishMergeStateResult
-pub fn grit_lib::state::FinishMergeStateResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::default::Default for grit_lib::state::FinishMergeStateResult
-pub fn grit_lib::state::FinishMergeStateResult::default() -> Self
-impl core::marker::StructuralPartialEq for grit_lib::state::FinishMergeStateResult
-impl core::marker::Freeze for grit_lib::state::FinishMergeStateResult
-impl core::marker::Send for grit_lib::state::FinishMergeStateResult
-impl core::marker::Sync for grit_lib::state::FinishMergeStateResult
-impl core::marker::Unpin for grit_lib::state::FinishMergeStateResult
-impl core::marker::UnsafeUnpin for grit_lib::state::FinishMergeStateResult
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::state::FinishMergeStateResult
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::state::FinishMergeStateResult
 pub fn grit_lib::state::finish_merge_state(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::state::FinishMergeStateResult>
 pub fn grit_lib::state::merge_completion_sentinels() -> &'static [&'static str]
 pub fn grit_lib::state::operation_alternatives(grit_lib::state::InProgressOperation) -> alloc::vec::Vec<grit_lib::state::NextStep>
