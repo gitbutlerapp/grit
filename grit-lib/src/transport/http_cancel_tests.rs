@@ -4,12 +4,13 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::clone::{clone, CloneError, CloneOptions};
+use crate::config::ConfigSet;
 use crate::environment::Environment;
 use crate::error::Error;
 use crate::pkt_line::write_line_to_vec;
@@ -23,20 +24,88 @@ use crate::repo::{InitOptions, Repository};
 use crate::transport::http::http_client_arc;
 use crate::transport::http::ureq_client::UreqHttpClient;
 use crate::transport::http::SmartHttpTransport;
-use crate::transport::{ConnectOptions, Connection, Service, Transport};
+use crate::transport::{ConnectOptions, Service, Transport};
 
 const TEST_HARD_TIMEOUT: Duration = Duration::from_secs(5);
+const SLOW_DISCOVERY_HARD_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn run_with_hard_timeout<T: Send + 'static>(
     label: &str,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    run_with_hard_timeout_for(label, TEST_HARD_TIMEOUT, f)
+}
+
+fn run_with_hard_timeout_for<T: Send + 'static>(
+    label: &str,
+    limit: Duration,
     f: impl FnOnce() -> T + Send + 'static,
 ) -> T {
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let _ = tx.send(f());
     });
-    rx.recv_timeout(TEST_HARD_TIMEOUT)
-        .unwrap_or_else(|_| panic!("{label} did not finish within {TEST_HARD_TIMEOUT:?}"))
+    rx.recv_timeout(limit)
+        .unwrap_or_else(|_| panic!("{label} did not finish within {limit:?}"))
+}
+
+/// Serves one slow `info/refs` body (2 B / 100 ms), then 404 on any further connection.
+fn spawn_slow_info_refs_server(body: Vec<u8>) -> (u16, Arc<AtomicUsize>) {
+    let requests = Arc::new(AtomicUsize::new(0));
+    let requests_server = Arc::clone(&requests);
+    let (port_tx, port_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind slow server");
+        port_tx
+            .send(listener.local_addr().expect("addr").port())
+            .expect("port");
+        listener.set_nonblocking(true).ok();
+        let body = body;
+        loop {
+            let Ok((mut stream, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            let n = requests_server.fetch_add(1, Ordering::SeqCst) + 1;
+            if n > 1 {
+                stream
+                    .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+                    .ok();
+                continue;
+            }
+            stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 4096];
+            loop {
+                let Ok(read) = stream.read(&mut tmp) else {
+                    return;
+                };
+                if read == 0 {
+                    return;
+                }
+                buf.extend_from_slice(&tmp[..read]);
+                if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/x-git-upload-pack-advertisement\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes()).expect("header");
+            let mut sent = 0usize;
+            while sent < body.len() {
+                thread::sleep(Duration::from_millis(100));
+                let chunk = (body.len() - sent).min(2);
+                stream.write_all(&body[sent..sent + chunk]).expect("body");
+                sent += chunk;
+            }
+        }
+    });
+    let port = port_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("server port");
+    (port, requests)
 }
 
 #[test]
@@ -589,6 +658,54 @@ fn clone_times_out_on_low_speed_stall_without_cancel() {
             elapsed
         );
     });
+}
+
+#[test]
+fn smart_http_discovery_completes_one_connection_with_slow_body_and_low_speed_env() {
+    run_with_hard_timeout_for(
+        "smart_http_discovery_completes_one_connection_with_slow_body_and_low_speed_env",
+        SLOW_DISCOVERY_HARD_TIMEOUT,
+        || {
+            let ad = minimal_upload_pack_advertisement();
+            let (port, requests) = spawn_slow_info_refs_server(ad);
+            let env = Environment::empty()
+                .with_var("GIT_HTTP_LOW_SPEED_LIMIT", "1")
+                .with_var("GIT_HTTP_LOW_SPEED_TIME", "1");
+            let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
+                .expect("client");
+            let url = format!("http://127.0.0.1:{port}/x.git");
+            let transport = SmartHttpTransport::new(http_client_arc(client));
+            let cancel = FlagCancel::new();
+            let (stack_watch, _guard) = HttpWaitGuard::bind(&cancel);
+            let mut connect = ConnectOptions {
+                cancel: Some(connect_cancel_arc(
+                    &cancel,
+                    std::sync::Arc::clone(&stack_watch),
+                )),
+                stack_watch,
+                ..Default::default()
+            };
+            connect.bind_stack_cancel(&cancel);
+            let started = Instant::now();
+            let conn = transport
+                .connect(&url, Service::UploadPack, &connect)
+                .expect("slow discovery via PendingHttp must succeed");
+            assert!(
+                !conn.advertised_refs().is_empty(),
+                "expected parsed upload-pack advertisement"
+            );
+            assert!(
+                started.elapsed() >= Duration::from_millis(1500),
+                "expected multi-second body read, got {:?}",
+                started.elapsed()
+            );
+            assert_eq!(
+                requests.load(Ordering::SeqCst),
+                1,
+                "must not open a second discovery GET after lowSpeedTime"
+            );
+        },
+    );
 }
 
 #[test]
