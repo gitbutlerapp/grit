@@ -33,6 +33,7 @@ mod json_error;
 mod json_filter;
 #[cfg(test)]
 mod json_schema;
+mod json_to_jaq;
 mod limit_args;
 mod log_display;
 mod markdown;

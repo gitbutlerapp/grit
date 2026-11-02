@@ -13,6 +13,8 @@ use jaq_json::{read, write, Num, Val};
 use serde_json::Value;
 use std::io::Write;
 
+use crate::json_to_jaq;
+
 /// Apply a jq-like `filter` expression to `input`.
 ///
 /// # Parameters
@@ -29,9 +31,9 @@ use std::io::Write;
 ///
 /// Returns an error when the expression fails to parse, compile, or execute.
 pub fn apply_json_filter(input: &Value, filter: &str) -> Result<Value> {
-    let input_bytes = serde_json::to_vec(input).context("serializing JSON for filter input")?;
+    let input_val = json_to_jaq::serialize_value(input).context("building filter input")?;
     let mut buf = Vec::new();
-    write_json_filter(&mut buf, input_bytes, filter)?;
+    write_json_filter_val(&mut buf, input_val, filter)?;
     serde_json::from_slice(&buf).context("parsing filtered JSON output")
 }
 
@@ -39,14 +41,20 @@ pub fn apply_json_filter(input: &Value, filter: &str) -> Result<Value> {
 ///
 /// A filter that emits zero values writes `null`; one value is written as-is;
 /// multiple values are written as a JSON array.
+/// Evaluate `filter` on serialized JSON bytes (tests and byte-oriented callers).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn write_json_filter(w: &mut dyn Write, input_json: Vec<u8>, filter: &str) -> Result<()> {
+    let input_val = read::parse_single(&input_json).map_err(|e| anyhow::anyhow!("{e}"))?;
+    drop(input_json);
+    write_json_filter_val(w, input_val, filter)
+}
+
+/// Evaluate `filter` on an already-built jaq value and write compact JSON to `w`.
+pub fn write_json_filter_val(w: &mut dyn Write, input_val: Val, filter: &str) -> Result<()> {
     let filter = filter.trim();
     if filter.is_empty() {
         bail!("--filter expression must not be empty");
     }
-
-    let input_val = read::parse_single(&input_json).map_err(|e| anyhow::anyhow!("{e}"))?;
-    drop(input_json);
 
     let compiled = compile_filter(filter)?;
     let ctx = Ctx::<data::JustLut<Val>>::new(&compiled.lut, Vars::new([]));
