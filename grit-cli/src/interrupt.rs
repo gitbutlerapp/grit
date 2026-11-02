@@ -9,10 +9,11 @@
 //! its process group, and that duplicate must not cut the rollback short.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use grit_lib::progress::Cancel;
 
-static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+static INTERRUPTED: LazyLock<Arc<AtomicBool>> = LazyLock::new(|| Arc::new(AtomicBool::new(false)));
 
 /// Monotonic time of the first interrupt, in nanoseconds.
 static FIRST_INTERRUPT_NS: AtomicU64 = AtomicU64::new(0);
@@ -138,6 +139,10 @@ impl InterruptCancel {
 impl Cancel for InterruptCancel {
     fn is_cancelled(&self) -> bool {
         INTERRUPTED.load(Ordering::Relaxed)
+    }
+
+    fn shared_watch(&self) -> Option<Arc<AtomicBool>> {
+        Some(Arc::clone(&INTERRUPTED))
     }
 }
 

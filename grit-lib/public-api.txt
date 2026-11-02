@@ -22136,6 +22136,7 @@ pub mod grit_lib::remote::http_client
 pub struct grit_lib::remote::http_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::from_config(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<Self>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::from_config_with_environment(&grit_lib::config::ConfigSet, &grit_lib::config::environment::Environment) -> grit_lib::error::Result<Self>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::new() -> Self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::with_credential_provider(self, alloc::boxed::Box<(dyn grit_lib::remote::credentials::CredentialProvider + core::marker::Send + core::marker::Sync)>) -> Self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::with_credentials(alloc::boxed::Box<(dyn grit_lib::remote::credentials::CredentialProvider + core::marker::Send + core::marker::Sync)>) -> Self
@@ -22153,6 +22154,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl !core::marker::Freeze for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl core::marker::Send for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -22171,6 +22173,7 @@ pub fn grit_lib::remote::http_client::HttpClient::post_into_reader(&self, &str, 
 pub fn grit_lib::remote::http_client::HttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::http_client::HttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::http_client::HttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn grit_lib::remote::http_client::HttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::http_client::HttpClient::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -22182,6 +22185,7 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::reset_auth_after_redirect_rebase(&self)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -22193,6 +22197,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl<C: grit_lib::remote::transport::http::HttpClient> grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<C>
 pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -25212,6 +25217,7 @@ pub mod grit_lib::remote::transport::http::ureq_client
 pub struct grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::from_config(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<Self>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::from_config_with_environment(&grit_lib::config::ConfigSet, &grit_lib::config::environment::Environment) -> grit_lib::error::Result<Self>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::new() -> Self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::with_credential_provider(self, alloc::boxed::Box<(dyn grit_lib::remote::credentials::CredentialProvider + core::marker::Send + core::marker::Sync)>) -> Self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::with_credentials(alloc::boxed::Box<(dyn grit_lib::remote::credentials::CredentialProvider + core::marker::Send + core::marker::Sync)>) -> Self
@@ -25229,6 +25235,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl !core::marker::Freeze for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl core::marker::Send for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -25325,6 +25332,7 @@ pub fn grit_lib::remote::transport::http::HttpClient::post_into_reader(&self, &s
 pub fn grit_lib::remote::transport::http::HttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::HttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::HttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn grit_lib::remote::transport::http::HttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::HttpClient::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -25336,6 +25344,7 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::reset_auth_after_redirect_rebase(&self)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -25347,6 +25356,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl<C: grit_lib::remote::transport::http::HttpClient> grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<C>
 pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -25459,6 +25469,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::transport::Advertisement
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::Advertisement
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::Advertisement
 pub struct grit_lib::remote::transport::ConnectOptions
+pub grit_lib::remote::transport::ConnectOptions::cancel: core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>
 pub grit_lib::remote::transport::ConnectOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
 pub grit_lib::remote::transport::ConnectOptions::network_trace: bool
 pub grit_lib::remote::transport::ConnectOptions::protocol_version: u8

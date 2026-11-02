@@ -35,8 +35,10 @@ use std::time::Duration;
 use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
+use crate::progress::Cancel;
 
 pub mod http;
+pub(crate) mod pending_http;
 pub(crate) mod rpc_channel;
 pub mod stateless_http;
 
@@ -64,7 +66,7 @@ impl Service {
 ///
 /// The default requests protocol version 0 (the classic advertisement) with no
 /// server options.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct ConnectOptions {
     /// Requested protocol version (`0`, `1`, or `2`). The server may downgrade.
     pub protocol_version: u8,
@@ -75,6 +77,61 @@ pub struct ConnectOptions {
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
     /// When true with [`Self::diagnostics`], connect paths may emit network traces.
     pub network_trace: bool,
+    /// When set, smart-HTTP connect and stateless POST rounds poll this while waiting
+    /// on the HTTP stack (discovery GET, upload-pack POST, receive-pack report).
+    pub cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
+    /// Flag mirrored from the stack [`Cancel`] on the owning thread during HTTP waits.
+    pub(crate) stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Stack [`Cancel`] fat pointer (owning thread only); see [`Self::bind_stack_cancel`].
+    pub(crate) stack_cancel: Option<StackCancelFatPtr>,
+}
+
+/// Two-word fat pointer to a stack [`Cancel`]; not dereferenced off the owning thread.
+#[derive(Clone, Copy)]
+pub(crate) struct StackCancelFatPtr {
+    data: *const (),
+    vtable: *const (),
+}
+
+impl StackCancelFatPtr {
+    pub(crate) fn capture(cancel: &dyn Cancel) -> Self {
+        let ptr: *const dyn Cancel = cancel;
+        let (data, vtable) =
+            unsafe { std::mem::transmute::<*const dyn Cancel, (*const (), *const ())>(ptr) };
+        Self { data, vtable }
+    }
+
+    pub(crate) fn as_cancel(&self) -> &dyn Cancel {
+        let ptr: *const dyn Cancel = unsafe { std::mem::transmute((self.data, self.vtable)) };
+        // SAFETY: dereferenced only on the thread that called [`Self::capture`].
+        unsafe { &*ptr }
+    }
+}
+
+impl Default for ConnectOptions {
+    fn default() -> Self {
+        Self {
+            protocol_version: 0,
+            server_options: Vec::new(),
+            diagnostics: None,
+            network_trace: false,
+            cancel: None,
+            stack_watch: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            stack_cancel: None,
+        }
+    }
+}
+
+impl ConnectOptions {
+    /// Record `cancel` for HTTP waits on the calling thread until connect/fetch ends.
+    pub(crate) fn bind_stack_cancel(&mut self, cancel: &dyn Cancel) {
+        crate::progress::mirror_stack_cancel(cancel, &self.stack_watch);
+        self.stack_cancel = Some(StackCancelFatPtr::capture(cancel));
+    }
+
+    pub(crate) fn stack_cancel(&self) -> Option<&dyn Cancel> {
+        self.stack_cancel.as_ref().map(StackCancelFatPtr::as_cancel)
+    }
 }
 
 /// A live, bidirectional pkt-line connection to a Git service, with the
@@ -123,6 +180,16 @@ pub trait Connection {
     /// teardown (`child.wait()` / socket close) blocks. The default is a no-op
     /// (v0/v1 connections, where the server closes after the single response).
     fn finish_send(&mut self) {}
+
+    /// Record the stack [`Cancel`] for smart-HTTP POST waits (owning thread only).
+    fn set_http_stack_cancel(&mut self, cancel: &dyn Cancel) {
+        let _ = cancel;
+    }
+
+    /// Shared flag mirrored from the stack [`Cancel`] during smart-HTTP waits.
+    fn http_stack_watch(&self) -> Option<&std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        None
+    }
 
     /// End the session and report how the server side ended, for transports whose
     /// server runs in this process.
