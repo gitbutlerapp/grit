@@ -67,6 +67,7 @@ use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{
     cache_tree_extension_valid, is_empty_tree_oid, write_tree_update_index, WriteTreeFlags,
 };
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -1162,8 +1163,90 @@ fn commit_files_index_vs_parent_tree(
             return Ok(files);
         }
     }
+    // The diff pairs and reports paths as lossy UTF-8: distinct non-UTF-8 names can collide, and
+    // file lists must carry the `storage_string` form.
+    if index
+        .entries()
+        .iter()
+        .any(|e| std::str::from_utf8(&e.path).is_err())
+    {
+        return commit_files_from_raw_paths(odb, index, parent_tree);
+    }
     let entries = diff_index_to_tree(odb, index, parent_tree, false)?;
-    Ok(commit_files_from_diff_entries(&entries))
+    if entries.iter().all(diff_entry_paths_are_stored_exactly) {
+        return Ok(commit_files_from_diff_entries(&entries));
+    }
+    commit_files_from_raw_paths(odb, index, parent_tree)
+}
+
+/// Whether the lossy UTF-8 paths [`diff_index_to_tree`] reports equal the
+/// [`crate::repo_relpath::storage_string`] form commit file lists use (tree-only paths can still
+/// be non-UTF-8 when the index paths are not).
+fn diff_entry_paths_are_stored_exactly(entry: &DiffEntry) -> bool {
+    [entry.old_path.as_deref(), entry.new_path.as_deref()]
+        .into_iter()
+        .flatten()
+        .all(|path| {
+            !path.contains(char::REPLACEMENT_CHARACTER)
+                && !path.starts_with(crate::repo_relpath::STORAGE_PREFIX)
+        })
+}
+
+/// Files that differ between `index` and `parent_tree`, comparing raw path bytes.
+///
+/// Reads every tree under `parent_tree`; used only when a changed path does not round-trip
+/// through UTF-8.
+fn commit_files_from_raw_paths(
+    odb: &crate::odb::Odb,
+    index: &Index,
+    parent_tree: Option<&ObjectId>,
+) -> Result<Vec<CommitFile>> {
+    fn collect(
+        odb: &crate::odb::Odb,
+        tree: &ObjectId,
+        prefix: &[u8],
+        out: &mut BTreeMap<Vec<u8>, (u32, ObjectId)>,
+    ) -> Result<()> {
+        for entry in crate::objects::parse_tree(&odb.read(tree)?.data)? {
+            let path = crate::repo_relpath::join_rel(prefix, &entry.name);
+            if entry.mode == crate::index::MODE_TREE {
+                collect(odb, &entry.oid, &path, out)?;
+            } else {
+                out.insert(path, (entry.mode, entry.oid));
+            }
+        }
+        Ok(())
+    }
+
+    let mut parent = BTreeMap::new();
+    if let Some(tree) = parent_tree {
+        collect(odb, tree, b"", &mut parent)?;
+    }
+    let mut files = Vec::new();
+    for entry in index.entries() {
+        if entry.stage() != 0 || entry.intent_to_add() {
+            continue;
+        }
+        let status = match parent.remove(entry.path.as_slice()) {
+            None => DiffStatus::Added,
+            Some((old_mode, old_oid)) if old_oid != entry.oid || old_mode != entry.mode => {
+                DiffStatus::for_content_change(old_mode, entry.mode)
+            }
+            Some(_) => continue,
+        };
+        files.push(CommitFile {
+            path: crate::repo_relpath::storage_string(&entry.path),
+            status,
+            old_path: None,
+        });
+    }
+    files.extend(parent.into_keys().map(|path| CommitFile {
+        path: crate::repo_relpath::storage_string(&path),
+        status: DiffStatus::Deleted,
+        old_path: None,
+    }));
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
 }
 
 struct MemOverlayGuard<'a>(&'a Odb);
@@ -3435,6 +3518,80 @@ mod tests {
                 .collect();
             assert_eq!(git_listed.lines().collect::<Vec<_>>(), expected);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dry_run_lists_non_utf8_paths_in_storage_form_like_commit() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let raw = |root: &Path, name: &[u8]| root.join(std::ffi::OsStr::from_bytes(name));
+        let check = |repo: &Repository, expected: &[(&[u8], DiffStatus)]| {
+            let preview = commit_worktree(
+                repo,
+                &dry_run_req("preview"),
+                &mut NullProgress,
+                &crate::progress::NeverCancel,
+            )
+            .unwrap();
+            let listed: Vec<(String, DiffStatus)> = preview
+                .files
+                .iter()
+                .map(|f| (f.path.clone(), f.status))
+                .collect();
+            let mut want: Vec<(String, DiffStatus)> = expected
+                .iter()
+                .map(|(p, s)| (crate::repo_relpath::storage_string(p), *s))
+                .collect();
+            want.sort_by(|a, b| a.0.cmp(&b.0));
+            assert_eq!(listed, want);
+            let committed = commit_worktree(
+                repo,
+                &commit_req("commit"),
+                &mut NullProgress,
+                &crate::progress::NeverCancel,
+            )
+            .unwrap();
+            assert_eq!(committed.files, preview.files);
+        };
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::create_dir(root.join("dir")).unwrap();
+        fs::write(raw(root, b"dir/keep\xff"), b"keep\n").unwrap();
+        fs::write(raw(root, b"dir/mod\xfe"), b"before\n").unwrap();
+        fs::write(raw(root, b"dir/del\xfd"), b"gone\n").unwrap();
+        fs::write(root.join("plain"), b"plain\n").unwrap();
+        commit_worktree(
+            &repo,
+            &commit_req("initial"),
+            &mut NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .unwrap();
+
+        fs::write(raw(root, b"dir/mod\xfe"), b"after\n").unwrap();
+        fs::remove_file(raw(root, b"dir/del\xfd")).unwrap();
+        fs::write(root.join("plain"), b"plain changed\n").unwrap();
+        check(
+            &repo,
+            &[
+                (b"dir/mod\xfe", DiffStatus::Modified),
+                (b"dir/del\xfd", DiffStatus::Deleted),
+                (b"plain", DiffStatus::Modified),
+            ],
+        );
+
+        fs::remove_file(raw(root, b"dir/keep\xff")).unwrap();
+        fs::remove_file(raw(root, b"dir/mod\xfe")).unwrap();
+        check(
+            &repo,
+            &[
+                (b"dir/keep\xff", DiffStatus::Deleted),
+                (b"dir/mod\xfe", DiffStatus::Deleted),
+            ],
+        );
     }
 
     #[test]
