@@ -15,14 +15,17 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath;
+use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 
 const BAD_NAME: &[u8] = b"bad\xffname.txt";
@@ -33,6 +36,7 @@ const UNTRACKED_NON_UTF8_DIR_FILE: &[u8] = b"\xfe/a.txt";
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 const GITLINK_OID: &str = "855827c583bc30645ba427885caa40c5b81764d2";
 const RESERVED_LITERAL: &str = "grit+pathhex:6162";
+const ISSUE_2513_FILE: &[u8] = b"base\xff.txt";
 
 fn bad_path(root: &std::path::Path) -> std::path::PathBuf {
     root.join(OsStr::from_bytes(BAD_NAME))
@@ -632,5 +636,171 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     assert!(
         ls.split('\0').any(|p| p == RESERVED_LITERAL),
         "git must see the literal filename in the index: {ls:?}"
+    );
+}
+
+/// Switch, merge, and restore on a clean tree must not treat non-UTF-8 index paths as dirty (issue #2513).
+#[test]
+fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("issue-2513");
+    std::fs::create_dir(&root).expect("mkdir");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "a@b"]);
+    git(&root, &["config", "user.name", "T"]);
+    write_non_utf8_path(&root, ISSUE_2513_FILE, b"a");
+    std::fs::write(root.join("p"), b"p\n").expect("p");
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "one"]);
+    git(&root, &["switch", "-qc", "br"]);
+    write_non_utf8_path(&root, ISSUE_2513_FILE, b"br");
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-qm", "two"]);
+    git(&root, &["switch", "-q", "main"]);
+    assert!(
+        git_porcelain(&root).trim().is_empty(),
+        "git status must be clean before grit switch"
+    );
+
+    let repo = open_repo(&root);
+    let br_oid = ObjectId::from_hex(git(&root, &["rev-parse", "br"]).trim()).expect("br oid");
+    switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "br".to_owned(),
+                oid: br_oid,
+            },
+            dry_run: false,
+            hooks: PostOperationHooks::Skip,
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("grit switch br on clean tree");
+    assert_eq!(
+        std::fs::read(root.join(OsStr::from_bytes(ISSUE_2513_FILE))).expect("read switched"),
+        b"br"
+    );
+    assert!(
+        git_porcelain(&root).trim().is_empty(),
+        "worktree clean after grit switch"
+    );
+    git(&root, &["switch", "-q", "main"]);
+
+    write_non_utf8_path(&root, ISSUE_2513_FILE, b"dirty");
+    let dirty_err = switch_repository(
+        &open_repo(&root),
+        &SwitchOptions {
+            mode: SwitchMode::Existing {
+                branch: "br".to_owned(),
+                oid: br_oid,
+            },
+            dry_run: false,
+            hooks: PostOperationHooks::Skip,
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect_err("switch must refuse real local edit");
+    assert!(
+        matches!(dirty_err, grit_lib::error::Error::WouldOverwrite { .. }),
+        "expected WouldOverwrite, got {dirty_err:?}"
+    );
+    write_non_utf8_path(&root, ISSUE_2513_FILE, b"a");
+
+    std::fs::write(root.join("q"), b"q\n").expect("q");
+    git(&root, &["add", "q"]);
+    git(&root, &["commit", "-qm", "three"]);
+    let main_oid = ObjectId::from_hex(git(&root, &["rev-parse", "HEAD"]).trim()).expect("main oid");
+    assert!(git_porcelain(&root).trim().is_empty());
+
+    write_non_utf8_path(&root, ISSUE_2513_FILE, b"dirty");
+    let merge_dirty = integrate_branch(
+        &open_repo(&root),
+        "refs/heads/main",
+        main_oid,
+        br_oid,
+        "br",
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect_err("merge must refuse unstaged edit");
+    assert!(
+        matches!(merge_dirty, grit_lib::error::Error::WouldOverwrite { .. }),
+        "expected WouldOverwrite on merge, got {merge_dirty:?}"
+    );
+    write_non_utf8_path(&root, ISSUE_2513_FILE, b"a");
+
+    let merge_repo = open_repo(&root);
+    let merge_out = integrate_branch(
+        &merge_repo,
+        "refs/heads/main",
+        main_oid,
+        br_oid,
+        "br",
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("grit merge br on clean tree");
+    let IntegrateBranchOutcome::Merged { .. } = merge_out else {
+        panic!("expected merge commit, got {merge_out:?}");
+    };
+    assert_eq!(
+        std::fs::read(root.join(OsStr::from_bytes(ISSUE_2513_FILE))).expect("read merged"),
+        b"br"
+    );
+    assert!(
+        git_porcelain(&root).trim().is_empty(),
+        "git status after grit merge"
+    );
+    git(&root, &["fsck", "--strict"]);
+
+    git(&root, &["reset", "-q", "--hard", &main_oid.to_hex()]);
+    let br_tree = {
+        let repo = open_repo(&root);
+        let commit = repo.odb().read(&br_oid).expect("br commit");
+        parse_commit(&commit.data).expect("parse br").tree
+    };
+    restore_paths(
+        &open_repo(&root),
+        &RestoreOptions {
+            pathspecs: vec![".".to_owned()],
+            pathspec_sources: vec![".".to_owned()],
+            source: RestoreSource::Tree(br_tree),
+            staged: false,
+            worktree: true,
+            stage: None,
+            remerge: None,
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("restore --source br");
+    assert_eq!(
+        std::fs::read(root.join(OsStr::from_bytes(ISSUE_2513_FILE))).expect("restored main file"),
+        b"br"
+    );
+    assert!(
+        !root
+            .join(OsStr::from_bytes(b"base\xef\xbf\xbd.txt"))
+            .exists(),
+        "restore must not create a U+FFFD replacement filename"
+    );
+    assert!(
+        git_ls_files_z(&root).contains(&ISSUE_2513_FILE.to_vec()),
+        "git index must still track raw byte path"
+    );
+    let grit_status = status(
+        &open_repo(&root),
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("grit status after restore");
+    assert!(
+        grit_status.untracked.is_empty(),
+        "restore must not leave a U+FFFD replacement as untracked: {:?}",
+        grit_status.untracked
     );
 }

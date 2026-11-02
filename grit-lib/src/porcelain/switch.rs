@@ -1109,10 +1109,12 @@ fn index_matches_target_tree_entry(
     path: &str,
     target: TargetTreeEntry,
 ) -> bool {
-    index.get(path.as_bytes(), 0).is_some_and(|entry| {
-        entry.oid == target.oid
-            && crate::index::canon_mode(entry.mode) == crate::index::canon_mode(target.mode)
-    })
+    index
+        .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
+        .is_some_and(|entry| {
+            entry.oid == target.oid
+                && crate::index::canon_mode(entry.mode) == crate::index::canon_mode(target.mode)
+        })
 }
 
 /// True when `entry` is a submodule directory that drifted from its index gitlink (another
@@ -1381,7 +1383,7 @@ pub(crate) fn ensure_local_changes_compatible_with_switch(
             });
             if scheduled.is_some_and(|change| {
                 index
-                    .get(path.as_bytes(), 0)
+                    .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
                     .is_some_and(|ie| ie.oid == change.old_oid)
                     && crate::porcelain::worktree_guard::worktree_path_absent_for_trusted_delete(
                         work_tree, path,

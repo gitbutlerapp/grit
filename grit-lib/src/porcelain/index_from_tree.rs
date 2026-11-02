@@ -70,7 +70,7 @@ pub(crate) fn refresh_stage0_index_stats_for_paths(
 ) -> Result<bool> {
     let entries: Vec<_> = paths
         .iter()
-        .filter_map(|path| index.get(path.as_bytes(), 0))
+        .filter_map(|path| index.get(crate::repo_relpath::storage_bytes(path).as_ref(), 0))
         .cloned()
         .collect();
     if entries.is_empty() {

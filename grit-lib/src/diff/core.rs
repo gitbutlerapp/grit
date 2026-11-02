@@ -3818,7 +3818,7 @@ fn emit_deleted_tree_from_index(
             if scan_prefix.is_empty() && ie.path.contains(&b'/') {
                 continue;
             }
-            let path = String::from_utf8_lossy(&ie.path).into_owned();
+            let path = crate::repo_relpath::storage_string(&ie.path);
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
                 old_path: Some(path),
@@ -6449,7 +6449,8 @@ fn diff_index_to_worktree_inner(
     if let Some(limit) = options.restrict_to_paths.as_ref() {
         let mut cursor = 0;
         for path in limit.iter() {
-            let Some(pos) = index.find_stage0_pos_from(path.as_bytes(), &mut cursor) else {
+            let path_bytes = crate::repo_relpath::storage_bytes(path);
+            let Some(pos) = index.find_stage0_pos_from(path_bytes.as_ref(), &mut cursor) else {
                 continue;
             };
             let ie = &index.entries[pos];
@@ -6532,7 +6533,8 @@ fn diff_index_to_worktree_inner(
             let mut positions = Vec::new();
             let mut cursor = 0;
             for path in limit.iter() {
-                let Some(pos) = index.find_stage0_pos_from(path.as_bytes(), &mut cursor) else {
+                let path_bytes = crate::repo_relpath::storage_bytes(path);
+                let Some(pos) = index.find_stage0_pos_from(path_bytes.as_ref(), &mut cursor) else {
                     continue;
                 };
                 let ie = &index.entries[pos];
@@ -13063,8 +13065,7 @@ fn flatten_tree_with_index(
     let mut result = Vec::new();
 
     for entry in entries {
-        let name_str = String::from_utf8_lossy(&entry.name);
-        let path = format_path(prefix, &name_str);
+        let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
         if is_tree_mode(entry.mode) {
             if index.is_some_and(|idx| sparse_index_skips_tree_descent(idx, &path, &entry.oid)) {
                 continue;
@@ -13133,19 +13134,6 @@ pub fn sort_entries_by_path(entries: &mut [DiffEntry]) {
         return;
     }
     entries.sort_by(path_order);
-}
-
-/// Build a path with an optional prefix.
-fn format_path(prefix: &str, name: &str) -> String {
-    if prefix.is_empty() {
-        name.to_owned()
-    } else {
-        let mut path = String::with_capacity(prefix.len() + 1 + name.len());
-        path.push_str(prefix);
-        path.push('/');
-        path.push_str(name);
-        path
-    }
 }
 
 /// Format a numeric mode as a zero-padded octal string.

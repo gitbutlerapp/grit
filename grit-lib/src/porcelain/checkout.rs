@@ -4918,12 +4918,12 @@ pub(crate) fn tree_changes_touch_gitattributes(changes: &[DiffEntry]) -> bool {
 /// Index after applying `changes`, used to resolve destination `.gitattributes` before writes land.
 fn prospective_index_for_checkout(index: &Index, changes: &[DiffEntry]) -> Index {
     let mut idx = index.clone();
-    let mut paths_to_remove: Vec<&[u8]> = Vec::with_capacity(changes.len());
+    let mut paths_to_remove: Vec<Vec<u8>> = Vec::with_capacity(changes.len());
     let mut replacements: Vec<IndexEntry> = Vec::new();
     for change in changes {
         if change.status == DiffStatus::Deleted {
             if let Some(path) = &change.old_path {
-                paths_to_remove.push(path.as_bytes());
+                paths_to_remove.push(checkout_stored_index_path_bytes(path));
             }
             continue;
         }
@@ -4932,13 +4932,13 @@ fn prospective_index_for_checkout(index: &Index, changes: &[DiffEntry]) -> Index
         };
         if let Some(old) = &change.old_path {
             if old != path {
-                paths_to_remove.push(old.as_bytes());
+                paths_to_remove.push(checkout_stored_index_path_bytes(old));
             }
         }
         let mode = change.new_mode.bits();
         replacements.push(prospective_index_entry(path, change.new_oid, mode));
     }
-    idx.remove_paths_and_insert(paths_to_remove, replacements);
+    idx.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), replacements);
     idx
 }
 
@@ -4957,7 +4957,7 @@ fn prospective_index_entry(path: &str, oid: ObjectId, mode: u32) -> IndexEntry {
         oid,
         flags: path.len().min(0xFFF) as u16,
         flags_extended: None,
-        path: path.as_bytes().to_vec(),
+        path: checkout_stored_index_path_bytes(path),
         base_index_pos: 0,
     }
 }
