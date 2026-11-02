@@ -14,8 +14,8 @@ use crate::diff::changes::{
 use crate::diff::detail::LineStat;
 use crate::diff::structured::StructuredHunk;
 use crate::diff::{
-    apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel,
-    DiffEntry, DiffOptions, DiffStatus, TreeDiffStructured,
+    apply_diff_filter, sort_entries_by_path, tree_diff_structured_parallel, DiffEntry, DiffOptions,
+    DiffStatus, TreeDiffStructured,
 };
 use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;

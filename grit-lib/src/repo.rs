@@ -1060,8 +1060,7 @@ impl Repository {
         if self.environment.git_no_replace_objects {
             return true;
         }
-        let Some(prefix) =
-            Self::replace_ref_prefix_from_config(cfg, self.environment.as_ref())
+        let Some(prefix) = Self::replace_ref_prefix_from_config(cfg, self.environment.as_ref())
         else {
             return true;
         };
