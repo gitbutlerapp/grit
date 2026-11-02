@@ -155,8 +155,7 @@ pub(crate) fn index_from_tree_with_owned_seed_worktree_stats(
     tree_oid: &ObjectId,
     mut seed: Index,
 ) -> Result<Index> {
-    let keep_skip_worktree = SparseCheckout::load(repo)?.is_some();
-    let mut index = match index_from_matching_seed(&mut seed, tree_oid, keep_skip_worktree) {
+    let mut index = match index_from_matching_seed(&mut seed, tree_oid) {
         Some(index) => index,
         None => index_from_tree_with_seeded_stats(repo, tree_oid, &seed)?,
     };
@@ -173,12 +172,8 @@ pub(crate) fn index_from_tree_with_owned_seed_worktree_stats(
 ///
 /// Each row keeps its path, mode and oid, and its stat data under the same conditions
 /// [`seed_stage0_stat_data`] copies it; flags are reset as a tree read leaves them, except that
-/// `keep_skip_worktree` (a sparse checkout) carries the skip-worktree bit over.
-fn index_from_matching_seed(
-    seed: &mut Index,
-    tree_oid: &ObjectId,
-    keep_skip_worktree: bool,
-) -> Option<Index> {
+/// a seed row's skip-worktree bit is carried over when the path still matches.
+fn index_from_matching_seed(seed: &mut Index, tree_oid: &ObjectId) -> Option<Index> {
     let matches = seed
         .cache_tree
         .as_ref()
@@ -192,7 +187,7 @@ fn index_from_matching_seed(
     index.entries = std::mem::take(&mut seed.entries);
     for entry in &mut index.entries {
         let keep_stat = seed_row_stat_reusable(entry);
-        let skip_worktree = keep_skip_worktree && entry.skip_worktree();
+        let skip_worktree = entry.skip_worktree();
         let mut row = tree_entry(std::mem::take(&mut entry.path), entry.mode, entry.oid);
         if keep_stat {
             copy_stat(&mut row, entry);
@@ -224,7 +219,33 @@ pub(crate) fn index_from_tree_with_seeded_stats(
         sparse.carry_skip_worktree(&mut index, seed);
     }
     seed_stage0_stat_data(&mut index, seed);
+    carry_seed_skip_worktree(&mut index, seed);
     Ok(index)
+}
+
+/// Copy user skip-worktree from seed stage-0 rows with the same path (oid/mode may differ).
+fn carry_seed_skip_worktree(index: &mut Index, seed: &Index) {
+    let mut seeds = seed
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.skip_worktree())
+        .peekable();
+    for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+        while seeds
+            .peek()
+            .is_some_and(|s| s.path.as_slice() < entry.path.as_slice())
+        {
+            seeds.next();
+        }
+        let Some(src) = seeds.peek() else {
+            break;
+        };
+        if src.path.as_slice() != entry.path.as_slice() {
+            continue;
+        }
+        entry.set_skip_worktree(true);
+        seeds.next();
+    }
 }
 
 /// Same entries and cache-tree as [`index_from_tree`] followed by
@@ -1741,21 +1762,16 @@ mod tests {
         never_stat.mtime_nsec = 0;
 
         let borrowed = index_from_tree_with_seeded_stats(&repo, &t2, &seed).expect("borrowed");
-        for keep_skip_worktree in [false, true] {
-            let owned = index_from_matching_seed(&mut seed.clone(), &t2, keep_skip_worktree)
-                .expect("seed matches t2");
-            if keep_skip_worktree {
-                assert!(owned.get(b"top", 0).expect("top").skip_worktree());
-            } else {
-                assert_same_index(&owned, &borrowed);
-            }
-        }
-        let owned = index_from_matching_seed(&mut seed.clone(), &t2, false).expect("matches");
+        assert!(borrowed.get(b"top", 0).expect("top").skip_worktree());
+        let owned = index_from_matching_seed(&mut seed.clone(), &t2).expect("seed matches t2");
+        assert!(owned.get(b"top", 0).expect("top").skip_worktree());
+        assert_same_index(&owned, &borrowed);
+        let owned = index_from_matching_seed(&mut seed.clone(), &t2).expect("matches");
         assert!(owned.get(b"a/x", 0).expect("a/x").stat_cache_unset());
         assert!(!owned.get(b"a/b/y", 0).expect("a/b/y").stat_cache_unset());
 
         let mut unmatched = seed.clone();
-        assert!(index_from_matching_seed(&mut unmatched, &t1, false).is_none());
+        assert!(index_from_matching_seed(&mut unmatched, &t1).is_none());
         assert_eq!(unmatched.entries, seed.entries);
         assert_eq!(unmatched.cache_tree, seed.cache_tree);
     }

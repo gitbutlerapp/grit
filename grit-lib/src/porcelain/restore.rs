@@ -576,7 +576,7 @@ fn collect_matched_paths(
     let skip_index_union = select_all_tracked && !restore_staged && !worktree_from_tree;
     if !skip_index_union {
         for entry in &index.entries {
-            if entry.stage() != 0 {
+            if entry.stage() != 0 || entry.skip_worktree() {
                 continue;
             }
             let path = String::from_utf8_lossy(&entry.path);
@@ -742,7 +742,7 @@ fn apply_worktree_restore_inner(
         let index_mtime = index_mtime_for_diff(index_out, None);
         let mut to_write: Vec<usize> = Vec::new();
         for (pos, entry) in index_out.entries.iter().enumerate() {
-            if entry.stage() != 0 {
+            if entry.stage() != 0 || entry.skip_worktree() {
                 continue;
             }
             let path = crate::repo_relpath::storage_string(&entry.path);
@@ -810,6 +810,12 @@ fn apply_worktree_restore_inner(
     for path in matched {
         poll_cancel(progress, cancel)?;
         progress.inc(1);
+        if index_out
+            .get(path.as_bytes(), 0)
+            .is_some_and(|e| e.skip_worktree())
+        {
+            continue;
+        }
         let src = tree_source
             .and_then(|entries| flat_tree_lookup(entries, path))
             .cloned();
