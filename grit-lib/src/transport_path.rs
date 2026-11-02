@@ -235,6 +235,26 @@ fn local_path_from_remote_url(url: &str) -> Result<PathBuf, Error> {
     Ok(PathBuf::from(path_str))
 }
 
+/// Filesystem path for a local clone or fetch source, with relative paths resolved from
+/// `discovery_cwd` (the caller's working directory before a clone destination exists).
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when a `file://` URL is malformed.
+pub(crate) fn resolve_local_clone_source_path(
+    url: &str,
+    discovery_cwd: &Path,
+) -> Result<PathBuf, Error> {
+    let mut remote_path = local_path_from_remote_url(url.trim())?;
+    if remote_path.is_relative() {
+        let base = discovery_cwd
+            .canonicalize_simplified()
+            .unwrap_or_else(|_| discovery_cwd.to_path_buf());
+        remote_path = base.join(remote_path);
+    }
+    Ok(remote_path)
+}
+
 /// True when `url` names a local filesystem remote (not `http(s)://`, `git://`, `ssh`, or `ext::`).
 #[must_use]
 pub fn is_local_path_remote_url(url: &str) -> bool {

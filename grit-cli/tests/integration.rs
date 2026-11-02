@@ -120,6 +120,8 @@ mod clone_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "clone_invalid_origin.rs"]
 mod clone_invalid_origin;
+#[path = "clone_missing_local_source.rs"]
+mod clone_missing_local_source;
 #[cfg(feature = "full-tests")]
 #[path = "clone_progress.rs"]
 mod clone_progress;

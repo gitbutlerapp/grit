@@ -31,6 +31,8 @@ Cloning a plain local path hard-links the source's packfiles, like `git clone --
 
 Without `<dir>`, the directory is named after the last path component of the URL with any `.git` suffix removed (splitting on both `/` and `\`, so Windows paths like `..\..\origin.git` clone into `origin`), so `https://github.com/gitbutlerapp/grit.git` clones into `grit`. The destination must not exist or must be empty. If the path already exists and is not empty, grit refuses the clone and leaves the directory and its files unchanged.
 
+For a local path or `file://` URL, grit checks that the source exists and is a repository (or a bundle file) **before** creating the destination directory. A typo or missing path fails with exit code **128** and leaves no new directory behind. Cloning from a real empty bare repository at another path is unchanged: grit still creates the destination and reports `empty_remote` when the remote has no commits.
+
 On an interactive terminal (human output, not `--json` or `--markdown`), each step of the clone gets one live line on stderr: **Receiving** (pack bytes), **Indexing** (objects), **Resolving** (deltas) and **Checkout** (files). Each line has a scrolling, colored graph of throughput over the last few seconds, a count, a completion bar when the total is known, the current rate and the elapsed time. When a step finishes, its line stays on screen with a graph of the whole step, the total and the average rate.
 
 While the pack streams in, grit counts its objects as they arrive (the total comes from the pack header), so the **Receiving** line shows `received/total` objects and a completion bar, as Git's does. Under the live line, an **Overall** bar estimates how far the whole clone is and how long is left:
