@@ -562,7 +562,11 @@ mod grit_stash_push_non_utf8 {
             .args(["ls-tree", "-r", "--name-only", "-z", rev])
             .output()
             .expect("ls-tree");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         out.stdout
             .split(|&b| b == 0)
             .filter(|p| !p.is_empty())
@@ -724,6 +728,59 @@ mod grit_stash_push_non_utf8 {
             )
             .expect("pop");
         assert_eq!(std::fs::read(root.path().join(&literal)).unwrap(), b"ab");
+    }
+
+    #[test]
+    fn pop_rejects_non_utf8_untracked_collision_before_tracked_apply() {
+        let root = tempfile::tempdir().expect("tempdir");
+        init_repo(root.path());
+        std::fs::write(root.path().join("f"), b"a").expect("write f");
+        git_cmd(root.path(), &["add", "f"]);
+        git_cmd(root.path(), &["commit", "-qm", "one"]);
+
+        std::fs::write(root.path().join("f"), b"b").expect("modify tracked");
+        let child = path_bytes(b"dir\xff/child");
+        std::fs::create_dir_all(root.path().join(&child).parent().unwrap()).expect("mkdir");
+        std::fs::write(root.path().join(&child), b"child\n").expect("untracked");
+
+        let repo = open(root.path());
+        repo.stash()
+            .push(
+                &stash_push_opts(true),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("push")
+            .expect("stash");
+
+        let blocker = path_bytes(b"dir\xff");
+        std::fs::write(root.path().join(&blocker), b"blocker\n").expect("blocker file");
+
+        let err = repo
+            .stash()
+            .pop(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect_err("must reject before mutating tracked files");
+        assert!(matches!(
+            err,
+            grit_lib::error::Error::StashCouldNotRestoreUntracked { .. }
+        ));
+
+        assert_eq!(std::fs::read(root.path().join("f")).unwrap(), b"a");
+        assert_eq!(
+            std::fs::read(root.path().join(&blocker)).unwrap(),
+            b"blocker\n"
+        );
+        assert!(
+            !git_cmd(root.path(), &["rev-parse", "refs/stash"])
+                .trim()
+                .is_empty(),
+            "stash entry must remain after failed pop"
+        );
     }
 
     #[test]

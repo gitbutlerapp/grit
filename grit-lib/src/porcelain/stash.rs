@@ -69,7 +69,6 @@ use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes;
 use crate::progress::{
     poll_cancel, Cancel, NeverCancel, NullProgress, ProgressPhase, ProgressScope, ProgressSink,
 };
@@ -2443,16 +2442,16 @@ fn collect_worktree_paths_blocking_stash_untracked_restore(
     repo: &Repository,
     work_tree: &Path,
     index: &mut Index,
-) -> Result<Vec<String>> {
+) -> Result<Vec<Vec<u8>>> {
     let mut paths = HashSet::new();
     for entry in index.entries() {
         if entry.stage() != 0 {
             continue;
         }
-        let path = storage_string(&entry.path);
-        let wt = worktree_abs(work_tree, &path);
+        let stored = storage_string(&entry.path);
+        let wt = worktree_abs(work_tree, &stored);
         if wt.exists() || wt.symlink_metadata().is_ok() {
-            paths.insert(path);
+            paths.insert(entry.path.clone());
         }
     }
     let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
@@ -2472,11 +2471,50 @@ fn collect_worktree_paths_blocking_stash_untracked_restore(
         &worktree_rules,
         None,
     )?;
-    paths.extend(untracked);
-    paths.extend(ignored);
-    let mut sorted: Vec<String> = paths.into_iter().collect();
+    for path in untracked.into_iter().chain(ignored) {
+        paths.insert(storage_bytes(&path).into_owned());
+    }
+    let mut sorted: Vec<Vec<u8>> = paths.into_iter().collect();
     sorted.sort();
     Ok(sorted)
+}
+
+fn is_component_prefix_bytes(prefix: &[u8], path: &[u8]) -> bool {
+    if path.len() <= prefix.len() {
+        return false;
+    }
+    path.starts_with(prefix) && path.get(prefix.len()) == Some(&b'/')
+}
+
+fn added_stash_path_collides_with_worktree_path(added: &[u8], existing: &[u8]) -> bool {
+    let existing = existing.strip_suffix(b"/").unwrap_or(existing);
+    if existing.is_empty() {
+        return false;
+    }
+    added == existing
+        || is_component_prefix_bytes(added, existing)
+        || is_component_prefix_bytes(existing, added)
+}
+
+fn untracked_stash_restore_collisions(
+    existing_paths: &[Vec<u8>],
+    ut_entries: &[RawFlatTreeEntry],
+) -> Vec<Vec<u8>> {
+    let mut collisions = Vec::new();
+    for entry in ut_entries {
+        if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
+            continue;
+        }
+        let added = entry.path.as_slice();
+        for existing in existing_paths {
+            if added_stash_path_collides_with_worktree_path(added, existing) {
+                collisions.push(added.to_vec());
+            }
+        }
+    }
+    collisions.sort();
+    collisions.dedup();
+    collisions
 }
 
 /// Refuse when restoring the stash untracked-files parent would clobber an existing worktree path.
@@ -2504,19 +2542,19 @@ fn check_stash_untracked_restore(
     if ut_entries.is_empty() {
         return Ok(());
     }
-    let ut_file_paths: HashSet<String> = ut_entries
+    let ut_file_paths: HashSet<&[u8]> = ut_entries
         .iter()
         .filter(|e| e.mode != MODE_GITLINK && e.mode != MODE_TREE)
-        .map(|e| storage_string(&e.path))
+        .map(|e| e.path.as_slice())
         .collect();
-    let existing_paths: Vec<String> =
+    let existing_paths: Vec<Vec<u8>> =
         collect_worktree_paths_blocking_stash_untracked_restore(repo, work_tree, index)?
             .into_iter()
-            .filter(|path| {
+            .filter(|path_bytes| {
                 for ut_file in &ut_file_paths {
-                    if path != ut_file
-                        && path.starts_with(&format!("{ut_file}/"))
-                        && wt_deletions.contains(path.as_bytes())
+                    if path_bytes.as_slice() != *ut_file
+                        && is_component_prefix_bytes(ut_file, path_bytes)
+                        && wt_deletions.contains(path_bytes)
                     {
                         return false;
                     }
@@ -2524,27 +2562,15 @@ fn check_stash_untracked_restore(
                 true
             })
             .collect();
-    let tree_changes: Vec<DiffEntry> = ut_entries
-        .iter()
-        .map(|entry| DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(storage_string(&entry.path)),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(entry.mode),
-            old_oid: ObjectId::zero(),
-            new_oid: entry.oid,
-            score: None,
-        })
-        .collect();
-    let collisions = untracked_would_be_overwritten_by_tree_changes(&existing_paths, &tree_changes);
-    for path in &collisions {
+    let collisions = untracked_stash_restore_collisions(&existing_paths, &ut_entries);
+    for path_bytes in collisions {
+        let path = storage_string(&path_bytes);
         if options.overwrite_identical_untracked
-            && untracked_on_disk_matches_stash(repo, work_tree, index, ut_oid, &ut_entries, path)?
+            && untracked_on_disk_matches_stash(repo, work_tree, index, ut_oid, &ut_entries, &path)?
         {
             continue;
         }
-        return Err(Error::StashCouldNotRestoreUntracked { path: path.clone() });
+        return Err(Error::StashCouldNotRestoreUntracked { path });
     }
     Ok(())
 }
