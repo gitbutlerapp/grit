@@ -729,17 +729,63 @@ fn invalidate_one_component(
     }
 }
 
-fn has_tracked_under(
-    tracked: &BTreeSet<String>,
-    gitlinks: &BTreeSet<String>,
-    rel_dir: &str,
-) -> bool {
-    tracked
-        .iter()
-        .any(|t| stored_path_is_strictly_under(t, rel_dir))
-        || gitlinks
+/// Whether `path` lies strictly under directory `dir` (`dir/…`), using raw index path bytes.
+fn index_path_is_strictly_under_dir(path: &[u8], dir: &[u8]) -> bool {
+    path.len() > dir.len() && path.starts_with(dir) && path[dir.len()] == b'/'
+}
+
+/// O(log n) probe for index entries at or under a stored directory during UNTR refresh.
+struct TrackedUnderLookup<'a> {
+    index: &'a Index,
+    unsorted_paths: Option<Vec<Vec<u8>>>,
+}
+
+impl<'a> TrackedUnderLookup<'a> {
+    fn new(index: &'a Index) -> Self {
+        let unsorted_paths = if index.entries_sorted {
+            None
+        } else {
+            let mut paths: Vec<Vec<u8>> = index.entries.iter().map(|e| e.path.to_vec()).collect();
+            paths.sort();
+            Some(paths)
+        };
+        Self {
+            index,
+            unsorted_paths,
+        }
+    }
+
+    fn has_tracked_under(&self, rel_dir: &str) -> bool {
+        let dir = storage_bytes(rel_dir);
+        if dir.is_empty() {
+            return !self.index.entries.is_empty();
+        }
+        if self.index.entries_sorted {
+            if self.index.has_gitlink_at(dir.as_ref()) {
+                return true;
+            }
+            return self
+                .index
+                .sorted_entries_under(dir.as_ref())
+                .is_some_and(|run| !run.is_empty());
+        }
+        let Some(paths) = self.unsorted_paths.as_ref() else {
+            return false;
+        };
+        let dir_ref = dir.as_ref();
+        if self
+            .index
+            .entries
             .iter()
-            .any(|g| g.as_str() == rel_dir || stored_path_is_strictly_under(g, rel_dir))
+            .any(|e| e.path.as_slice() == dir_ref && e.mode == MODE_GITLINK)
+        {
+            return true;
+        }
+        let mut prefix = dir_ref.to_vec();
+        prefix.push(b'/');
+        let start = paths.partition_point(|p| p.as_slice() < prefix.as_slice());
+        start < paths.len() && index_path_is_strictly_under_dir(&paths[start], dir_ref)
+    }
 }
 
 fn has_hidden_untracked_file_or_dir(
@@ -865,17 +911,6 @@ fn join_stored_paths(parent: &str, child: &str) -> String {
 fn stored_dir_name(rel: &str) -> String {
     let bytes = storage_bytes(rel);
     storage_string(repo_relpath::file_name(&bytes))
-}
-
-fn stored_path_is_strictly_under(path: &str, dir: &str) -> bool {
-    if dir.is_empty() {
-        return !path.is_empty();
-    }
-    let dir_bytes = storage_bytes(dir);
-    let path_bytes = storage_bytes(path);
-    path_bytes.len() > dir_bytes.len()
-        && path_bytes.starts_with(dir_bytes.as_ref())
-        && path_bytes[dir_bytes.len()] == b'/'
 }
 
 #[cfg(unix)]
@@ -1085,6 +1120,7 @@ pub fn refresh_untracked_cache_for_status(
         .collect();
 
     let mut matcher = IgnoreMatcher::from_repository(repo)?;
+    let tracked_under = TrackedUnderLookup::new(index);
 
     if uc.root.is_none() {
         uc.root = Some(UntrackedCacheDir::new(String::new()));
@@ -1100,6 +1136,7 @@ pub fn refresh_untracked_cache_for_status(
         work_tree,
         &tracked,
         &gitlinks,
+        &tracked_under,
         &mut matcher,
         ignored_mode,
         show_all_untracked,
@@ -1190,6 +1227,7 @@ fn read_directory_recursive(
     work_tree: &Path,
     tracked: &BTreeSet<String>,
     gitlinks: &BTreeSet<String>,
+    tracked_under: &TrackedUnderLookup<'_>,
     matcher: &mut IgnoreMatcher,
     ignored_mode: UntrackedIgnoredMode,
     show_all: bool,
@@ -1344,6 +1382,7 @@ fn read_directory_recursive(
                 work_tree,
                 tracked,
                 gitlinks,
+                tracked_under,
                 matcher,
                 ignored_mode,
                 show_all,
@@ -1392,6 +1431,7 @@ fn visit_untracked_directory_uc(
     work_tree: &Path,
     tracked: &BTreeSet<String>,
     gitlinks: &BTreeSet<String>,
+    tracked_under: &TrackedUnderLookup<'_>,
     matcher: &mut IgnoreMatcher,
     ignored_mode: UntrackedIgnoredMode,
     show_all: bool,
@@ -1406,7 +1446,7 @@ fn visit_untracked_directory_uc(
     }
     let name = stored_dir_name(rel);
 
-    if has_tracked_under(tracked, gitlinks, rel) {
+    if tracked_under.has_tracked_under(rel) {
         let child = lookup_or_create_child(parent_ucd, &name, uc);
         return read_directory_recursive(
             repo,
@@ -1414,6 +1454,7 @@ fn visit_untracked_directory_uc(
             work_tree,
             tracked,
             gitlinks,
+            tracked_under,
             matcher,
             ignored_mode,
             show_all,
@@ -1461,6 +1502,7 @@ fn visit_untracked_directory_uc(
             work_tree,
             tracked,
             gitlinks,
+            tracked_under,
             matcher,
             ignored_mode,
             true,
@@ -1505,6 +1547,7 @@ fn visit_untracked_directory_uc(
         work_tree,
         tracked,
         gitlinks,
+        tracked_under,
         matcher,
         ignored_mode,
         true,
@@ -1523,6 +1566,7 @@ fn visit_untracked_directory_uc(
             work_tree,
             tracked,
             gitlinks,
+            tracked_under,
             matcher,
             ignored_mode,
             true,
@@ -1748,6 +1792,7 @@ fn visit_untracked_node_full(
     work_tree: &Path,
     tracked: &BTreeSet<String>,
     gitlinks: &BTreeSet<String>,
+    tracked_under: &TrackedUnderLookup<'_>,
     matcher: &mut IgnoreMatcher,
     ignored_mode: UntrackedIgnoredMode,
     show_all: bool,
@@ -1790,6 +1835,7 @@ fn visit_untracked_node_full(
                 work_tree,
                 tracked,
                 gitlinks,
+                tracked_under,
                 matcher,
                 ignored_mode,
                 show_all,
@@ -1819,6 +1865,7 @@ fn visit_untracked_directory_collect(
     work_tree: &Path,
     tracked: &BTreeSet<String>,
     gitlinks: &BTreeSet<String>,
+    tracked_under: &TrackedUnderLookup<'_>,
     matcher: &mut IgnoreMatcher,
     ignored_mode: UntrackedIgnoredMode,
     show_all: bool,
@@ -1828,13 +1875,14 @@ fn visit_untracked_directory_collect(
     ignored_out: &mut Vec<String>,
     uc: &mut UntrackedCache,
 ) -> Result<()> {
-    if has_tracked_under(tracked, gitlinks, rel) {
+    if tracked_under.has_tracked_under(rel) {
         return visit_untracked_node_full(
             repo,
             index,
             work_tree,
             tracked,
             gitlinks,
+            tracked_under,
             matcher,
             ignored_mode,
             show_all,
@@ -1882,6 +1930,7 @@ fn visit_untracked_directory_collect(
         work_tree,
         tracked,
         gitlinks,
+        tracked_under,
         matcher,
         ignored_mode,
         show_all,
@@ -1990,6 +2039,7 @@ fn traditional_normal_directory_only(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::index::IndexEntry;
 
     #[test]
     fn collapse_tracked_only_never_marks_root_check_only() {
@@ -2152,6 +2202,107 @@ mod tests {
         let back = parse_untracked_extension(&raw).expect("parse");
         let child = &back.root.as_ref().expect("root").dirs[0];
         assert!(child.untracked.is_empty());
+    }
+
+    fn test_index_with_paths(paths: &[&[u8]]) -> Index {
+        let mut index = Index::empty(2);
+        for path in paths {
+            index.push_entry_unsorted(IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: crate::index::MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                oid: ObjectId::from_bytes(&[0u8; 20]).expect("oid"),
+                flags: path.len().min(0xFFF) as u16,
+                flags_extended: None,
+                path: path.to_vec(),
+                base_index_pos: 0,
+            });
+        }
+        index.sort();
+        index
+    }
+
+    fn tracked_under_oracle(index: &Index, rel_dir: &str) -> bool {
+        let gitlinks: BTreeSet<String> = index
+            .entries
+            .iter()
+            .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+            .map(|e| storage_string(&e.path))
+            .collect();
+        let tracked: BTreeSet<String> = index
+            .entries
+            .iter()
+            .map(|e| storage_string(&e.path))
+            .collect();
+        let dir_bytes = storage_bytes(rel_dir);
+        tracked.iter().any(|t| {
+            let path_bytes = storage_bytes(t);
+            if dir_bytes.is_empty() {
+                return !path_bytes.is_empty();
+            }
+            path_bytes.len() > dir_bytes.len()
+                && path_bytes.starts_with(dir_bytes.as_ref())
+                && path_bytes[dir_bytes.len()] == b'/'
+        }) || gitlinks.iter().any(|g| {
+            g.as_str() == rel_dir || {
+                let g_bytes = storage_bytes(g);
+                dir_bytes.len() < g_bytes.len()
+                    && g_bytes.starts_with(dir_bytes.as_ref())
+                    && g_bytes[dir_bytes.len()] == b'/'
+            }
+        })
+    }
+
+    #[test]
+    fn tracked_under_lookup_matches_linear_oracle() {
+        let fe_dir = storage_string(b"\xfe");
+        let fe_file = storage_string(b"\xfe/child.txt");
+        let index = test_index_with_paths(&[
+            b"a/x",
+            b"ab/y",
+            b"dir/file",
+            b"dir2/other",
+            fe_file.as_bytes(),
+        ]);
+        let lookup = TrackedUnderLookup::new(&index);
+        for rel in ["", "a", "ab", "dir", "dir2", "missing", &fe_dir] {
+            assert_eq!(
+                lookup.has_tracked_under(rel),
+                tracked_under_oracle(&index, rel),
+                "rel={rel:?}"
+            );
+        }
+        assert!(lookup.has_tracked_under("dir"));
+        assert!(
+            !lookup.has_tracked_under("d"),
+            "prefix dir must not match unrelated paths"
+        );
+        assert!(lookup.has_tracked_under("dir2"));
+        assert!(!lookup.has_tracked_under("dirX"));
+        let under_fe = test_index_with_paths(&[b"\xfe/under.c"]);
+        let fe_lookup = TrackedUnderLookup::new(&under_fe);
+        assert!(fe_lookup.has_tracked_under(&fe_dir));
+        assert!(!fe_lookup.has_tracked_under(&storage_string(b"\xfe2")));
+    }
+
+    #[test]
+    fn tracked_under_lookup_unsorted_index_snapshot() {
+        let mut index = test_index_with_paths(&[b"parent/one", b"parent/two", b"sibling"]);
+        index.mark_entries_unsorted();
+        let lookup = TrackedUnderLookup::new(&index);
+        assert!(lookup.has_tracked_under("parent"));
+        assert!(!lookup.has_tracked_under("parent/extra"));
+        assert_eq!(
+            lookup.has_tracked_under("parent"),
+            tracked_under_oracle(&index, "parent")
+        );
     }
 
     #[test]
