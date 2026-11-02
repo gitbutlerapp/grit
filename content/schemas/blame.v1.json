@@ -86,6 +86,12 @@
     },
     "BlameLineJson": {
       "properties": {
+        "boundary": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "commit": {
           "type": "string"
         },

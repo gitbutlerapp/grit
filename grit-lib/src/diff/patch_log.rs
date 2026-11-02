@@ -465,7 +465,8 @@ pub fn write_commit_log_patch<W: Write>(
     let odb = repo.odb();
     let raw = odb.read(oid)?;
     let commit = parse_commit(&raw.data)?;
-    let parent_tree = parent_tree_for_commit(repo, oid, &commit, None)?;
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+    let parent_tree = parent_tree_for_commit(repo, &parent_ctx, oid, &commit, None)?;
     let opts = effective_log_patch_options(repo, opts)?;
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     write_parsed_commit_log_patch(
@@ -475,6 +476,7 @@ pub fn write_commit_log_patch<W: Write>(
         oid,
         &commit,
         parent_tree,
+        &parent_ctx,
         &opts,
         &mut abbrev_cache,
     )
@@ -508,12 +510,14 @@ pub fn write_commits_log_patch<W: Write>(
         parsed.push((*oid, commit));
     }
     let opts = effective_log_patch_options(repo, opts)?;
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     for (i, (oid, commit)) in parsed.iter().enumerate() {
         if i > 0 && opts.commit_header == LogPatchCommitHeader::Full {
             writeln!(out)?;
         }
-        let parent_tree = parent_tree_for_commit(repo, oid, commit, Some(&trees_by_commit))?;
+        let parent_tree =
+            parent_tree_for_commit(repo, &parent_ctx, oid, commit, Some(&trees_by_commit))?;
         write_parsed_commit_log_patch(
             out,
             repo,
@@ -521,6 +525,7 @@ pub fn write_commits_log_patch<W: Write>(
             oid,
             commit,
             parent_tree,
+            &parent_ctx,
             &opts,
             &mut abbrev_cache,
         )?;
@@ -530,11 +535,11 @@ pub fn write_commits_log_patch<W: Write>(
 
 fn parent_tree_for_commit(
     repo: &Repository,
+    parent_ctx: &crate::shallow::EffectiveCommitParents,
     commit_oid: &ObjectId,
     commit: &CommitData,
     trees_by_commit: Option<&HashMap<ObjectId, ObjectId>>,
 ) -> Result<Option<ObjectId>> {
-    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
     let effective_parents = parent_ctx.for_commit(*commit_oid, &commit.parents);
     if effective_parents.is_empty() {
         return Ok(None);
@@ -590,10 +595,10 @@ fn write_parsed_commit_log_patch<W: Write>(
     oid: &ObjectId,
     commit: &CommitData,
     _parent_tree: Option<ObjectId>,
+    parent_ctx: &crate::shallow::EffectiveCommitParents,
     opts: &LogPatchOptions,
     abbrev_cache: &mut OidAbbrevCache,
 ) -> Result<()> {
-    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
     let effective_parents = parent_ctx.for_commit(*oid, &commit.parents);
     let is_merge = effective_parents.len() > 1;
     let omit_merge_patch = is_merge && opts.diff_merges == DiffMerges::Combined;
