@@ -53,7 +53,7 @@ fn line_for_update(
         let Some(RawRef::Direct(new_oid)) = &update.new_value else {
             return Ok(None);
         };
-        let old_oid = current_direct_oid(store, &update.name, null_oid)?;
+        let old_oid = current_log_only_old_oid(store, &update.name, null_oid)?;
         return Ok(Some(ReferenceTransactionLine {
             old_oid,
             new_oid: *new_oid,
@@ -95,6 +95,31 @@ fn current_direct_oid(
     match raw {
         RawRef::Direct(oid) => Ok(oid),
         RawRef::Symbolic(_) => Ok(null_oid),
+    }
+}
+
+/// Old oid for log-only direct updates (e.g. `HEAD` reflog while `HEAD` stays symbolic).
+fn current_log_only_old_oid(
+    store: &dyn RefStore,
+    name: &str,
+    null_oid: ObjectId,
+) -> StoreResult<ObjectId> {
+    let Some(raw) = store
+        .read_raw(name)
+        .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+    else {
+        return Ok(null_oid);
+    };
+    match raw {
+        RawRef::Direct(oid) => Ok(oid),
+        RawRef::Symbolic(_) => match store.resolve(name) {
+            Ok(oid) => Ok(oid),
+            Err(crate::error::Error::RefStore(RefStoreError::NotFound { .. })) => Ok(null_oid),
+            Err(e) => Err(match e {
+                crate::error::Error::RefStore(err) => err,
+                other => RefStoreError::Corrupt(other.to_string()),
+            }),
+        },
     }
 }
 
@@ -317,6 +342,68 @@ mod tests {
         .expect("lines");
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].old_oid, old);
+        assert_eq!(lines[0].new_oid, new);
+    }
+
+    #[test]
+    fn log_only_resolves_symbolic_head_old_oid() {
+        let store = MemoryRefStore::new();
+        let tip = oid(3);
+        let new = oid(4);
+        store
+            .set_ref("refs/heads/main", RawRef::Direct(tip))
+            .expect("branch");
+        store
+            .set_ref("HEAD", RawRef::Symbolic("refs/heads/main".into()))
+            .expect("head");
+        let null = zero_oid();
+        let lines = reference_transaction_lines(
+            &store,
+            &[RefUpdate {
+                name: "HEAD".into(),
+                new_value: Some(RawRef::Direct(new)),
+                expected: crate::refs::store::Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags {
+                    log_only: true,
+                    no_deref: true,
+                    ..Default::default()
+                },
+            }],
+            null,
+        )
+        .expect("lines");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].old_oid, tip);
+        assert_eq!(lines[0].new_oid, new);
+    }
+
+    #[test]
+    fn log_only_unborn_symbolic_head_uses_null_old_oid() {
+        let store = MemoryRefStore::new();
+        let new = oid(1);
+        store
+            .set_ref("HEAD", RawRef::Symbolic("refs/heads/main".into()))
+            .expect("head");
+        let null = zero_oid();
+        let lines = reference_transaction_lines(
+            &store,
+            &[RefUpdate {
+                name: "HEAD".into(),
+                new_value: Some(RawRef::Direct(new)),
+                expected: crate::refs::store::Expected::Any,
+                reflog: None,
+                flags: RefUpdateFlags {
+                    log_only: true,
+                    no_deref: true,
+                    ..Default::default()
+                },
+            }],
+            null,
+        )
+        .expect("lines");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].old_oid, null);
         assert_eq!(lines[0].new_oid, new);
     }
 }
