@@ -135,7 +135,9 @@ pub fn write_bundle_with_options(
 
 /// Like [`write_bundle_with_options`], but stops while streaming the pack when `cancel` is set.
 ///
-/// On cancel or failure after the destination file was created, the partial file is removed.
+/// On cancel or failure, only the temporary `*.bundle.part` file is removed. A destination that
+/// already existed is left unchanged; a new destination is atomically installed only after a
+/// successful write via `rename`.
 pub fn write_bundle_with_options_with_cancel(
     repo: &Repository,
     path: &Path,
@@ -158,7 +160,6 @@ pub fn write_bundle_with_options_with_cancel(
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
-        let _ = std::fs::remove_file(path);
     }
     result
 }
