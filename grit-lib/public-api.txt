@@ -12374,6 +12374,8 @@ pub fn grit_lib::objects::pack_store::PackStore::invalidate_packs(&self)
 pub fn grit_lib::objects::pack_store::PackStore::new(std::path::PathBuf) -> Self
 pub fn grit_lib::objects::pack_store::PackStore::objects_dir(&self) -> &std::path::Path
 pub fn grit_lib::objects::pack_store::PackStore::with_context<R>(alloc::rcs::arc::Arc<Self>, impl core::ops::function::FnOnce() -> R) -> R
+impl core::ops::drop::Drop for grit_lib::objects::pack_store::PackStore
+pub fn grit_lib::objects::pack_store::PackStore::drop(&mut self)
 impl !core::marker::Freeze for grit_lib::objects::pack_store::PackStore
 impl core::marker::Send for grit_lib::objects::pack_store::PackStore
 impl core::marker::Sync for grit_lib::objects::pack_store::PackStore
@@ -19734,6 +19736,7 @@ pub fn grit_lib::refs::gc::update_refs(&std::path::Path, &[grit_lib::refs::gc::R
 pub mod grit_lib::refs::handle
 pub struct grit_lib::refs::handle::References<'repo>
 impl<'repo> grit_lib::refs::handle::References<'repo>
+pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::handle::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::handle::References<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::refs::handle::References<'repo>::pack(&self, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
@@ -19743,7 +19746,6 @@ pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo gr
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::handle::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::handle::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::refs::handle::References<'repo>
@@ -20972,7 +20974,7 @@ pub grit_lib::refs::store::ReflogUpdate::new_oid: core::option::Option<grit_lib:
 pub grit_lib::refs::store::ReflogUpdate::old_oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::ReflogUpdate::time: time::offset_date_time::OffsetDateTime
 impl grit_lib::refs::store::ReflogUpdate
-pub fn grit_lib::refs::store::ReflogUpdate::from_signature(&grit_lib::ident::Signature, impl Into<alloc::string::String>) -> Self
+pub fn grit_lib::refs::store::ReflogUpdate::from_signature(&grit_lib::ident::Signature, impl core::convert::Into<alloc::string::String>) -> Self
 impl core::clone::Clone for grit_lib::refs::store::ReflogUpdate
 pub fn grit_lib::refs::store::ReflogUpdate::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::ReflogUpdate
@@ -21277,6 +21279,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::RefUpdateCommi
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::RefUpdateCommitOutcome
 pub struct grit_lib::refs::References<'repo>
 impl<'repo> grit_lib::refs::handle::References<'repo>
+pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::handle::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::handle::References<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::refs::handle::References<'repo>::pack(&self, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
@@ -21286,7 +21289,6 @@ pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo gr
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::handle::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::handle::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::refs::handle::References<'repo>
@@ -25696,11 +25698,12 @@ pub grit_lib::remote::transport::ConnectOptions::diagnostics: core::option::Opti
 pub grit_lib::remote::transport::ConnectOptions::network_trace: bool
 pub grit_lib::remote::transport::ConnectOptions::protocol_version: u8
 pub grit_lib::remote::transport::ConnectOptions::server_options: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::remote::transport::ConnectOptions
+pub fn grit_lib::remote::transport::ConnectOptions::with_protocol_version(u8) -> Self
 impl core::clone::Clone for grit_lib::remote::transport::ConnectOptions
 pub fn grit_lib::remote::transport::ConnectOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::transport::ConnectOptions
 pub fn grit_lib::remote::transport::ConnectOptions::default() -> Self
-pub fn grit_lib::remote::transport::ConnectOptions::with_protocol_version(u8) -> Self
 impl core::marker::Freeze for grit_lib::remote::transport::ConnectOptions
 impl core::marker::Send for grit_lib::remote::transport::ConnectOptions
 impl core::marker::Sync for grit_lib::remote::transport::ConnectOptions
