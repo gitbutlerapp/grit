@@ -436,7 +436,15 @@ fn setup_two_base_fork_point_fixture(wt: &std::path::Path) -> (ObjectId, ObjectI
     );
     let head = git_rev_parse_verify(wt, "HEAD").expect("merge head");
     git(wt, &["branch", "-f", "upstream", &a.to_hex()]);
-    git(wt, &["update-ref", "refs/heads/upstream", &b.to_hex(), &a.to_hex()]);
+    git(
+        wt,
+        &[
+            "update-ref",
+            "refs/heads/upstream",
+            &b.to_hex(),
+            &a.to_hex(),
+        ],
+    );
     (a, b, head)
 }
 
@@ -459,8 +467,7 @@ fn try_reflog_fork_point_none_when_git_has_no_fork_point() {
         git_fp.is_none(),
         "system git must not resolve a fork point with two merge bases"
     );
-    let grit_fp =
-        try_reflog_fork_point(&repo, "refs/heads/upstream", upstream, head).expect("try");
+    let grit_fp = try_reflog_fork_point(&repo, "refs/heads/upstream", upstream, head).expect("try");
     assert_eq!(
         grit_fp, git_fp,
         "try_reflog_fork_point must not truncate multiple merge bases to one"
