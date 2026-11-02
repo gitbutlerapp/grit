@@ -105,10 +105,10 @@ pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
 ) -> Result<()> {
     opts.validate()?;
     let stdout = std::io::stdout();
-    let mut lock = stdout.lock();
+    let lock = stdout.lock();
     let mode = opts.mode;
     let filter = opts.filter.clone();
-    let render = move |w: &mut dyn Write| -> Result<()> {
+    let render = move |w: &mut StreamingStdout<'_>| -> Result<()> {
         match mode {
             OutputMode::Human => value.render_human(w, ctx),
             OutputMode::Json => write_json(w, value, filter.as_deref()),
@@ -119,15 +119,65 @@ pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
     // costs a write per kilobyte or per line. Buffer like C stdio does: always for the single
     // JSON value, and for text unless a terminal is watching it appear.
     if mode != OutputMode::Json && lock.is_terminal() {
-        return render(&mut lock);
+        let mut out = StreamingStdout::Terminal(lock);
+        return render(&mut out);
     }
-    let mut buffered = std::io::BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, lock);
-    render(&mut buffered)?;
-    stdio::io_result(buffered.flush()).map_err(|e| anyhow::anyhow!("writing output: {e}"))
+    with_streaming_writer(lock, render)
 }
 
-/// Stdout buffer size for [`emit`] when output is not shown on a terminal.
-const OUTPUT_BUFFER_BYTES: usize = 64 * 1024;
+/// Stdout buffer size for [`emit`] and streamed command bodies when output is not a terminal.
+pub(crate) const OUTPUT_BUFFER_BYTES: usize = 64 * 1024;
+
+/// Locked stdout, optionally wrapped in a 64 KiB buffer when output is not a terminal.
+pub(crate) enum StreamingStdout<'a> {
+    /// Line-buffered terminal output.
+    Terminal(std::io::StdoutLock<'a>),
+    /// Buffered output for pipes and redirects.
+    Buffered(std::io::BufWriter<std::io::StdoutLock<'a>>),
+}
+
+impl Write for StreamingStdout<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Terminal(w) => w.write(buf),
+            Self::Buffered(w) => w.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Terminal(w) => w.flush(),
+            Self::Buffered(w) => w.flush(),
+        }
+    }
+}
+
+/// Run `f` on a writer backed by locked stdout. When stdout is not a terminal, wrap it in a
+/// 64 KiB buffer so redirected or piped output does not flush on every line.
+pub(crate) fn with_streaming_stdout<R>(
+    f: impl FnOnce(&mut StreamingStdout<'_>) -> Result<R>,
+) -> Result<R> {
+    let stdout = std::io::stdout();
+    let lock = stdout.lock();
+    with_streaming_writer(lock, f)
+}
+
+fn with_streaming_writer<R>(
+    lock: std::io::StdoutLock<'_>,
+    f: impl FnOnce(&mut StreamingStdout<'_>) -> Result<R>,
+) -> Result<R> {
+    if lock.is_terminal() {
+        let mut out = StreamingStdout::Terminal(lock);
+        return f(&mut out);
+    }
+    let mut out =
+        StreamingStdout::Buffered(std::io::BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, lock));
+    let result = f(&mut out)?;
+    if let StreamingStdout::Buffered(w) = &mut out {
+        stdio::io_result(w.flush()).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    }
+    Ok(result)
+}
 
 /// Render an outcome into an in-memory string (for snapshot tests).
 #[cfg(test)]

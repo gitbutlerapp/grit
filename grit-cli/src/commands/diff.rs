@@ -44,6 +44,7 @@ use crate::diff_render::{
 use crate::markdown;
 use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
+use crate::stdio;
 use crate::ui::{self, PathDisplayOptions};
 
 /// Lines of unchanged context to show around each change.
@@ -770,7 +771,12 @@ fn run_no_index_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let changed = if quiet {
         grit_lib::diff::write_paths_patch(a, b, &diff_options, &mut std::io::sink())?
     } else {
-        grit_lib::diff::write_paths_patch(a, b, &diff_options, &mut std::io::stdout())?
+        let mut changed = false;
+        crate::output::with_streaming_stdout(|stdout| {
+            changed = grit_lib::diff::write_paths_patch(a, b, &diff_options, stdout)?;
+            Ok(())
+        })?;
+        changed
     };
     Ok(DiffOutcome {
         changed,
@@ -798,31 +804,32 @@ fn emit_patch_text_to_stdout(
         return Ok(());
     }
     let patch_opts = PatchTextOptions::from_repo(repo, diff_options)?;
-    let mut stdout = std::io::stdout();
-    if let Some((changes, binary_new)) = changes {
-        if entries.len() != changes.len() {
-            anyhow::bail!("internal error: patch-text entry/change count mismatch");
+    crate::output::with_streaming_stdout(|stdout| {
+        if let Some((changes, binary_new)) = changes {
+            if entries.len() != changes.len() {
+                anyhow::bail!("internal error: patch-text entry/change count mismatch");
+            }
+            let resolved: Vec<PatchResolvedSide> = entries
+                .into_iter()
+                .zip(changes)
+                .map(|(entry, fc)| {
+                    let (old, new) = if fc.binary {
+                        (PatchSide::Blob, binary_new.clone())
+                    } else {
+                        (
+                            PatchSide::Bytes(fc.old_bytes.data),
+                            PatchSide::Bytes(fc.new_bytes.data),
+                        )
+                    };
+                    PatchResolvedSide { entry, old, new }
+                })
+                .collect();
+            write_patch_resolved(repo, &resolved, &patch_opts, stdout)?;
+        } else {
+            write_patch(repo, &entries, &patch_opts, stdout)?;
         }
-        let resolved: Vec<PatchResolvedSide> = entries
-            .into_iter()
-            .zip(changes)
-            .map(|(entry, fc)| {
-                let (old, new) = if fc.binary {
-                    (PatchSide::Blob, binary_new.clone())
-                } else {
-                    (
-                        PatchSide::Bytes(fc.old_bytes.data),
-                        PatchSide::Bytes(fc.new_bytes.data),
-                    )
-                };
-                PatchResolvedSide { entry, old, new }
-            })
-            .collect();
-        write_patch_resolved(repo, &resolved, &patch_opts, &mut stdout)?;
-    } else {
-        write_patch(repo, &entries, &patch_opts, &mut stdout)?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Resolved inputs for deferred `grit show --patch-text` rendering.
@@ -1601,33 +1608,37 @@ fn stream_tree_patch_diff(
     }
     let path_display = PathDisplayOptions::from_repo(repo).ok();
     let color = diff_render::use_color();
-    let mut stdout = std::io::stdout();
     let config = repo.config().context("could not load config")?;
     let thread_policy = repo.thread_policy();
-    let mut index = 0usize;
-    for_each_tree_diff_structured(
-        repo.odb(),
-        entries,
-        diff_options,
-        config.as_ref(),
-        &thread_policy,
-        |structured| {
-            let file = file_diff_from_tree_structured(structured);
-            let map_cli_err = |e: anyhow::Error| grit_lib::error::Error::PathError(e.to_string());
-            match mode {
-                OutputMode::Human => render_file(&mut stdout, &file, color, path_display.as_ref())
-                    .map_err(map_cli_err)?,
-                OutputMode::Markdown => {
-                    markdown::print_diff_file(&mut stdout, &file, path_display.as_ref(), index > 0)
-                        .map_err(map_cli_err)?
+    crate::output::with_streaming_stdout(|stdout| {
+        let w: &mut dyn Write = stdout;
+        let mut index = 0usize;
+        for_each_tree_diff_structured(
+            repo.odb(),
+            entries,
+            diff_options,
+            config.as_ref(),
+            &thread_policy,
+            |structured| {
+                let file = file_diff_from_tree_structured(structured);
+                let map_cli_err =
+                    |e: anyhow::Error| grit_lib::error::Error::PathError(e.to_string());
+                match mode {
+                    OutputMode::Human => {
+                        render_file(w, &file, color, path_display.as_ref()).map_err(map_cli_err)?
+                    }
+                    OutputMode::Markdown => {
+                        markdown::print_diff_file(w, &file, path_display.as_ref(), index > 0)
+                            .map_err(map_cli_err)?
+                    }
+                    OutputMode::Json => unreachable!("stream delivery is not used for JSON"),
                 }
-                OutputMode::Json => unreachable!("stream delivery is not used for JSON"),
-            }
-            index += 1;
-            Ok(())
-        },
-    )
-    .context("structured diff")?;
+                index += 1;
+                Ok(())
+            },
+        )
+        .context("structured diff")
+    })?;
     Ok(DiffOutcome {
         changed: true,
         files: Vec::new(),
@@ -1901,7 +1912,7 @@ fn render_hunk(w: &mut dyn Write, hunk: &Hunk, width: usize, color: bool) -> Res
     }
 
     for line in &hunk.lines {
-        outln!(w, "{}", render_line(line, width, color));
+        write_render_line(w, line, width, color)?;
         if line.no_newline_at_eof {
             let marker = "\\ No newline at end of file";
             outln!(w, "{}", paint(color, FG_DIM, marker));
@@ -1910,24 +1921,53 @@ fn render_hunk(w: &mut dyn Write, hunk: &Hunk, width: usize, color: bool) -> Res
     Ok(())
 }
 
-fn render_line(line: &Line, width: usize, color: bool) -> String {
-    let (base_bg, emph_bg, num_code, sign) = match line.kind {
+fn write_render_line(w: &mut dyn Write, line: &Line, width: usize, color: bool) -> Result<()> {
+    if color {
+        outln!(w, "{}", render_line_colored(line, width));
+        return Ok(());
+    }
+    write_plain_line(w, line, width)
+}
+
+fn write_plain_line(w: &mut dyn Write, line: &Line, width: usize) -> Result<()> {
+    let sign = match line.kind {
+        LineKind::Del => '-',
+        LineKind::Add => '+',
+        LineKind::Context => ' ',
+    };
+    write_plain_num_cell(w, line.old, width)?;
+    stdio::io_result(write!(w, " ")).map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    write_plain_num_cell(w, line.new, width)?;
+    stdio::io_result(write!(w, " │ {sign} "))
+        .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+    let raw: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+    let text = expand_tabs(&raw, 0);
+    outln!(w, "{text}");
+    Ok(())
+}
+
+fn write_plain_num_cell(w: &mut dyn Write, n: Option<usize>, width: usize) -> Result<()> {
+    match n {
+        Some(n) => stdio::io_result(write!(w, "{n:>width$}"))
+            .map_err(|e| anyhow::anyhow!("writing output: {e}"))?,
+        None => stdio::io_result(write!(w, "{}", " ".repeat(width)))
+            .map_err(|e| anyhow::anyhow!("writing output: {e}"))?,
+    }
+    Ok(())
+}
+
+fn render_line_colored(line: &Line, width: usize) -> String {
+    let (base_bg, emph_bg, num_code, _sign) = match line.kind {
         LineKind::Del => (BG_DEL, BG_DEL_EMPH, FG_DEL_NUM, '-'),
         LineKind::Add => (BG_ADD, BG_ADD_EMPH, FG_ADD_NUM, '+'),
         LineKind::Context => ("", "", FG_DIM, ' '),
     };
 
     // Gutter: two right-aligned line-number columns (changed side colored).
-    let old_col = num_cell(line.old, width, num_code, line.kind == LineKind::Del, color);
-    let new_col = num_cell(line.new, width, num_code, line.kind == LineKind::Add, color);
-    let bar = paint(color, FG_DIM, "│");
+    let old_col = num_cell(line.old, width, num_code, line.kind == LineKind::Del, true);
+    let new_col = num_cell(line.new, width, num_code, line.kind == LineKind::Add, true);
+    let bar = paint(true, FG_DIM, "│");
     let gutter = format!("{old_col} {new_col} {bar} ");
-
-    if !color {
-        // Plain text: lead with a +/-/space marker so piped output is readable.
-        let raw: String = line.segments.iter().map(|s| s.text.as_str()).collect();
-        return format!("{gutter}{sign} {}", expand_tabs(&raw, 0));
-    }
 
     // Colored: paint the background behind the text only (brighter for the
     // emphasized word-level changes). We deliberately do NOT pad to a fixed
@@ -2114,6 +2154,66 @@ mod tests {
             let collected = render_human_or_markdown(&repo, &entries, OutputMode::Markdown, false);
             let streamed = render_human_or_markdown(&repo, &entries, OutputMode::Markdown, true);
             assert_eq!(collected, streamed);
+        }
+
+        #[test]
+        fn human_render_batches_writes_through_buffer() {
+            use crate::output::OUTPUT_BUFFER_BYTES;
+            use std::cell::RefCell;
+            use std::io::{self, BufWriter, Write};
+            use std::rc::Rc;
+
+            struct SpyWriter {
+                sizes: Rc<RefCell<Vec<usize>>>,
+            }
+
+            impl Write for SpyWriter {
+                fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                    self.sizes.borrow_mut().push(buf.len());
+                    Ok(buf.len())
+                }
+
+                fn flush(&mut self) -> io::Result<()> {
+                    Ok(())
+                }
+            }
+
+            let (_dir, repo, entries) = repo_with_range();
+            let config = repo.config().expect("config");
+            let thread_policy = repo.thread_policy();
+            let diff_options = DiffOptions::default().with_word_level_inline(false);
+            let structured = tree_diff_structured_parallel(
+                repo.odb(),
+                entries,
+                config.as_ref(),
+                &thread_policy,
+                diff_options,
+            )
+            .expect("structured")
+            .into_iter()
+            .next()
+            .expect("one file");
+            let file = file_diff_from_tree_structured(structured);
+            let sizes = Rc::new(RefCell::new(Vec::new()));
+            let spy = SpyWriter {
+                sizes: Rc::clone(&sizes),
+            };
+            let mut buffered = BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, spy);
+            for _ in 0..400 {
+                render_file(&mut buffered, &file, false, None).expect("render");
+            }
+            buffered.flush().expect("flush");
+            let write_count = sizes.borrow().len();
+            let total_bytes: usize = sizes.borrow().iter().sum();
+            let line_budget = total_bytes / OUTPUT_BUFFER_BYTES + 4;
+            assert!(
+                write_count <= line_budget,
+                "expected O(bytes/64KiB) writes, got {write_count} for {total_bytes} bytes (budget {line_budget})"
+            );
+            assert!(
+                write_count < 400,
+                "expected buffering, got one write batch per render ({write_count})"
+            );
         }
 
         #[test]
