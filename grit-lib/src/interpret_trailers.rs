@@ -636,7 +636,6 @@ fn apply_command(conf: &ConfInfo, arg: Option<&str>, cwd: Option<&Path>) -> Stri
             stdin: CommandStdin::Null,
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
-            isolate_process_group: false,
         };
         runner
             .spawn(&spec)

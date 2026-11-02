@@ -72,10 +72,9 @@ fn run_captured(repo: &Repository, hook: &str) -> (Result<HookResult, HookError>
         hook,
         &[],
         config.as_ref(),
-        {
-            let mut opts = RunHookOptions::default();
-            opts.stdout_to_stderr = true;
-            opts
+        RunHookOptions {
+            stdout_to_stderr: true,
+            ..RunHookOptions::default()
         },
     );
     let output = match &result {

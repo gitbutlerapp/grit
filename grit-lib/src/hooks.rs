@@ -535,7 +535,7 @@ struct HookSpawnContext<'a> {
     stdin_piped: bool,
     stdout: CommandStdio,
     stderr: CommandStdio,
-    isolate_process_group: bool,
+    server_receive_hook: bool,
 }
 
 impl HookSpawnContext<'_> {
@@ -557,7 +557,6 @@ impl HookSpawnContext<'_> {
             },
             stdout: self.stdout,
             stderr: self.stderr,
-            isolate_process_group: self.isolate_process_group,
         }
     }
 
@@ -577,7 +576,12 @@ impl HookSpawnContext<'_> {
     }
 
     fn spawn(&self, spec: &CommandSpec, hook_name: &str) -> Result<RunningCommand, HookError> {
-        self.runner.spawn(spec).map_err(|source| HookError::Spawn {
+        let spawn = if self.server_receive_hook {
+            self.runner.spawn_server_receive_hook(spec)
+        } else {
+            self.runner.spawn(spec)
+        };
+        spawn.map_err(|source| HookError::Spawn {
             hook_name: hook_name.to_owned(),
             path: spec.program.clone(),
             source,
@@ -609,17 +613,11 @@ impl HookSpawnContext<'_> {
             return self.spawn(&via_shell(interpreter), hook_name);
         }
         let direct = self.spec(argv0.to_path_buf(), None, args);
-        match self.runner.spawn(&direct) {
-            Err(e) if is_not_an_executable(&e) => {
+        match self.spawn(&direct, hook_name) {
+            Err(HookError::Spawn { source, path, .. }) if is_not_an_executable(&source) => {
                 self.spawn(&via_shell(hook_shell(self.env)), hook_name)
             }
-            Err(source) => Err(HookError::Spawn {
-                hook_name: hook_name.to_owned(),
-                path: direct.program,
-                source,
-                output: HookOutput::default(),
-            }),
-            Ok(child) => Ok(child),
+            other => other,
         }
     }
 
@@ -969,8 +967,6 @@ pub struct RunHookOptions<'a> {
     pub cwd: Option<&'a Path>,
     /// Commit-style env (`GIT_INDEX_FILE`, `GIT_PREFIX`, author exports, …) merged after `env_vars`.
     pub commit_env: Option<&'a CommitHookEnv<'a>>,
-    /// Put each hook child in its own process group (server receive hooks).
-    pub(crate) isolate_process_group: bool,
 }
 
 /// Run all hooks for `hook_name` in Git order; return first non-zero exit or success.
@@ -984,36 +980,9 @@ pub struct RunHookOptions<'a> {
 ///
 const HOOK_WAIT_POLL: Duration = Duration::from_millis(50);
 
-#[cfg(unix)]
-fn kill_pid_sigkill(pid: u32, process_group: bool) {
-    if let Ok(pid_t) = libc::pid_t::try_from(pid) {
-        // SAFETY: `pid` is a hook child this process spawned.
-        unsafe {
-            if process_group {
-                let pgid = libc::getpgid(pid_t);
-                if pgid > 0 {
-                    libc::kill(-pgid, libc::SIGKILL);
-                    return;
-                }
-            }
-            libc::kill(pid_t, libc::SIGKILL);
-        }
-    }
+fn kill_pid_sigkill(pid: u32, kill_process_group: bool) {
+    crate::command_runner::force_kill_process_pid(pid, kill_process_group);
 }
-
-#[cfg(windows)]
-fn kill_pid_sigkill(pid: u32, _process_group: bool) {
-    use std::process::{Command, Stdio};
-    let _ = Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string(), "/T"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-#[cfg(not(any(unix, windows)))]
-fn kill_pid_sigkill(_pid: u32, _process_group: bool) {}
 
 fn wait_hook_command(
     child: RunningCommand,
@@ -1065,7 +1034,8 @@ fn wait_hook_command(
                 } else {
                     let _ = child.wait();
                 }
-            } else if let Some(pid) = pid {
+            }
+            if let Some(pid) = pid {
                 kill_pid_sigkill(pid, kill_process_group);
             }
             if let Ok(Ok(out)) = rx.recv_timeout(HOOK_WAIT_POLL.saturating_mul(20)) {
@@ -1159,7 +1129,7 @@ pub fn run_hook_opts(
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
 ) -> Result<HookResult, HookError> {
-    run_hook_opts_with_cancel(repo, hook_name, args, config, opts, &NeverCancel)
+    run_hook_opts_with_cancel(repo, hook_name, args, config, opts, &NeverCancel, false)
 }
 
 fn run_hook_opts_with_cancel(
@@ -1169,6 +1139,7 @@ fn run_hook_opts_with_cancel(
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
     cancel: &dyn Cancel,
+    server_receive_hook: bool,
 ) -> Result<HookResult, HookError> {
     let seq = match repo {
         Some(r) => resolve_hook_sequence(r, hook_name, config)?,
@@ -1234,7 +1205,7 @@ fn run_hook_opts_with_cancel(
             stdin_piped,
             stdout,
             stderr,
-            isolate_process_group: opts.isolate_process_group,
+            server_receive_hook,
         };
         let spawned = match h {
             ResolvedHook::Traditional { path, argv0 } => {
@@ -1370,6 +1341,7 @@ pub(crate) fn run_commit_hook_with_cancel(
             ..repo_hook_options(repo, hook_name)
         },
         cancel,
+        false,
     )
 }
 
@@ -1469,10 +1441,10 @@ pub(crate) fn run_hook_in_git_dir_with_cancel(
             stdin_data,
             env_vars: &env_vars,
             cwd: Some(repo.git_dir()),
-            isolate_process_group: true,
             ..RunHookOptions::default()
         },
         cancel,
+        true,
     )
 }
 
@@ -1813,7 +1785,7 @@ fn run_hook_opts_for_ref_context(
             stdin_piped,
             stdout,
             stderr,
-            isolate_process_group: opts.isolate_process_group,
+            server_receive_hook: false,
         };
         let spawned = match h {
             ResolvedHook::Traditional { path, argv0 } => {
@@ -2048,7 +2020,7 @@ mod tests {
             stdin_piped: false,
             stdout: CommandStdio::Inherit,
             stderr: CommandStdio::Inherit,
-            isolate_process_group: false,
+            server_receive_hook: false,
         };
         let dash_c = || ShellInvocation::DashC {
             script: "true".into(),

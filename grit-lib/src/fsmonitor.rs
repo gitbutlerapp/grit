@@ -240,7 +240,6 @@ fn query_hook(
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Null,
         shell: None,
-        isolate_process_group: false,
     };
     let child = runner.spawn(&spec).map_err(Error::Io)?;
     let output = child.wait_with_output().map_err(Error::Io)?;

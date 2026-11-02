@@ -440,7 +440,6 @@ fn spawn_running(
         stdin: CommandStdin::Pipe(Vec::new()),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Inherit,
-        isolate_process_group: false,
     };
     if let Some(ctx) = state.subprocess.get() {
         spec.cwd = Some(ctx.cwd());

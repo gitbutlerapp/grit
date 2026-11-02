@@ -918,7 +918,6 @@ fn probe_git_exec_path(runner: &dyn CommandRunner) -> Vec<PathBuf> {
         stdin: CommandStdin::Null,
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Null,
-        isolate_process_group: false,
     };
     let Ok(child) = runner.spawn(&spec) else {
         return Vec::new();
@@ -1036,7 +1035,6 @@ fn invoke_helper(
             stdin: CommandStdin::Pipe(stdin_bytes),
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
-            isolate_process_group: false,
         }
     } else {
         let helper_program =
@@ -1060,7 +1058,6 @@ fn invoke_helper(
             stdin: CommandStdin::Pipe(stdin_bytes),
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
-            isolate_process_group: false,
         }
     };
 
@@ -1091,7 +1088,6 @@ fn run_askpass(runner: &dyn CommandRunner, program: &Path, prompt: &str) -> Resu
         stdin: CommandStdin::Null,
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Inherit,
-        isolate_process_group: false,
     };
     let output = runner
         .spawn(&spec)

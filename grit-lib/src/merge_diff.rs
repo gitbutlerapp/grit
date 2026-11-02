@@ -407,7 +407,6 @@ pub fn run_textconv_raw(
             stdin: CommandStdin::Null,
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Null,
-            isolate_process_group: false,
         };
         runner.spawn(&spec).ok()?.wait_with_output().ok()?
     } else {

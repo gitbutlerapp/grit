@@ -51,10 +51,9 @@ fn system_hook_receives_stdin_on_pre_push() {
         "pre-push",
         &[],
         config.as_ref(),
-        {
-            let mut opts = RunHookOptions::default();
-            opts.stdin_data = Some(stdin_data);
-            opts
+        RunHookOptions {
+            stdin_data: Some(stdin_data),
+            ..RunHookOptions::default()
         },
     )
     .expect("run hook");

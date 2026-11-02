@@ -147,9 +147,6 @@ pub struct CommandSpec {
     pub stdout: CommandStdio,
     /// Stderr disposition.
     pub stderr: CommandStdio,
-    /// When true (Unix only), the child starts in its own process group so a
-    /// shutdown can SIGKILL the whole tree (server receive hooks).
-    pub(crate) isolate_process_group: bool,
 }
 
 impl CommandSpec {
@@ -169,7 +166,6 @@ impl CommandSpec {
             stdin: CommandStdin::Pipe(Vec::new()),
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
-            isolate_process_group: false,
         }
     }
 }
@@ -467,6 +463,13 @@ pub trait CommandRunner: Send + Sync {
     ///
     /// Returns I/O errors from spawn or missing piped stdio when requested.
     fn spawn(&self, spec: &CommandSpec) -> io::Result<RunningCommand>;
+
+    /// Spawn a server-side receive-pack hook subprocess (isolated process group on Unix).
+    ///
+    /// Default implementation delegates to [`Self::spawn`].
+    fn spawn_server_receive_hook(&self, spec: &CommandSpec) -> io::Result<RunningCommand> {
+        self.spawn(spec)
+    }
 }
 
 /// Runs commands with the real OS process API.
@@ -711,10 +714,14 @@ fn is_path_var(key: &OsStr) -> bool {
     }
 }
 
-impl CommandRunner for SystemCommandRunner {
-    fn spawn(&self, spec: &CommandSpec) -> io::Result<RunningCommand> {
+impl SystemCommandRunner {
+    fn spawn_with_process_group(
+        &self,
+        spec: &CommandSpec,
+        isolate_process_group: bool,
+    ) -> io::Result<RunningCommand> {
         let mut cmd = Self::build_command(spec);
-        if spec.isolate_process_group {
+        if isolate_process_group {
             #[cfg(unix)]
             {
                 use std::os::unix::process::CommandExt;
@@ -729,7 +736,7 @@ impl CommandRunner for SystemCommandRunner {
                 }
             }
         }
-        let kill_process_group = spec.isolate_process_group;
+        let kill_process_group = isolate_process_group;
         let mut child = cmd.spawn()?;
 
         let mut stdin = child.stdin.take();
@@ -752,6 +759,64 @@ impl CommandRunner for SystemCommandRunner {
             stderr,
             kill_process_group,
         ))
+    }
+}
+
+impl CommandRunner for SystemCommandRunner {
+    fn spawn(&self, spec: &CommandSpec) -> io::Result<RunningCommand> {
+        self.spawn_with_process_group(spec, false)
+    }
+
+    fn spawn_server_receive_hook(&self, spec: &CommandSpec) -> io::Result<RunningCommand> {
+        self.spawn_with_process_group(spec, true)
+    }
+}
+
+/// Force-terminate a process by pid (process group on Unix, tree on Windows).
+pub(crate) fn force_kill_process_pid(pid: u32, kill_process_group: bool) {
+    #[cfg(unix)]
+    {
+        if let Ok(pid_t) = libc::pid_t::try_from(pid) {
+            // SAFETY: `pid` names a hook child this process spawned or tracked.
+            unsafe {
+                if kill_process_group {
+                    let pgid = libc::getpgid(pid_t);
+                    if pgid > 0 {
+                        libc::kill(-pgid, libc::SIGKILL);
+                        return;
+                    }
+                }
+                libc::kill(pid_t, libc::SIGKILL);
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        let mut args = vec![
+            OsString::from("/F"),
+            OsString::from("/PID"),
+            OsString::from(pid.to_string()),
+        ];
+        if kill_process_group {
+            args.push(OsString::from("/T"));
+        }
+        let spec = CommandSpec {
+            program: PathBuf::from("taskkill"),
+            args,
+            shell: None,
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Null,
+            stdout: CommandStdio::Null,
+            stderr: CommandStdio::Null,
+        };
+        let _ = SystemCommandRunner
+            .spawn(&spec)
+            .and_then(|child| child.wait().map(|_| ()));
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (pid, kill_process_group);
     }
 }
 
@@ -921,7 +986,6 @@ pub fn run_program(
         stdin,
         stdout: CommandStdio::Pipe,
         stderr,
-        isolate_process_group: false,
     };
     runner.spawn(&spec)?.wait_with_output()
 }
@@ -1239,7 +1303,6 @@ mod tests {
             stdin: CommandStdin::Null,
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
-            isolate_process_group: false,
         };
         let out = SystemCommandRunner
             .spawn(&spec)
@@ -1283,7 +1346,6 @@ mod tests {
             stdin: CommandStdin::Null,
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Pipe,
-            isolate_process_group: false,
         };
         let out = SystemCommandRunner
             .spawn(&spec)

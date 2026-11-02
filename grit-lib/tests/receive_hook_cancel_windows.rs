@@ -7,9 +7,9 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+use grit_lib::command_runner::hooks::{run_hook_in_git_dir_with_cancel, HookError};
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::hooks::{run_hook_in_git_dir_with_cancel, HookError};
 use grit_lib::progress::FlagCancel;
 use grit_lib::repo::Repository;
 
@@ -59,18 +59,22 @@ fn cancelled_pre_receive_hook_terminates_sleeping_child() {
     assert!(matches!(err, HookError::Cancelled));
 
     thread::sleep(Duration::from_millis(500));
-    let child_pid = std::fs::read_to_string(&child_pid_file)
-        .ok()
-        .and_then(|s| s.trim().parse::<u32>().ok());
-    if let Some(pid) = child_pid {
-        let still_running = Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}")])
-            .output()
-            .expect("tasklist");
-        let listing = String::from_utf8_lossy(&still_running.stdout);
-        assert!(
-            !listing.contains(&pid.to_string()),
-            "hook child {pid} should not keep running after cancel: {listing}"
-        );
-    }
+    assert!(
+        child_pid_file.is_file(),
+        "pre-receive hook should record its sleeping child pid"
+    );
+    let child_pid: u32 = std::fs::read_to_string(&child_pid_file)
+        .expect("child pid file")
+        .trim()
+        .parse()
+        .expect("child pid");
+    let still_running = Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {child_pid}")])
+        .output()
+        .expect("tasklist");
+    let listing = String::from_utf8_lossy(&still_running.stdout);
+    assert!(
+        !listing.contains(&child_pid.to_string()),
+        "hook child {child_pid} should not keep running after cancel: {listing}"
+    );
 }
