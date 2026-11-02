@@ -353,6 +353,8 @@ mod issue_1653_gc_repack;
 mod issue_1876_gc_midx_version;
 #[path = "json_error_kinds_2413.rs"]
 mod json_error_kinds_2413;
+#[path = "json_filter_large_diff.rs"]
+mod json_filter_large_diff;
 #[cfg(feature = "full-tests")]
 #[path = "json_output.rs"]
 mod json_output;
