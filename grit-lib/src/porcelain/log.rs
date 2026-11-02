@@ -274,12 +274,11 @@ pub fn load_commits_with_decorations_reusing(
     decorations: &DecorationMap,
     parsed: &mut impl CommitReuse,
 ) -> Result<Vec<LoadedCommit>> {
-    let odb = repo.odb();
     let mut out = Vec::with_capacity(oids.len());
     for oid in oids {
         let data = match parsed.take_commit(oid) {
             Some(data) => data?,
-            None => odb.read_commit(oid)?,
+            None => repo.read_commit_with_replace(oid)?,
         };
         let resolved = resolved_change_id(oid, &data);
         let hex = oid.to_hex();

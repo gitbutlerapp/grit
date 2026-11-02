@@ -47,7 +47,7 @@ use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
 use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
-use crate::objects::{HashAlgo, ObjectId};
+use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
@@ -1060,15 +1060,37 @@ impl Repository {
         if self.environment.git_no_replace_objects {
             return true;
         }
+        let Some(prefix) = Self::replace_ref_prefix_from_config(cfg, self.environment.as_ref())
+        else {
+            return true;
+        };
+        self.references()
+            .list(&prefix)
+            .map(|refs| refs.is_empty())
+            .unwrap_or(true)
+    }
+
+    fn replace_ref_prefix_from_config(
+        cfg: &ConfigSet,
+        environment: &Environment,
+    ) -> Option<String> {
         if !cfg
             .get_bool("core.useReplaceRefs")
             .and_then(|r| r.ok())
             .unwrap_or(true)
         {
-            return true;
+            return None;
         }
-        let replace_dir = self.common_git_dir.join("refs/replace");
-        !replace_dir_is_non_empty(&replace_dir)
+        let replace_ref_base = environment
+            .git_replace_ref_base
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("refs/replace");
+        Some(if replace_ref_base.ends_with('/') {
+            replace_ref_base.to_owned()
+        } else {
+            format!("{replace_ref_base}/")
+        })
     }
 
     /// Return the diagnostic sink installed on this repository.
@@ -2789,34 +2811,85 @@ impl Repository {
         if !settings.use_replace_refs {
             return None;
         }
-        let replace_ref =
-            self.common_git_dir
-                .join(format!("{}{}", settings.replace_ref_base, oid.to_hex()));
-        if !replace_ref.is_file() {
-            return None;
+        let mut slot = self
+            .caches
+            .replace_redirects()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() {
+            *slot = Some(load_replace_redirect_map(self));
         }
-        let content = std::fs::read_to_string(&replace_ref).ok()?;
-        let hex = content.trim();
-        let replacement_oid = hex.parse::<crate::objects::ObjectId>().ok()?;
-        if self.odb.read_info(&replacement_oid).is_ok() {
-            Some(replacement_oid)
-        } else {
-            None
+        slot.as_ref()?.get(oid).copied()
+    }
+
+    /// Raw commit bytes for history traversal at `oid`, honoring `refs/replace`.
+    pub(crate) fn read_commit_bytes_with_replace(&self, oid: &ObjectId) -> Result<Vec<u8>> {
+        let effective = self.object_id_after_replace(oid);
+        let object = self.odb.read(&effective)?;
+        if object.kind != ObjectKind::Commit {
+            return Err(Error::UnexpectedObjectKind {
+                oid: effective,
+                expected: ObjectKind::Commit,
+                actual: object.kind,
+            });
         }
+        Ok(object.data)
+    }
+
+    /// Parsed commit for history traversal at `oid`, honoring `refs/replace`.
+    pub(crate) fn read_commit_with_replace(&self, oid: &ObjectId) -> Result<CommitData> {
+        parse_commit(&self.read_commit_bytes_with_replace(oid)?)
+    }
+
+    /// Like [`Odb::read_into`], but follows replace refs for commit reads.
+    pub(crate) fn read_commit_into_with_replace(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<ObjectKind> {
+        let effective = self.object_id_after_replace(oid);
+        self.odb().read_into(&effective, buf)
     }
 }
 
-/// Resolve the common git directory for linked worktrees.
-fn replace_dir_is_non_empty(replace_dir: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(replace_dir) else {
-        return false;
+fn load_replace_redirect_map(repo: &Repository) -> crate::objects::OidHashMap<ObjectId> {
+    use crate::objects::oid_hash_map;
+    use std::collections::HashSet;
+
+    let mut direct = oid_hash_map();
+    let Some(ref_base) = repo.replace_ref_base_if_enabled() else {
+        return direct;
     };
-    entries.filter_map(|e| e.ok()).any(|e| {
-        let Ok(ft) = e.file_type() else {
-            return false;
+    let Ok(refs) = crate::refs::list_refs_for_repository(repo, &ref_base) else {
+        return direct;
+    };
+    for (name, replacement) in refs {
+        let Some(hex) = name.strip_prefix(&ref_base) else {
+            continue;
         };
-        ft.is_file()
-    })
+        let Ok(original) = hex.parse::<ObjectId>() else {
+            continue;
+        };
+        if repo.odb().read_info(&replacement).is_ok() {
+            direct.insert(original, replacement);
+        }
+    }
+
+    let mut resolved = oid_hash_map();
+    for &original in direct.keys() {
+        let mut cur = original;
+        let mut seen = HashSet::new();
+        while let Some(&next) = direct.get(&cur) {
+            if !seen.insert(cur) {
+                break;
+            }
+            cur = next;
+        }
+        if cur != original {
+            resolved.insert(original, cur);
+        }
+    }
+    resolved
 }
 
 /// Resolve the common git directory for linked worktrees.

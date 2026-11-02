@@ -3387,22 +3387,24 @@ impl<'r> CommitGraphCache<'r> {
         }
         // Fast path: parents + committer time from the commit-graph file (no
         // object decompression). Misses (not in graph / octopus) fall through.
-        if let Some(graph) = &self.graph {
-            if let Some((parents, ctime)) = graph.graph_commit(&oid) {
-                let parents = if self.shallow_boundaries.contains(&oid) {
-                    Vec::new()
-                } else {
-                    parents
-                        .into_iter()
-                        .filter(|p| !self.promisor_stop.contains(p))
-                        .collect()
-                };
-                let parents = self.grafted_parents(oid, parents);
-                self.with_linkage(|link| {
-                    link.times.insert(oid, ctime);
-                    link.parents.insert(oid, parents.clone());
-                });
-                return Ok(parents);
+        if self.repo.object_id_after_replace(&oid) == oid {
+            if let Some(graph) = &self.graph {
+                if let Some((parents, ctime)) = graph.graph_commit(&oid) {
+                    let parents = if self.shallow_boundaries.contains(&oid) {
+                        Vec::new()
+                    } else {
+                        parents
+                            .into_iter()
+                            .filter(|p| !self.promisor_stop.contains(p))
+                            .collect()
+                    };
+                    let parents = self.grafted_parents(oid, parents);
+                    self.with_linkage(|link| {
+                        link.times.insert(oid, ctime);
+                        link.parents.insert(oid, parents.clone());
+                    });
+                    return Ok(parents);
+                }
             }
         }
         // A plain commit without a replacement is its own peel target, so one read serves both
@@ -3438,7 +3440,7 @@ impl<'r> CommitGraphCache<'r> {
         };
         let linkage = CommitRef::parse(buf)?;
         let (time, parsed_parents) = (linkage.committer_timestamp(), linkage.parents().to_vec());
-        if self.retain_reads && effective_oid == oid && commit_oid == oid {
+        if self.retain_reads && commit_oid == oid {
             if let Some(retained) = self.retained.as_mut() {
                 retained.insert(oid, buf);
             }

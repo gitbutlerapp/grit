@@ -3335,12 +3335,15 @@ pub fn tree_oid_of_commit_in_repo(
     repo: &crate::repo::Repository,
     commit_oid: &ObjectId,
 ) -> Result<ObjectId> {
-    if let Some(chain) = repo.odb().commit_graph_chain() {
-        if let Some(tree) = chain.graph_commit_tree(commit_oid) {
-            return Ok(tree);
+    if repo.object_id_after_replace(commit_oid) == *commit_oid {
+        if let Some(chain) = repo.odb().commit_graph_chain() {
+            if let Some(tree) = chain.graph_commit_tree(commit_oid) {
+                return Ok(tree);
+            }
         }
     }
-    tree_oid_of_commit(repo.odb(), commit_oid)
+    let effective = repo.object_id_after_replace(commit_oid);
+    tree_oid_of_commit(repo.odb(), &effective)
 }
 
 /// Diff the trees recorded at two commits (`base` is the old side, `tip` the new side).

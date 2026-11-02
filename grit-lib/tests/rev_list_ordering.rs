@@ -755,6 +755,133 @@ fn t6001_grafts_and_replace_refs_match_git() {
     );
 }
 
+fn seed_replace_graft_fixture(wt: &Path) {
+    git(wt, &["config", "commit.gpgsign", "false"]);
+    for i in 1..=4 {
+        fs::write(wt.join("f"), format!("{i}\n")).expect("write f");
+        git(wt, &["add", "f"]);
+        git(wt, &["commit", "-qm", &format!("c{i}")]);
+    }
+    git(wt, &["replace", "HEAD~1", "HEAD~3"]);
+}
+
+fn assert_replace_graft_history_matches_git(
+    wt: &Path,
+    grit: &grit_lib::repo::Repository,
+    label: &str,
+) {
+    use grit_lib::config::ConfigSet;
+    use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
+    use grit_lib::porcelain::log::load_commits_with_decorations;
+    let git_subjects: Vec<String> = git(wt, &["log", "--format=%s"])
+        .lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    assert_eq!(
+        git_subjects,
+        vec!["c4".to_owned(), "c1".to_owned()],
+        "{label}: log subjects"
+    );
+    assert_eq!(
+        git(wt, &["rev-list", "--count", "HEAD"]).trim(),
+        "2",
+        "{label}: git count"
+    );
+
+    let result = grit_lib::revwalk::rev_list::rev_list(
+        grit,
+        &[String::from("HEAD")],
+        &[],
+        &RevListOptions::default(),
+    )
+    .expect("revs");
+    assert_eq!(result.commits.len(), 2, "{label}: grit count");
+
+    let parent = git_rev_parse(wt, "HEAD~1").expect("HEAD~1");
+    let commits = load_commits_with_decorations(grit, &[parent], &Default::default())
+        .expect("load parent commit");
+    assert_eq!(commits[0].message.trim(), "c1", "{label}: show subject");
+
+    let config = ConfigSet::default();
+    let thread_policy = grit.thread_policy();
+    let diff = commit_diff_files(
+        grit,
+        &parent,
+        DiffMerges::FirstParent,
+        DiffDetail::NameOnly,
+        &DiffOptions::default(),
+        &[],
+        &config,
+        &thread_policy,
+    )
+    .expect("commit diff");
+    assert!(
+        diff.files.iter().any(|f| f.path == "f"),
+        "{label}: commit diff uses replaced tree"
+    );
+}
+
+#[test]
+fn replace_graft_on_ancestor_stitches_history_issue_2473() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    seed_replace_graft_fixture(wt);
+
+    let grit = open_grit_repo(wt);
+    for use_graph in [false, true] {
+        if use_graph {
+            git_commit_graph_write(wt);
+        }
+        let mut opts = RevListOptions::default();
+        opts.use_commit_graph = use_graph;
+        assert_rev_list_commits_match_git(
+            wt,
+            &grit,
+            &["HEAD"],
+            &[String::from("HEAD")],
+            &[],
+            opts.clone(),
+            &format!("issue 2473 rev-list (graph={use_graph})"),
+        );
+    }
+
+    assert_replace_graft_history_matches_git(wt, &grit, "loose refs");
+
+    git(wt, &["pack-refs", "--all"]);
+    let grit_packed = open_grit_repo(wt);
+    assert_replace_graft_history_matches_git(wt, &grit_packed, "packed-refs");
+
+    let mut env = grit_lib::config::environment::Environment::empty();
+    env.git_no_replace_objects = true;
+    let grit_raw = grit_lib::repo::Repository::discover(
+        Some(wt),
+        &grit_lib::config::environment::RepositoryOptions::with_environment(env),
+    )
+    .expect("open no-replace");
+    let raw = grit_lib::revwalk::rev_list::rev_list(
+        &grit_raw,
+        &[String::from("HEAD")],
+        &[],
+        &RevListOptions::default(),
+    )
+    .expect("raw revs");
+    assert_eq!(raw.commits.len(), 4);
+}
+
+#[test]
+fn replace_graft_on_ancestor_reftable_storage_issue_2473() {
+    if !support::require_reftable_git() {
+        return;
+    }
+    let root = support::git_init_reftable_repo("main");
+    let wt = root.path();
+    seed_replace_graft_fixture(wt);
+    let grit = open_grit_repo(wt);
+    assert_replace_graft_history_matches_git(wt, &grit, "reftable");
+}
+
 #[test]
 fn symmetric_diff_left_right_cherry_mark_match_git() {
     let repo = HistoryRepo::init();

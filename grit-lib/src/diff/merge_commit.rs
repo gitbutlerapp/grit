@@ -20,7 +20,7 @@ use crate::diff::merge_diff::{
 use crate::diff::{DiffEntry, DiffOptions, DiffStatus};
 use crate::error::Result;
 use crate::objects::pack_store::PackReadContextGuard;
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::parallel::{try_par_map_with_local, ParallelHashError, ParallelOp, ThreadPolicy};
 use crate::repo::Repository;
@@ -108,11 +108,10 @@ pub fn commit_diff_files(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<DiffFilesOutput> {
-    let data = repo.odb().read(commit_oid)?.data;
-    let commit = parse_commit(&data)?;
+    let commit = repo.read_commit_with_replace(commit_oid)?;
     if commit.parents.len() < 2 || merges == DiffMerges::FirstParent {
         let old_tree = match commit.parents.first() {
-            Some(parent) => Some(repo.odb().commit_tree(parent)?),
+            Some(parent) => Some(repo.read_commit_with_replace(parent)?.tree),
             None => None,
         };
         let entries = tree_diff_entries(
