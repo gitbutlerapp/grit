@@ -18,6 +18,7 @@
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use crate::limits::{io_error_is_idle_timeout, BodyIdleTimeout};
@@ -28,6 +29,27 @@ use axum::{
 };
 use grit_lib::remote::serve::{io_error_is_request_body_limit, RequestBodyLimitExceeded};
 use grit_protocol::RepositoryOptions;
+
+/// Blocking-thread pack work in flight (upload-pack, receive-pack, info/refs).
+static PACK_BLOCKING_INFLIGHT: AtomicUsize = AtomicUsize::new(0);
+
+struct PackBlockingGuard;
+
+impl PackBlockingGuard {
+    fn enter() -> Self {
+        PACK_BLOCKING_INFLIGHT.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+impl Drop for PackBlockingGuard {
+    fn drop(&mut self) {
+        let prev = PACK_BLOCKING_INFLIGHT.fetch_sub(1, Ordering::AcqRel);
+        if prev == 1 {
+            let _ = grit_lib::release_unused_heap();
+        }
+    }
+}
 
 /// The two smart HTTP services.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -310,6 +332,7 @@ pub(crate) async fn rpc_holding_with_cancel<H: Send + 'static>(
             let (raw, bridge) = crate::request_body::open_body_bridge(body);
             let raw = std::io::BufReader::with_capacity(STREAM_READ_BUFFER, raw);
             let result = tokio::task::spawn_blocking(move || {
+                let _guard = PackBlockingGuard::enter();
                 let _hold = hold;
                 let mut request = push_request_body(raw, encoding);
                 grit_protocol::receive_pack::stateless_rpc_with_session(
@@ -1158,6 +1181,7 @@ async fn stream_info_refs_advertisement<H: Send + 'static>(
 ) -> Response<Body> {
     let (tx, rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let task = tokio::task::spawn_blocking(move || {
+        let _guard = PackBlockingGuard::enter();
         let _hold = hold;
         let mut out = ChannelWriter::new(tx, idle_timeout);
         let result = (|| -> grit_protocol::Result<()> {
@@ -1243,6 +1267,7 @@ async fn stream_upload_pack<H: Send + 'static>(
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let mut bridge = Some(bridge);
     let task = tokio::task::spawn_blocking(move || {
+        let _guard = PackBlockingGuard::enter();
         let _hold = hold;
         let mut request = fetch_request_body(raw, encoding);
         let mut out = ChannelWriter::new(tx, idle_timeout);

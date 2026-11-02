@@ -1564,6 +1564,8 @@ mod reftable_store_git_roundtrip;
 mod reftable_worktree_git_compat;
 #[path = "reftable_worktree_head_deref.rs"]
 mod reftable_worktree_head_deref;
+#[path = "release_unused_heap.rs"]
+mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;

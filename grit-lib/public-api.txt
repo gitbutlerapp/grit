@@ -7157,6 +7157,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::gitbutler::WorkspaceS
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::gitbutler::WorkspaceStanding
 pub const grit_lib::gitbutler::WORKSPACE_BRANCH: &str
 pub const grit_lib::gitbutler::WORKSPACE_COMMIT_MARKER: &str
+pub mod grit_lib::heap
+pub fn grit_lib::heap::release_unused_heap() -> bool
+pub fn grit_lib::release_unused_heap() -> bool
 pub mod grit_lib::ident
 pub enum grit_lib::ident::AuthorArgError
 pub grit_lib::ident::AuthorArgError::EmptyEmail
