@@ -477,6 +477,8 @@ mod push_dry_run;
 mod push_force_lease;
 #[path = "push_interrupt.rs"]
 mod push_interrupt;
+#[path = "upload_pack_interrupt.rs"]
+mod upload_pack_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "push_json_flags.rs"]
 mod push_json_flags;

@@ -80,7 +80,6 @@ pub fn run(
         );
     }
 
-    let interrupt = crate::interrupt::InterruptCancel::install();
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut output = BufWriter::new(std::io::stdout().lock());
@@ -89,6 +88,7 @@ pub fn run(
             let _summary = serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?;
         }
         Service::ReceivePack => {
+            let interrupt = crate::interrupt::InterruptCancel::install();
             let policy = ReceivePolicy::from_config(&config);
             let guard = grit_protocol::PushGuard::for_repository(&repo);
             match serve::receive_pack_with_hook_cancellable(
