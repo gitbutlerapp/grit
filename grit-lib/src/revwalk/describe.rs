@@ -717,6 +717,107 @@ mod tests {
         Ok(())
     }
 
+    /// Issue #2479: tag peel reachable at two depths via merge (first parent + side chain).
+    #[test]
+    fn describe_diamond_merge_tag_at_two_depths() -> Result<()> {
+        use crate::merge_base::{
+            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
+        };
+        use crate::refs;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let base = write_commit_at(odb, &[], "base", 1_704_067_200)?;
+        let s1 = write_commit_at(odb, &[base], "s1", 1_704_153_600)?;
+        let s2 = write_commit_at(odb, &[s1], "s2", 1_704_240_000)?;
+        let merge = write_commit_at(odb, &[base, s2], "merge", 1_704_499_200)?;
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
+        tag_annotated(&repo, "v1", base, "v1");
+
+        let expected = count_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[merge],
+            &[base],
+            ReachableCountFilter::default(),
+        )?;
+        let d = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert_eq!(tag_short_name(&d), "v1");
+        assert_eq!(d.peeled, base);
+        assert_eq!(d.distance, expected);
+        assert_eq!(d.distance, 3);
+        Ok(())
+    }
+
+    /// Parent reachable after pop must still settle with correct distance when side is newer.
+    #[test]
+    fn describe_diamond_direct_parent_newer_than_side() -> Result<()> {
+        use crate::merge_base::{
+            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
+        };
+        use crate::refs;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let tagged = write_commit_at(odb, &[], "tagged", 100)?;
+        let side = write_commit_at(odb, &[tagged], "side", 500)?;
+        let merge = write_commit_at(odb, &[tagged, side], "merge", 600)?;
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
+        tag_annotated(&repo, "t", tagged, "t");
+        let expected = count_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[merge],
+            &[tagged],
+            ReachableCountFilter::default(),
+        )?;
+        let d = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert_eq!(d.peeled, tagged);
+        assert_eq!(d.distance, expected);
+        Ok(())
+    }
+
+    /// Repeated diamond merges must stay linear in commits, not exponential in heap re-pops.
+    #[test]
+    fn describe_merge_ladder_parent_reads_bounded() -> Result<()> {
+        use crate::merge_base::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+        use crate::refs;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let root = write_commit_at(odb, &[], "base", 1)?;
+        tag_annotated(&repo, "v1", root, "v1");
+        let mut base = root;
+        let mut head = base;
+        for i in 0..20 {
+            let s1 = write_commit_at(odb, &[base], &format!("s1-{i}"), 100 + i as i64 * 10)?;
+            let s2 = write_commit_at(odb, &[s1], &format!("s2-{i}"), 101 + i as i64 * 10)?;
+            head = write_commit_at(odb, &[base, s2], &format!("merge-{i}"), 200 + i as i64 * 10)?;
+            base = head;
+        }
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
+
+        reset_commit_parent_lookups();
+        let d = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert_eq!(tag_short_name(&d), "v1");
+        assert_eq!(d.peeled, root);
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups <= 250,
+            "describe ladder must be O(commits), not exponential ({lookups} parent reads)"
+        );
+        Ok(())
+    }
+
     /// Depth-bump re-pops of a tagged commit must not register extra within bits (one bit per
     /// deduped candidate), which otherwise panics once `matches.len()` exceeds `unique.len()`.
     #[test]
