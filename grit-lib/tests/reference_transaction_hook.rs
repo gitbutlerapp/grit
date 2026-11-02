@@ -7,17 +7,23 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
+use std::sync::Arc;
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::ident::Signature;
+use grit_lib::objects::odb::store::MemoryStore;
+use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+use grit_lib::refs::store::{Expected, MemoryRefStore, RawRef, RefUpdate, RefUpdateFlags};
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit_on_store, BranchCommitRefUpdate,
 };
-use grit_lib::repo::Repository;
+use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_test_support::git;
 
 fn install_reference_transaction_hook(repo: &Repository, log_path: &Path, deny_prepared: bool) {
@@ -327,4 +333,94 @@ fn core_hooks_path_is_honored() {
     let text = read_log(&log);
     assert!(text.contains("prepared prepared"), "{text}");
     assert!(text.contains("committed prepared"), "{text}");
+}
+
+fn hook_lines_for_phase(text: &str, phase: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let prefix = format!("{phase}: ");
+            line.strip_prefix(&prefix).map(|rest| {
+                rest.split_terminator('|')
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+        })
+        .flatten()
+        .collect()
+}
+
+#[test]
+fn memory_ref_store_second_commit_head_line_matches_branch_old_oid() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("r");
+    Repository::init(&root, &InitOptions::new().with_initial_branch("main")).expect("init");
+    let git_dir = root.join(".git");
+    fs::write(
+        git_dir.join("config"),
+        format!(
+            "{}\n[user]\n\tname = T\n\temail = t@x\n",
+            fs::read_to_string(git_dir.join("config")).expect("config")
+        ),
+    )
+    .expect("config");
+    let log = tmp.path().join("hook.log");
+    let hooks = git_dir.join("hooks");
+    fs::create_dir_all(&hooks).expect("hooks");
+    let script = format!(
+        "#!/bin/sh\n\
+         echo \"$1: $(cat | tr '\\n' '|')\" >> {log}\n\
+         exit 0\n",
+        log = log.display()
+    );
+    let hook = hooks.join("reference-transaction");
+    fs::write(&hook, script).expect("hook");
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
+
+    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .initial_branch("main")
+        .odb_builder(
+            OdbBuilder::files(git_dir.join("objects"))
+                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                .alternates(false),
+        )
+        .ref_store(Arc::new(MemoryRefStore::new()))
+        .open(&git_dir, Some(&root))
+        .expect("open");
+
+    let ident: Signature = "T <t@x> 1700000000 +0000".parse().expect("sig");
+    for i in 0..2 {
+        fs::write(root.join(format!("f{i}")), "x").expect("file");
+        let mut req = CommitRequest::new(format!("c{i}"));
+        req.author = Some(ident.clone());
+        req.committer = Some(ident.clone());
+        commit_with_scope(
+            &repo,
+            &req,
+            CommitScope::AutoStage,
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("commit");
+        if i == 0 {
+            fs::write(&log, "").expect("clear after first commit");
+            continue;
+        }
+        let text = read_log(&log);
+        for phase in ["prepared", "committed"] {
+            let lines = hook_lines_for_phase(&text, phase);
+            assert_eq!(lines.len(), 2, "{phase}: {text}");
+            let head = lines
+                .iter()
+                .find(|l| l.ends_with(" HEAD"))
+                .expect("HEAD line");
+            let branch = lines
+                .iter()
+                .find(|l| l.ends_with(" refs/heads/main"))
+                .expect("branch line");
+            let head_old = head.split_whitespace().next().expect("head old");
+            let branch_old = branch.split_whitespace().next().expect("branch old");
+            assert_ne!(head_old, ObjectId::null(HashAlgo::Sha1).to_hex(), "{phase}");
+            assert_eq!(head_old, branch_old, "{phase}: {text}");
+        }
+    }
 }
