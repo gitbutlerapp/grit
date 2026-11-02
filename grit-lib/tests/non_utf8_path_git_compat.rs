@@ -273,11 +273,33 @@ fn non_utf8_untracked_directory_component_with_untr() {
     )
     .expect("stage must not fail on collapsed non-UTF-8 directory path");
 
-    let mut dry = CommitRequest::new("preview");
-    dry.dry_run = true;
-    commit_worktree(&repo, &dry, &mut NullProgress, &NeverCancel).expect(
-        "commit dry-run must not fail after reversible collapsed directory encoding",
+    let staged = repo.index_handle().load().expect("index after stage");
+    assert!(
+        staged.get(UNTRACKED_NON_UTF8_DIR_FILE, 0).is_some(),
+        "index must record the file under raw bytes, not only a directory placeholder"
     );
+    assert!(
+        !staged
+            .entries()
+            .iter()
+            .any(|e| e.path == b"\xfe/" && e.mode != 0o040000),
+        "must not stage collapsed marker as an empty blob at \\xfe/"
+    );
+
+    commit_worktree(
+        &repo,
+        &CommitRequest::new("add non-utf8 dir file"),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("commit staged non-UTF-8 path under directory");
+
+    let ls = git_ls_files_z(&root);
+    assert!(
+        ls.iter().any(|p| p == UNTRACKED_NON_UTF8_DIR_FILE),
+        "git ls-files must list raw byte path after commit: {ls:?}"
+    );
+    git(&root, &["fsck", "--strict"]);
 }
 
 #[test]

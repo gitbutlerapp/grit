@@ -91,6 +91,20 @@ pub fn directory_marker_stored(stored: &str) -> String {
     storage_string(&bytes)
 }
 
+/// Whether a stored path denotes a collapsed untracked directory (`dir/` in raw bytes).
+#[must_use]
+pub fn stored_path_is_directory_marker(stored: &str) -> bool {
+    storage_bytes(stored).ends_with(b"/")
+}
+
+/// Stored repository-relative path with a directory-marker trailing slash removed (raw bytes).
+#[must_use]
+pub fn stored_directory_marker_parent(stored: &str) -> String {
+    let bytes = storage_bytes(stored);
+    let parent = bytes.strip_suffix(b"/").unwrap_or(bytes.as_ref());
+    storage_string(parent)
+}
+
 /// Decode a path previously produced by [`storage_string`].
 #[must_use]
 pub fn storage_bytes(stored: &str) -> Cow<'_, [u8]> {
@@ -211,5 +225,16 @@ mod tests {
         let marked = directory_marker_stored(&dir);
         assert_eq!(marked, "grit+pathhex:fe2f");
         assert_eq!(storage_bytes(&marked)[..], b"\xfe/"[..]);
+    }
+
+    #[test]
+    fn stored_directory_marker_detect_and_parent() {
+        let marked = directory_marker_stored(&storage_string(b"\xfe"));
+        assert!(stored_path_is_directory_marker(&marked));
+        assert!(!stored_path_is_directory_marker("plain.txt"));
+        assert_eq!(
+            stored_directory_marker_parent(&marked),
+            storage_string(b"\xfe")
+        );
     }
 }

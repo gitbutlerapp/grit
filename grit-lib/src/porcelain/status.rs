@@ -858,7 +858,10 @@ pub fn expand_untracked_for_staging(
     untracked: Vec<String>,
     pathspecs: &[String],
 ) -> Result<Vec<String>> {
-    if !untracked.iter().any(|p| p.ends_with('/')) {
+    if !untracked
+        .iter()
+        .any(|p| crate::repo_relpath::stored_path_is_directory_marker(p))
+    {
         let mut files = untracked;
         files.sort();
         files.dedup();
@@ -883,8 +886,9 @@ pub fn expand_untracked_for_staging_with_rules(
     pathspecs: &[String],
     rules: &crate::worktree_rules::WorktreeRules,
 ) -> Result<Vec<String>> {
-    let (mut expanded, dirs): (Vec<String>, Vec<String>) =
-        untracked.into_iter().partition(|p| !p.ends_with('/'));
+    let (mut expanded, dirs): (Vec<String>, Vec<String>) = untracked
+        .into_iter()
+        .partition(|p| !crate::repo_relpath::stored_path_is_directory_marker(p));
     if !dirs.is_empty() {
         let ignorecase = rules
             .config()
@@ -901,7 +905,7 @@ pub fn expand_untracked_for_staging_with_rules(
         let mut matcher = rules.ignore_mut();
         let mut ignored = Vec::new();
         for path in dirs {
-            let dir = path.trim_end_matches('/');
+            let dir = crate::repo_relpath::stored_directory_marker_parent(&path);
             if dir.is_empty() {
                 continue;
             }
@@ -917,8 +921,8 @@ pub fn expand_untracked_for_staging_with_rules(
                 None,
                 precompose_unicode,
                 &tracked_paths,
-                dir,
-                &crate::repo_relpath::worktree_abs(work_tree, dir),
+                &dir,
+                &crate::repo_relpath::worktree_abs(work_tree, &dir),
                 pathspecs,
                 Some(rules),
                 &mut expanded,

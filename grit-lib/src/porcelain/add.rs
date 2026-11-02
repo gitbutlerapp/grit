@@ -1671,7 +1671,7 @@ fn stage_untracked_path(
 fn validate_worktree_paths_for_staging(rules: &WorktreeRules, paths: &[String]) -> Result<()> {
     let protect = ProtectOptions::from_config(rules.config());
     for path in paths {
-        if path.ends_with('/') {
+        if path.ends_with('/') || crate::repo_relpath::stored_path_is_directory_marker(path) {
             continue;
         }
         validate_path(
