@@ -358,8 +358,8 @@ impl ServeOptions {
 pub const PUSH_BUNDLE_CAPABILITY: &str = "pushBundle";
 
 /// One ref as it appears in an advertisement.
+#[cfg(test)]
 #[derive(Debug, Clone)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct AdvertisedRef {
     /// Full ref name, such as `refs/heads/main`.
     pub(crate) name: String,
@@ -369,7 +369,7 @@ pub(crate) struct AdvertisedRef {
     pub(crate) peeled: Option<ObjectId>,
 }
 
-/// Whether [`advertised_refs`] fills [`AdvertisedRef::peeled`].
+/// Whether [`for_each_advertised_ref`] peels annotated tags.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Peel {
     /// Leave `peeled` empty and read no objects.
@@ -485,26 +485,6 @@ pub(crate) fn for_each_advertised_ref(
     } else {
         run()
     }
-}
-
-/// Collect every advertised ref (tests and callers that need the full list).
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn advertised_refs(
-    repo: &Repository,
-    hidden: &[String],
-    prefixes: &[&str],
-    peel: Peel,
-) -> Result<Vec<AdvertisedRef>> {
-    let mut out = Vec::new();
-    for_each_advertised_ref(repo, hidden, prefixes, peel, |r| {
-        out.push(AdvertisedRef {
-            name: r.name.to_owned(),
-            oid: r.oid,
-            peeled: r.peeled,
-        });
-        Ok(ControlFlow::Continue(()))
-    })?;
-    Ok(out)
 }
 
 /// Object ids that appear in an advertisement (direct tips and peeled targets).
@@ -634,10 +614,13 @@ pub(crate) fn check_object_format(repo: &Repository, client: Option<&str>) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::{advertised_refs, scan_prefixes, Peel, ProtocolVersion};
+    use super::{
+        for_each_advertised_ref, scan_prefixes, AdvertisedRef, Peel, ProtocolVersion, Result,
+    };
     use crate::config::environment::RepositoryOptions;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::repo::{InitOptions, Repository};
+    use std::ops::ControlFlow;
 
     #[test]
     fn scan_prefixes_collapse_to_disjoint_sorted_ref_prefixes() {
@@ -704,7 +687,25 @@ mod tests {
         (dir, repo, commit, tag)
     }
 
-    fn listed(refs: &[super::AdvertisedRef]) -> Vec<(&str, Option<ObjectId>)> {
+    fn advertised_refs(
+        repo: &Repository,
+        hidden: &[String],
+        prefixes: &[&str],
+        peel: Peel,
+    ) -> Result<Vec<AdvertisedRef>> {
+        let mut out = Vec::new();
+        for_each_advertised_ref(repo, hidden, prefixes, peel, |r| {
+            out.push(AdvertisedRef {
+                name: r.name.to_owned(),
+                oid: r.oid,
+                peeled: r.peeled,
+            });
+            Ok(ControlFlow::Continue(()))
+        })?;
+        Ok(out)
+    }
+
+    fn listed(refs: &[AdvertisedRef]) -> Vec<(&str, Option<ObjectId>)> {
         refs.iter().map(|r| (r.name.as_str(), r.peeled)).collect()
     }
 

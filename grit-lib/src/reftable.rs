@@ -3387,19 +3387,6 @@ impl ReftableStack {
         )))
     }
 
-    /// Write `tables.list` atomically.
-    ///
-    /// Acquires `tables.list.lock` exclusively for the duration of the write so
-    /// it can never race with another writer. Callers that need a read followed
-    /// by a write to be atomic (e.g. [`add_table`]) should instead acquire the
-    /// lock with [`acquire_tables_list_lock`] and call
-    /// [`write_tables_list_locked`] while holding it.
-    #[expect(dead_code)]
-    fn write_tables_list(&self) -> Result<()> {
-        let mut guard = self.acquire_tables_list_lock()?;
-        self.write_tables_list_locked(&mut guard)
-    }
-
     /// Write `tables.list` while already holding the lock guard.
     fn write_tables_list_locked(&self, guard: &mut TablesListLock) -> Result<()> {
         let tables_list = self.reftable_dir.join("tables.list");

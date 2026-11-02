@@ -1715,9 +1715,7 @@ mod git_xdiff {
 
     /// A single side of the diff: token ids plus the `changed` flags and the
     /// `reference_index` mapping from effective record -> original record.
-    struct XdFile<'a> {
-        #[allow(dead_code)]
-        ids: &'a [u32],
+    struct XdFile {
         changed: Vec<u8>,
         reference_index: Vec<usize>,
         /// Interned token id per effective record (parallel to `reference_index`).
@@ -1728,7 +1726,7 @@ mod git_xdiff {
     }
 
     #[inline]
-    fn effective_id(xdf: &XdFile<'_>, idx: i64) -> u32 {
+    fn effective_id(xdf: &XdFile, idx: i64) -> u32 {
         xdf.effective_ids[idx as usize]
     }
 
@@ -1795,10 +1793,10 @@ mod git_xdiff {
     /// the forward/backward k-vectors, offset so index 0 maps to diagonal 0.
     #[allow(clippy::too_many_arguments)]
     fn xdl_split(
-        xdf1: &XdFile<'_>,
+        xdf1: &XdFile,
         off1: i64,
         lim1: i64,
-        xdf2: &XdFile<'_>,
+        xdf2: &XdFile,
         off2: i64,
         lim2: i64,
         kvdf: &mut [i64],
@@ -2039,10 +2037,10 @@ mod git_xdiff {
     /// Faithful port of `xdl_recs_cmp` (divide & conquer). Marks `changed` flags.
     #[allow(clippy::too_many_arguments)]
     fn xdl_recs_cmp(
-        xdf1: &mut XdFile<'_>,
+        xdf1: &mut XdFile,
         mut off1: i64,
         mut lim1: i64,
-        xdf2: &mut XdFile<'_>,
+        xdf2: &mut XdFile,
         mut off2: i64,
         mut lim2: i64,
         kvdf: &mut [i64],
@@ -2201,7 +2199,6 @@ mod git_xdiff {
         }
 
         let mut xdf1 = XdFile {
-            ids: ids1,
             changed: vec![0u8; nrec1],
             reference_index: Vec::new(),
             effective_ids: Vec::new(),
@@ -2210,7 +2207,6 @@ mod git_xdiff {
             nreff: 0,
         };
         let mut xdf2 = XdFile {
-            ids: ids2,
             changed: vec![0u8; nrec2],
             reference_index: Vec::new(),
             effective_ids: Vec::new(),

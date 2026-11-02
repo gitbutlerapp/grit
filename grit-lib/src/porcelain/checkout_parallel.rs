@@ -118,24 +118,9 @@ fn normalized_path_key(path: &str, precompose: bool, ignorecase: bool) -> String
     }
 }
 
-/// Paths that must not share a parallel worker pool with any colliding spelling.
+/// Indices into `paths` that must not run on the parallel checkout pool.
 ///
 /// Runs in O(n × average path depth) via prefix lookup, not O(n²) pairwise comparison.
-#[must_use]
-#[allow(dead_code)]
-pub(crate) fn paths_needing_serial_checkout(
-    paths: &[String],
-    ignorecase: bool,
-    precompose: bool,
-) -> HashSet<String> {
-    let borrowed: Vec<&str> = paths.iter().map(String::as_str).collect();
-    paths_needing_serial_checkout_str(&borrowed, ignorecase, precompose)
-        .into_iter()
-        .map(|i| paths[i].clone())
-        .collect()
-}
-
-/// Indices into `paths` that must not run on the parallel checkout pool.
 #[must_use]
 pub(crate) fn paths_needing_serial_checkout_str(
     paths: &[&str],
@@ -790,6 +775,18 @@ pub(crate) fn execute_write_jobs_unrecorded(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn paths_needing_serial_checkout(
+        paths: &[String],
+        ignorecase: bool,
+        precompose: bool,
+    ) -> HashSet<String> {
+        let borrowed: Vec<&str> = paths.iter().map(String::as_str).collect();
+        paths_needing_serial_checkout_str(&borrowed, ignorecase, precompose)
+            .into_iter()
+            .map(|i| paths[i].clone())
+            .collect()
+    }
 
     #[test]
     fn ignorecase_basename_collision_marks_serial() {
