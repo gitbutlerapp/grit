@@ -5,6 +5,8 @@ summary: Tree-to-tree and index-to-worktree diffs, blob patches, and the DiffEnt
 
 Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain module (tree/content diff, merge helpers, patch-ids). Prefer `Repository::diff` (`Diff`) for tree, index, and worktree comparisons on one open handle. Results are `DiffEntry` rows with a `DiffStatus` letter (`M`, `A`, `D`, …), paths, modes, and object ids — the same shape [`grit diff`](../../diff/) and `porcelain::status` use before formatting output. See [API layout](../api-layout/) for the flat-path map.
 
+Two public structs carry per-file diff output: [`FileDiff`](rustdoc:grit_lib::diff::FileDiff) from [`Diff::files`](rustdoc:grit_lib::diff::Diff::files) always includes structured hunks when line diff ran; [`ListedFileDiff`](rustdoc:grit_lib::diff::ListedFileDiff) from [`build_file_diffs`](rustdoc:grit_lib::diff::build_file_diffs) is the stat-or-patch row where structured hunks and line counts are filled according to [`DiffDetail`](rustdoc:grit_lib::diff::DiffDetail).
+
 ## Pickaxe
 
 [`Pickaxe`](rustdoc:grit_lib::diff::pickaxe::Pickaxe) implements Git's pickaxe filters for revision walks: [`Pickaxe::occurrences`](rustdoc:grit_lib::diff::pickaxe::Pickaxe::occurrences) (`-S`, occurrence-count change per file) and [`Pickaxe::line_grep`](rustdoc:grit_lib::diff::pickaxe::Pickaxe::line_grep) (`-G`, regex on added/removed lines). Call [`Pickaxe::matches_commit`](rustdoc:grit_lib::diff::pickaxe::Pickaxe::matches_commit) to test one commit against its first parent; wire the filter through [`RevWalkListOptions::pickaxe`](rustdoc:grit_lib::revwalk::queries::RevWalkListOptions) for `grit log` / `grit revs`.

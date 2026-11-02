@@ -38,9 +38,9 @@ const CORRECTED_COMMIT_DATE_OFFSET_OVERFLOW: u32 = 1u32 << 31;
 /// Per-commit data needed to write CDAT / Bloom.
 #[derive(Debug, Clone)]
 pub struct CommitGraphCommitInfo {
-    /// Tree for this item.
+    /// Root tree object id for this commit.
     pub tree: ObjectId,
-    /// Parents for this item.
+    /// Parent commit object ids (empty for root commits).
     pub parents: Vec<ObjectId>,
     /// Committer Unix timestamp (Git `timestamp_t`; may exceed `u32`).
     pub commit_time: u64,
@@ -235,15 +235,15 @@ fn resolve_parent_edge(
 /// Counters emitted as `GIT_TRACE2_EVENT` for Bloom generation (`commit-graph.c`).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct BloomWriteStats {
-    /// Filter computed for this item.
+    /// Commits that received a newly computed Bloom filter chunk.
     pub filter_computed: u32,
-    /// Filter not computed for this item.
+    /// Commits skipped because a filter already existed or Bloom was disabled.
     pub filter_not_computed: u32,
-    /// Filter trunc empty for this item.
+    /// Filters omitted because the changed-path set was empty.
     pub filter_trunc_empty: u32,
-    /// Filter trunc large for this item.
+    /// Filters omitted because changed paths exceeded the size limit.
     pub filter_trunc_large: u32,
-    /// Filter upgraded for this item.
+    /// Filters rebuilt at a higher setting than a previous generation.
     pub filter_upgraded: u32,
 }
 #[expect(clippy::too_many_arguments)]

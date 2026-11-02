@@ -104,25 +104,25 @@ pub enum Warning {
         /// Why it did not run, including the underlying OS error.
         detail: String,
     },
-    /// Returned when midx checksum mismatch.
+    /// Multi-pack-index checksum does not match file contents.
     MidxChecksumMismatch,
-    /// Returned when midx ignoring existing checksum mismatch.
+    /// Existing on-disk MIDX had a checksum mismatch; grit ignored it and continued.
     MidxIgnoringExistingChecksumMismatch,
-    /// Returned when midx chunk table error.
+    /// Multi-pack-index chunk table is invalid or inconsistent.
     MidxChunkTableError {
         /// Additional human-readable detail for the failure.
         detail: String,
     },
-    /// Returned when midx rev index wrong size.
+    /// Reverse index chunk size does not match the MIDX layout.
     MidxRevIndexWrongSize,
-    /// Returned when midx bitmap missing reverse index.
+    /// Pack bitmap requires a reverse index that is missing from the MIDX.
     MidxBitmapMissingReverseIndex,
-    /// Returned when midx pack index unavailable.
+    /// A pack named in the MIDX has no readable `.idx` sidecar.
     MidxPackIndexUnavailable {
         /// Pack file basename (`.pack` suffix).
         pack: String,
     },
-    /// Returned when midx unknown preferred pack.
+    /// `core.midx` preferred pack name does not match any pack in the MIDX.
     MidxUnknownPreferredPack {
         /// Pack file name or config identifier.
         name: String,
@@ -147,7 +147,7 @@ pub enum Warning {
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Trace {
-    /// Returned when network.
+    /// Low-level network trace line (when trace diagnostics are enabled).
     Network {
         /// Human-readable message body.
         message: String,

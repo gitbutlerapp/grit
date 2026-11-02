@@ -31,19 +31,19 @@ pub enum RerereAutoupdate {
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 pub enum RerereEventKind {
-    /// Returned when recorded preimage.
+    /// Recorded a new conflict preimage under `rr-cache/`.
     RecordedPreimage,
-    /// Returned when recorded resolution.
+    /// Recorded the user's resolution for this conflict id.
     RecordedResolution,
-    /// Returned when resolved from previous.
+    /// Applied a resolution remembered from a previous merge.
     ResolvedFromPrevious,
-    /// Returned when staged from previous.
+    /// Staged a resolution that rerere recovered from cache.
     StagedFromPrevious,
-    /// Returned when updated preimage.
+    /// Updated the stored preimage because the conflict hunk changed.
     UpdatedPreimage,
-    /// Returned when forgot.
+    /// Dropped remembered state for this path (`rerere forget`).
     Forgot,
-    /// Returned when no remembered.
+    /// No remembered resolution was available for this conflict.
     NoRemembered,
 }
 
@@ -51,9 +51,9 @@ pub enum RerereEventKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct RerereEvent {
-    /// Repository-relative or filesystem path related to the failure.
+    /// Repository-relative path whose conflict rerere handled.
     pub path: String,
-    /// Object type name when known (`commit`, `tree`, etc.).
+    /// What rerere did for this path.
     pub kind: RerereEventKind,
 }
 

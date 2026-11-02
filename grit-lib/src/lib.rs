@@ -405,4 +405,6 @@ mod object_write_regression;
 #[cfg(test)]
 mod repository_config_snapshot_tests;
 #[cfg(test)]
+mod rustdoc_placeholder_guard;
+#[cfg(test)]
 mod status_clean_tree_regression;

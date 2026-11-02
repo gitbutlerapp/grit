@@ -242,6 +242,13 @@ pub struct BranchList {
 }
 
 /// List the local branches (`refs/heads/*`) of `repo`, sorted by name.
+///
+/// Returns [`BranchList`] with short names, tip oids, and which branch `HEAD` is on — no
+/// commit reads and no upstream or worktree metadata. For UI rows like `grit branch`, use
+/// [`crate::refs::branch_tracking::list_branches`] with [`BranchListQuery`](crate::refs::branch_tracking::BranchListQuery)
+/// and [`BranchDetail::Full`](crate::refs::branch_tracking::BranchDetail::Full); use
+/// [`BranchDetail::Names`](crate::refs::branch_tracking::BranchDetail::Names) when you only
+/// need the same ref listing at lower cost.
 pub fn list_branches(repo: &Repository) -> Result<BranchList> {
     let current = match resolve_head_for_repository(repo)? {
         HeadState::Branch { short_name, .. } => Some(short_name),

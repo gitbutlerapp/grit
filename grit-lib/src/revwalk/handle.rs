@@ -35,6 +35,12 @@ impl<'repo> RevWalk<'repo> {
 
     /// Resolve a user revision spec (for example `HEAD`, `main~2`, `v1.0`).
     ///
+    /// Delegates to [`crate::rev_parse::resolve_revision`], including index DWIM, so an unknown
+    /// name may surface as [`super::rev_parse_error::RevParseError::AmbiguousArgument`] (Git's
+    /// "bad revision or path" class). To match only existing refs and objects, use
+    /// [`crate::rev_parse::resolve_revision_for_verify`] and match on
+    /// [`super::rev_parse_error::RevParseError::InvalidObjectName`].
+    ///
     /// # Errors
     ///
     /// Propagates rev-parse and ref errors.

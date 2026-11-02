@@ -25,7 +25,7 @@ use thiserror::Error;
 
 use crate::environment::Environment;
 
-/// Returned when an operation requires a live OS child but the handle is synthetic.
+/// Error when an operation requires a live OS child but the handle is synthetic.
 #[derive(Debug, Error)]
 #[error("command handle is not backed by a live OS process")]
 pub struct CommandHandleError;
@@ -80,11 +80,11 @@ impl CommandEnvironment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CommandStdio {
     #[default]
-    /// Returned when inherit.
+    /// Inherit this process's corresponding stream.
     Inherit,
-    /// Returned when null.
+    /// Discard the stream (`/dev/null`).
     Null,
-    /// Returned when pipe.
+    /// Open a pipe for read or write via [`RunningCommand`].
     Pipe,
     /// Connect the stream to this process's stderr (hooks write their stdout there, as in Git).
     ParentStderr,
@@ -94,11 +94,11 @@ pub enum CommandStdio {
 #[derive(Debug, Clone, Default)]
 pub enum CommandStdin {
     #[default]
-    /// Returned when inherit.
+    /// Inherit this process's stdin.
     Inherit,
-    /// Returned when null.
+    /// No stdin (`/dev/null`).
     Null,
-    /// Returned when pipe.
+    /// Bytes written to the child's stdin before it is closed.
     Pipe(Vec<u8>),
 }
 
@@ -107,18 +107,18 @@ pub enum CommandStdin {
 pub enum ShellInvocation {
     /// `program` is `sh`: `-c script`, optional `argv0` positional (`hook`), then `args`.
     DashC {
-        /// Script for this error or warning.
+        /// Shell script passed to `sh -c`.
         script: String,
-        /// Argv0 for this error or warning.
+        /// Optional `argv[0]` for the shell (Git hook name).
         argv0: Option<String>,
-        /// Args for this error or warning.
+        /// Extra arguments after the script positional.
         args: Vec<OsString>,
     },
     /// Run `sh script_path` with `args` (traditional hook ENOEXEC retry).
     ScriptPath {
-        /// Script path for this error or warning.
+        /// Hook or filter script on disk.
         script_path: PathBuf,
-        /// Args for this error or warning.
+        /// Arguments appended after the script path.
         args: Vec<OsString>,
     },
 }
@@ -139,13 +139,13 @@ pub struct CommandSpec {
     pub shell: Option<ShellInvocation>,
     /// Process working directory used during repository discovery.
     pub cwd: Option<PathBuf>,
-    /// Env for this item.
+    /// Child environment (inherit and overrides).
     pub env: CommandEnvironment,
-    /// Stdin for this item.
+    /// Stdin source for the child.
     pub stdin: CommandStdin,
-    /// Stdout for this item.
+    /// Stdout disposition.
     pub stdout: CommandStdio,
-    /// Stderr for this item.
+    /// Stderr disposition.
     pub stderr: CommandStdio,
 }
 
@@ -193,9 +193,9 @@ impl From<ExitStatus> for CommandExit {
 pub struct CommandOutput {
     /// Subprocess exit status from the filter command.
     pub status: CommandExit,
-    /// Stdout for this item.
+    /// Captured stdout bytes.
     pub stdout: Vec<u8>,
-    /// Stderr for this item.
+    /// Captured stderr bytes.
     pub stderr: Vec<u8>,
 }
 
@@ -723,15 +723,15 @@ pub fn system_command_runner() -> Arc<dyn CommandRunner> {
 /// Scripted responses for [`RecordingRunner`].
 #[derive(Debug, Clone)]
 pub enum RecordedResponse {
-    /// Returned when success.
+    /// Exit status 0 with empty stdout/stderr.
     Success,
-    /// Returned when exit.
+    /// Exit with the given non-zero code and empty output.
     Exit(i32),
-    /// Returned when output.
+    /// Exit with the given code and stdout payload.
     Output {
-        /// Stdout disposition for the child process.
+        /// Stdout bytes returned to the caller.
         stdout: Vec<u8>,
-        /// Code.
+        /// Process exit code.
         code: i32,
     },
 }
@@ -739,7 +739,7 @@ pub enum RecordedResponse {
 /// Records [`CommandSpec`] invocations and returns configurable exit statuses.
 #[derive(Debug, Default)]
 pub struct RecordingRunner {
-    /// Recorded for this item.
+    /// Every [`CommandSpec`] passed to [`CommandRunner::spawn`], in order.
     pub recorded: Mutex<Vec<CommandSpec>>,
     stdin_payloads: Mutex<Vec<Arc<Mutex<Vec<u8>>>>>,
     responses: Mutex<VecDeque<RecordedResponse>>,

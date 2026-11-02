@@ -61,7 +61,11 @@ pub enum DiffTarget {
     },
 }
 
-/// One changed file with structured hunks and metadata.
+/// One changed file with structured hunks and metadata (returned by [`Diff::files`](crate::diff::Diff::files)).
+///
+/// Always carries [`Self::hunks`] when line diff was computed. For stat-or-patch listing rows
+/// from [`build_file_diffs`](crate::diff::build_file_diffs), use [`ListedFileDiff`](crate::diff::ListedFileDiff)
+/// instead (structured hunks and line counts are optional there).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileDiff {
     /// Display path (new path, or old path for a deletion).
