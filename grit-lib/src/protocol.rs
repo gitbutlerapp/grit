@@ -4,7 +4,7 @@
 //! environment semantics without reading process-global state directly.
 
 use crate::config::ConfigSet;
-use crate::error::Error;
+use crate::error::{ConfigError, Error};
 use thiserror::Error;
 
 /// Errors returned when a transport protocol is not allowed.
@@ -141,8 +141,12 @@ pub fn parse_protocol_version_digit(s: &str) -> Option<u8> {
 ///
 /// Returns [`Error::Config`] when the value is present but not `0`, `1`, or `2`.
 pub fn try_protocol_version_from_config_value(raw: &str) -> Result<u8, Error> {
-    parse_protocol_version_digit(raw)
-        .ok_or_else(|| Error::Config(format!("bad protocol version '{raw}'").into()))
+    parse_protocol_version_digit(raw).ok_or_else(|| {
+        Error::Config(ConfigError::UnknownValue {
+            key: "protocol.version".to_owned(),
+            value: raw.to_owned(),
+        })
+    })
 }
 
 /// Effective client-side protocol version from `protocol.version` in `config`.

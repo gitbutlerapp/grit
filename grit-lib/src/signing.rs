@@ -28,7 +28,7 @@ use crate::command_runner::{
     CommandStdin, CommandStdio,
 };
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::error::{ConfigError, Error, Result};
 use crate::objects::HashAlgo;
 
 /// The hash header label for a sha1 repository.
@@ -239,7 +239,10 @@ impl GpgConfig {
     pub fn from_config(config: &ConfigSet) -> Result<GpgConfig> {
         let format = match config.get("gpg.format") {
             Some(raw) => GpgFormat::from_name(&raw).ok_or_else(|| {
-                Error::Config(format!("invalid value for 'gpg.format': '{raw}'").into())
+                Error::Config(ConfigError::UnknownValue {
+                    key: "gpg.format".to_owned(),
+                    value: raw.clone(),
+                })
             })?,
             None => GpgFormat::OpenPgp,
         };

@@ -31,7 +31,7 @@ use std::time::Duration;
 use crate::config::ConfigSet;
 use crate::diff::submodule_embedded_git_dir;
 use crate::environment::RepositoryOptions;
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, SubmoduleError};
 use crate::hash::{try_par_hash_with, try_par_hash_with_force, PAR_HASH_MIN_ITEMS};
 use crate::objects::{
     iter_extra_headers, parse_commit, parse_tree, remove_header_lines, HashAlgo, ObjectId,
@@ -542,7 +542,9 @@ fn resolve_submodule_git_dir(
     if submodule_path_config_enabled(super_git_dir) {
         let key = format!("submodule.{submodule_name}.gitdir");
         let value = cfg.get(&key).ok_or_else(|| {
-            Error::Config(format!("missing {key} (submodulePathConfig enabled)").into())
+            Error::Submodule(SubmoduleError::GitDirNotConfigured {
+                name: submodule_name.to_owned(),
+            })
         })?;
         Ok(resolve_gitdir_value(work_tree, &value))
     } else {

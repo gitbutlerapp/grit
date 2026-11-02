@@ -285,9 +285,10 @@ fn parse_pack_threads(config: &ConfigSet) -> Result<Option<usize>, ConfigError> 
     };
     let trimmed = raw.trim();
     match config.get_i64(KEY) {
-        Some(Ok(n)) if n < 0 => Err(ConfigError::Other(format!(
-            "invalid number of threads specified ({n})"
-        ))),
+        Some(Ok(n)) if n < 0 => Err(ConfigError::InvalidThreadCount {
+            key: KEY.into(),
+            value: n,
+        }),
         Some(Ok(0)) => Ok(None),
         Some(Ok(n)) => Ok(Some(usize::try_from(n).unwrap_or(1))),
         Some(Err(_)) | None => Err(ConfigError::BadNumericValue {
@@ -417,7 +418,10 @@ mod tests {
             .expect_err("negative pack.threads");
         assert_eq!(
             err,
-            ConfigError::Other("invalid number of threads specified (-3)".into())
+            ConfigError::InvalidThreadCount {
+                key: "pack.threads".into(),
+                value: -3,
+            }
         );
     }
 

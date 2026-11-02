@@ -2052,9 +2052,10 @@ fn gc_loose_prune_policy(config: &ConfigSet, now_unix: i64) -> Result<GcLoosePru
     let mut err = 0;
     let cutoff_sec = approxidate_careful_at(&spec, now_unix, Some(&mut err)) as i64;
     if err != 0 {
-        return Err(Error::Config(ConfigError::Other(format!(
-            "bad config value '{spec}' for 'gc.pruneExpire'"
-        ))));
+        return Err(Error::Config(ConfigError::InvalidDate {
+            key: "gc.pruneExpire".to_owned(),
+            value: spec,
+        }));
     }
     let keep_newer_than = SystemTime::UNIX_EPOCH
         .checked_add(std::time::Duration::from_secs(cutoff_sec.max(0) as u64));
