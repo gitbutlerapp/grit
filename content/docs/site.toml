@@ -108,6 +108,8 @@ baseline = [
   "grit-utils/baselines/daily-commit-dry-run-6560-after.json",
   "grit-utils/baselines/daily-commit-dry-run-6560-related-before.json",
   "grit-utils/baselines/daily-commit-dry-run-6560-related-after.json",
+  "grit-utils/baselines/daily-switch-branch-10k-6598-before.json",
+  "grit-utils/baselines/daily-switch-branch-10k-6598-after.json",
   "grit-utils/baselines/daily-status-clean-10k-6351-before.json",
   "grit-utils/baselines/daily-status-clean-10k-6351-after.json",
   "grit-utils/baselines/daily-status-clean-10k-6351-related-before.json",
