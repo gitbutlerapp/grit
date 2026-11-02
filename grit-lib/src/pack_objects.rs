@@ -968,10 +968,18 @@ fn write_planned_entries(
                             entry.oid,
                             entry.kind,
                             opts,
+                            &CancelSignal::never(),
                         )?
                     }
                 } else {
-                    write_whole_pack_object_to_odb(&mut counter, odb, entry.oid, entry.kind, opts)?
+                    write_whole_pack_object_to_odb(
+                        &mut counter,
+                        odb,
+                        entry.oid,
+                        entry.kind,
+                        opts,
+                        &CancelSignal::never(),
+                    )?
                 }
             };
             let crc = crc_w.finalize();
@@ -1446,7 +1454,7 @@ fn write_whole_pack_object_from_odb(
     kind: ObjectKind,
     opts: &PackBuildOptions,
 ) -> Result<()> {
-    write_whole_pack_object_to_odb(buf, odb, oid, kind, opts).map(|_| ())
+    write_whole_pack_object_to_odb(buf, odb, oid, kind, opts, &CancelSignal::never()).map(|_| ())
 }
 
 /// Write one whole object from the ODB to `w`, reusing on-disk pack bytes or streaming
@@ -1457,6 +1465,7 @@ pub(crate) fn write_whole_pack_object_to_odb(
     oid: ObjectId,
     kind: ObjectKind,
     opts: &PackBuildOptions,
+    stop: &CancelSignal<'_>,
 ) -> Result<u64> {
     if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
         if let Some((bytes, start, end)) =
@@ -1480,6 +1489,7 @@ pub(crate) fn write_whole_pack_object_to_odb(
                 stream.size,
                 &mut counter,
                 odb.pack_compression()?,
+                stop,
             )?;
             Ok(())
         })?
@@ -1487,6 +1497,7 @@ pub(crate) fn write_whole_pack_object_to_odb(
         return Ok(counter.n);
     }
     let obj = odb.read(&oid)?;
+    stop.poll()?;
     write_whole_pack_object_to(w, odb, oid, kind, &obj.data, opts)
 }
 

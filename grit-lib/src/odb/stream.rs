@@ -17,6 +17,7 @@ use crate::error::{Error, Result};
 use crate::hash::{ChecksumHasher, ObjectPayloadHasher};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::pack_objects::{encode_pack_object_header, pack_type_code};
+use crate::progress::CancelSignal;
 
 /// Bytes read from the source per step; the only payload-sized buffer a stream holds.
 const CHUNK: usize = 128 * 1024;
@@ -69,9 +70,10 @@ pub(crate) fn deflate_stream_to_writer(
     size: u64,
     w: &mut dyn Write,
     compression: Compression,
+    stop: &CancelSignal<'_>,
 ) -> Result<()> {
     let mut enc = ZlibEncoder::new(w, compression);
-    for_each_chunk(reader, size, |chunk| {
+    for_each_chunk(reader, size, Some(stop), |chunk| {
         enc.write_all(chunk).map_err(Error::Io)
     })?;
     enc.finish().map_err(Error::Io)?;
@@ -82,11 +84,15 @@ pub(crate) fn deflate_stream_to_writer(
 fn for_each_chunk(
     reader: &mut dyn Read,
     size: u64,
+    stop: Option<&CancelSignal<'_>>,
     mut sink: impl FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     let mut buf = vec![0u8; usize::try_from(size).map_or(CHUNK, |s| s.min(CHUNK))];
     let mut remaining = size;
     while remaining > 0 {
+        if let Some(stop) = stop {
+            stop.poll()?;
+        }
         let want = usize::try_from(remaining).map_or(buf.len(), |r| r.min(buf.len()));
         let n = match reader.read(&mut buf[..want]) {
             Ok(0) => {
@@ -113,7 +119,7 @@ pub(crate) fn hash_stream(
     reader: &mut dyn Read,
 ) -> Result<ObjectId> {
     let mut hasher = ObjectPayloadHasher::new(algo, kind, size);
-    for_each_chunk(reader, size, |chunk| {
+    for_each_chunk(reader, size, None, |chunk| {
         hasher.update(chunk);
         Ok(())
     })?;
@@ -195,7 +201,7 @@ impl StagedPack {
         hasher.update(&first);
         encoder.write_all(&first).map_err(Error::Io)?;
         if tail > 0 {
-            for_each_chunk(reader, tail, |chunk| {
+            for_each_chunk(reader, tail, None, |chunk| {
                 hasher.update(chunk);
                 encoder.write_all(chunk).map_err(Error::Io)
             })?;

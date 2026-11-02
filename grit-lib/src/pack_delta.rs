@@ -252,6 +252,7 @@ fn write_pack_in_batches(
                     *oid,
                     *kind,
                     opts,
+                    stop,
                 )?;
                 (n, crc_out.finalize())
             }

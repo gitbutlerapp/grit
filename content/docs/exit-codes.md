@@ -16,7 +16,7 @@ Grit uses a small set of exit codes. Command-specific yes/no checks (for example
 | `missing_prerequisite` | 128 | `grit bundle unbundle` when the repository lacks prerequisite commits. |
 | `refused_not_ff` | 128 | `grit merge --ff-only` or `grit pull --ff-only` when a fast-forward is not possible. |
 | `invalid_commit_filter` | 129 | Invalid `--author`, `--grep`, or pickaxe pattern on `grit log`, `grit revs`, or related commands (`kind`: `invalid_pattern`). |
-| `interrupted` | 130 | `grit clone` stopped by Ctrl-C, `SIGTERM`, or `SIGHUP` on Unix (or Ctrl-Break on Windows). The partial clone has already been removed, so the same command can be run again. With `--json`, stdout is `{"error":"operation cancelled"}`. |
+| `interrupted` | 130 | `grit clone`, `grit fetch`, or `grit push` stopped by Ctrl-C, `SIGTERM`, or `SIGHUP` on Unix (or Ctrl-Break on Windows). Partial work is rolled back (for example an incomplete clone directory, fetch temp pack, or push receive quarantine on the remote), so the same command can be run again. With `--json`, stdout is `{"error":"operation cancelled"}`. |
 | `custom` | *varies* | Passthrough from `grit hooks run` (hook exit code) or `grit rebase --exec` when a command fails. |
 
 ## Structured error kinds (`kind` in JSON)

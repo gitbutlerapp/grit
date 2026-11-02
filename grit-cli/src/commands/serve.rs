@@ -14,7 +14,8 @@ use anyhow::{Context, Result};
 use crate::stdio;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::remote::serve::{self, ProtocolVersion, ReceivePolicy, ServeOptions};
+use grit_lib::error::Error as LibError;
+use grit_lib::remote::serve::{self, ProtocolVersion, ReceivePolicy, ServeError, ServeOptions};
 use grit_lib::repo::Repository;
 
 /// Which server program to run.
@@ -79,6 +80,7 @@ pub fn run(
         );
     }
 
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut output = BufWriter::new(std::io::stdout().lock());
@@ -89,7 +91,21 @@ pub fn run(
         Service::ReceivePack => {
             let policy = ReceivePolicy::from_config(&config);
             let guard = grit_protocol::PushGuard::for_repository(&repo);
-            serve::receive_pack_with_hook(&repo, &mut input, &mut output, &opts, &policy, &guard)?;
+            match serve::receive_pack_with_hook_cancellable(
+                &repo,
+                &mut input,
+                &mut output,
+                &opts,
+                &policy,
+                &guard,
+                &interrupt,
+            ) {
+                Ok(_summary) => {}
+                Err(ServeError::Cancelled) => {
+                    return Err(anyhow::Error::new(LibError::Cancelled));
+                }
+                Err(err) => return Err(err.into()),
+            }
         }
     }
     stdio::io_result(output.flush()).context("writing the response")?;

@@ -72,6 +72,8 @@ When a smart-HTTP server advertises a resumable push endpoint (the `pushBundle` 
 
 Set `push.bundleThreshold` (bytes, with optional `k`, `m` or `g`) to change the size at which this starts.
 
+When a push is interrupted (`SIGINT`, `SIGTERM`, or `SIGHUP`, including Ctrl+C from a terminal), grit cancels the in-progress transfer, removes any partial receive quarantine or `tmp_pack_*` file it was writing on the remote, and exits **130** without updating remote refs. Stale temp files from a hard kill (`SIGKILL`) are removed later by [`grit gc`](gc.md) once they are older than `gc.pruneExpire`, the same way `git gc` prunes abandoned quarantine directories.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options

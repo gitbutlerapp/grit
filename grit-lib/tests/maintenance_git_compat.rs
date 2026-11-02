@@ -3165,6 +3165,27 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     assert!(pack_dir.join(".cache-install-state").is_dir());
     assert!(pack_dir.join(".pack-deadbeef-install-stale-file").is_file());
 
+    let quarantine = objects.join("tmp_objdir-incoming-99999-0");
+    fs::create_dir_all(quarantine.join("pack")).expect("quarantine pack dir");
+    fs::write(
+        quarantine.join("pack/tmp_pack_stale"),
+        b"stale quarantine pack",
+    )
+    .expect("stale");
+    let fresh_quarantine = objects.join("tmp_objdir-incoming-1-0");
+    fs::create_dir_all(fresh_quarantine.join("pack")).expect("fresh quarantine");
+    fs::write(
+        fresh_quarantine.join("pack/tmp_pack_fresh"),
+        b"fresh quarantine pack",
+    )
+    .expect("fresh");
+    filetime::set_file_mtime(&quarantine, three_weeks_ago).expect("mtime quarantine");
+    filetime::set_file_mtime(quarantine.join("pack/tmp_pack_stale"), three_weeks_ago)
+        .expect("mtime quarantine pack");
+    gc(&repo, &GcOptions::default()).expect("grit gc quarantine");
+    assert!(!quarantine.exists());
+    assert!(fresh_quarantine.exists());
+
     let never_dir = TempDir::new().expect("never");
     duplicate_repo_tree(dir.path(), never_dir.path());
     git(never_dir.path(), &["config", "gc.pruneExpire", "never"]);

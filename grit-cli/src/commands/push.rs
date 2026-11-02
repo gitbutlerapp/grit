@@ -22,7 +22,7 @@ use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::progress::TerminalProgress;
 use crate::quiet_args::QuietArgs;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::Cancel;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
 #[derive(Serialize, JsonSchema)]
@@ -282,6 +282,7 @@ pub fn run(
         remote_ref_tips: plan_ctx.remote_tips,
         no_verify,
     };
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = quiet.progress(mode);
     let report = match push_once(
         &repo,
@@ -291,6 +292,7 @@ pub fn run(
         &wire,
         &factory,
         &mut progress,
+        &interrupt,
     ) {
         Ok(report) => report,
         Err(err) => {
@@ -306,6 +308,7 @@ pub fn run(
                     &wire,
                     &factory,
                     &mut progress,
+                    &interrupt,
                 )?
             } else {
                 return Err(err);
@@ -408,6 +411,7 @@ fn push_once(
     wire: &PushWireOptions<'_>,
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
+    cancel: &dyn Cancel,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
     let remote = open_push_destination(config, remote_name).map_err(map_remote_error)?;
     let options = PushOptions {
@@ -420,7 +424,7 @@ fn push_once(
         ..Default::default()
     };
     remote
-        .push(repo, specs, options, progress, &NeverCancel, Some(factory))
+        .push(repo, specs, options, progress, cancel, Some(factory))
         .map_err(map_remote_error)
 }
 

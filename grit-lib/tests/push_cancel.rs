@@ -541,3 +541,52 @@ fn http_push_cancelled_while_the_server_is_silent_returns_at_once() {
     // answers; the cancelled push just stopped waiting for that answer.
     drop(release);
 }
+
+#[test]
+fn local_push_cancelled_while_streaming_one_large_blob_drops_quarantine() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = init_bare(&tmp.path().join("local.git"));
+    let data = noise(42, 3 * 1024 * 1024);
+    let blob = local.odb().write(ObjectKind::Blob, &data).expect("blob");
+    let tree = local
+        .odb()
+        .write(
+            ObjectKind::Tree,
+            &serialize_tree(&[TreeEntry {
+                mode: 0o100644,
+                name: b"blob.bin".to_vec(),
+                oid: blob,
+            }]),
+        )
+        .expect("tree");
+    let body = format!(
+        "tree {tree}\nauthor A <a@example.com> 1 +0000\ncommitter A <a@example.com> 1 +0000\n\nbig\n"
+    );
+    let tip = local
+        .odb()
+        .write(ObjectKind::Commit, body.as_bytes())
+        .expect("commit");
+
+    let remote_dir = tmp.path().join("remote.git");
+    init_bare(&remote_dir);
+    let before = object_files(&remote_dir);
+
+    let cancel = FlagCancel::new();
+    let flip = cancel.clone();
+    let flipper = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(5));
+        flip.cancel();
+        Instant::now()
+    });
+    let err = push_file(&local, &remote_dir, tip, &cancel).expect_err("cancelled mid-stream");
+    let returned = Instant::now();
+    let flipped = flipper.join().expect("flipper");
+    assert!(err.is_cancelled(), "{err:?}");
+    assert!(
+        returned.saturating_duration_since(flipped) < Duration::from_secs(2),
+        "push kept running {:?} after cancel during large-blob deflate",
+        returned.saturating_duration_since(flipped)
+    );
+    assert_eq!(remote_main(&remote_dir), None);
+    assert_eq!(object_files(&remote_dir), before);
+}
