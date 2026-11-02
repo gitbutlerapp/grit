@@ -247,8 +247,9 @@ impl Odb {
     /// [`crate::maintenance::build_commit_graph`] and attach it with
     /// [`OdbBuilder::commit_graph`] instead.
     ///
-    /// Writes nothing and deletes any existing graph in a repository that rewrites parent
-    /// lists (shallow, `info/grafts`, or replace refs unless `core.useReplaceRefs=false`), as
+    /// Writes nothing when there are no reachable commits (existing graph unchanged) and
+    /// deletes any existing graph in a repository that rewrites parent lists (shallow,
+    /// `info/grafts`, or replace refs unless `core.useReplaceRefs=false`), as
     /// [`crate::maintenance::write_commit_graph`] does.
     ///
     /// # Errors
@@ -282,6 +283,9 @@ impl Odb {
             return Ok(());
         }
         let commits = collect_reachable_commit_oids(git_dir, self)?;
+        if commits.is_empty() {
+            return Ok(());
+        }
         let existing = CommitGraphChain::try_load(objects_dir).ok().flatten();
         let built = crate::maintenance::build_commit_graph_for_commits(
             self,

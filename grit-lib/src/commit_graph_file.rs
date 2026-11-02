@@ -540,7 +540,6 @@ impl CommitGraphLayer {
         let commit_data_off = commit_data_off.ok_or_else(|| {
             Error::CorruptObject("commit-graph missing commit data chunk".to_owned())
         })?;
-        checked_add_end(oid_lookup_off, 4, body.len())?;
         let num_commits = fanout_num_commits(body, fanout_off)?;
         let oid_lookup_bytes = (num_commits as usize)
             .checked_mul(hash_len)
@@ -2109,6 +2108,44 @@ mod tests {
         let used = attached.odb().commit_graph_chain().expect("attached graph");
         assert!(std::sync::Arc::ptr_eq(&used, &chain));
         assert!(used.graph_commit(&commit).is_some());
+    }
+
+    #[test]
+    fn empty_commit_graph_bytes_parse_and_open() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let bloom = BloomFilterSettings::default();
+        let (bytes, _) = build_commit_graph_bytes(
+            &[],
+            &HashMap::new(),
+            &repo.odb(),
+            false,
+            &bloom,
+            None,
+            &[],
+            None,
+            &empty_byte_filters(),
+            &empty_byte_filters(),
+            true,
+        )
+        .expect("build");
+        let layer = super::CommitGraphLayer::try_parse(
+            std::path::PathBuf::from("commit-graph"),
+            bytes.clone(),
+        )
+        .expect("parse");
+        assert_eq!(layer.num_commits, 0);
+        let path = dir.path().join("commit-graph");
+        std::fs::write(&path, &bytes).expect("write");
+        let opened = super::CommitGraphLayer::try_open(path).expect("open");
+        assert_eq!(opened.num_commits, 0);
     }
 
     #[test]

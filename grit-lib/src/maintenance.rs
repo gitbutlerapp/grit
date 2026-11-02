@@ -688,6 +688,9 @@ pub(crate) fn build_commit_graph_for_commits(
 /// Reachable commits are discovered from [`Repository::refs`](crate::repo::Repository::refs)
 /// (reftable, packed-refs, and linked-worktree visibility), not by scanning `git_dir/refs` alone.
 ///
+/// When there are no reachable commits, nothing is written (matching `git commit-graph write`).
+/// An existing graph is left in place.
+///
 /// In a shallow repository, with `info/grafts`, or with enabled replace refs, nothing is
 /// written and [`CommitGraphWriteReport::skipped`] says why (see [`CommitGraphSkipReason`]).
 /// Git only skips the write in that state, but `git fsck` still verifies a graph that is
@@ -738,6 +741,15 @@ pub fn write_commit_graph(
             commit_count: commits.len(),
             removed_chain: false,
             bloom_stats: opts.changed_paths.then_some(BloomWriteStats::default()),
+            skipped: None,
+        });
+    }
+    if commits.is_empty() {
+        return Ok(CommitGraphWriteReport {
+            path,
+            commit_count: 0,
+            removed_chain: false,
+            bloom_stats: None,
             skipped: None,
         });
     }
