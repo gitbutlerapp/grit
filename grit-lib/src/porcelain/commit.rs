@@ -263,7 +263,9 @@ pub struct CommitRequest {
     pub reset_author: bool,
     /// Reuse log message and author from this commit (`-C` / `--reuse-message`); copies get a new change id.
     pub reuse_message_from: Option<ObjectId>,
-    /// When true, compute the commit tree and file list without writing objects, updating refs, or running hooks.
+    /// When true, stage in memory and report the files the commit would change (index against the
+    /// parent tree, by object id and mode) without writing objects, the index or refs, or running
+    /// hooks.
     pub dry_run: bool,
     /// When true, a [`Error::NothingToCommit`] is upgraded to [`Error::NothingStagedToCommit`] if the
     /// work tree still has unstaged or untracked paths (index-only commit).
