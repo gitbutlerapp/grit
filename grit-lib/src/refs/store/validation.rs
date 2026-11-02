@@ -152,6 +152,32 @@ pub fn verify_create_conflicts(
     Ok(())
 }
 
+/// Whether two ref names cannot coexist when `core.ignorecase` is enabled: they share a path
+/// component slot that matches under ASCII case folding but is spelled differently (including
+/// parallel trees such as `refs/heads/Foo/bar` vs `refs/heads/foo/baz`).
+#[must_use]
+pub(crate) fn ascii_casefold_ref_paths_collide(a: &str, b: &str) -> bool {
+    if a == b {
+        return false;
+    }
+    let mut a_parts = a.split('/').filter(|s| !s.is_empty());
+    let mut b_parts = b.split('/').filter(|s| !s.is_empty());
+    loop {
+        match (a_parts.next(), b_parts.next()) {
+            (Some(x), Some(y)) => {
+                if !x.eq_ignore_ascii_case(y) {
+                    return false;
+                }
+                if x != y {
+                    return true;
+                }
+            }
+            (Some(_), None) | (None, Some(_)) => return false,
+            (None, None) => return false,
+        }
+    }
+}
+
 /// When `ignore_case`, reject each create whose name matches an existing ref under ASCII
 /// case folding (`core.ignorecase` on macOS/Windows).
 ///
@@ -206,6 +232,15 @@ pub fn verify_create_casefold_conflicts(
         return Ok(());
     }
     verify_create_casefold_against_existing(ignore_case, existing, updates)?;
+    verify_create_casefold_same_batch(updates)
+}
+
+/// Reject two creates in one batch whose names differ only by ASCII case.
+///
+/// # Errors
+///
+/// [`RefStoreError::CaseConflict`] when two creates in `updates` differ only by case.
+pub fn verify_create_casefold_same_batch(updates: &[RefUpdate]) -> Result<(), RefStoreError> {
     let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
     for update in updates {
         if update.new_value.is_none() || update.flags.log_only {
@@ -224,6 +259,38 @@ pub fn verify_create_casefold_conflicts(
         }
     }
     Ok(())
+}
+
+/// When `ignore_case`, reject each create whose name matches a stored ref under ASCII case
+/// folding, using `existing` to look up collisions without loading every ref value.
+///
+/// # Errors
+///
+/// [`RefStoreError::CreateExists`] or [`RefStoreError::CaseConflict`].
+pub fn verify_create_casefold_with_lookup(
+    ignore_case: bool,
+    skip_exact: &BTreeMap<String, RawRef>,
+    updates: &[RefUpdate],
+    mut existing: impl FnMut(&str) -> Result<Option<String>, RefStoreError>,
+) -> Result<(), RefStoreError> {
+    if !ignore_case {
+        return Ok(());
+    }
+    for update in updates {
+        if update.new_value.is_none() || update.flags.log_only {
+            continue;
+        }
+        if skip_exact.contains_key(&update.name) {
+            continue;
+        }
+        let name = update.name.as_str();
+        if existing(name)?.is_some() {
+            return Err(RefStoreError::CreateExists {
+                name: update.name.clone(),
+            });
+        }
+    }
+    verify_create_casefold_same_batch(updates)
 }
 
 /// Whether `refname` can be created against a sorted ref map without scanning every key.
@@ -455,6 +522,21 @@ mod tests {
     }
 
     #[test]
+    fn ascii_casefold_ref_paths_collide_detects_nested_parallel_trees() {
+        assert!(ascii_casefold_ref_paths_collide(
+            "refs/heads/Foo/bar",
+            "refs/heads/foo/baz"
+        ));
+        assert!(ascii_casefold_ref_paths_collide(
+            "refs/heads/foo/baz",
+            "refs/heads/Foo/bar"
+        ));
+        assert!(!ascii_casefold_ref_paths_collide(
+            "refs/heads/main",
+            "refs/heads/other"
+        ));
+    }
+
     fn ignorecase_rejects_casefold_duplicate_create() {
         let existing: BTreeMap<String, RawRef> =
             [("refs/heads/Foo".to_owned(), RawRef::Direct(oid(2)))].into();

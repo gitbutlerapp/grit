@@ -35,15 +35,16 @@ use super::apply::{
     apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_change_target,
     ref_lock_names_for_updates, simulate_batch_apply, RefBatchState,
 };
-use super::backend::{is_per_ref_rejectable, partition_updates_allowing_failures};
+use super::backend::{is_per_ref_rejectable, partition_updates_allowing_failures, CasefoldLookup};
 use super::error::RefStoreError;
 use super::routing::{resolve_common_dir, route_ref_storage_in_common, RefStorageRoute};
 use super::transaction::expected_matches;
 use super::transaction::RefTransaction;
 use super::types::Expected;
 use super::validation::{
-    validate_storable_refname, verify_create_casefold_against_existing,
-    verify_create_casefold_conflicts, verify_create_conflicts, verify_name_available_for_create,
+    ascii_casefold_ref_paths_collide, validate_storable_refname,
+    verify_create_casefold_against_existing, verify_create_casefold_conflicts,
+    verify_create_casefold_with_lookup, verify_create_conflicts, verify_name_available_for_create,
 };
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 use crate::refs::RefnameUnavailable;
@@ -182,12 +183,10 @@ impl FilesRefStore {
         if !self.refs_ignore_ascii_case() {
             return Ok(());
         }
-        let existing = self
-            .load_raw_map_prefix("", None)
-            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        if existing
-            .keys()
-            .any(|other| other.as_str() != name && other.eq_ignore_ascii_case(name))
+        if self
+            .ascii_casefold_existing_name(name)
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+            .is_some()
         {
             return Err(RefStoreError::CreateExists {
                 name: name.to_owned(),
@@ -204,6 +203,84 @@ impl FilesRefStore {
             });
         }
         Ok(())
+    }
+
+    /// When `core.ignorecase` is enabled, return a stored ref whose name collides with `name`
+    /// under ASCII case folding (full name, nested path slots, or parallel trees). Packed names
+    /// are scanned without reading loose ref files; loose collisions walk each parent directory
+    /// and compare path components case-insensitively without opening ref bodies.
+    fn ascii_casefold_existing_name(&self, name: &str) -> Result<Option<String>> {
+        if !self.refs_ignore_ascii_case() {
+            return Ok(None);
+        }
+        if let Some(hit) = self.packed_ascii_casefold_existing_name(name)? {
+            return Ok(Some(hit));
+        }
+        self.loose_ascii_casefold_existing_name(name)
+    }
+
+    fn packed_ascii_casefold_existing_name(&self, name: &str) -> Result<Option<String>> {
+        self.ensure_full_packed_map()?;
+        let Some(view) = self.packed_refs_view()? else {
+            return Ok(None);
+        };
+        let path = super::paths::packed_refs_path(&self.common_dir);
+        let mut hit = None;
+        let _ = view.for_each_record(&path, None, None, |storage, _, _| {
+            let logical = self.logical_name(storage);
+            if ascii_casefold_ref_paths_collide(&logical, name) {
+                hit = Some(logical);
+                return ControlFlow::Break(());
+            }
+            ControlFlow::Continue(())
+        })?;
+        Ok(hit)
+    }
+
+    fn loose_ascii_casefold_existing_name(&self, name: &str) -> Result<Option<String>> {
+        let storage = self.route(name).storage_name;
+        let parts: Vec<&str> = storage.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        for base in self.store_bases() {
+            let mut cur = base.to_path_buf();
+            for part in &parts {
+                let Ok(read_dir) = fs::read_dir(&cur) else {
+                    break;
+                };
+                let mut descend_exact: Option<PathBuf> = None;
+                for entry in read_dir.flatten() {
+                    let comp_os = entry.file_name();
+                    let comp = comp_os.to_string_lossy();
+                    let path = entry.path();
+                    if comp.as_ref() == *part {
+                        if path.is_dir() {
+                            descend_exact = Some(path);
+                        }
+                        continue;
+                    }
+                    if !comp.eq_ignore_ascii_case(part) {
+                        continue;
+                    }
+                    if path.is_file() {
+                        let storage_name = loose_storage_path_to_refname(base, &path);
+                        return Ok(Some(self.logical_name(&storage_name)));
+                    }
+                    if path.is_dir() {
+                        if let Some(blocking) = first_loose_ref_file_under(&path) {
+                            let storage_name = loose_storage_path_to_refname(base, &blocking);
+                            return Ok(Some(self.logical_name(&storage_name)));
+                        }
+                    }
+                }
+                cur = match descend_exact {
+                    Some(next) => next,
+                    None => break,
+                };
+            }
+        }
+        Ok(None)
     }
 
     /// Git directory this store reads `HEAD` and per-worktree refs from.
@@ -2166,27 +2243,27 @@ impl RefStore for FilesRefStore {
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
         self.insert_create_conflict_neighbors(&mut preliminary.refs, &updates)
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        let ascii_casefold_existing = if self.refs_ignore_ascii_case() {
-            Some(
-                self.load_raw_map_prefix("", None)
-                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?,
-            )
+        let ignore_case = self.refs_ignore_ascii_case();
+        let casefold_lookup = |name: &str| -> std::result::Result<Option<String>, RefStoreError> {
+            self.ascii_casefold_existing_name(name)
+                .map_err(|e| RefStoreError::Corrupt(e.to_string()))
+        };
+        let casefold_lookup: CasefoldLookup<'_> = if ignore_case {
+            Some(&casefold_lookup)
         } else {
             None
         };
-        let ascii_casefold_existing = ascii_casefold_existing.as_ref();
         let updates = if allow_failures {
-            let (accepted, part) = partition_updates_allowing_failures(
-                &preliminary,
-                updates,
-                ascii_casefold_existing,
-            )?;
+            let (accepted, part) =
+                partition_updates_allowing_failures(&preliminary, updates, casefold_lookup)?;
             rejections.extend(part);
             accepted
         } else {
             verify_create_conflicts(&preliminary.refs, &updates)?;
-            if let Some(existing) = ascii_casefold_existing {
-                verify_create_casefold_conflicts(true, existing, &updates)?;
+            if let Some(lookup) = casefold_lookup {
+                verify_create_casefold_with_lookup(true, &preliminary.refs, &updates, |name| {
+                    lookup(name)
+                })?;
             }
             updates
         };
