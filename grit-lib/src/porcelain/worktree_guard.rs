@@ -21,7 +21,7 @@ use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
-use crate::path_icase::ScheduledDeletePathLookup;
+use crate::path_icase::{DentrySpellingCache, ScheduledDeletePathLookup, Stage0TrackedPaths};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
 use crate::porcelain::status::{collect_untracked_and_ignored_with_cache, IgnoredMode};
 use crate::repo::Repository;
@@ -709,8 +709,53 @@ pub(crate) fn untracked_scan_pathspecs_for_deletes(tree_changes: &[DiffEntry]) -
     specs.into_iter().collect()
 }
 
-fn index_has_stage0_path(index: &Index, rel: &str) -> bool {
-    index.get(rel.as_bytes(), 0).is_some()
+#[must_use]
+fn removed_or_replaced_old_paths(tree_changes: &[DiffEntry]) -> HashSet<String> {
+    let mut paths = HashSet::new();
+    for change in tree_changes {
+        match change.status {
+            DiffStatus::Deleted => {
+                if let Some(p) = &change.old_path {
+                    paths.insert(p.clone());
+                }
+            }
+            DiffStatus::Added | DiffStatus::Modified | DiffStatus::TypeChanged => {
+                if let Some(p) = &change.old_path {
+                    paths.insert(p.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    paths
+}
+
+/// Context for the added-path lstat untracked scan (built once per tree diff).
+struct AddedTreeChangeUntrackedScan<'a, 'i> {
+    ignorecase: bool,
+    tracked: Stage0TrackedPaths<'i>,
+    remove_lookup: ScheduledDeletePathLookup<'a>,
+    dentries: DentrySpellingCache<'a>,
+}
+
+impl AddedTreeChangeUntrackedScan<'_, '_> {
+    fn path_removed_by_tree_change(&self, rel: &str) -> bool {
+        self.remove_lookup.contains(rel)
+    }
+
+    fn classify_worktree_path(&mut self, rel: &str) -> String {
+        if !self.ignorecase {
+            return rel.to_owned();
+        }
+        self.dentries
+            .spelling(rel)
+            .map(std::borrow::Cow::into_owned)
+            .unwrap_or_else(|| rel.to_owned())
+    }
+
+    fn path_is_tracked(&self, rel: &str) -> bool {
+        self.tracked.contains_bytes(rel.as_bytes())
+    }
 }
 
 /// Untracked paths that [`DiffStatus::Added`] tree rows would overwrite, without a worktree walk.
@@ -722,6 +767,7 @@ fn collect_untracked_for_added_tree_changes_lstat(
     index: &Index,
     work_tree: &Path,
     tree_changes: &[DiffEntry],
+    ignorecase: bool,
 ) -> Result<Vec<String>> {
     let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
         .ok()
@@ -729,6 +775,13 @@ fn collect_untracked_for_added_tree_changes_lstat(
         .unwrap_or_else(|| Arc::new(ConfigSet::new()));
     let rules = WorktreeRules::from_parts_index_attributes_only(repo, index, config)?;
     let mut matcher = rules.ignore_mut();
+    let removed_paths = removed_or_replaced_old_paths(tree_changes);
+    let mut scan = AddedTreeChangeUntrackedScan {
+        ignorecase,
+        tracked: Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase),
+        remove_lookup: ScheduledDeletePathLookup::new(&removed_paths, ignorecase),
+        dentries: DentrySpellingCache::new(work_tree),
+    };
     let mut untracked = Vec::new();
     for change in tree_changes {
         if change.status != DiffStatus::Added {
@@ -746,7 +799,7 @@ fn collect_untracked_for_added_tree_changes_lstat(
             index,
             work_tree,
             trimmed,
-            tree_changes,
+            &mut scan,
             &mut matcher,
             &mut untracked,
         )?;
@@ -759,11 +812,12 @@ fn collect_untracked_for_added_tree_changes_lstat(
 fn push_untracked_collision_if_present(
     repo: &Repository,
     index: &Index,
+    scan: &AddedTreeChangeUntrackedScan<'_, '_>,
     matcher: &mut crate::ignore::IgnoreMatcher,
     rel: &str,
     untracked: &mut Vec<String>,
 ) -> Result<()> {
-    if index_has_stage0_path(index, rel) {
+    if scan.path_is_tracked(rel) {
         return Ok(());
     }
     if matcher.is_path_ignored(repo, Some(index), rel, false)? {
@@ -789,48 +843,34 @@ fn existing_worktree_path_for_untracked_scan(work_tree: &Path, rel: &str) -> Opt
     }
 }
 
-fn tree_change_removes_or_replaces_path(path: &str, tree_changes: &[DiffEntry]) -> bool {
-    for change in tree_changes {
-        match change.status {
-            DiffStatus::Deleted => {
-                if change.old_path.as_deref() == Some(path) {
-                    return true;
-                }
-            }
-            DiffStatus::Added | DiffStatus::Modified | DiffStatus::TypeChanged
-                if change.old_path.as_deref() == Some(path) =>
-            {
-                return true;
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
 fn collect_untracked_collisions_for_added_path(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
     added: &str,
-    tree_changes: &[DiffEntry],
+    scan: &mut AddedTreeChangeUntrackedScan<'_, '_>,
     matcher: &mut crate::ignore::IgnoreMatcher,
     untracked: &mut Vec<String>,
 ) -> Result<()> {
     match fs::symlink_metadata(work_tree.join(added)) {
         Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {
             if let Some(existing) = existing_worktree_path_for_untracked_scan(work_tree, added) {
-                if tree_change_removes_or_replaces_path(&existing, tree_changes) {
+                let classify = scan.classify_worktree_path(&existing);
+                if scan.path_removed_by_tree_change(&classify) {
                     return Ok(());
                 }
-                push_untracked_collision_if_present(repo, index, matcher, &existing, untracked)?;
+                push_untracked_collision_if_present(
+                    repo, index, scan, matcher, &classify, untracked,
+                )?;
             }
             return Ok(());
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(e) => return Err(Error::Io(e)),
         Ok(meta) if meta.is_dir() => {
-            collect_untracked_files_under_dir(repo, index, matcher, work_tree, added, untracked)?;
+            collect_untracked_files_under_dir(
+                repo, index, scan, matcher, work_tree, added, untracked,
+            )?;
             return Ok(());
         }
         Ok(_) => {}
@@ -847,24 +887,27 @@ fn collect_untracked_collisions_for_added_path(
         let Ok(meta) = fs::symlink_metadata(&abs) else {
             continue;
         };
+        let classify = scan.classify_worktree_path(rel);
         if meta.file_type().is_symlink() {
-            if tree_change_removes_or_replaces_path(rel, tree_changes) {
+            if scan.path_removed_by_tree_change(&classify) {
                 return Ok(());
             }
-            push_untracked_collision_if_present(repo, index, matcher, rel, untracked)?;
+            push_untracked_collision_if_present(repo, index, scan, matcher, &classify, untracked)?;
             return Ok(());
         }
         if meta.is_dir() {
             if prefix_len >= added.len() {
-                collect_untracked_files_under_dir(repo, index, matcher, work_tree, rel, untracked)?;
+                collect_untracked_files_under_dir(
+                    repo, index, scan, matcher, work_tree, rel, untracked,
+                )?;
             }
             continue;
         }
         if meta.is_file() {
-            if tree_change_removes_or_replaces_path(rel, tree_changes) {
+            if scan.path_removed_by_tree_change(&classify) {
                 continue;
             }
-            push_untracked_collision_if_present(repo, index, matcher, rel, untracked)?;
+            push_untracked_collision_if_present(repo, index, scan, matcher, &classify, untracked)?;
         }
     }
     Ok(())
@@ -873,6 +916,7 @@ fn collect_untracked_collisions_for_added_path(
 fn collect_untracked_files_under_dir(
     repo: &Repository,
     index: &Index,
+    scan: &AddedTreeChangeUntrackedScan<'_, '_>,
     matcher: &mut crate::ignore::IgnoreMatcher,
     work_tree: &Path,
     dir_rel: &str,
@@ -901,7 +945,9 @@ fn collect_untracked_files_under_dir(
                 continue;
             }
             if file_type.is_file() || file_type.is_symlink() {
-                push_untracked_collision_if_present(repo, index, matcher, &child_rel, untracked)?;
+                push_untracked_collision_if_present(
+                    repo, index, scan, matcher, &child_rel, untracked,
+                )?;
             }
         }
     }
@@ -1429,8 +1475,13 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         ignored.extend(i);
     }
     if use_fast_wholesale_scan {
-        let u =
-            collect_untracked_for_added_tree_changes_lstat(repo, index, work_tree, tree_changes)?;
+        let u = collect_untracked_for_added_tree_changes_lstat(
+            repo,
+            index,
+            work_tree,
+            tree_changes,
+            ignorecase,
+        )?;
         untracked.extend(u);
     } else if !all_specs.is_empty() {
         let (u, mut ign) = collect_untracked_and_ignored_with_cache(
@@ -1880,7 +1931,7 @@ mod tests {
             added_entry("dir0/sub/f"),
         ];
         let hits = super::collect_untracked_for_added_tree_changes_lstat(
-            &repo, &index, work_tree, &changes,
+            &repo, &index, work_tree, &changes, false,
         )
         .expect("scan");
         assert!(
@@ -1901,6 +1952,7 @@ mod tests {
             &index,
             work_tree,
             &[added_entry("slot")],
+            false,
         )
         .expect("scan");
         assert_eq!(hits, vec!["slot/precious.txt".to_owned()]);
@@ -1912,6 +1964,7 @@ mod tests {
             &index,
             work_tree,
             &[added_entry("slot/incoming.txt")],
+            false,
         )
         .expect("scan");
         assert_eq!(hits, vec!["slot".to_owned()]);
@@ -1929,6 +1982,7 @@ mod tests {
             &index,
             work_tree,
             &[added_entry("victim")],
+            false,
         )
         .expect("scan");
         assert!(hits.is_empty(), "ignored victim should not block: {hits:?}");
@@ -1966,6 +2020,7 @@ mod tests {
             &index,
             work_tree,
             &[added_entry("t/inv/in/Cargo.toml")],
+            false,
         )
         .expect("scan");
         assert!(
@@ -1991,6 +2046,7 @@ mod tests {
             &index,
             work_tree,
             &[added_entry("link/inside.txt")],
+            false,
         )
         .expect("scan");
         assert_eq!(hits, vec!["link".to_owned()]);
@@ -2013,9 +2069,143 @@ mod tests {
             &index,
             work_tree,
             &[added_entry("link/nested/file.txt")],
+            false,
         )
         .expect("scan");
         assert_eq!(hits, vec!["link".to_owned()]);
+    }
+
+    #[test]
+    fn icase_added_lstat_lookup_treats_case_only_rename_as_tracked() {
+        use crate::index::entry_from_stat;
+        use crate::objects::ObjectKind;
+
+        let (dir, repo) = init_repo();
+        std::fs::create_dir_all(dir.path().join("d")).expect("mkdir");
+        std::fs::write(dir.path().join("d/README.md"), "y\n").expect("readme");
+        let oid = repo.odb().write(ObjectKind::Blob, b"y\n").expect("blob");
+        let mut index = load_worktree_index(&repo).expect("index");
+        let readme_entry = entry_from_stat(
+            &dir.path().join("d/README.md"),
+            b"d/README.md",
+            oid,
+            crate::index::MODE_REGULAR,
+        )
+        .expect("entry");
+        index.add_or_replace(readme_entry);
+        index.sort();
+
+        let removed = super::removed_or_replaced_old_paths(&[
+            DiffEntry {
+                status: DiffStatus::Deleted,
+                old_path: Some("d/README.md".into()),
+                new_path: None,
+                old_mode: FileMode::REGULAR,
+                new_mode: FileMode::ABSENT,
+                old_oid: ObjectId::zero(),
+                new_oid: ObjectId::zero(),
+                score: None,
+            },
+            added_entry("d/Readme.md"),
+        ]);
+        let lookup = ScheduledDeletePathLookup::new(&removed, true);
+        assert!(lookup.contains("d/Readme.md"));
+        let tracked = Stage0TrackedPaths::from_index_for_untracked_scan(&index, true);
+        assert!(tracked.contains_bytes(b"d/Readme.md"));
+    }
+
+    fn deleted_entry(path: &str) -> DiffEntry {
+        DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(path.to_owned()),
+            new_path: None,
+            old_mode: FileMode::REGULAR,
+            new_mode: FileMode::ABSENT,
+            old_oid: ObjectId::zero(),
+            new_oid: ObjectId::zero(),
+            score: None,
+        }
+    }
+
+    #[test]
+    fn added_lstat_untracked_icase_rename_with_wholesale_delete_count() {
+        use crate::index::entry_from_stat;
+        use crate::objects::ObjectKind;
+
+        let (dir, repo) = init_repo();
+        let work_tree = repo.work_tree().expect("work tree");
+        std::fs::create_dir_all(work_tree.join("d")).expect("mkdir");
+        std::fs::write(work_tree.join("d/README.md"), "y\n").expect("readme");
+        let oid = repo.odb().write(ObjectKind::Blob, b"y\n").expect("blob");
+        let mut index = load_worktree_index(&repo).expect("index");
+        index.add_or_replace(
+            entry_from_stat(
+                &work_tree.join("d/README.md"),
+                b"d/README.md",
+                oid,
+                crate::index::MODE_REGULAR,
+            )
+            .expect("entry"),
+        );
+        for i in 1..=40 {
+            let rel = format!("d/f{i}");
+            std::fs::write(work_tree.join(&rel), format!("{i}\n")).expect("write");
+            let file_oid = repo
+                .odb()
+                .write(ObjectKind::Blob, format!("{i}\n").as_bytes())
+                .expect("blob");
+            index.add_or_replace(
+                entry_from_stat(
+                    &work_tree.join(&rel),
+                    rel.as_bytes(),
+                    file_oid,
+                    crate::index::MODE_REGULAR,
+                )
+                .expect("entry"),
+            );
+        }
+        index.sort();
+
+        let mut changes = vec![deleted_entry("d/README.md"), added_entry("d/Readme.md")];
+        for i in 1..=40 {
+            changes.push(deleted_entry(&format!("d/f{i}")));
+        }
+
+        let hits_31 = {
+            let mut subset = changes.clone();
+            subset.retain(|c| {
+                c.old_path.as_deref() != Some("d/f40") && c.new_path.as_deref() != Some("d/f40")
+            });
+            super::collect_untracked_for_added_tree_changes_lstat(
+                &repo, &index, work_tree, &subset, true,
+            )
+            .expect("scan 31 deletes")
+        };
+        assert!(
+            hits_31.is_empty(),
+            "31-delete path should not report case rename: {hits_31:?}"
+        );
+
+        let hits_32 = super::collect_untracked_for_added_tree_changes_lstat(
+            &repo, &index, work_tree, &changes, true,
+        )
+        .expect("scan 32+ deletes");
+        assert!(
+            hits_32.is_empty(),
+            "wholesale fast-path lstat must not treat case rename as untracked: {hits_32:?}"
+        );
+
+        changes.push(added_entry("d/collision.txt"));
+        std::fs::write(work_tree.join("d/collision.txt"), "x\n").expect("collision");
+        let hits_extra = super::collect_untracked_for_added_tree_changes_lstat(
+            &repo, &index, work_tree, &changes, true,
+        )
+        .expect("scan with collision");
+        assert!(
+            hits_extra.iter().any(|p| p == "d/collision.txt"),
+            "distinct untracked file must still block: {hits_extra:?}"
+        );
+        let _ = dir;
     }
 
     #[test]
