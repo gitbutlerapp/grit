@@ -43,6 +43,12 @@ struct FileStatJson {
     binary: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
+    old_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    new_size: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
     similarity: Option<u32>,
 }
 
@@ -60,6 +66,8 @@ impl From<&DiffStat> for DiffStatJson {
                     insertions: file.lines.insertions,
                     deletions: file.lines.deletions,
                     binary: file.binary,
+                    old_size: file.binary.then_some(file.old_size),
+                    new_size: file.binary.then_some(file.new_size),
                     similarity: file.similarity,
                 })
                 .collect(),
@@ -110,6 +118,8 @@ pub fn diffstat_from_files(files: &[FileDiff]) -> DiffStat {
                 old_path: file.old_path.clone(),
                 status: file.status.into(),
                 binary: file.binary,
+                old_size: file.old_size.unwrap_or(0),
+                new_size: file.new_size.unwrap_or(0),
                 similarity: file.similarity,
                 lines: file.line_stat(),
             })
@@ -164,12 +174,21 @@ fn render_stat_with_options(
     for file in stat.files() {
         let path = stat_path(file, path_opts);
         if file.binary {
-            outln!(w, " {path:<name_width$} | Bin");
+            outln!(
+                w,
+                " {path:<name_width$} | Bin {} -> {} bytes",
+                file.old_size,
+                file.new_size
+            );
             continue;
         }
         let total = file.lines.changes();
         let bar = paint_bar(file.lines.bar(max_changes, BAR_WIDTH), color);
-        outln!(w, " {path:<name_width$} | {total:>3} {bar}");
+        if bar.is_empty() {
+            outln!(w, " {path:<name_width$} | {total:>3}");
+        } else {
+            outln!(w, " {path:<name_width$} | {total:>3} {bar}");
+        }
     }
 
     outln!(w, " {}", summary_line(stat.totals()));
@@ -193,7 +212,12 @@ pub fn render_markdown_stat(
         let path = markdown::escape_table_cell(&stat_path(file, path_opts));
         let path_code = markdown::format_inline_code(&path);
         if file.binary {
-            outln!(w, "| {path_code} | binary | |");
+            outln!(
+                w,
+                "| {path_code} | Bin {} → {} bytes | |",
+                file.old_size,
+                file.new_size
+            );
         } else {
             outln!(
                 w,

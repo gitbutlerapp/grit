@@ -190,7 +190,7 @@ pub(crate) fn load_change(
         None => load_new_side(odb, &entry, None)?,
     };
     let (old_bytes, old_binary) = if new_binary {
-        (SideBytes::from_bytes(Vec::new()), false)
+        (old_side_without_payload(odb, &entry, worktree)?, false)
     } else {
         load_old_side(odb, &entry, None)?
     };
@@ -212,6 +212,35 @@ pub(crate) fn load_changes(
         .into_iter()
         .map(|entry| load_change(odb, entry, worktree))
         .collect()
+}
+
+fn old_side_without_payload(
+    odb: &Odb,
+    entry: &DiffEntry,
+    worktree: Option<&WorktreeSide<'_>>,
+) -> Result<SideBytes> {
+    if entry.old_mode == FileMode::GITLINK {
+        return Ok(SideBytes::from_bytes(
+            gitlink_line(&entry.old_oid).into_bytes(),
+        ));
+    }
+    if entry.old_mode == FileMode::ABSENT {
+        return Ok(SideBytes::empty_with_size(0));
+    }
+    if let Some(side) = worktree {
+        if let Some(path) = entry.old_path.as_deref().or(entry.new_path.as_deref()) {
+            if let Some(ie) = side.index.get(&crate::repo_relpath::storage_bytes(path), 0) {
+                if ie.oid == entry.old_oid && !ie.stat_cache_unset() {
+                    return Ok(SideBytes::empty_with_size(u64::from(ie.size)));
+                }
+            }
+        }
+    }
+    if entry.old_oid.is_zero() {
+        return Ok(SideBytes::empty_with_size(0));
+    }
+    let info = odb.read_info(&entry.old_oid)?;
+    Ok(SideBytes::empty_with_size(info.size))
 }
 
 fn load_worktree_new_side(

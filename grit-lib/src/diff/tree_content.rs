@@ -100,6 +100,10 @@ pub struct TreeDiffStructured {
     pub structured: StructuredFileDiff,
     /// `true` when either side looks like a binary blob (NUL in the first 8 KiB).
     pub binary: bool,
+    /// Old-side byte length (for binary `--stat` rows).
+    pub old_size: u64,
+    /// New-side byte length (for binary `--stat` rows).
+    pub new_size: u64,
     /// Worktree/index side bytes when content is not materialized in the ODB.
     pub patch_bytes: Option<(SideBytes, SideBytes)>,
 }
@@ -152,6 +156,9 @@ pub fn tree_diff_contents_parallel(
     Ok(rows)
 }
 
+/// One tree diff entry's stat row: metadata, binary flag, line counts, side byte lengths.
+pub(crate) type TreeDiffStatRow = (DiffEntry, bool, Option<LineStat>, u64, u64);
+
 /// Per-file line counts for stat modes (loads blobs, no hunk allocation).
 ///
 /// Worker threads are used only for 16 or more entries (or the policy's
@@ -166,7 +173,7 @@ pub fn tree_diff_stat_parallel(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     diff_options: DiffOptions,
-) -> Result<Vec<(DiffEntry, bool, Option<LineStat>)>> {
+) -> Result<Vec<TreeDiffStatRow>> {
     if entries.is_empty() {
         return Ok(Vec::new());
     }
@@ -186,8 +193,9 @@ pub fn tree_diff_stat_parallel(
                 && entry.old_oid == entry.new_oid
                 && entry.old_mode == entry.new_mode
             {
-                let (_, old_bin) = load_old_side(odb, entry, blob_reads)?;
+                let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
                 let binary = old_bin;
+                let size = old_bytes.byte_len();
                 return Ok((
                     entry.clone(),
                     binary,
@@ -196,11 +204,15 @@ pub fn tree_diff_stat_parallel(
                     } else {
                         Some(LineStat::default())
                     },
+                    size,
+                    size,
                 ));
             }
             let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
             let (new_bytes, new_bin) = load_new_side(odb, entry, blob_reads)?;
             let binary = old_bin || new_bin;
+            let old_size = old_bytes.byte_len();
+            let new_size = new_bytes.byte_len();
             let stat = if binary {
                 None
             } else {
@@ -210,7 +222,7 @@ pub fn tree_diff_stat_parallel(
                     &line_diff_opts,
                 ))
             };
-            Ok((entry.clone(), binary, stat))
+            Ok((entry.clone(), binary, stat, old_size, new_size))
         },
     );
     match rows {
@@ -235,6 +247,7 @@ pub fn tree_diff_structured_entry(
         && entry.old_mode == entry.new_mode
     {
         let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
+        let size = old_bytes.byte_len();
         return Ok(TreeDiffStructured {
             entry: entry.clone(),
             structured: StructuredFileDiff {
@@ -245,12 +258,16 @@ pub fn tree_diff_structured_entry(
                 hunks: Vec::new(),
             },
             binary: old_bin,
+            old_size: size,
+            new_size: size,
             patch_bytes: None,
         });
     }
     let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
     let (new_bytes, new_bin) = load_new_side(odb, entry, blob_reads)?;
     let binary = old_bin || new_bin;
+    let old_size = old_bytes.byte_len();
+    let new_size = new_bytes.byte_len();
     let structured = if binary {
         StructuredFileDiff {
             old_mode: entry.old_mode.octal_if_present(),
@@ -272,6 +289,8 @@ pub fn tree_diff_structured_entry(
         entry: entry.clone(),
         structured,
         binary,
+        old_size,
+        new_size,
         patch_bytes: None,
     })
 }
@@ -462,8 +481,9 @@ pub(crate) fn side_bytes_after_blob_read(
     retain_binary_payload: bool,
 ) -> (SideBytes, bool) {
     let binary = crate::crlf::is_binary(&data);
+    let size = data.len() as u64;
     if binary && !retain_binary_payload {
-        (SideBytes::from_bytes(Vec::new()), true)
+        (SideBytes::empty_with_size(size), true)
     } else {
         (SideBytes::from_bytes(data), binary)
     }
@@ -486,14 +506,14 @@ pub fn load_odb_blob_side_for_diff(
     force_read_content: bool,
 ) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
-        return Ok((SideBytes::from_bytes(Vec::new()), false));
+        return Ok((SideBytes::empty_with_size(0), false));
     }
     if !force_read_content {
         let info = odb.read_info(oid)?;
         if info.kind == ObjectKind::Blob
             && treat_side_as_binary_without_reading(odb, info.size, path, false)?
         {
-            return Ok((SideBytes::from_bytes(Vec::new()), true));
+            return Ok((SideBytes::empty_with_size(info.size), true));
         }
     }
     note_blob_read(blob_reads);
@@ -506,8 +526,9 @@ pub fn load_odb_blob_side_for_diff(
 /// Classify raw blob bytes for line diffs (NUL in the first 8 KiB ⇒ binary).
 #[must_use]
 pub fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
+    let size = data.len() as u64;
     if crate::crlf::is_binary(&data) {
-        (SideBytes::from_bytes(Vec::new()), true)
+        (SideBytes::empty_with_size(size), true)
     } else {
         (SideBytes::from_bytes(data), false)
     }

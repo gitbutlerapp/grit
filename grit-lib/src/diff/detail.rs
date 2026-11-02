@@ -81,6 +81,10 @@ pub struct FileDiff {
     pub new_mode: Option<String>,
     /// Either side looks like a binary blob.
     pub binary: bool,
+    /// Old-side byte length (for binary `--stat` and JSON).
+    pub old_size: u64,
+    /// New-side byte length (for binary `--stat` and JSON).
+    pub new_size: u64,
     /// Rename/copy similarity (0–100), when applicable.
     pub similarity: Option<u32>,
     /// Line counts when [`DiffDetail::Stat`] was requested.

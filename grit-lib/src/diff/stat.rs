@@ -213,6 +213,10 @@ pub struct FileStat {
     pub status: DiffStatus,
     /// Either side looks like a binary blob (no line counts).
     pub binary: bool,
+    /// Old-side byte length when [`Self::binary`] is true.
+    pub old_size: u64,
+    /// New-side byte length when [`Self::binary`] is true.
+    pub new_size: u64,
     /// Rename/copy similarity (0–100), when applicable.
     pub similarity: Option<u32>,
     /// Inserted and deleted lines.
@@ -226,6 +230,8 @@ impl From<&FileDiff> for FileStat {
             old_path: file.old_path.clone(),
             status: file.status,
             binary: file.binary,
+            old_size: file.old_size,
+            new_size: file.new_size,
             similarity: file.similarity,
             lines: file.line_stat(),
         }
@@ -351,6 +357,8 @@ mod tests {
             old_path: None,
             status: DiffStatus::Modified,
             binary,
+            old_size: 0,
+            new_size: 0,
             similarity: None,
             lines: stat,
         }
@@ -364,6 +372,8 @@ mod tests {
             old_mode: None,
             new_mode: None,
             binary: false,
+            old_size: 0,
+            new_size: 0,
             similarity: None,
             stat,
             structured,

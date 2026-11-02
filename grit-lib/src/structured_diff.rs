@@ -27,17 +27,37 @@ pub struct SideBytes {
     pub data: Vec<u8>,
     /// `true` when [`SideBytes::text`] used lossy UTF-8 decoding.
     pub encoding_lossy: bool,
+    /// Byte length of this side; kept when [`Self::data`] is dropped for binary diffs.
+    pub size: u64,
 }
 
 impl SideBytes {
     /// Decode as text for diffing (NUL in the first 8 KiB ⇒ treat as binary upstream).
     #[must_use]
     pub fn from_bytes(data: Vec<u8>) -> Self {
+        let size = data.len() as u64;
         let encoding_lossy = !data.is_empty() && std::str::from_utf8(&data).is_err();
         Self {
             data,
             encoding_lossy,
+            size,
         }
+    }
+
+    /// Empty payload with a known on-disk byte length (binary stat / skipped reads).
+    #[must_use]
+    pub fn empty_with_size(size: u64) -> Self {
+        Self {
+            data: Vec::new(),
+            encoding_lossy: false,
+            size,
+        }
+    }
+
+    /// On-disk byte length of this side.
+    #[must_use]
+    pub fn byte_len(&self) -> u64 {
+        self.size
     }
 
     /// Lossy UTF-8 view of [`Self::data`].

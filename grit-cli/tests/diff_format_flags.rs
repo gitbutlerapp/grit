@@ -404,3 +404,46 @@ fn name_status_with_default_renames_reads_no_blobs_when_nothing_pairs() {
     assert_eq!(files.len(), 14);
     assert!(files.iter().all(|f| f["status"] == "modified"), "{value}");
 }
+
+#[test]
+fn diff_stat_binary_shows_byte_sizes_like_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    assert!(grit(dir.path(), &["init", "-b", "main"]).ok(), "init");
+    std::process::Command::new("head")
+        .args(["-c", "4096", "/dev/urandom"])
+        .stdout(std::process::Stdio::from(
+            std::fs::File::create(dir.path().join("bin.dat")).expect("create"),
+        ))
+        .status()
+        .expect("head");
+    assert!(
+        grit(dir.path(), &["commit", "-m", "c1"]).ok(),
+        "first commit"
+    );
+    std::process::Command::new("head")
+        .args(["-c", "100", "/dev/urandom"])
+        .stdout(std::process::Stdio::from(
+            std::fs::File::create(dir.path().join("bin.dat")).expect("recreate"),
+        ))
+        .status()
+        .expect("head");
+    let git_stat = git(dir.path(), &["diff", "--stat"]);
+    let grit_stat = grit(dir.path(), &["diff", "--stat"]);
+    assert!(
+        git_stat.contains("Bin 4096 -> 100 bytes"),
+        "git: {git_stat:?}"
+    );
+    assert!(grit_stat.ok(), "{}", grit_stat.dump("grit diff --stat"));
+    assert!(
+        grit_stat.stdout.contains("Bin 4096 -> 100 bytes"),
+        "{}",
+        grit_stat.dump("grit diff --stat")
+    );
+    let json = grit(dir.path(), &["diff", "--stat", "--json"]);
+    assert!(json.ok(), "{}", json.dump("stat json"));
+    let value: serde_json::Value = serde_json::from_str(&json.stdout).expect("json");
+    let file = &value["files"][0];
+    assert_eq!(file["binary"], true);
+    assert_eq!(file["old_size"], 4096);
+    assert_eq!(file["new_size"], 100);
+}

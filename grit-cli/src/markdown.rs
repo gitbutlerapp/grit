@@ -2270,6 +2270,8 @@ mod tests {
             old_encoding_lossy: false,
             new_encoding_lossy: false,
             binary: false,
+            old_size: None,
+            new_size: None,
             content_changed: false,
             similarity: None,
             stat: None,

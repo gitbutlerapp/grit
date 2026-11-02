@@ -8370,7 +8370,10 @@ pub fn load_worktree_side_for_diff(
     if !force_read_content
         && treat_side_as_binary_without_reading(odb, meta.len(), Some(rel_match.as_ref()), false)?
     {
-        return Ok((super::structured::SideBytes::from_bytes(Vec::new()), true));
+        return Ok((
+            super::structured::SideBytes::empty_with_size(meta.len()),
+            true,
+        ));
     }
     let data = if let Some(rules) = worktree_rules {
         worktree_blob_bytes(

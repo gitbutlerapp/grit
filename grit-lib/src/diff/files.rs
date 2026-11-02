@@ -93,6 +93,8 @@ impl FileDiff {
             old_mode: entry.old_mode.octal_if_present(),
             new_mode: entry.new_mode.octal_if_present(),
             binary: false,
+            old_size: 0,
+            new_size: 0,
             similarity,
             stat: None,
             structured: None,
@@ -111,6 +113,8 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
         old_mode: t.structured.old_mode.clone(),
         new_mode: t.structured.new_mode.clone(),
         binary: t.binary,
+        old_size: t.old_size,
+        new_size: t.new_size,
         similarity: t.entry.rename_similarity(),
         stat: None,
         structured: Some(t.structured),
@@ -119,7 +123,13 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
     }
 }
 
-fn file_diff_from_stat(entry: DiffEntry, binary: bool, stat: Option<LineStat>) -> FileDiff {
+fn file_diff_from_stat(
+    entry: DiffEntry,
+    binary: bool,
+    stat: Option<LineStat>,
+    old_size: u64,
+    new_size: u64,
+) -> FileDiff {
     let path = path_from_entry(&entry);
     FileDiff {
         path: path.clone(),
@@ -128,6 +138,8 @@ fn file_diff_from_stat(entry: DiffEntry, binary: bool, stat: Option<LineStat>) -
         old_mode: entry.old_mode.octal_if_present(),
         new_mode: entry.new_mode.octal_if_present(),
         binary,
+        old_size,
+        new_size,
         similarity: entry.rename_similarity(),
         stat,
         structured: None,
@@ -189,7 +201,9 @@ pub fn build_file_diffs(
             let rows = tree_diff_stat_parallel(odb, entries, config, thread_policy, diff_options)?;
             let files: Vec<FileDiff> = rows
                 .into_iter()
-                .map(|(entry, binary, stat)| file_diff_from_stat(entry, binary, stat))
+                .map(|(entry, binary, stat, old_size, new_size)| {
+                    file_diff_from_stat(entry, binary, stat, old_size, new_size)
+                })
                 .collect();
             let totals = Some(DiffTotals::from_files(&files));
             Ok(DiffFilesOutput {

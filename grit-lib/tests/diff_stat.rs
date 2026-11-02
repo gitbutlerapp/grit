@@ -79,6 +79,20 @@ fn stat_and_patch_details_give_the_same_diffstat() {
         insertions,
         deletions,
     };
+    let bin_row = from_stat
+        .files()
+        .iter()
+        .find(|f| f.path == "bin.dat")
+        .expect("bin.dat row");
+    assert!(bin_row.binary);
+    assert_eq!(bin_row.old_size, 3);
+    assert_eq!(bin_row.new_size, 4);
+
+    let rows: Vec<_> = from_stat
+        .files()
+        .iter()
+        .map(|f| (f.path.as_str(), f.status, f.binary, f.lines))
+        .collect();
     assert_eq!(
         rows,
         [
@@ -115,6 +129,8 @@ fn diffstat_from_rows_sums_totals_in_order() {
         old_path: None,
         status: DiffStatus::Modified,
         binary: false,
+        old_size: 0,
+        new_size: 0,
         similarity: None,
         lines: LineStat {
             insertions,
