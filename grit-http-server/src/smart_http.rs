@@ -213,14 +213,22 @@ pub async fn rpc_holding<H: Send + 'static>(
 ) -> (Response<Body>, RpcFollowUp) {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
-        Err(resp) => return (*resp, RpcFollowUp::default()),
+        Err(resp) => {
+            let outcome = crate::request_body::discard_request_body(body).await;
+            return (
+                crate::request_body::apply_discard_outcome(*resp, outcome),
+                RpcFollowUp::default(),
+            );
+        }
     };
     match service {
         Service::UploadPack => {
-            let raw = streaming_body_reader(body);
+            let (raw, bridge) = crate::request_body::open_body_bridge(body);
+            let raw = std::io::BufReader::with_capacity(STREAM_READ_BUFFER, raw);
             let (response, upload_outcome) = stream_upload_pack(
                 repo_path,
                 raw,
+                bridge,
                 encoding,
                 protocol_version,
                 options,
@@ -238,16 +246,20 @@ pub async fn rpc_holding<H: Send + 'static>(
             )
         }
         Service::ReceivePack => {
-            let raw = streaming_body_reader(body);
+            let (raw, bridge) = crate::request_body::open_body_bridge(body);
+            let raw = std::io::BufReader::with_capacity(STREAM_READ_BUFFER, raw);
             let result = tokio::task::spawn_blocking(move || {
+                let mut request = push_request_body(raw, encoding);
                 grit_protocol::receive_pack::stateless_rpc_with_session(
                     &repo_path,
-                    &mut decoded_reader(raw, encoding),
+                    &mut request,
                     &options,
                     &session,
                 )
             })
             .await;
+            let force_discard = matches!(&result, Ok(Err(_)));
+            let discard = bridge.finish(force_discard).await;
             match result {
                 Ok(Ok(result)) => (
                     no_cache_headers(Response::builder())
@@ -262,7 +274,13 @@ pub async fn rpc_holding<H: Send + 'static>(
                         upload_outcome: None,
                     },
                 ),
-                Ok(Err(e)) => (receive_pack_error_response(&e), RpcFollowUp::default()),
+                Ok(Err(e)) => (
+                    crate::request_body::apply_discard_outcome(
+                        receive_pack_error_response(&e),
+                        discard,
+                    ),
+                    RpcFollowUp::default(),
+                ),
                 Err(e) => (
                     internal_error(&format!("{} failed: {e}", service.name())),
                     RpcFollowUp::default(),
@@ -473,13 +491,69 @@ impl<R: Read> Read for FetchGzip<R> {
     }
 }
 
+enum FetchRequestBody<R: Read> {
+    Plain(Box<DecodedByteLimit<R>>),
+    Gzip(Box<FetchGzip<R>>),
+}
+
+impl<R: Read> Read for FetchRequestBody<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(r) => r.read(buf),
+            Self::Gzip(r) => r.read(buf),
+        }
+    }
+}
+
+fn fetch_request_body(
+    raw: impl Read + Send + 'static,
+    encoding: BodyEncoding,
+) -> FetchRequestBody<Box<dyn Read + Send>> {
+    let raw: Box<dyn Read + Send> = Box::new(raw);
+    let max = fetch_body_limit();
+    match encoding {
+        BodyEncoding::Identity => FetchRequestBody::Plain(Box::new(DecodedByteLimit {
+            inner: raw,
+            decoded: 0,
+            max,
+        })),
+        BodyEncoding::Gzip => FetchRequestBody::Gzip(Box::new(FetchGzip {
+            decoder: flate2::read::GzDecoder::new(raw),
+            decoded: 0,
+            max,
+        })),
+    }
+}
+
+enum PushRequestBody<R: Read> {
+    Plain(R),
+    Gzip(Box<ExpansionLimitedGzip<R>>),
+}
+
+impl<R: Read> Read for PushRequestBody<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(r) => r.read(buf),
+            Self::Gzip(r) => r.read(buf),
+        }
+    }
+}
+
+fn push_request_body(
+    raw: impl Read + Send + 'static,
+    encoding: BodyEncoding,
+) -> PushRequestBody<Box<dyn Read + Send>> {
+    let raw: Box<dyn Read + Send> = Box::new(raw);
+    match encoding {
+        BodyEncoding::Identity => PushRequestBody::Plain(raw),
+        BodyEncoding::Gzip => PushRequestBody::Gzip(Box::new(ExpansionLimitedGzip::new(raw))),
+    }
+}
+
 /// Apply fetch-body size limits while undoing `Content-Encoding`.
 ///
 /// Call on the blocking thread: the gzip decoder reads its header as soon as it is created.
-fn decoded_fetch_reader(raw: impl Read + Send + 'static, encoding: BodyEncoding) -> Box<dyn Read> {
-    decoded_fetch_reader_with_limit(raw, encoding, fetch_body_limit())
-}
-
+#[allow(dead_code)]
 fn decoded_fetch_reader_with_limit(
     raw: impl Read + Send + 'static,
     encoding: BodyEncoding,
@@ -507,6 +581,7 @@ const STREAM_READ_BUFFER: usize = 64 * 1024;
 ///
 /// Must be called from the async runtime; the returned reader must then be used from a
 /// blocking thread (`spawn_blocking`), where each read waits for the next body chunk.
+#[cfg(test)]
 fn streaming_body_reader(body: Body) -> impl Read + Send + 'static {
     use futures_util::TryStreamExt as _;
 
@@ -521,6 +596,7 @@ fn streaming_body_reader(body: Body) -> impl Read + Send + 'static {
 ///
 /// Call this on the blocking thread: the gzip decoder reads its header as soon as it is
 /// created, which would block the async runtime.
+#[allow(dead_code)]
 fn decoded_reader<'a>(raw: impl Read + 'a, encoding: BodyEncoding) -> Box<dyn Read + 'a> {
     match encoding {
         BodyEncoding::Identity => Box::new(raw),
@@ -1047,6 +1123,7 @@ async fn streaming_channel_response(
 async fn stream_upload_pack<H: Send + 'static>(
     repo_path: PathBuf,
     raw: impl Read + Send + 'static,
+    bridge: crate::request_body::BodyBridge,
     encoding: BodyEncoding,
     protocol_version: Option<u8>,
     options: RepositoryOptions,
@@ -1059,8 +1136,9 @@ async fn stream_upload_pack<H: Send + 'static>(
 ) {
     let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
+    let mut bridge = Some(bridge);
     let task = tokio::task::spawn_blocking(move || {
-        let mut request = decoded_fetch_reader(raw, encoding);
+        let mut request = fetch_request_body(raw, encoding);
         let mut out = ChannelWriter::new(tx);
         let result = grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
             &repo_path,
@@ -1089,12 +1167,35 @@ async fn stream_upload_pack<H: Send + 'static>(
     let first = match rx.recv().await {
         Some(Ok(first)) => first,
         Some(Err(e)) => {
+            if let Some(bridge) = bridge.take() {
+                let _ = bridge.finish(true).await;
+            }
             return (internal_error(&format!("upload-pack failed: {e}")), None);
         }
         None => match task.await {
-            Ok(Ok(())) => Bytes::new(),
-            Ok(Err(e)) => return (upload_pack_error_response(&e), None),
+            Ok(Ok(())) => {
+                if let Some(bridge) = bridge.take() {
+                    let _ = bridge.finish(false).await;
+                }
+                Bytes::new()
+            }
+            Ok(Err(e)) => {
+                let Some(bridge) = bridge.take() else {
+                    return (upload_pack_error_response(&e), None);
+                };
+                let outcome = bridge.finish(true).await;
+                return (
+                    crate::request_body::apply_discard_outcome(
+                        upload_pack_error_response(&e),
+                        outcome,
+                    ),
+                    None,
+                );
+            }
             Err(e) => {
+                if let Some(bridge) = bridge.take() {
+                    let _ = bridge.finish(true).await;
+                }
                 return (internal_error(&format!("upload-pack failed: {e}")), None);
             }
         },
@@ -1106,6 +1207,11 @@ async fn stream_upload_pack<H: Send + 'static>(
         futures_util::stream::once(std::future::ready(Ok::<Bytes, std::io::Error>(first))),
         rest,
     );
+    if let Some(bridge) = bridge.take() {
+        tokio::spawn(async move {
+            let _ = bridge.finish(false).await;
+        });
+    }
     (
         no_cache_headers(Response::builder())
             .header(header::CONTENT_TYPE, "application/x-git-upload-pack-result")

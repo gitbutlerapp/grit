@@ -255,17 +255,25 @@ async fn rpc_dispatch(
 ) -> Response {
     state.log_request_headers(&headers);
     if let Err(resp) = state.check_auth(&headers) {
-        return *resp;
+        return finish_with_discarded_body(body, *resp).await;
     }
     let Some((repo, service)) = Service::strip_rpc_suffix(&full_path) else {
-        return (StatusCode::NOT_FOUND, "not found").into_response();
+        return finish_with_discarded_body(
+            body,
+            (StatusCode::NOT_FOUND, "not found").into_response(),
+        )
+        .await;
     };
     if repo.is_empty() {
-        return (StatusCode::BAD_REQUEST, "missing repository").into_response();
+        return finish_with_discarded_body(
+            body,
+            (StatusCode::BAD_REQUEST, "missing repository").into_response(),
+        )
+        .await;
     }
     let repo_path = match state.repo_path(repo) {
         Ok(p) => p,
-        Err(e) => return *e,
+        Err(e) => return finish_with_discarded_body(body, *e).await,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
     let response = smart_http::rpc(
@@ -280,4 +288,9 @@ async fn rpc_dispatch(
     )
     .await;
     state.with_cookie(response)
+}
+
+async fn finish_with_discarded_body(body: Body, response: Response) -> Response {
+    let outcome = grit_http_server::request_body::discard_request_body(body).await;
+    grit_http_server::request_body::apply_discard_outcome(response, outcome)
 }

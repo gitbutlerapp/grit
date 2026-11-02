@@ -648,6 +648,11 @@ fn upload_target(
     state.authorize(headers, name, Access::Write)
 }
 
+async fn finish_with_discarded_body(body: Body, response: Response<Body>) -> Response<Body> {
+    let outcome = crate::request_body::discard_request_body(body).await;
+    crate::request_body::apply_discard_outcome(response, outcome)
+}
+
 async fn head_dispatch(
     State(state): State<Arc<ServerState>>,
     UrlPath(path): UrlPath<String>,
@@ -669,7 +674,11 @@ async fn patch_dispatch(
     body: Body,
 ) -> Response<Body> {
     let Some((name, UploadPath::Upload(id))) = crate::uploads::parse_path(&path) else {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        return finish_with_discarded_body(
+            body,
+            (StatusCode::NOT_FOUND, "not found\n").into_response(),
+        )
+        .await;
     };
     match upload_target(&state, &headers, name) {
         Ok(found) => {
@@ -683,7 +692,7 @@ async fn patch_dispatch(
             )
             .await
         }
-        Err(resp) => *resp,
+        Err(resp) => finish_with_discarded_body(body, *resp).await,
     }
 }
 
@@ -703,7 +712,7 @@ async fn post_dispatch(
     if let Some((name, upload)) = crate::uploads::parse_path(&path) {
         let found = match upload_target(&state, &headers, name) {
             Ok(found) => found,
-            Err(resp) => return *resp,
+            Err(resp) => return finish_with_discarded_body(body, *resp).await,
         };
         return match upload {
             UploadPath::Endpoint => {
@@ -729,11 +738,15 @@ async fn post_dispatch(
         };
     }
     let Some((name, service)) = Service::strip_rpc_suffix(&path) else {
-        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+        return finish_with_discarded_body(
+            body,
+            (StatusCode::NOT_FOUND, "not found\n").into_response(),
+        )
+        .await;
     };
     let found = match state.authorize(&headers, name, needed_access(service)) {
         Ok(found) => found,
-        Err(resp) => return *resp,
+        Err(resp) => return finish_with_discarded_body(body, *resp).await,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
     let extensions = state.extensions(&found.repo, service, &headers);
