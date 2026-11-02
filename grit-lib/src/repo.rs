@@ -1799,6 +1799,7 @@ impl Repository {
 
         let repo = Self::from_canonical_git_dir(options, git_dir, work_tree, injected_refs)?;
         repo.refresh_config_session()?;
+        read_core_bare_and_worktree_from_config(repo.config()?.as_ref())?;
         if options.validate_repository_format {
             repo.validate_repository_format_cached()?;
         }
@@ -1965,6 +1966,12 @@ impl Repository {
     }
 
     /// Discover a repository starting from `start` (defaults to [`Environment::cwd`] when `None`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NotARepository`] when no repository is found in the search path.
+    /// Returns [`Error::Config`] when a config file in the discovery cascade is malformed or
+    /// contains an invalid value (for example a non-boolean `core.bare`).
     pub fn discover(start: Option<&Path>, options: &RepositoryOptions) -> Result<Self> {
         let env = &options.environment;
         let cwd = env.discovery_cwd();
@@ -2112,7 +2119,7 @@ impl Repository {
                         repo.discovery_via_gitfile && resolve_common_dir(&repo.git_dir).is_some();
                     if !linked_gitfile {
                         let (is_bare, core_wt) =
-                            read_core_bare_and_worktree_from_config(cfg.as_ref());
+                            read_core_bare_and_worktree_from_config(cfg.as_ref())?;
                         if is_bare {
                             repo.work_tree = None;
                         } else if let Some(raw) = core_wt {
@@ -3544,7 +3551,7 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
                     gitfile: None,
                 }));
             }
-            Err(Error::NotARepository(_)) | Err(Error::Config(_)) => return Ok(None),
+            Err(Error::NotARepository(_)) => return Ok(None),
             Err(e) => return Err(e),
         }
     }
@@ -3881,17 +3888,30 @@ fn warn_core_bare_worktree_conflict(options: &RepositoryOptions, repo: &Reposito
     let Ok(cfg) = repo.ensure_config_arc_fast() else {
         return;
     };
-    if let (true, Some(_)) = read_core_bare_and_worktree_from_config(&cfg) {
+    let bare = cfg.bool_or("core.bare", false);
+    let worktree = cfg.get("core.worktree").map(|s| s.to_owned());
+    if bare && worktree.is_some() {
         options
             .diagnostics
             .warn(diagnostics::Warning::CoreBareWithWorktree);
     }
 }
 
-fn read_core_bare_and_worktree_from_config(cfg: &ConfigSet) -> (bool, Option<String>) {
-    let bare = cfg.bool_or("core.bare", false);
+/// Read `core.bare` and `core.worktree` from a loaded config set.
+///
+/// # Errors
+///
+/// Returns [`Error::Config`] when `core.bare` is set to a value that is not a Git boolean.
+pub(crate) fn read_core_bare_and_worktree_from_config(
+    cfg: &ConfigSet,
+) -> Result<(bool, Option<String>)> {
+    let bare = match cfg.get_bool("core.bare") {
+        None => false,
+        Some(Ok(v)) => v,
+        Some(Err(e)) => return Err(Error::Config(e)),
+    };
     let worktree = cfg.get("core.worktree").map(|s| s.to_owned());
-    (bare, worktree)
+    Ok((bare, worktree))
 }
 
 fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)> {
@@ -3899,9 +3919,8 @@ fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)>
         &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
-    )
-    .unwrap_or_default();
-    Ok(read_core_bare_and_worktree_from_config(&cfg))
+    )?;
+    read_core_bare_and_worktree_from_config(&cfg)
 }
 
 /// Reject impossible `GIT_WORK_TREE` values before repository setup (matches Git's
