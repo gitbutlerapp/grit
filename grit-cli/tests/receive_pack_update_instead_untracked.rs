@@ -46,19 +46,20 @@ fn update_instead_refuses_untracked_collision_like_git() {
     std::fs::write(srv.join("a"), "a\n").unwrap();
     git(&srv, &["add", "a"]);
     git(&srv, &["commit", "-q", "-m", "a"]);
-    git(&srv, &["config", "receive.denyCurrentBranch", "updateInstead"]);
+    git(
+        &srv,
+        &["config", "receive.denyCurrentBranch", "updateInstead"],
+    );
 
     let work = tmp.path().join("work");
-    assert!(
-        Command::new("git")
-            .current_dir(tmp.path())
-            .args(["clone", "-q", "srv", "work"])
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .status()
-            .unwrap()
-            .success()
-    );
+    assert!(Command::new("git")
+        .current_dir(tmp.path())
+        .args(["clone", "-q", "srv", "work"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .status()
+        .unwrap()
+        .success());
     std::fs::write(work.join("collision"), "incoming\n").unwrap();
     git(&work, &["add", "collision"]);
     git(&work, &["commit", "-q", "-m", "add collision"]);
@@ -68,10 +69,7 @@ fn update_instead_refuses_untracked_collision_like_git() {
     let main_before = rev_parse(&srv, "refs/heads/main");
 
     let receive_pack = format!("--receive-pack={GRIT} receive-pack");
-    let push = git_cmd(
-        &work,
-        &["push", &receive_pack, "../srv", "HEAD:main"],
-    );
+    let push = git_cmd(&work, &["push", &receive_pack, "../srv", "HEAD:main"]);
     assert!(
         !push.status.success(),
         "push should fail: {}",
