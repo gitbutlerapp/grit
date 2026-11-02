@@ -704,9 +704,20 @@ impl Remote {
                 }
             }
         };
+        let (stack_watch, _wait_guard) = crate::progress::HttpWaitGuard::bind(cancel);
+        let mut connect = ConnectOptions {
+            cancel: Some(crate::progress::connect_cancel_arc(
+                cancel,
+                std::sync::Arc::clone(&stack_watch),
+            )),
+            stack_watch,
+            ..Default::default()
+        };
+        connect.bind_stack_cancel(cancel);
+        client.set_operation_cancel(connect.cancel.clone());
         crate::bundle_uri::seed_from_bundle_uri(
             repo,
-            client.as_ref(),
+            std::sync::Arc::from(client),
             url,
             cache_dir,
             progress,

@@ -119,6 +119,8 @@ mod clone_depth_branch;
 #[cfg(feature = "full-tests")]
 #[path = "clone_empty_remote.rs"]
 mod clone_empty_remote;
+#[path = "clone_http_stall_interrupt.rs"]
+mod clone_http_stall_interrupt;
 #[path = "clone_interrupt.rs"]
 mod clone_interrupt;
 #[cfg(feature = "full-tests")]

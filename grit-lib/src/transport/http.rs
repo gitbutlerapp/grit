@@ -214,6 +214,12 @@ pub trait HttpClient: Send + Sync {
         _cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
     ) {
     }
+
+    /// When set, worker-thread HTTP waits abort after this duration with no response
+    /// (Git `http.lowSpeedTime` with zero bytes transferred).
+    fn low_speed_stall_window(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 /// Method of an [`HttpRequest`].
@@ -417,6 +423,10 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
     fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
         (**self).send(request)
     }
+
+    fn low_speed_stall_window(&self) -> Option<std::time::Duration> {
+        (**self).low_speed_stall_window()
+    }
 }
 
 impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
@@ -487,6 +497,10 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
 
     fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
         (**self).send(request)
+    }
+
+    fn low_speed_stall_window(&self) -> Option<std::time::Duration> {
+        (**self).low_speed_stall_window()
     }
 }
 
@@ -1067,6 +1081,7 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
     owner: &dyn Cancel,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> Result<(Vec<u8>, Option<String>)> {
+    let stall = client.low_speed_stall_window();
     let client = client.clone();
     let url = url.to_owned();
     let git_protocol = git_protocol.map(str::to_owned);
@@ -1074,7 +1089,7 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
         client.get_with_final_url(&url, git_protocol.as_deref())
     })
     .map_err(Error::Io)?
-    .wait_with_watch(cancel, Some(owner), Some(stack_watch))
+    .wait_with_watch(cancel, Some(owner), Some(stack_watch), stall)
 }
 
 fn info_refs_url_for_service(repo_url: &str, service: Service) -> String {
