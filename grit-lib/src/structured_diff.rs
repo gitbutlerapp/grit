@@ -70,33 +70,33 @@ impl SideBytes {
 /// One run of text within a line, with optional intra-line emphasis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredSegment {
-    /// Text for this item.
+    /// Visible characters for this run (may be a substring of the line).
     pub text: String,
-    /// Emphasis for this item.
+    /// When `true`, render with intra-line emphasis (word-level diff).
     pub emphasis: bool,
 }
 
 /// Kind of line in a structured hunk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructuredLineKind {
-    /// Returned when context.
+    /// Unchanged context line present on both sides.
     Context,
-    /// Returned when add.
+    /// Line added on the new side.
     Add,
-    /// Returned when del.
+    /// Line removed from the old side.
     Del,
 }
 
 /// One rendered line in a structured hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredLine {
-    /// Object type name when known (`commit`, `tree`, etc.).
+    /// Whether this line is context, an addition, or a deletion.
     pub kind: StructuredLineKind,
-    /// Old for this item.
+    /// 1-based line number on the old side, when applicable.
     pub old: Option<usize>,
-    /// New for this item.
+    /// 1-based line number on the new side, when applicable.
     pub new: Option<usize>,
-    /// Segments for this item.
+    /// Text runs that make up the rendered line.
     pub segments: Vec<StructuredSegment>,
     /// Git `\ No newline at end of file` on this side.
     pub no_newline_at_eof: bool,
@@ -105,39 +105,39 @@ pub struct StructuredLine {
 /// A contiguous run of changes plus surrounding context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredHunk {
-    /// Old start for this item.
+    /// 1-based starting line on the old side (unified hunk header).
     pub old_start: usize,
-    /// New start for this item.
+    /// 1-based starting line on the new side.
     pub new_start: usize,
-    /// Old lines for this item.
+    /// Number of old-side lines in this hunk (including context).
     pub old_lines: usize,
-    /// New lines for this item.
+    /// Number of new-side lines in this hunk (including context).
     pub new_lines: usize,
-    /// Context for this item.
+    /// Optional `@@` function/context header copied from Git patch text.
     pub context: Option<String>,
-    /// Lines for this item.
+    /// Rendered lines in hunk order.
     pub lines: Vec<StructuredLine>,
 }
 
 /// Line-level diff of two text sides (no file metadata).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredTextDiff {
-    /// Hunks for this item.
+    /// Line hunks between two text sides (no paths or modes).
     pub hunks: Vec<StructuredHunk>,
 }
 
 /// File metadata plus a structured line diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuredFileDiff {
-    /// Old mode for this item.
+    /// Old git mode (octal string), when present.
     pub old_mode: Option<String>,
-    /// New mode for this item.
+    /// New git mode (octal string), when present.
     pub new_mode: Option<String>,
-    /// Old encoding lossy for this item.
+    /// Old side required lossy UTF-8 decoding.
     pub old_encoding_lossy: bool,
-    /// New encoding lossy for this item.
+    /// New side required lossy UTF-8 decoding.
     pub new_encoding_lossy: bool,
-    /// Hunks for this item.
+    /// Structured line hunks for this file pair.
     pub hunks: Vec<StructuredHunk>,
 }
 

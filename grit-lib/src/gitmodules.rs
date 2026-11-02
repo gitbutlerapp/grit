@@ -170,40 +170,40 @@ pub fn fsck_dot_special_tree_pass(
 /// Problems reported while walking trees / blobs for `.gitmodules` / `.gitattributes` fsck.
 #[derive(Debug, Clone)]
 pub enum DotFsckIssue {
-    /// Returned when tree symlink.
+    /// A `.gitmodules` / `.gitattributes`-related path appears as a symlink in a tree.
     TreeSymlink {
-        /// Tree oid for this error or warning.
+        /// Tree object containing the symlink entry.
         tree_oid: ObjectId,
-        /// Id for this error or warning.
+        /// Git fsck message id (for example `gitmodulesSymlink`).
         id: &'static str,
         /// Additional human-readable detail for the failure.
         detail: &'static str,
     },
-    /// Returned when non blob dot file.
+    /// A registered dot-file path resolves to a non-blob object.
     NonBlobDotFile {
         /// Object id (hex) related to the error.
         oid: ObjectId,
         /// Object type name when known (`commit`, `tree`, etc.).
         kind: ObjectKind,
-        /// Id for this error or warning.
+        /// Git fsck message id.
         id: &'static str,
         /// Additional human-readable detail for the failure.
         detail: &'static str,
     },
-    /// Returned when blob gitmodules.
+    /// Content validation failed for a `.gitmodules` blob.
     BlobGitmodules {
-        /// Blob oid for this error or warning.
+        /// Blob object id.
         blob_oid: ObjectId,
-        /// Id for this error or warning.
+        /// Git fsck message id.
         id: &'static str,
         /// Additional human-readable detail for the failure.
         detail: String,
     },
-    /// Returned when blob gitattributes.
+    /// Content validation failed for a `.gitattributes` blob.
     BlobGitattributes {
-        /// Blob oid for this error or warning.
+        /// Blob object id.
         blob_oid: ObjectId,
-        /// Id for this error or warning.
+        /// Git fsck message id.
         id: &'static str,
         /// Additional human-readable detail for the failure.
         detail: &'static str,
@@ -388,13 +388,13 @@ pub fn fsck_dot_special_object(
 /// Tracks `.gitmodules` / `.gitattributes` blob OIDs discovered in trees (Git `fsck_options` oidsets).
 #[derive(Debug, Default)]
 pub struct DotFsckTracker {
-    /// Gitmodules found for this item.
+    /// `.gitmodules` blob OIDs discovered while walking trees.
     pub gitmodules_found: HashSet<ObjectId>,
-    /// Gitmodules done for this item.
+    /// `.gitmodules` blobs already checked by [`Self::on_object`].
     pub gitmodules_done: HashSet<ObjectId>,
-    /// Gitattributes found for this item.
+    /// `.gitattributes` blob OIDs discovered while walking trees.
     pub gitattributes_found: HashSet<ObjectId>,
-    /// Gitattributes done for this item.
+    /// `.gitattributes` blobs already checked by [`Self::on_object`].
     pub gitattributes_done: HashSet<ObjectId>,
 }
 

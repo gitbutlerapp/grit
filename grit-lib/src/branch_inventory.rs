@@ -112,6 +112,10 @@ pub fn upstream_status(repo: &Repository, branch: &str) -> Result<Option<Upstrea
 /// [`BranchDetail::Full`] loads commit headers in parallel and computes upstream
 /// ahead/behind via [`crate::branch_tracking::TipComparison`]. Worktree paths are resolved once per call.
 ///
+/// Re-exported as [`crate::refs::branch_tracking::list_branches`] (what `grit branch` uses).
+/// For a minimal local name/oid/current list without object reads, see
+/// [`crate::porcelain::branch::list_branches`].
+///
 /// # Errors
 ///
 /// Propagates ref listing, configuration, object read, and walk errors.

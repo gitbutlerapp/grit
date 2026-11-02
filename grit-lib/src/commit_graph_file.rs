@@ -906,13 +906,13 @@ pub enum BloomPrecheck {
 /// Counters for `GIT_TRACE2_PERF` Bloom statistics (`revision.c` `trace2_bloom_filter_statistics_atexit`).
 #[derive(Debug, Default, Clone)]
 pub struct BloomWalkStats {
-    /// Filter not present for this item.
+    /// Walks where the commit-graph Bloom filter was missing or unusable.
     pub filter_not_present: u32,
-    /// Maybe for this item.
+    /// Bloom precheck returned [`BloomPrecheck::Maybe`] (diff still required).
     pub maybe: u32,
-    /// Definitely not for this item.
+    /// Bloom precheck ruled out the path without opening a diff.
     pub definitely_not: u32,
-    /// False positive for this item.
+    /// Bloom said maybe but the path was absent after diff (false positive).
     pub false_positive: u32,
 }
 
