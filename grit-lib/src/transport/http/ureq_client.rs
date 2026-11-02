@@ -540,6 +540,15 @@ struct LowSpeedReader<R> {
     cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
 }
 
+fn is_per_read_idle_timeout(err: &io::Error) -> bool {
+    if err.kind() == io::ErrorKind::TimedOut {
+        return true;
+    }
+    err.get_ref()
+        .and_then(|inner| inner.downcast_ref::<ureq::Error>())
+        .is_some_and(|e| matches!(e, ureq::Error::Timeout(ureq::Timeout::PerRead)))
+}
+
 impl<R: Read> LowSpeedReader<R> {
     fn new(inner: R, timeouts: &HttpTransportTimeouts) -> Self {
         let global_deadline = timeouts.global.and_then(|g| Instant::now().checked_add(g));
@@ -609,26 +618,31 @@ impl<R: Read> LowSpeedReader<R> {
 
 impl<R: Read> Read for LowSpeedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.settings.is_some() || self.global_deadline.is_some() || self.cancel.is_some() {
-            self.check_cancel()?;
-            self.check_global()?;
-            self.finish_window()?;
-        }
-        let n = match self.inner.read(buf) {
-            Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+        loop {
+            if self.settings.is_some() || self.global_deadline.is_some() || self.cancel.is_some() {
                 self.check_cancel()?;
                 self.check_global()?;
                 self.finish_window()?;
-                return Err(e);
             }
-            Err(e) => return Err(e),
-        };
-        if n > 0 && self.settings.is_some() {
-            self.window_bytes += n as u64;
-            self.finish_window()?;
+            match self.inner.read(buf) {
+                Ok(n) => {
+                    if n > 0 && self.settings.is_some() {
+                        self.window_bytes += n as u64;
+                        self.finish_window()?;
+                    }
+                    return Ok(n);
+                }
+                Err(e) if is_per_read_idle_timeout(&e) => {
+                    self.check_cancel()?;
+                    self.check_global()?;
+                    match self.finish_window() {
+                        Err(window_err) => return Err(window_err),
+                        Ok(()) => continue,
+                    }
+                }
+                Err(e) => return Err(e),
+            }
         }
-        Ok(n)
     }
 }
 
@@ -659,21 +673,24 @@ fn agent_from_timeouts(
 ) -> ureq::Agent {
     let mut builder = ureq::Agent::config_builder()
         .timeout_connect(Some(timeouts.connect))
-        .timeout_global(timeouts.global)
+        .timeout_global(timeouts.global);
+    if let Some(low) = &timeouts.low_speed {
+        builder = builder
+            .timeout_per_read(Some(low.window))
+            // Abort waits when the server accepts but sends no response headers for
+            // longer than `http.lowSpeedTime` (Git counts time-to-first-byte). Body
+            // throughput stays on [`LowSpeedReader`] once headers arrive.
+            .timeout_recv_response(Some(low.window));
+    }
+    builder
         // Return >= 400 responses as `Ok` so the auth-retry logic can inspect the
         // status and `WWW-Authenticate` headers rather than treating them as hard
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
         .http_status_as_error(false)
         .tls_config(agent_tls_config())
-        .proxy(proxy);
-    // Abort discovery/fetch waits when the server accepts the connection but never
-    // sends response headers for longer than `http.lowSpeedTime` (Git applies low-speed
-    // to the whole transfer, including time-to-first-byte). Body throughput stays on
-    // [`LowSpeedReader`] once headers arrive.
-    if let Some(low) = timeouts.low_speed {
-        builder = builder.timeout_recv_response(Some(low.window));
-    }
-    builder.build().new_agent()
+        .proxy(proxy)
+        .build()
+        .new_agent()
 }
 
 /// Resolve `http.proxy` into a [`ureq::Proxy`], or `None` for the direct path.
@@ -851,7 +868,7 @@ impl UreqHttpClient {
         });
         match result {
             Ok(resp) => open_response_body(resp, &self.effective_timeouts()),
-            Err(e) => Err(http_transport_error(url, &e)),
+            Err(e) => Err(map_ureq_transport_error(url, e, &self.effective_timeouts())),
         }
     }
 
@@ -1028,7 +1045,7 @@ impl UreqHttpClient {
                 .decorate(self.agent.delete(url).force_send_body(), request, auth)
                 .send(request.body),
         });
-        let resp = result.map_err(|e| http_transport_error(url, &e))?;
+        let resp = result.map_err(|e| map_ureq_transport_error(url, e, &timeouts))?;
         let headers = resp
             .headers()
             .iter()
@@ -1238,7 +1255,7 @@ impl HttpClient for UreqHttpClient {
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
             Ok(resp) => open_response_body(resp, &self.effective_timeouts())?,
-            Err(e) => return Err(http_transport_error(url, &e)),
+            Err(e) => return Err(map_ureq_transport_error(url, e, &self.effective_timeouts())),
         };
         self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
         self.save_response_cookies(&head.set_cookie);
@@ -1330,7 +1347,7 @@ fn finish(
 ) -> Result<RawResponse> {
     match result {
         Ok(resp) => read_response(url, resp, timeouts),
-        Err(e) => Err(http_transport_error(url, &e)),
+        Err(e) => Err(map_ureq_transport_error(url, e, timeouts)),
     }
 }
 
@@ -1343,7 +1360,7 @@ fn read_response(
     let mut body = Vec::new();
     reader
         .read_to_end(&mut body)
-        .map_err(|e| map_http_read_error(url, e))?;
+        .map_err(|e| map_http_read_error(url, e, timeouts))?;
     Ok(RawResponse {
         status: head.status,
         content_type: head.content_type,
@@ -1429,6 +1446,36 @@ fn finalize_status(
     Ok((body, final_url))
 }
 
+const LOW_SPEED_TRANSPORT_DETAIL: &str =
+    "HTTP transfer speed below http.lowSpeedLimit for http.lowSpeedTime";
+
+fn low_speed_transport_error(url: &str) -> Error {
+    Error::remote_unreadable(
+        url_for_display(url),
+        RemoteUnreadableReason::Transport {
+            detail: LOW_SPEED_TRANSPORT_DETAIL.to_owned(),
+        },
+    )
+}
+
+fn map_ureq_transport_error(
+    url: &str,
+    err: ureq::Error,
+    timeouts: &HttpTransportTimeouts,
+) -> Error {
+    if timeouts.low_speed.is_some()
+        && matches!(
+            err,
+            ureq::Error::Timeout(
+                ureq::Timeout::PerRead | ureq::Timeout::RecvResponse
+            )
+        )
+    {
+        return low_speed_transport_error(url);
+    }
+    http_transport_error(url, &err)
+}
+
 fn http_transport_error(url: &str, err: impl std::fmt::Display) -> Error {
     let detail = credentials::redact_embedded_url_credentials(&err.to_string());
     Error::remote_unreadable(
@@ -1437,9 +1484,13 @@ fn http_transport_error(url: &str, err: impl std::fmt::Display) -> Error {
     )
 }
 
-fn map_http_read_error(url: &str, err: std::io::Error) -> Error {
+fn map_http_read_error(url: &str, err: std::io::Error, timeouts: &HttpTransportTimeouts) -> Error {
     if err.kind() == std::io::ErrorKind::Interrupted {
         Error::Cancelled
+    } else if timeouts.low_speed.is_some()
+        && (err.to_string().contains(LOW_SPEED_TRANSPORT_DETAIL) || is_per_read_idle_timeout(&err))
+    {
+        low_speed_transport_error(url)
     } else {
         http_transport_error(url, err)
     }
@@ -2178,6 +2229,36 @@ mod tests {
             .read_to_end(&mut Vec::new())
             .expect_err("unexpected eof");
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn low_speed_reader_retries_idle_per_read_until_low_speed_window() {
+        struct AlwaysTimedOut;
+        impl Read for AlwaysTimedOut {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "simulated per-read idle timeout",
+                ))
+            }
+        }
+        let timeouts = HttpTransportTimeouts {
+            connect: Duration::from_secs(30),
+            global: Some(Duration::from_secs(600)),
+            low_speed: Some(LowSpeedSettings {
+                bytes_per_second: 1000,
+                window: Duration::from_millis(100),
+            }),
+            cancel: None,
+        };
+        let started = Instant::now();
+        let err = LowSpeedReader::new(AlwaysTimedOut, &timeouts)
+            .read_to_end(&mut Vec::new())
+            .expect_err("idle reads must hit the low-speed window");
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(err.to_string().contains(super::LOW_SPEED_TRANSPORT_DETAIL));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(started.elapsed() >= Duration::from_millis(90));
     }
 
     #[test]
