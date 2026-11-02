@@ -20,6 +20,7 @@
 mod connectivity;
 mod object_info;
 pub(crate) mod promised_objects;
+pub(crate) mod push_to_checkout;
 mod receive_pack;
 mod ref_update_policy;
 mod shallow_upload;
@@ -30,9 +31,9 @@ pub(crate) use receive_pack::ReceiveHookScripts;
 pub(crate) use shallow_upload::{compute_shallow_response, ShallowRequest};
 
 pub use receive_pack::{
-    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, HookRunRecord,
-    ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand, RefUpdateRefusal,
-    RefUpdateResult, RejectedObject, UnpackError,
+    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, DenyCurrentBranch,
+    HookRunRecord, ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand,
+    RefUpdateRefusal, RefUpdateResult, RejectedObject, UnpackError,
 };
 pub use ref_update_policy::{checked_out_branch, head_branch, validate_ref_update, HeadBranches};
 pub use upload_pack::{upload_pack, upload_pack_cancellable, UploadOutcome};

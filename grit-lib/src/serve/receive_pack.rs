@@ -40,6 +40,30 @@ const CAPABILITIES: &[&str] = &[
     "ofs-delta",
 ];
 
+/// How [`ReceivePolicy`] treats updates to the branch checked out in a non-bare repository
+/// (`receive.denyCurrentBranch`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DenyCurrentBranch {
+    /// Refuse the update (`refuse`, `true`, or unset).
+    #[default]
+    Refuse,
+    /// Allow the ref move without updating the worktree (`warn`).
+    Warn,
+    /// Allow the ref move without updating the worktree (`ignore`, `false`, …).
+    Ignore,
+    /// Move the ref and check out the new commit in every worktree that has the branch checked
+    /// out (`updateInstead`).
+    UpdateInstead,
+}
+
+impl DenyCurrentBranch {
+    /// Whether [`super::ref_update_policy::validate_ref_update`] should refuse the update.
+    #[must_use]
+    pub fn refuses_checked_out_update(self) -> bool {
+        matches!(self, Self::Refuse)
+    }
+}
+
 /// Which pushed objects and ref updates the server refuses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReceivePolicy {
@@ -48,9 +72,9 @@ pub struct ReceivePolicy {
     pub deny_non_fast_forwards: bool,
     /// Refuse ref deletions (`receive.denyDeletes`).
     pub deny_deletes: bool,
-    /// In a repository with a working tree, refuse to update or delete the
-    /// branch `HEAD` points at (`receive.denyCurrentBranch`).
-    pub deny_current_branch: bool,
+    /// How to treat updates to the branch checked out in a non-bare repository
+    /// (`receive.denyCurrentBranch`).
+    pub deny_current_branch: DenyCurrentBranch,
     /// Refuse to delete the branch `HEAD` points at, in a bare repository as
     /// well as one with a working tree (`receive.denyDeleteCurrent`).
     pub deny_delete_current: bool,
@@ -74,7 +98,7 @@ impl Default for ReceivePolicy {
         Self {
             deny_non_fast_forwards: false,
             deny_deletes: false,
-            deny_current_branch: true,
+            deny_current_branch: DenyCurrentBranch::Refuse,
             deny_delete_current: true,
             fsck_objects: None,
             shallow_update: false,
@@ -85,11 +109,12 @@ impl Default for ReceivePolicy {
 impl ReceivePolicy {
     /// Read the policy from the `receive.*` configuration keys.
     ///
-    /// `receive.denyCurrentBranch` accepts Git's values: `refuse`, `true` or
-    /// unset refuse the update; `ignore`, `warn`, `false` and `updateInstead`
-    /// allow it (this server does not update the working tree).
-    /// `receive.denyDeleteCurrent` is the same, except that `updateInstead`
-    /// refuses: there is no working tree to update for a deleted branch.
+    /// `receive.denyCurrentBranch` accepts Git's values: `refuse`, `true` or unset
+    /// refuse the update; `warn` and `ignore` / `false` allow the ref move without
+    /// touching the worktree; `updateInstead` moves the ref and runs push-to-checkout
+    /// (hook or built-in deploy) on worktrees that have the branch checked out.
+    /// `receive.denyDeleteCurrent` is the same, except that `updateInstead` refuses
+    /// deletion: there is no tree to deploy for a deleted branch.
     ///
     /// Pushed objects are checked when `receive.fsckObjects` is true, or when it
     /// is unset and `transfer.fsckObjects` is true. A value that is not a
@@ -108,12 +133,28 @@ impl ReceivePolicy {
     pub fn from_config(config: &ConfigSet) -> Self {
         let flag = |key: &str| config.get_bool(key).and_then(|r| r.ok()).unwrap_or(false);
         // Whether a `receive.deny*` key is set to a value that lets the update through.
-        let allows = |key: &str, update_instead_allows: bool| {
+        let allows_delete = |key: &str| {
             config.get(key).is_some_and(|v| {
                 let v = v.to_ascii_lowercase();
                 matches!(v.as_str(), "ignore" | "warn" | "false" | "no" | "off" | "0")
-                    || (update_instead_allows && v == "updateinstead")
             })
+        };
+        let deny_current_branch = match config.get("receive.denyCurrentBranch") {
+            None => DenyCurrentBranch::Refuse,
+            Some(v) => {
+                let v = v.to_ascii_lowercase();
+                if matches!(v.as_str(), "refuse" | "true" | "1" | "yes" | "on") {
+                    DenyCurrentBranch::Refuse
+                } else if v == "warn" {
+                    DenyCurrentBranch::Warn
+                } else if v == "updateinstead" {
+                    DenyCurrentBranch::UpdateInstead
+                } else if matches!(v.as_str(), "ignore" | "false" | "no" | "off" | "0") {
+                    DenyCurrentBranch::Ignore
+                } else {
+                    DenyCurrentBranch::Refuse
+                }
+            }
         };
         let explicit = |key: &str| config.get_bool(key).map(|r| r.unwrap_or(true));
         let fsck = explicit("receive.fsckObjects")
@@ -122,8 +163,8 @@ impl ReceivePolicy {
         Self {
             deny_non_fast_forwards: flag("receive.denyNonFastForwards"),
             deny_deletes: flag("receive.denyDeletes"),
-            deny_current_branch: !allows("receive.denyCurrentBranch", true),
-            deny_delete_current: !allows("receive.denyDeleteCurrent", false),
+            deny_current_branch,
+            deny_delete_current: !allows_delete("receive.denyDeleteCurrent"),
             fsck_objects: fsck.then(|| ObjectFsckPolicy::from_config(config, "receive.fsck")),
             shallow_update: flag("receive.shallowUpdate"),
         }
@@ -212,6 +253,21 @@ pub enum RefUpdateRefusal {
     /// (`receive.denyCurrentBranch`).
     #[error("branch is currently checked out")]
     CurrentBranch,
+    /// Push-to-checkout could not refresh the index (`updateInstead` deploy).
+    #[error("Up-to-date check failed")]
+    PushCheckoutUpToDateFailed,
+    /// The worktree differs from the index (`updateInstead` deploy).
+    #[error("Working directory has unstaged changes")]
+    PushCheckoutUnstagedChanges,
+    /// The index differs from `HEAD` (`updateInstead` deploy).
+    #[error("Working directory has staged changes")]
+    PushCheckoutStagedChanges,
+    /// Push-to-checkout could not apply the new tree (`updateInstead` deploy).
+    #[error("Could not update working tree to new HEAD")]
+    PushCheckoutFailed,
+    /// The `push-to-checkout` hook exited non-zero.
+    #[error("push-to-checkout hook declined")]
+    PushCheckoutHookDeclined,
     /// The new value is not in the repository or the pushed pack.
     #[error("missing necessary objects")]
     MissingObjects,
@@ -1134,6 +1190,21 @@ fn apply_commands_with_hooks(
         }
     }
 
+    for (cmd, result) in request.commands.iter().zip(results.iter_mut()) {
+        if result.error.is_some() {
+            continue;
+        }
+        match super::push_to_checkout::deploy_for_update_instead(
+            repo,
+            cmd,
+            policy,
+            &mut sideband_out,
+        )? {
+            None => {}
+            Some(reason) => result.error = Some(reason),
+        }
+    }
+
     if atomic && results.iter().any(|r| r.error.is_some()) {
         refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
         return Ok(applied_push(results));
@@ -1970,10 +2041,12 @@ mod tests {
             }
             ReceivePolicy::from_config(&config).deny_current_branch
         };
-        assert!(policy_for(None));
-        assert!(!policy_for(Some("ignore")));
-        assert!(!policy_for(Some("updateInstead")));
-        assert!(policy_for(Some("refuse")));
+        use DenyCurrentBranch as D;
+        assert_eq!(policy_for(None), D::Refuse);
+        assert_eq!(policy_for(Some("ignore")), D::Ignore);
+        assert_eq!(policy_for(Some("updateInstead")), D::UpdateInstead);
+        assert_eq!(policy_for(Some("refuse")), D::Refuse);
+        assert_eq!(policy_for(Some("warn")), D::Warn);
     }
 
     #[test]

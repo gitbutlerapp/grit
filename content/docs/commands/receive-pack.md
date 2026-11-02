@@ -23,7 +23,7 @@ Every ref update is checked before it's applied, and the client is told which up
 | --- | --- |
 | `receive.denyNonFastForwards` | Refuse updates that would discard commits from a branch (`refs/heads/*`). Fast-forwards are accepted, and other refs, such as tags, are not checked. |
 | `receive.denyDeletes` | Refuse to delete refs. |
-| `receive.denyCurrentBranch` | Refuse to update the branch checked out in a non-bare repository. On by default; set it to `ignore` or `warn` to allow it. |
+| `receive.denyCurrentBranch` | What to do when a push updates the branch checked out in a non-bare worktree. `refuse` or unset (default) rejects the update. `ignore` and `false` move the ref without touching the worktree. `warn` does the same and may log a warning. `updateInstead` moves the ref and runs the `push-to-checkout` hook when present, otherwise checks that the worktree is clean and checks out the new commit's tree into the index and working tree (without moving `HEAD`). A dirty worktree or a failed checkout refuses the push with the same messages as Git. |
 | `receive.denyDeleteCurrent` | Refuse to delete the branch `HEAD` points at, in a bare repository too. On by default; set it to `ignore` or `warn` to allow it. |
 | `receive.hideRefs`, `transfer.hideRefs` | Hide refs from pushing clients and refuse updates to them. |
 | `receive.maxInputSize` | Refuse pushes whose pack is larger than this many bytes. Unlimited by default. |

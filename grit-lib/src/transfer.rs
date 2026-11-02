@@ -2730,6 +2730,26 @@ pub(crate) fn push_local_from(
                 remote_messages.push(line);
             }
         }
+        let cfg = remote_repo
+            .config()
+            .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
+        let receive_policy = crate::serve::ReceivePolicy::from_config(cfg.as_ref());
+        for d in decisions.iter_mut().filter(|d| d.apply) {
+            let Some(cmd) = d.ref_command() else {
+                continue;
+            };
+            let mut no_sideband: Option<&mut dyn Write> = None;
+            if let Some(reason) = crate::serve::push_to_checkout::deploy_for_update_instead(
+                &remote_repo,
+                &cmd,
+                &receive_policy,
+                &mut no_sideband,
+            )
+            .map_err(|e| Error::Message(e.to_string()))?
+            {
+                d.refuse(&reason);
+            }
+        }
         if opts.atomic && decisions.iter().any(|d| d.result.status.is_error()) {
             fail_atomic_push(&mut decisions);
         }

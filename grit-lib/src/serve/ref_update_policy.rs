@@ -69,7 +69,7 @@ pub fn validate_ref_update(
     let Some(new) = cmd.new else {
         // As in Git, the checked-out branch's own check comes first, then the
         // deletion checks.
-        if is_current_branch && policy.deny_current_branch {
+        if is_current_branch && policy.deny_current_branch.refuses_checked_out_update() {
             return Ok(Some(RefUpdateRefusal::CurrentBranch));
         }
         if policy.deny_deletes {
@@ -84,7 +84,7 @@ pub fn validate_ref_update(
     if !odb.contains(&new)? {
         return Ok(Some(RefUpdateRefusal::MissingObjects));
     }
-    if is_current_branch && policy.deny_current_branch {
+    if is_current_branch && policy.deny_current_branch.refuses_checked_out_update() {
         return Ok(Some(RefUpdateRefusal::CurrentBranch));
     }
     if let (Some(old), true) = (current, policy.deny_non_fast_forwards) {
@@ -128,6 +128,7 @@ mod tests {
     use grit_test_support::{git, git_cmd};
 
     use super::{validate_ref_update, ReceivePolicy, RefCommand, RefUpdateRefusal};
+    use crate::serve::DenyCurrentBranch;
 
     fn rev_parse(dir: &Path, rev: &str) -> ObjectId {
         ObjectId::from_hex(git(dir, &["rev-parse", rev]).trim()).expect("oid")
@@ -179,7 +180,7 @@ mod tests {
         let policy = ReceivePolicy {
             deny_non_fast_forwards: true,
             deny_deletes: false,
-            deny_current_branch: false,
+            deny_current_branch: DenyCurrentBranch::Ignore,
             deny_delete_current: false,
             ..ReceivePolicy::default()
         };
