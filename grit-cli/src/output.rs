@@ -202,6 +202,9 @@ pub fn render_to_string<T: Serialize + HumanRender + MarkdownRender>(
 /// Serialize `value` to `w`, optionally applying a jq-like `filter`.
 fn write_json<T: Serialize>(w: &mut dyn Write, value: T, filter: Option<&str>) -> Result<()> {
     if let Some(expr) = filter {
+        // Build the jaq input tree in one pass from the typed outcome (interning
+        // object keys). Do not serialize to JSON bytes and re-parse: that roughly
+        // doubles work and peak RSS on large diff/log payloads (#2409).
         let input_val = json_to_jaq::serialize_value(value)
             .map_err(|e| anyhow::anyhow!("serializing JSON for filter: {e}"))?;
         write_json_filter_val(w, input_val, expr)?;

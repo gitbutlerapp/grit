@@ -239,4 +239,37 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("not valid JSON"), "{msg}");
     }
+
+    /// Guards the #2409 hot path: `--filter` must not use JSON-bytes re-parse on
+    /// large command outcomes (see `write_json` in `output.rs`).
+    #[test]
+    fn large_diff_shaped_direct_serialize_beats_json_reparse() {
+        use std::time::Instant;
+
+        let files: Vec<_> = (0..8000)
+            .map(|i| {
+                json!({
+                    "path": format!("src/file{i}.rs"),
+                    "kind": "modified",
+                    "hunks": [{"header": "@@", "lines": [{"kind": "context", "text": "x"}]}],
+                })
+            })
+            .collect();
+        let input = json!({"files": files});
+
+        let bytes = serde_json::to_vec(&input).expect("serialize");
+        let start = Instant::now();
+        let _ = jaq_json::read::parse_single(&bytes).expect("parse");
+        let reparse = start.elapsed();
+
+        let start = Instant::now();
+        let _ = crate::json_to_jaq::serialize_value(&input).expect("direct jaq");
+        let direct = start.elapsed();
+
+        assert!(
+            direct < reparse,
+            "typed serde→jaq ({direct:?}) must be faster than JSON bytes + parse \
+             ({reparse:?}); the `--filter` hot path uses the former (see `write_json`)"
+        );
+    }
 }
