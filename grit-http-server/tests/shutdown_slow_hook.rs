@@ -23,17 +23,24 @@ fn git_output(dir: &Path, args: &[&str]) -> Output {
 fn fixture(root: &Path, pid_file: &Path) -> std::path::PathBuf {
     let seed = root.join("seed");
     std::fs::create_dir(&seed).expect("mkdir seed");
-    assert!(git_output(&seed, &["init", "-q", "-b", "main"]).status.success());
+    assert!(git_output(&seed, &["init", "-q", "-b", "main"])
+        .status
+        .success());
     std::fs::write(seed.join("README"), "hello\n").expect("write");
     assert!(git_output(&seed, &["add", "README"]).status.success());
-    assert!(git_output(&seed, &["commit", "-q", "-m", "init"]).status.success());
+    assert!(git_output(&seed, &["commit", "-q", "-m", "init"])
+        .status
+        .success());
 
     let repos = root.join("repos");
     std::fs::create_dir(&repos).expect("mkdir repos");
     let bare = repos.join("project.git");
-    assert!(
-        git_output(root, &["clone", "-q", "--bare", "seed", "repos/project.git"]).status.success()
-    );
+    assert!(git_output(
+        root,
+        &["clone", "-q", "--bare", "seed", "repos/project.git"]
+    )
+    .status
+    .success());
 
     std::fs::create_dir_all(bare.join("hooks")).expect("hooks dir");
     let hook = bare.join("hooks/pre-receive");
@@ -96,10 +103,22 @@ fn server_run_returns_after_grace_while_pre_receive_sleeps() {
     });
 
     let client = tmp.path().join("client");
-    assert!(git_output(tmp.path(), &["clone", "-q", &format!("http://user:grit_admin_token@{addr}/project"), "client"]).status.success());
+    assert!(git_output(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            &format!("http://user:grit_admin_token@{addr}/project"),
+            "client"
+        ]
+    )
+    .status
+    .success());
     std::fs::write(client.join("f"), "x\n").expect("write");
     assert!(git_output(&client, &["add", "f"]).status.success());
-    assert!(git_output(&client, &["commit", "-q", "-m", "c"]).status.success());
+    assert!(git_output(&client, &["commit", "-q", "-m", "c"])
+        .status
+        .success());
 
     let push_url = format!("http://user:grit_admin_token@{addr}/project");
     let push_handle = std::thread::spawn({
@@ -137,5 +156,8 @@ fn server_run_returns_after_grace_while_pre_receive_sleeps() {
         .expect("kill -0")
         .code()
         != Some(0);
-    assert!(hook_gone, "hook {hook_pid} should be terminated after shutdown");
+    assert!(
+        hook_gone,
+        "hook {hook_pid} should be terminated after shutdown"
+    );
 }

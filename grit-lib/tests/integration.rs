@@ -1412,6 +1412,9 @@ mod read_info_git_compat;
 #[path = "rebase_cancel_rollback_wide_perf.rs"]
 mod rebase_cancel_rollback_wide_perf;
 #[cfg(feature = "full-tests")]
+#[path = "receive_hook_cancel_windows.rs"]
+mod receive_hook_cancel_windows;
+#[cfg(feature = "full-tests")]
 #[path = "receive_pack_ignorecase_ref_2471.rs"]
 mod receive_pack_ignorecase_ref_2471;
 #[cfg(feature = "full-tests")]

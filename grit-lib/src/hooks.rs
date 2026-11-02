@@ -970,7 +970,7 @@ pub struct RunHookOptions<'a> {
     /// Commit-style env (`GIT_INDEX_FILE`, `GIT_PREFIX`, author exports, …) merged after `env_vars`.
     pub commit_env: Option<&'a CommitHookEnv<'a>>,
     /// Put each hook child in its own process group (server receive hooks).
-    pub isolate_process_group: bool,
+    pub(crate) isolate_process_group: bool,
 }
 
 /// Run all hooks for `hook_name` in Git order; return first non-zero exit or success.
@@ -1001,7 +1001,18 @@ fn kill_pid_sigkill(pid: u32, process_group: bool) {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn kill_pid_sigkill(pid: u32, _process_group: bool) {
+    use std::process::{Command, Stdio};
+    let _ = Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string(), "/T"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(any(unix, windows)))]
 fn kill_pid_sigkill(_pid: u32, _process_group: bool) {}
 
 fn wait_hook_command(
@@ -1022,8 +1033,14 @@ fn wait_hook_command(
 
     let pid = child.child_pid();
     let kill_process_group = child.kill_process_group();
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+    let shared_wait = std::sync::Arc::clone(&shared);
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
+        let child = shared_wait.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let Some(child) = child else {
+            return;
+        };
         let result = if capture {
             child.wait_with_output()
         } else {
@@ -1038,7 +1055,17 @@ fn wait_hook_command(
 
     loop {
         if cancel.is_cancelled() {
-            if let Some(pid) = pid {
+            if let Some(mut child) = shared.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let _ = child.kill();
+                if capture {
+                    if let Ok(out) = child.wait_with_output() {
+                        output.stdout.extend_from_slice(&out.stdout);
+                        output.stderr.extend_from_slice(&out.stderr);
+                    }
+                } else {
+                    let _ = child.wait();
+                }
+            } else if let Some(pid) = pid {
                 kill_pid_sigkill(pid, kill_process_group);
             }
             if let Ok(Ok(out)) = rx.recv_timeout(HOOK_WAIT_POLL.saturating_mul(20)) {

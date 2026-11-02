@@ -149,7 +149,7 @@ pub struct CommandSpec {
     pub stderr: CommandStdio,
     /// When true (Unix only), the child starts in its own process group so a
     /// shutdown can SIGKILL the whole tree (server receive hooks).
-    pub isolate_process_group: bool,
+    pub(crate) isolate_process_group: bool,
 }
 
 impl CommandSpec {
@@ -312,7 +312,7 @@ impl RunningCommand {
 
     /// Whether [`wait_hook_command`] should signal the child's process group on cancel.
     #[must_use]
-    pub fn kill_process_group(&self) -> bool {
+    pub(crate) fn kill_process_group(&self) -> bool {
         match &self.inner {
             RunningCommandInner::System {
                 kill_process_group, ..

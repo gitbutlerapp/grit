@@ -259,13 +259,15 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let bare = tmp.path().join("bare");
     let pid_file = tmp.path().join("hook.pid");
+    let child_pid_file = tmp.path().join("hook-child.pid");
     std::fs::create_dir_all(&bare).unwrap();
     git(&bare, &["init", "-q", "--bare", "."]);
     write_executable_hook(
         &bare.join("hooks/pre-receive"),
         &format!(
-            "#!/bin/sh\ncat >/dev/null\necho $$ >{}\nsleep 120\n",
-            pid_file.display()
+            "#!/bin/sh\ncat >/dev/null\necho $$ >{}\nsleep 120 &\necho $! >{}\nwait\n",
+            pid_file.display(),
+            child_pid_file.display()
         ),
     );
     let repo = open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
@@ -319,13 +321,27 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
     assert!(matches!(err, ServeError::Cancelled));
     assert!(resolve_ref(&bare, "refs/heads/main").is_err());
     assert!(!repo.odb().exists(&oid));
-    let hook_gone = Command::new("kill")
-        .args(["-0", &hook_pid.to_string()])
-        .status()
-        .expect("kill -0")
-        .code()
-        != Some(0);
-    assert!(hook_gone, "hook process group {hook_pid} should be gone");
+    let child_pid: u32 = std::fs::read_to_string(&child_pid_file)
+        .expect("child pid file")
+        .trim()
+        .parse()
+        .expect("child pid");
+    let process_alive = |pid: u32| {
+        Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .expect("kill -0")
+            .code()
+            == Some(0)
+    };
+    assert!(
+        !process_alive(hook_pid),
+        "hook shell {hook_pid} should be gone"
+    );
+    assert!(
+        !process_alive(child_pid),
+        "hook sleep child {child_pid} should be gone with the process group"
+    );
 }
 
 #[test]
