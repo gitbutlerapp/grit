@@ -1933,6 +1933,7 @@ pub fn grit_lib::commit::format_git_timestamp(time::offset_date_time::OffsetDate
 pub fn grit_lib::commit::normalize_commit_date_override(&str) -> core::result::Result<alloc::string::String, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::commit::parse_date_to_git_timestamp(&str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::commit::parse_trailer_command_line_arg(&str) -> core::result::Result<(alloc::string::String, alloc::string::String), grit_lib::commit::TrailerArgParseError>
+pub fn grit_lib::commit::resolve_core_abbrev_len(&grit_lib::config::ConfigSet, &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<usize>
 pub mod grit_lib::config
 pub mod grit_lib::config::dotfile
 pub fn grit_lib::config::dotfile::dotfile_matches(&str, &str) -> bool
@@ -32241,7 +32242,6 @@ impl core::marker::Unpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::marker::UnsafeUnpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
-pub fn grit_lib::commit::resolve_core_abbrev_len(&grit_lib::config::ConfigSet, &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<usize>
 pub struct grit_lib::OidAbbrevBatch
 impl grit_lib::OidAbbrevBatch
 pub fn grit_lib::OidAbbrevBatch::abbrev_known(&mut self, &grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::string::String>
