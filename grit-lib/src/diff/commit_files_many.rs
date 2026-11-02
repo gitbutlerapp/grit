@@ -212,14 +212,16 @@ impl Diff<'_> {
         if oids.is_empty() {
             return Ok(Vec::new());
         }
-        let odb = self.repository().odb();
+        let repo = self.repository();
+        let odb = repo.odb();
+        let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
         let inputs = oids
             .iter()
             .map(|oid| {
                 let commit = odb.read_commit(oid)?;
                 Ok(CommitFilesManyInput {
                     oid: *oid,
-                    parents: commit.parents,
+                    parents: parent_ctx.for_commit(*oid, &commit.parents),
                     tree: commit.tree,
                 })
             })
@@ -254,19 +256,22 @@ impl Diff<'_> {
         config: &ConfigSet,
         thread_policy: &ThreadPolicy,
     ) -> Result<Vec<Option<DiffTotals>>> {
-        let odb = self.repository().odb();
+        let repo = self.repository();
+        let odb = repo.odb();
+        let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
         let mut inputs = Vec::with_capacity(oids.len());
         let mut slots = Vec::with_capacity(oids.len());
         for oid in oids {
             let commit = odb.read_commit(oid)?;
-            if commit.parents.len() > 1 {
+            let parents = parent_ctx.for_commit(*oid, &commit.parents);
+            if parents.len() > 1 {
                 slots.push(None);
                 continue;
             }
             slots.push(Some(inputs.len()));
             inputs.push(CommitFilesManyInput {
                 oid: *oid,
-                parents: commit.parents,
+                parents,
                 tree: commit.tree,
             });
         }

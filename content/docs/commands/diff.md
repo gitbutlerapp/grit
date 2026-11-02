@@ -29,6 +29,8 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 
 `<commit>` can be anything that names a commit: a full or short commit id, a branch or tag name, or an expression like `HEAD~2`.
 
+In a shallow clone, a commit listed in `.git/shallow` is diffed like a root (against the empty tree), even when its object still names a parent that was not fetched.
+
 ## Options
 
 | Option | Description |

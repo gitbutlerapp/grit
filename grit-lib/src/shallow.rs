@@ -4,6 +4,8 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pkt_line;
+use crate::repo::Repository;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
@@ -21,6 +23,47 @@ pub const INFINITE_DEPTH: u32 = 0x7fff_ffff;
 #[must_use]
 pub fn shallow_file_path(git_dir: &Path) -> PathBuf {
     crate::repo::common_git_dir_for_config(git_dir).join("shallow")
+}
+
+/// Cached shallow boundaries and graft parents for one repository operation.
+///
+/// Commits listed in `.git/shallow` behave as roots unless `.git/info/grafts`
+/// replaces their parents (same rules as revision walks).
+#[derive(Debug, Clone, Default)]
+pub struct EffectiveCommitParents {
+    shallow: HashSet<ObjectId>,
+    grafts: HashMap<ObjectId, Vec<ObjectId>>,
+}
+
+impl EffectiveCommitParents {
+    /// Load `.git/shallow` and `.git/info/grafts` once for a walk or diff batch.
+    #[must_use]
+    pub fn load(repo: &Repository) -> Self {
+        Self {
+            shallow: load_shallow_boundaries(repo.git_dir()),
+            grafts: crate::rev_parse::load_graft_parents(repo.git_dir()),
+        }
+    }
+
+    /// Parent OIDs to follow for history, diffs, and blame.
+    ///
+    /// Grafts override shallow cuts; object parents are used otherwise.
+    #[must_use]
+    pub fn for_commit(&self, commit_oid: ObjectId, object_parents: &[ObjectId]) -> Vec<ObjectId> {
+        if let Some(grafted) = self.grafts.get(&commit_oid) {
+            return grafted.clone();
+        }
+        if self.shallow.contains(&commit_oid) {
+            return Vec::new();
+        }
+        object_parents.to_vec()
+    }
+
+    /// Whether `commit_oid` has no effective parents (real root or shallow boundary).
+    #[must_use]
+    pub fn is_history_root(&self, commit_oid: ObjectId, object_parents: &[ObjectId]) -> bool {
+        self.for_commit(commit_oid, object_parents).is_empty()
+    }
 }
 
 /// Returns the set of commit OIDs recorded as shallow boundaries in `.git/shallow`.
@@ -728,6 +771,32 @@ mod tests {
         apply_shallow_updates(git_dir, &[], &[b]).unwrap();
         assert!(!git_dir.join("shallow").exists());
         assert!(load_shallow_oids(git_dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn effective_parents_clear_shallow_and_honor_grafts() {
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path();
+        let parent = oid(0x01);
+        let child = oid(0x02);
+        std::fs::write(git_dir.join("shallow"), format!("{}\n", child.to_hex())).unwrap();
+        let shallow_only = EffectiveCommitParents {
+            shallow: load_shallow_boundaries(git_dir),
+            grafts: HashMap::new(),
+        };
+        assert!(shallow_only.for_commit(child, &[parent]).is_empty());
+
+        std::fs::create_dir_all(git_dir.join("info")).unwrap();
+        std::fs::write(
+            git_dir.join("info/grafts"),
+            format!("{} {}\n", child.to_hex(), parent.to_hex()),
+        )
+        .unwrap();
+        let ctx = EffectiveCommitParents {
+            shallow: load_shallow_boundaries(git_dir),
+            grafts: crate::rev_parse::load_graft_parents(git_dir),
+        };
+        assert_eq!(ctx.for_commit(child, &[parent]), vec![parent]);
     }
 
     #[test]

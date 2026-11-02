@@ -62,6 +62,8 @@ pub struct BlameLineJson {
     pub unblamable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub not_committed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<bool>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -158,8 +160,10 @@ impl MarkdownRender for BlameOutcome {
     }
 }
 
-fn blame_line_marker(unblamable: bool, ignored: bool) -> char {
-    if unblamable {
+fn blame_line_marker(boundary: bool, unblamable: bool, ignored: bool) -> char {
+    if boundary {
+        '^'
+    } else if unblamable {
         '*'
     } else if ignored {
         '?'
@@ -310,7 +314,7 @@ fn outcome_from_result(
             .unwrap_or_else(|| ("unknown".to_owned(), "?".to_owned()));
 
         let content = normalize_blame_line_content(&line.content);
-        let marker = blame_line_marker(line.unblamable, line.ignored);
+        let marker = blame_line_marker(line.boundary, line.unblamable, line.ignored);
         lines_json.push(BlameLineJson {
             commit: commit_hex.clone(),
             original_line: line.original_line,
@@ -321,6 +325,7 @@ fn outcome_from_result(
             ignored: line.ignored.then_some(true),
             unblamable: line.unblamable.then_some(true),
             not_committed: line.not_committed.then_some(true),
+            boundary: line.boundary.then_some(true),
         });
         let commit_short = commit_short
             .get(&line.commit)

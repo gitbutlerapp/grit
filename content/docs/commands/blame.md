@@ -38,6 +38,8 @@ On Unix, explicit file operands must be valid UTF-8. An operand containing inval
 
 Adding or removing the final newline attributes the last line to the commit that changed it. With `-w` / `--ignore-all-space`, newline-only changes are ignored along with other whitespace-only changes. Line content in the output excludes LF in either mode.
 
+Lines attributed to a commit with no effective parents (a repository root or a shallow boundary in `.git/shallow`) are prefixed with `^` in human output, the same marker Git uses. `--json` sets `"boundary": true` on those lines.
+
 ### Benchmarking
 
 Measured on 2026-10-26 on a 4-core Linux VM with system Git 2.55.0 and release builds. The baseline is `origin/main` at `5d557d222cbe621d4d3bd41f7ecf1ab7d71c477b`. These are the existing deep-history and large-tail blame fixtures used by `grit-bench`.
@@ -165,6 +167,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `lines[].encoding_lossy` | boolean | Present and `true` when the line bytes were not valid UTF-8 and `content` used lossy decoding. Raw bytes are not included in JSON; use [`grit_lib::blame::BlameAttributedLine::content_bytes`](rustdoc:grit_lib::blame::BlameAttributedLine::content_bytes) from the library when you need them. |
 | `lines[].ignored` | boolean | Present and `true` when the line was attributed through an ignored revision. |
 | `lines[].unblamable` | boolean | Present and `true` when the line was added in an ignored revision and cannot be blamed further back. |
+| `lines[].boundary` | boolean | Present and `true` when the attributed commit has no effective parents (root or shallow boundary). Human output prefixes the line with `^`. |
 | `lines[].not_committed` | boolean | Present and `true` when the line exists only in the working tree or `--contents` buffer. `commit` is then all zeros and `original_line` equals `final_line`. |
 | `commits` | object | Map of commit oid → metadata for every line. |
 | `commits.<oid>.author` | object | Author with `name`, `email`, and `date` (RFC 3339 — same shape as [`grit show`](../show/)). Author date is only here, not repeated on each line or hunk. |

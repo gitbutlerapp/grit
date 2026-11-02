@@ -111,8 +111,10 @@ pub fn commit_diff_files(
     thread_policy: &ThreadPolicy,
 ) -> Result<DiffFilesOutput> {
     let commit = repo.read_commit_with_replace(commit_oid)?;
-    if commit.parents.len() < 2 || merges == DiffMerges::FirstParent {
-        let old_tree = match commit.parents.first() {
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+    let effective_parents = parent_ctx.for_commit(*commit_oid, &commit.parents);
+    if effective_parents.len() < 2 || merges == DiffMerges::FirstParent {
+        let old_tree = match effective_parents.first() {
             Some(parent) => Some(repo.read_commit_with_replace(parent)?.tree),
             None => None,
         };
@@ -143,7 +145,7 @@ pub fn commit_diff_files(
     combined_commit_diff_files(
         repo,
         &commit.tree,
-        &commit.parents,
+        &effective_parents,
         detail,
         options,
         pathspecs,
@@ -181,13 +183,16 @@ fn filter_entries(
 /// Propagates ODB and diff errors.
 pub(crate) fn commit_first_parent_diff_entries(
     repo: &Repository,
+    commit_oid: &ObjectId,
     commit: &crate::objects::CommitData,
     pathspecs: &[String],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<DiffEntry>> {
     let odb = repo.odb();
-    let old_tree = match commit.parents.first() {
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+    let effective_parents = parent_ctx.for_commit(*commit_oid, &commit.parents);
+    let old_tree = match effective_parents.first() {
         Some(parent) => Some(odb.commit_tree(parent)?),
         None => None,
     };

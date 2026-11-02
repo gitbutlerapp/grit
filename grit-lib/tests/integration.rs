@@ -1851,6 +1851,9 @@ mod sha256_midx_commit_graph;
 #[path = "sha256_worktree.rs"]
 mod sha256_worktree;
 #[cfg(feature = "full-tests")]
+#[path = "shallow_boundary_diff_blame.rs"]
+mod shallow_boundary_diff_blame;
+#[cfg(feature = "full-tests")]
 #[path = "shallow_deepen_single_commit.rs"]
 mod shallow_deepen_single_commit;
 #[cfg(feature = "full-tests")]

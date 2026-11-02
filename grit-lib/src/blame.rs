@@ -4824,6 +4824,8 @@ pub struct BlameAttributedLine {
     pub ignored: bool,
     /// Line could not be blamed past an ignored revision.
     pub unblamable: bool,
+    /// Commit has no effective parents (repository root or shallow boundary).
+    pub boundary: bool,
     /// Line exists only in the uncommitted content selected by
     /// [`BlameOptions::final_source`]. `commit` is then the null object id and
     /// `original_line` equals `final_line`.
@@ -4965,6 +4967,7 @@ impl serde::Serialize for BlameAttributedLine {
         }
         out.serialize_field("ignored", &self.ignored)?;
         out.serialize_field("unblamable", &self.unblamable)?;
+        out.serialize_field("boundary", &self.boundary)?;
         out.serialize_field("not_committed", &self.not_committed)?;
         out.end()
     }
@@ -5061,6 +5064,7 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
         && prev.original_path == next.original_path
         && prev.ignored == next.ignored
         && prev.unblamable == next.unblamable
+        && prev.boundary == next.boundary
         && prev.not_committed == next.not_committed
         && next.original_line == prev.original_line + 1
         && next.final_line == prev.final_line + 1
@@ -5098,7 +5102,11 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
     let start_oid = resolve_blame_start(repo, options.start)?;
     let file_path = normalize_blame_path(repo, path);
     let config = repo.config().map(|cfg| (*cfg).clone()).unwrap_or_default();
-    let grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
+    let mut grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
+    for oid in crate::shallow::load_shallow_boundaries(repo.git_dir()) {
+        grafts.entry(oid).or_default();
+    }
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
     let diff_algorithm = config
         .get("diff.algorithm")
         .as_ref()
@@ -5149,19 +5157,29 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
                 &mut session,
             )?;
 
+            let mut boundary_cache: HashMap<ObjectId, bool> = HashMap::new();
             let lines: Vec<BlameAttributedLine> = raw
                 .into_iter()
-                .map(|line| BlameAttributedLine {
-                    commit: line.oid,
-                    original_line: line.orig_lineno,
-                    final_line: line.final_lineno,
-                    original_path: line.original_path,
-                    content: line.content,
-                    encoding_lossy: line.encoding_lossy,
-                    content_bytes: line.content_bytes,
-                    ignored: line.ignored,
-                    unblamable: line.unblamable,
-                    not_committed: line.not_committed,
+                .map(|line| {
+                    let boundary = *boundary_cache.entry(line.oid).or_insert_with(|| {
+                        repo.odb()
+                            .read_commit(&line.oid)
+                            .ok()
+                            .is_some_and(|c| parent_ctx.is_history_root(line.oid, &c.parents))
+                    });
+                    BlameAttributedLine {
+                        commit: line.oid,
+                        original_line: line.orig_lineno,
+                        final_line: line.final_lineno,
+                        original_path: line.original_path,
+                        content: line.content,
+                        encoding_lossy: line.encoding_lossy,
+                        content_bytes: line.content_bytes,
+                        ignored: line.ignored,
+                        unblamable: line.unblamable,
+                        boundary,
+                        not_committed: line.not_committed,
+                    }
                 })
                 .collect();
 
@@ -6030,6 +6048,7 @@ mod tests {
                     content_bytes: None,
                     ignored: false,
                     unblamable: false,
+                    boundary: false,
                     not_committed: false,
                 },
                 BlameAttributedLine {
@@ -6042,6 +6061,7 @@ mod tests {
                     content_bytes: None,
                     ignored: false,
                     unblamable: false,
+                    boundary: false,
                     not_committed: false,
                 },
                 BlameAttributedLine {
@@ -6054,6 +6074,7 @@ mod tests {
                     content_bytes: None,
                     ignored: false,
                     unblamable: false,
+                    boundary: false,
                     not_committed: false,
                 },
             ],
@@ -6097,6 +6118,7 @@ mod tests {
             content_bytes: None,
             ignored: false,
             unblamable: false,
+            boundary: false,
             not_committed,
         };
         let mut all = vec![line(1, committed, false)];

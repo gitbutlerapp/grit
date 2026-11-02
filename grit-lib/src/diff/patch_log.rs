@@ -465,7 +465,7 @@ pub fn write_commit_log_patch<W: Write>(
     let odb = repo.odb();
     let raw = odb.read(oid)?;
     let commit = parse_commit(&raw.data)?;
-    let parent_tree = parent_tree_for_commit(odb, &commit, None)?;
+    let parent_tree = parent_tree_for_commit(repo, oid, &commit, None)?;
     let opts = effective_log_patch_options(repo, opts)?;
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     write_parsed_commit_log_patch(
@@ -513,7 +513,7 @@ pub fn write_commits_log_patch<W: Write>(
         if i > 0 && opts.commit_header == LogPatchCommitHeader::Full {
             writeln!(out)?;
         }
-        let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
+        let parent_tree = parent_tree_for_commit(repo, oid, commit, Some(&trees_by_commit))?;
         write_parsed_commit_log_patch(
             out,
             repo,
@@ -529,14 +529,18 @@ pub fn write_commits_log_patch<W: Write>(
 }
 
 fn parent_tree_for_commit(
-    odb: &Odb,
+    repo: &Repository,
+    commit_oid: &ObjectId,
     commit: &CommitData,
     trees_by_commit: Option<&HashMap<ObjectId, ObjectId>>,
 ) -> Result<Option<ObjectId>> {
-    if commit.parents.is_empty() {
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+    let effective_parents = parent_ctx.for_commit(*commit_oid, &commit.parents);
+    if effective_parents.is_empty() {
         return Ok(None);
     }
-    let parent = commit.parents[0];
+    let parent = effective_parents[0];
+    let odb = repo.odb();
     if let Some(map) = trees_by_commit {
         if let Some(tree) = map.get(&parent) {
             return Ok(Some(*tree));
@@ -589,14 +593,16 @@ fn write_parsed_commit_log_patch<W: Write>(
     opts: &LogPatchOptions,
     abbrev_cache: &mut OidAbbrevCache,
 ) -> Result<()> {
-    let is_merge = commit.parents.len() > 1;
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+    let effective_parents = parent_ctx.for_commit(*oid, &commit.parents);
+    let is_merge = effective_parents.len() > 1;
     let omit_merge_patch = is_merge && opts.diff_merges == DiffMerges::Combined;
     match opts.commit_header {
         LogPatchCommitHeader::Full => {
             writeln!(out, "commit {oid}")?;
             if is_merge {
-                let mut parts = Vec::with_capacity(commit.parents.len());
-                for parent in &commit.parents {
+                let mut parts = Vec::with_capacity(effective_parents.len());
+                for parent in &effective_parents {
                     parts.push(abbrev_for_index_line(
                         abbrev_cache,
                         repo,
@@ -622,8 +628,14 @@ fn write_parsed_commit_log_patch<W: Write>(
     }
     let config = repo.config()?.clone();
     let thread_policy = repo.thread_policy();
-    let entries =
-        commit_first_parent_diff_entries(repo, commit, &opts.pathspecs, &config, &thread_policy)?;
+    let entries = commit_first_parent_diff_entries(
+        repo,
+        oid,
+        commit,
+        &opts.pathspecs,
+        &config,
+        &thread_policy,
+    )?;
     for entry in entries {
         write_diff_entry_patch(
             out,

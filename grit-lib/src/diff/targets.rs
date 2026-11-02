@@ -1037,7 +1037,9 @@ fn commit_diff_entries(
 ) -> Result<super::core::DiffEntriesResult> {
     let commit = repo.read_commit_with_replace(oid)?;
     let new_tree = commit.tree;
-    let old_tree = match commit.parents.first() {
+    let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+    let effective_parents = parent_ctx.for_commit(*oid, &commit.parents);
+    let old_tree = match effective_parents.first() {
         Some(parent) => Some(repo.read_commit_with_replace(parent)?.tree),
         None => None,
     };

@@ -721,6 +721,7 @@ const NAV_LINKAGE_CACHE_LIMIT: usize = 1024;
 struct NavParentCache<'repo> {
     repo: &'repo Repository,
     grafts: HashMap<ObjectId, Vec<ObjectId>>,
+    shallow: std::collections::HashSet<ObjectId>,
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
     share_linkage: std::cell::OnceCell<bool>,
 }
@@ -733,10 +734,12 @@ enum NavigationMetadata {
 impl<'repo> NavParentCache<'repo> {
     fn new(repo: &'repo Repository, metadata: NavigationMetadata) -> Self {
         let grafts = load_graft_parents(repo.git_dir());
+        let shallow = crate::shallow::load_shallow_boundaries(repo.git_dir());
         let graph = repo.odb().commit_graph_chain().map(|arc| (*arc).clone());
         Self {
             repo,
             grafts,
+            shallow,
             graph,
             share_linkage: match metadata {
                 NavigationMetadata::Discard => std::cell::OnceCell::from(false),
@@ -751,7 +754,10 @@ impl<'repo> NavParentCache<'repo> {
         }
         if self.repo.object_id_after_replace(&commit_oid) == commit_oid {
             if let Some(graph) = &self.graph {
-                if let Some((parents, _)) = graph.graph_commit(&commit_oid) {
+                if let Some((mut parents, _)) = graph.graph_commit(&commit_oid) {
+                    if self.shallow.contains(&commit_oid) {
+                        parents.clear();
+                    }
                     return Ok(parents);
                 }
             }
@@ -760,7 +766,7 @@ impl<'repo> NavParentCache<'repo> {
         // cached parents differ from what we parse here.
         let share_linkage = *self.share_linkage.get_or_init(|| {
             self.grafts.is_empty()
-                && crate::shallow::load_shallow_boundaries(self.repo.git_dir()).is_empty()
+                && self.shallow.is_empty()
                 && !crate::promisor::repo_treats_promisor_packs(
                     self.repo.git_dir(),
                     &self.repo.config().unwrap_or_default(),
@@ -787,7 +793,10 @@ impl<'repo> NavParentCache<'repo> {
             Ok(bytes) => bytes,
         };
         let commit = crate::objects::CommitRef::parse(&bytes)?;
-        let parents = commit.parents().to_vec();
+        let mut parents = commit.parents().to_vec();
+        if self.shallow.contains(&commit_oid) {
+            parents.clear();
+        }
         if share_linkage {
             let mut cache = self
                 .repo
@@ -5301,14 +5310,13 @@ mod line_coverage_tests {
             "the range walk must reuse navigation metadata"
         );
 
-        // Shallow boundaries trim parents for walks; navigation still reads the object
-        // parents until shallow applies on the walk side.
         fs::write(repo.git_dir().join("shallow"), format!("{child}\n"))?;
         let shallow_repo = Repository::open(&repo.git_dir(), &RepositoryOptions::empty())?;
         assert_eq!(
             NavParentCache::new(&shallow_repo, NavigationMetadata::RetainForWalk)
                 .parents_of(child)?,
-            vec![root]
+            Vec::<ObjectId>::new(),
+            "shallow boundary commits have no parents for navigation"
         );
         assert_eq!(
             count_commits_reachable_excluding_ancestors_of(

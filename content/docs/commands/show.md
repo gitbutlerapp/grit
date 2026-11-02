@@ -26,6 +26,8 @@ Pass several `<object>` values to show more than one commit (human and markdown 
 
 Use `--stat` (or other diff format flags below) instead of the default patch. Limit output to paths with `-- <path>…` after the commit arguments.
 
+In a shallow clone, a commit listed in `.git/shallow` is diffed like a root (against the empty tree), even when its object still names a missing parent.
+
 ## Options
 
 | Option | Description |

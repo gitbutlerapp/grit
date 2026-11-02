@@ -177,10 +177,12 @@ impl Pickaxe {
     ) -> Result<bool> {
         let data = repo.odb().read(&commit_oid)?.data;
         let commit = parse_commit(&data)?;
-        if commit.parents.len() > 1 {
+        let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
+        let effective_parents = parent_ctx.for_commit(commit_oid, &commit.parents);
+        if effective_parents.len() > 1 {
             return Ok(false);
         }
-        let parent_tree = if let Some(&parent_oid) = commit.parents.first() {
+        let parent_tree = if let Some(&parent_oid) = effective_parents.first() {
             let parent_data = repo.odb().read(&parent_oid)?.data;
             let parent = parse_commit(&parent_data)?;
             if parent.tree == commit.tree {
