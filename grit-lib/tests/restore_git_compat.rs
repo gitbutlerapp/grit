@@ -758,3 +758,69 @@ fn restore_index_readable_by_git_ls_files() {
     assert!(ls.contains("100644"));
     git_fsck(dir.path());
 }
+
+fn setup_mixed_staged_restore_fixture(root: &std::path::Path) {
+    fs::create_dir_all(root.join("sub")).unwrap();
+    fs::write(root.join("keep.txt"), "k\n").unwrap();
+    fs::write(root.join("sub/same.txt"), "s\n").unwrap();
+    fs::write(root.join("sub/change.txt"), "v1\n").unwrap();
+    git_cmd(root, &["add", "-A"]);
+    git_cmd(root, &["commit", "-qm", "main"]);
+    git_cmd(root, &["branch", "main"]);
+    fs::write(root.join("sub/change.txt"), "v2\n").unwrap();
+    fs::write(root.join("big-only.txt"), "b\n").unwrap();
+    git_cmd(root, &["add", "-A"]);
+    git_cmd(root, &["commit", "-qm", "big"]);
+    fs::write(root.join("sub/change.txt"), "staged\n").unwrap();
+    git_cmd(root, &["add", "sub/change.txt"]);
+    git_cmd(root, &["rm", "--cached", "sub/same.txt"]);
+}
+
+#[test]
+fn restore_staged_mixed_paths_from_source_tree_matches_git() {
+    let (dir_git, _) = init_repo();
+    setup_mixed_staged_restore_fixture(dir_git.path());
+    let main_tree = git_cmd(dir_git.path(), &["rev-parse", "main^{tree}"]);
+    let main_tree = grit_lib::objects::ObjectId::from_hex(main_tree.trim()).expect("tree");
+
+    git_cmd(
+        dir_git.path(),
+        &[
+            "restore",
+            "--source",
+            "main",
+            "--staged",
+            "--",
+            "keep.txt",
+            "sub",
+            "big-only.txt",
+        ],
+    );
+    let want_index = git_cmd(dir_git.path(), &["ls-files", "-s"]);
+    let want_resolve = git_cmd(dir_git.path(), &["ls-files", "--resolve-undo"]);
+
+    let (dir, repo) = init_repo();
+    setup_mixed_staged_restore_fixture(dir.path());
+    restore_paths(
+        &repo,
+        &RestoreOptions {
+            pathspecs: vec!["keep.txt".into(), "sub".into(), "big-only.txt".into()],
+            pathspec_sources: vec!["keep.txt".into(), "sub".into(), "big-only.txt".into()],
+            source: RestoreSource::Tree(main_tree),
+            staged: true,
+            worktree: false,
+            stage: None,
+            remerge: None,
+        },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("restore staged mixed");
+
+    assert_eq!(git_cmd(dir.path(), &["ls-files", "-s"]), want_index);
+    assert_eq!(
+        git_cmd(dir.path(), &["ls-files", "--resolve-undo"]),
+        want_resolve
+    );
+    git_fsck(dir.path());
+}

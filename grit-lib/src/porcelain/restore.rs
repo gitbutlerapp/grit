@@ -670,6 +670,9 @@ fn apply_index_restore(
     outcome: &mut RestoreOutcome,
     index_dirty: &mut bool,
 ) -> Result<()> {
+    let mut paths_to_remove: Vec<Vec<u8>> = Vec::new();
+    let mut replacements: Vec<IndexEntry> = Vec::new();
+
     for path in matched {
         let path_bytes = path.as_bytes();
         if let Some(src) = flat_tree_lookup(source_entries, path) {
@@ -680,15 +683,27 @@ fn apply_index_restore(
                 continue;
             }
             let size = blob_index_size(repo, src)?;
-            index.stage_file(index_entry_from_flat(path, src, size));
+            let mut entry = index_entry_from_flat(path, src, size);
+            if let Some(existing) = index.get(path_bytes, 0) {
+                entry.base_index_pos = existing.base_index_pos;
+            }
+            paths_to_remove.push(path_bytes.to_vec());
+            replacements.push(entry);
             outcome.restored.push(path.clone());
             *index_dirty = true;
         } else if index.get(path_bytes, 0).is_some() {
-            index.remove(path_bytes);
+            paths_to_remove.push(path_bytes.to_vec());
             outcome.removed.push(path.clone());
             *index_dirty = true;
         }
     }
+
+    if paths_to_remove.is_empty() && replacements.is_empty() {
+        return Ok(());
+    }
+
+    let path_refs: Vec<&[u8]> = paths_to_remove.iter().map(|p| p.as_slice()).collect();
+    index.remove_paths_and_insert(path_refs, replacements);
     Ok(())
 }
 
@@ -1398,5 +1413,139 @@ mod tests {
             "submodule worktree should match stage 3"
         );
         let _ = dir;
+    }
+
+    fn apply_index_restore_sequential(
+        repo: &Repository,
+        source_entries: &[FlatTreeEntry],
+        matched: &BTreeSet<String>,
+        index: &mut Index,
+        outcome: &mut RestoreOutcome,
+        index_dirty: &mut bool,
+    ) -> Result<()> {
+        for path in matched {
+            let path_bytes = path.as_bytes();
+            if let Some(src) = flat_tree_lookup(source_entries, path) {
+                if index
+                    .get(path_bytes, 0)
+                    .is_some_and(|e| e.oid == src.oid && e.mode == src.mode)
+                {
+                    continue;
+                }
+                let size = blob_index_size(repo, src)?;
+                index.stage_file(index_entry_from_flat(path, src, size));
+                outcome.restored.push(path.clone());
+                *index_dirty = true;
+            } else if index.get(path_bytes, 0).is_some() {
+                index.remove(path_bytes);
+                outcome.removed.push(path.clone());
+                *index_dirty = true;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn apply_index_restore_matches_sequential_stage_and_remove() {
+        let (_dir, repo) = init_repo();
+        let blob_a = repo.odb().write(ObjectKind::Blob, b"a\n").expect("blob");
+        let blob_b = repo.odb().write(ObjectKind::Blob, b"b\n").expect("blob");
+        let blob_c = repo.odb().write(ObjectKind::Blob, b"c\n").expect("blob");
+        let blob_f = repo.odb().write(ObjectKind::Blob, b"f\n").expect("blob");
+
+        let source = vec![
+            FlatTreeEntry {
+                path: "conflict.txt".into(),
+                mode: crate::index::MODE_REGULAR,
+                oid: blob_f,
+            },
+            FlatTreeEntry {
+                path: "replace.txt".into(),
+                mode: crate::index::MODE_REGULAR,
+                oid: blob_b,
+            },
+            FlatTreeEntry {
+                path: "same.txt".into(),
+                mode: crate::index::MODE_REGULAR,
+                oid: blob_a,
+            },
+        ];
+
+        let build = || {
+            let mut index = Index::new();
+            let mut same = staged_entry(&repo, "same.txt", b"a\n", 0);
+            same.oid = blob_a;
+            same.base_index_pos = 0;
+            let mut replace = staged_entry(&repo, "replace.txt", b"old\n", 0);
+            replace.base_index_pos = 99;
+            index.entries.push(same);
+            index.entries.push(replace);
+            index
+                .entries
+                .push(staged_entry(&repo, "drop.txt", b"d\n", 0));
+            for stage in 1..=3u16 {
+                index
+                    .entries
+                    .push(staged_entry(&repo, "conflict.txt", b"x\n", stage));
+            }
+            index
+                .entries
+                .push(staged_entry(&repo, "only-stage.txt", b"z\n", 2));
+            index.sort();
+            index
+        };
+
+        let matched = BTreeSet::from([
+            "same.txt".into(),
+            "replace.txt".into(),
+            "drop.txt".into(),
+            "conflict.txt".into(),
+            "only-stage.txt".into(),
+            "missing.txt".into(),
+        ]);
+
+        let mut batch_index = build();
+        let mut batch_outcome = RestoreOutcome::default();
+        let mut batch_dirty = false;
+        apply_index_restore(
+            &repo,
+            &source,
+            &matched,
+            &mut batch_index,
+            &mut batch_outcome,
+            &mut batch_dirty,
+        )
+        .expect("batch");
+
+        let mut seq_index = build();
+        let mut seq_outcome = RestoreOutcome::default();
+        let mut seq_dirty = false;
+        apply_index_restore_sequential(
+            &repo,
+            &source,
+            &matched,
+            &mut seq_index,
+            &mut seq_outcome,
+            &mut seq_dirty,
+        )
+        .expect("sequential");
+
+        assert_eq!(batch_outcome.restored, seq_outcome.restored);
+        assert_eq!(batch_outcome.removed, seq_outcome.removed);
+        assert_eq!(batch_index.entries, seq_index.entries);
+        assert_eq!(batch_index.resolve_undo, seq_index.resolve_undo);
+        assert_eq!(batch_index.get(b"replace.txt", 0).unwrap().oid, blob_b);
+        assert_eq!(
+            batch_index.get(b"replace.txt", 0).unwrap().base_index_pos,
+            99
+        );
+        assert!(batch_index.get(b"drop.txt", 0).is_none());
+        assert!(batch_index.get(b"conflict.txt", 0).is_some());
+        assert!(batch_index.get(b"conflict.txt", 1).is_none());
+        assert!(batch_index.resolve_undo.is_some());
+        assert!(batch_index.get(b"only-stage.txt", 2).is_some());
+        assert!(batch_index.get(b"only-stage.txt", 0).is_none());
+        let _ = blob_c;
+        assert!(batch_dirty);
     }
 }

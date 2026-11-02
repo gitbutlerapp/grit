@@ -2858,6 +2858,8 @@ impl Index {
     /// Remove all entries matching the given path (all stages).
     ///
     /// Returns `true` if at least one entry was removed.
+    ///
+    /// For many paths, prefer [`Self::remove_paths`] or [`Self::remove_paths_and_insert`].
     pub fn remove(&mut self, path: &[u8]) -> bool {
         if self.entries_sorted {
             let (start, end) = self.path_run_range_sorted(path);
