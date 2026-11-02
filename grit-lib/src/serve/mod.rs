@@ -542,11 +542,20 @@ pub(crate) struct HeadInfo {
 
 /// Read `HEAD` for the advertisement.
 pub(crate) fn head_info(repo: &Repository) -> HeadInfo {
-    HeadInfo {
-        target: crate::refs::read_symbolic_ref(repo.git_dir(), "HEAD")
-            .ok()
-            .flatten(),
-        oid: crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok(),
+    if repo.refs_on_disk() {
+        HeadInfo {
+            target: crate::refs::read_symbolic_ref(repo.git_dir(), "HEAD")
+                .ok()
+                .flatten(),
+            oid: crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok(),
+        }
+    } else {
+        HeadInfo {
+            target: crate::refs::read_symbolic_ref_for_repository(repo, "HEAD")
+                .ok()
+                .flatten(),
+            oid: crate::refs::resolve_ref_in(repo, "HEAD").ok(),
+        }
     }
 }
 
@@ -760,5 +769,87 @@ mod tests {
             ProtocolVersion::from_git_protocol("version=9"),
             ProtocolVersion::V0
         );
+    }
+
+    #[test]
+    fn head_info_uses_injected_ref_store_for_symbolic_head() {
+        use std::sync::Arc;
+
+        use crate::refs::store::{
+            Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+        };
+        use crate::repo::RepositoryBuilder;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("master"),
+        )
+        .expect("init");
+        let store = Arc::new(MemoryRefStore::new());
+        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+            .ref_store(store.clone())
+            .initial_branch("master")
+            .open(dir.path(), None)
+            .expect("open");
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+        let commit = repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                format!(
+                    "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n"
+                )
+                .as_bytes(),
+            )
+            .expect("commit");
+        store
+            .prepare(
+                RefTransaction::new()
+                    .update(RefUpdate {
+                        name: "refs/heads/master".into(),
+                        new_value: Some(RawRef::Direct(commit)),
+                        expected: Expected::Missing,
+                        reflog: None,
+                        flags: Default::default(),
+                    })
+                    .expect("txn"),
+            )
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+
+        let head = super::head_info(&repo);
+        assert_eq!(head.target.as_deref(), Some("refs/heads/master"));
+        assert_eq!(head.oid, Some(commit));
+    }
+
+    #[test]
+    fn head_info_injected_unborn_head_has_symref_without_oid() {
+        use std::sync::Arc;
+
+        use crate::refs::store::MemoryRefStore;
+        use crate::repo::RepositoryBuilder;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("master"),
+        )
+        .expect("init");
+        let store = Arc::new(MemoryRefStore::new());
+        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+            .ref_store(store.clone())
+            .initial_branch("master")
+            .open(dir.path(), None)
+            .expect("open");
+
+        let head = super::head_info(&repo);
+        assert_eq!(head.target.as_deref(), Some("refs/heads/master"));
+        assert!(head.oid.is_none());
     }
 }

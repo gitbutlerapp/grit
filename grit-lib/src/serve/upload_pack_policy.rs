@@ -109,8 +109,8 @@ pub(crate) fn resolve_want_ref(
     if crate::hide_refs::ref_is_hidden(name, &full, hidden) {
         return Err(ServeError::Protocol(format!("unknown ref {name}")));
     }
-    crate::refs::resolve_ref(repo.git_dir(), &full)
-        .or_else(|_| crate::refs::resolve_ref(repo.git_dir(), name))
+    crate::refs::resolve_ref_in(repo, &full)
+        .or_else(|_| crate::refs::resolve_ref_in(repo, name))
         .map_err(|_| ServeError::Protocol(format!("unknown ref {name}")))
 }
 
@@ -205,10 +205,10 @@ fn validate_stateless_extra_wants(repo: &Repository, wants: &[ObjectId]) -> Resu
 /// Direct ref targets (unpeeled), including annotated tag objects on refs.
 fn repository_ref_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut ids = HashSet::new();
-    for (_, oid) in crate::refs::list_refs(repo.git_dir(), "refs/")? {
+    for (_, oid) in crate::refs::list_refs_in(repo, "refs/")? {
         ids.insert(oid);
     }
-    if let Ok(head) = crate::refs::resolve_ref(repo.git_dir(), "HEAD") {
+    if let Ok(head) = crate::refs::resolve_ref_in(repo, "HEAD") {
         ids.insert(head);
     }
     Ok(ids)
@@ -327,12 +327,12 @@ fn object_reachable_in_tip_closure(
 /// Peeled commit tips for every ref in the repository (including hidden refs).
 fn repository_tip_commits(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut tips = HashSet::new();
-    for (_, oid) in crate::refs::list_refs(repo.git_dir(), "refs/")? {
+    for (_, oid) in crate::refs::list_refs_in(repo, "refs/")? {
         if let Ok(p) = repo.odb().peel_tags(oid).map(|(p, _)| p) {
             tips.insert(p);
         }
     }
-    if let Ok(head) = crate::refs::resolve_ref(repo.git_dir(), "HEAD") {
+    if let Ok(head) = crate::refs::resolve_ref_in(repo, "HEAD") {
         if let Ok(p) = repo.odb().peel_tags(head).map(|(p, _)| p) {
             tips.insert(p);
         }
@@ -374,4 +374,98 @@ fn reachable_from_repository_tips(repo: &Repository) -> Result<HashSet<ObjectId>
         }
     }
     Ok(seen)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use crate::config::environment::RepositoryOptions;
+    use crate::objects::{ObjectId, ObjectKind};
+    use crate::refs::store::{
+        Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+    };
+    use crate::repo::{InitOptions, Repository, RepositoryBuilder};
+
+    use super::{repository_ref_object_ids, resolve_want_ref};
+
+    fn memory_serve_repo() -> (tempfile::TempDir, Repository, Arc<MemoryRefStore>, ObjectId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("master"),
+        )
+        .expect("init");
+        let store = Arc::new(MemoryRefStore::new());
+        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+            .ref_store(store.clone())
+            .initial_branch("master")
+            .open(dir.path(), None)
+            .expect("open");
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+        let commit = repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                format!(
+                    "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n"
+                )
+                .as_bytes(),
+            )
+            .expect("commit");
+        store
+            .prepare(
+                RefTransaction::new()
+                    .update(RefUpdate {
+                        name: "refs/heads/master".into(),
+                        new_value: Some(RawRef::Direct(commit)),
+                        expected: Expected::Missing,
+                        reflog: None,
+                        flags: Default::default(),
+                    })
+                    .expect("txn"),
+            )
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+        (dir, repo, store, commit)
+    }
+
+    #[test]
+    fn resolve_want_ref_head_uses_injected_store() {
+        let (_dir, repo, _store, commit) = memory_serve_repo();
+        let oid = resolve_want_ref(&repo, &[], "HEAD").expect("HEAD");
+        assert_eq!(oid, commit);
+    }
+
+    #[test]
+    fn resolve_want_ref_memory_only_branch() {
+        let (_dir, repo, store, commit) = memory_serve_repo();
+        store
+            .prepare(
+                RefTransaction::new()
+                    .update(RefUpdate {
+                        name: "refs/heads/only-memory".into(),
+                        new_value: Some(RawRef::Direct(commit)),
+                        expected: Expected::Missing,
+                        reflog: None,
+                        flags: Default::default(),
+                    })
+                    .expect("txn"),
+            )
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+        let oid = resolve_want_ref(&repo, &[], "heads/only-memory").expect("ref");
+        assert_eq!(oid, commit);
+    }
+
+    #[test]
+    fn repository_ref_object_ids_includes_injected_head() {
+        let (_dir, repo, _store, commit) = memory_serve_repo();
+        let ids = repository_ref_object_ids(&repo).expect("ids");
+        assert!(ids.contains(&commit));
+    }
 }

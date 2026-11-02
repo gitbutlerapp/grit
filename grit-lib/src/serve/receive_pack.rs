@@ -1043,7 +1043,7 @@ impl ShallowPlan {
             receiver_tips.insert(r.peeled.unwrap_or(r.oid));
             Ok(std::ops::ControlFlow::Continue(()))
         })?;
-        receiver_tips.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
+        receiver_tips.extend(crate::refs::resolve_ref_in(repo, "HEAD").ok());
         let graph = repo.odb().commit_graph_chain();
         let roots = request
             .commands
@@ -1756,7 +1756,7 @@ fn unconnected_tips(
 /// The values of every ref of `repo` and of `HEAD`, with tags also peeled.
 fn existing_ref_values(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut existing = super::advertised_object_ids_from_repo(repo, &[], &[], super::Peel::Yes)?;
-    existing.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
+    existing.extend(crate::refs::resolve_ref_in(repo, "HEAD").ok());
     Ok(existing)
 }
 
@@ -2074,5 +2074,61 @@ mod tests {
         assert!(policy_for(Some("updateInstead")));
         assert!(policy_for(Some("refuse")));
         assert!(ReceivePolicy::default().deny_delete_current);
+    }
+
+    #[test]
+    fn existing_ref_values_includes_injected_head() {
+        use std::sync::Arc;
+
+        use crate::config::environment::RepositoryOptions;
+        use crate::objects::ObjectKind;
+        use crate::refs::store::{
+            Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+        };
+        use crate::repo::{InitOptions, Repository, RepositoryBuilder};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("master"),
+        )
+        .expect("init");
+        let store = Arc::new(MemoryRefStore::new());
+        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+            .ref_store(store.clone())
+            .initial_branch("master")
+            .open(dir.path(), None)
+            .expect("open");
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+        let commit = repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                format!(
+                    "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n"
+                )
+                .as_bytes(),
+            )
+            .expect("commit");
+        store
+            .prepare(
+                RefTransaction::new()
+                    .update(RefUpdate {
+                        name: "refs/heads/master".into(),
+                        new_value: Some(RawRef::Direct(commit)),
+                        expected: Expected::Missing,
+                        reflog: None,
+                        flags: Default::default(),
+                    })
+                    .expect("txn"),
+            )
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+
+        let values = existing_ref_values(&repo).expect("values");
+        assert!(values.contains(&commit));
     }
 }
