@@ -1,6 +1,6 @@
 //! `release_unused_heap` returns freed glibc arena pages on Linux.
 
-#![cfg(target_os = "linux")]
+#![cfg(all(target_os = "linux", target_env = "gnu"))]
 
 mod upload_pack_blob_memory_support;
 

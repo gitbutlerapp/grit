@@ -60,6 +60,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",
+    ("grit-lib", "release_unused_heap"): 'all(target_os = "linux", target_env = "gnu")',
 }
 
 GUARD = '''
