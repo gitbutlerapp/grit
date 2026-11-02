@@ -708,6 +708,237 @@ fn smart_http_discovery_completes_one_connection_with_slow_body_and_low_speed_en
     );
 }
 
+#[derive(Clone, Copy)]
+enum SilentStallMode {
+    Silent,
+    HeadersContentLength,
+}
+
+fn spawn_silent_stall_server(mode: SilentStallMode) -> (u16, Arc<AtomicBool>) {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_server = Arc::clone(&stop);
+    let (port_tx, port_rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind silent stall server");
+        port_tx
+            .send(listener.local_addr().expect("addr").port())
+            .expect("port");
+        listener.set_nonblocking(true).ok();
+        while !stop_server.load(Ordering::Relaxed) {
+            let Ok((mut stream, _)) = listener.accept() else {
+                thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            thread::spawn(move || {
+                stream.set_read_timeout(Some(Duration::from_secs(30))).ok();
+                let mut buf = [0u8; 65536];
+                let _ = stream.read(&mut buf);
+                if matches!(mode, SilentStallMode::HeadersContentLength) {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Type: application/x-git-upload-pack-advertisement\r\nContent-Length: 100000\r\n\r\n",
+                        )
+                        .ok();
+                }
+                loop {
+                    thread::sleep(Duration::from_secs(100));
+                }
+            });
+        }
+    });
+    let port = port_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("stall server port");
+    (port, stop)
+}
+
+fn low_speed_test_env() -> Environment {
+    Environment::empty()
+        .with_var("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+        .with_var("GIT_HTTP_LOW_SPEED_TIME", "1")
+}
+
+fn assert_low_speed_transport(err: &Error) {
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("HTTP transfer speed below http.lowSpeedLimit"),
+        "expected low-speed transport error, got {msg}"
+    );
+    assert!(!err.is_cancelled(), "low-speed must not look like cancel");
+}
+
+fn assert_low_speed_elapsed(started: Instant) {
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "low-speed timeout took too long: {elapsed:?}"
+    );
+    assert!(
+        elapsed >= Duration::from_millis(900),
+        "expected ~1s low-speed window, got {elapsed:?}"
+    );
+}
+
+#[test]
+fn smart_http_connect_aborts_on_silent_stall_with_low_speed_env() {
+    run_with_hard_timeout(
+        "smart_http_connect_aborts_on_silent_stall_with_low_speed_env",
+        || {
+            let (port, stop) = spawn_silent_stall_server(SilentStallMode::Silent);
+            let env = low_speed_test_env();
+            let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
+                .expect("client");
+            let url = format!("http://127.0.0.1:{port}/x.git");
+            let transport = SmartHttpTransport::new(http_client_arc(client));
+            let started = Instant::now();
+            let err = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default())
+            {
+                Ok(_) => panic!("silent stall must not succeed"),
+                Err(e) => e,
+            };
+            stop.store(true, Ordering::Relaxed);
+            assert_low_speed_transport(&err);
+            assert_low_speed_elapsed(started);
+        },
+    );
+}
+
+#[test]
+fn smart_http_connect_aborts_on_headers_stall_with_low_speed_env() {
+    run_with_hard_timeout(
+        "smart_http_connect_aborts_on_headers_stall_with_low_speed_env",
+        || {
+            let (port, stop) = spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
+            let env = low_speed_test_env();
+            let client = UreqHttpClient::from_config_with_environment(&ConfigSet::default(), &env)
+                .expect("client");
+            let url = format!("http://127.0.0.1:{port}/x.git");
+            let transport = SmartHttpTransport::new(http_client_arc(client));
+            let started = Instant::now();
+            let err = match transport.connect(&url, Service::UploadPack, &ConnectOptions::default())
+            {
+                Ok(_) => panic!("header stall must not succeed"),
+                Err(e) => e,
+            };
+            stop.store(true, Ordering::Relaxed);
+            assert_low_speed_transport(&err);
+            assert_low_speed_elapsed(started);
+        },
+    );
+}
+
+#[test]
+fn clone_aborts_on_silent_stall_with_low_speed_env_without_bundle_cache() {
+    run_with_hard_timeout(
+        "clone_aborts_on_silent_stall_with_low_speed_env_without_bundle_cache",
+        || {
+            let (port, stop) = spawn_silent_stall_server(SilentStallMode::Silent);
+            let env = low_speed_test_env();
+            let factory = DefaultHttpClientFactory::with_environment(env.clone());
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let dest = tmp.path().join("cl");
+            let url = format!("http://127.0.0.1:{port}/x.git");
+            let started = Instant::now();
+            let err = clone(
+                CloneOptions {
+                    checkout: false,
+                    environment: env,
+                    ..CloneOptions::new(url, dest)
+                },
+                &mut NoProgress,
+                &NeverCancel,
+                Some(&factory),
+            )
+            .expect_err("silent clone stall must fail");
+            stop.store(true, Ordering::Relaxed);
+            assert!(
+                matches!(err, CloneError::Remote(_) | CloneError::Library(_)),
+                "expected transport failure, got {err:?}"
+            );
+            assert!(!err.is_cancelled());
+            let msg = format!("{err}");
+            assert!(msg.contains("HTTP transfer speed below http.lowSpeedLimit"));
+            assert_low_speed_elapsed(started);
+        },
+    );
+}
+
+#[test]
+fn remote_fetch_aborts_on_silent_stall_with_low_speed_env() {
+    run_with_hard_timeout(
+        "remote_fetch_aborts_on_silent_stall_with_low_speed_env",
+        || {
+            let (port, stop) = spawn_silent_stall_server(SilentStallMode::Silent);
+            let env = low_speed_test_env();
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+            let url = format!("http://127.0.0.1:{port}/x.git");
+            let remote = Remote::from_url(&url).expect("remote url");
+            let started = Instant::now();
+            let err = remote
+                .fetch(
+                    &repo,
+                    FetchOptions {
+                        environment: env,
+                        ..FetchOptions::default()
+                    },
+                    &mut NoProgress,
+                    &NeverCancel,
+                    Some(&DefaultHttpClientFactory::with_environment(
+                        low_speed_test_env(),
+                    )),
+                )
+                .expect_err("silent fetch stall must fail");
+            stop.store(true, Ordering::Relaxed);
+            assert!(!err.is_cancelled(), "low-speed must not look like cancel");
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("HTTP transfer speed below http.lowSpeedLimit"),
+                "expected low-speed transport error, got {msg}"
+            );
+            assert_low_speed_elapsed(started);
+        },
+    );
+}
+
+#[test]
+fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
+    run_with_hard_timeout(
+        "remote_fetch_aborts_on_headers_stall_with_low_speed_env",
+        || {
+            let (port, stop) = spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
+            let env = low_speed_test_env();
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+            let url = format!("http://127.0.0.1:{port}/x.git");
+            let remote = Remote::from_url(&url).expect("remote url");
+            let started = Instant::now();
+            let err = remote
+                .fetch(
+                    &repo,
+                    FetchOptions {
+                        environment: env,
+                        ..FetchOptions::default()
+                    },
+                    &mut NoProgress,
+                    &NeverCancel,
+                    Some(&DefaultHttpClientFactory::with_environment(
+                        low_speed_test_env(),
+                    )),
+                )
+                .expect_err("header fetch stall must fail");
+            stop.store(true, Ordering::Relaxed);
+            assert!(!err.is_cancelled(), "low-speed must not look like cancel");
+            let msg = format!("{err}");
+            assert!(
+                msg.contains("HTTP transfer speed below http.lowSpeedLimit"),
+                "expected low-speed transport error, got {msg}"
+            );
+            assert_low_speed_elapsed(started);
+        },
+    );
+}
+
 #[test]
 fn connect_operation_cancel_watch_observes_mirrored_deadline() {
     let cancel = DeadlineCancel(Instant::now() - Duration::from_secs(1));
