@@ -331,6 +331,17 @@ pub(crate) fn parse_index_extensions(
     Ok(out)
 }
 
+/// Smallest on-disk size of one index entry (empty path), used to cap `with_capacity`.
+pub(crate) fn min_on_disk_index_entry_size(version: u32, hash_len: usize) -> usize {
+    let mut size = 40 + hash_len + 2 + 1;
+    if version == 4 {
+        size += 1;
+    } else {
+        size = (size + 7) & !7;
+    }
+    size
+}
+
 pub(crate) fn parse_entries_serial(
     body: &[u8],
     version: u32,
@@ -338,18 +349,43 @@ pub(crate) fn parse_entries_serial(
     hash_len: usize,
     start: usize,
 ) -> Result<(Vec<IndexEntry>, usize)> {
+    if start > body.len() {
+        return Err(Error::IndexError(
+            "index entry region starts past end of file".to_owned(),
+        ));
+    }
+    let remaining = body.len() - start;
+    let min_entry = min_on_disk_index_entry_size(version, hash_len);
+    let max_by_bytes = remaining / min_entry;
+    if count as usize > max_by_bytes {
+        return Err(Error::IndexError(format!(
+            "index declares {count} entries but only {max_by_bytes} fit in {remaining} bytes"
+        )));
+    }
+
     let mut pos = start;
     let mut entries = Vec::with_capacity(count as usize);
     for _ in 0..count {
+        let Some(tail) = body.get(pos..) else {
+            return Err(Error::IndexError(
+                "index entry overruns index body".to_owned(),
+            ));
+        };
         let prev_path: &[u8] = if version == 4 {
             entries.last().map_or(&[][..], |e: &IndexEntry| &e.path)
         } else {
             &[]
         };
-        let (entry, consumed) =
-            crate::index::parse_entry(&body[pos..], version, prev_path, hash_len)?;
+        let (entry, consumed) = crate::index::parse_entry(tail, version, prev_path, hash_len)?;
+        pos = pos
+            .checked_add(consumed)
+            .ok_or_else(|| Error::IndexError("index entry size overflow".to_owned()))?;
+        if pos > body.len() {
+            return Err(Error::IndexError(
+                "index entry overruns index body".to_owned(),
+            ));
+        }
         entries.push(entry);
-        pos += consumed;
     }
     Ok((entries, pos))
 }
@@ -362,11 +398,17 @@ fn parse_ieot_block_range(
     block_start: usize,
     block_end: usize,
 ) -> Result<Vec<IndexEntry>> {
-    let nr: usize = ieot.entries[block_start..block_end]
+    let nr: usize = ieot
+        .entries
+        .get(block_start..block_end)
+        .ok_or_else(|| Error::IndexError("IEOT block range out of bounds".to_owned()))?
         .iter()
-        .map(|b| b.nr as usize)
-        .sum();
-    let mut local = Vec::with_capacity(nr);
+        .try_fold(0usize, |acc, b| {
+            acc.checked_add(b.nr as usize)
+                .ok_or_else(|| Error::IndexError("IEOT entry count overflow".to_owned()))
+        })?;
+    let min_entry = min_on_disk_index_entry_size(version, hash_len);
+    let mut local = Vec::with_capacity(nr.min(body.len() / min_entry.max(1)));
     for i in block_start..block_end {
         let block = &ieot.entries[i];
         let mut pos = block.offset as usize;
@@ -383,9 +425,20 @@ fn parse_ieot_block_range(
                 )));
             }
             let prev_path: &[u8] = if version == 4 { &prev } else { &[] };
-            let (entry, consumed) =
-                crate::index::parse_entry(&body[pos..], version, prev_path, hash_len)?;
-            pos += consumed;
+            let Some(tail) = body.get(pos..) else {
+                return Err(Error::IndexError(format!(
+                    "IEOT block {i} entry overruns index body at {pos}"
+                )));
+            };
+            let (entry, consumed) = crate::index::parse_entry(tail, version, prev_path, hash_len)?;
+            pos = pos
+                .checked_add(consumed)
+                .ok_or_else(|| Error::IndexError("index entry size overflow".to_owned()))?;
+            if pos > body.len() {
+                return Err(Error::IndexError(format!(
+                    "IEOT block {i} entry overruns index body at {pos}"
+                )));
+            }
             if version == 4 {
                 prev.clear();
                 prev.extend_from_slice(&entry.path);
@@ -420,7 +473,9 @@ pub(crate) fn parse_entries_parallel(
     let blocks = run_ordered_pool(&block_indices, nr_threads, 1, |&i| {
         parse_ieot_block_range(body, version, hash_len, ieot, i, i + 1)
     })?;
-    let mut entries = Vec::with_capacity(count as usize);
+    let min_entry = min_on_disk_index_entry_size(version, hash_len);
+    let cap = (count as usize).min(body.len() / min_entry.max(1));
+    let mut entries = Vec::with_capacity(cap);
     for part in blocks {
         entries.extend(part);
     }
