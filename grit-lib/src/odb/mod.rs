@@ -996,6 +996,29 @@ impl Odb {
             .clone()
     }
 
+    fn invalidate_loose_negative_cache(&self, objects_dir: &Path) {
+        let key = objects_dir.to_path_buf();
+        let cache = self
+            .loose_negative_caches
+            .lock()
+            .ok()
+            .and_then(|guard| guard.get(&key).map(Arc::clone));
+        let Some(cache) = cache else {
+            return;
+        };
+        let mut inner = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *inner = store::LooseNegativeCache::default();
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn err_object_not_found(&self, oid: &ObjectId) -> Error {
+        self.invalidate_loose_negative_cache(self.objects_dir.as_path());
+        Error::ObjectNotFound(oid.to_hex())
+    }
+
     #[cfg(test)]
     pub(crate) fn exists_probe_count(&self) -> usize {
         self.exists_probe.load(Ordering::Relaxed)
@@ -2509,7 +2532,7 @@ impl Odb {
         let mut lazy_retries = 0u32;
         loop {
             let Some(res) = self.resolve_promisor_miss(oid, lazy_retries)? else {
-                return Err(Error::ObjectNotFound(oid.to_hex()));
+                return Err(self.err_object_not_found(oid));
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::RetryAfterFetch => {
@@ -2519,7 +2542,7 @@ impl Odb {
                     }
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
-                    return Err(Error::ObjectNotFound(oid.to_hex()));
+                    return Err(self.err_object_not_found(oid));
                 }
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
                     return Err(err);
@@ -2805,7 +2828,7 @@ impl Odb {
         let mut lazy_retries = 0u32;
         loop {
             let Some(res) = self.resolve_promisor_miss(oid, lazy_retries)? else {
-                return Err(Error::ObjectNotFound(oid.to_hex()));
+                return Err(self.err_object_not_found(oid));
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::RetryAfterFetch => {
@@ -2815,7 +2838,7 @@ impl Odb {
                     }
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
-                    return Err(Error::ObjectNotFound(oid.to_hex()));
+                    return Err(self.err_object_not_found(oid));
                 }
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
                     return Err(err);
@@ -3004,7 +3027,7 @@ impl Odb {
     /// from a remote; missing local objects return [`Error::ObjectNotFound`].
     pub(crate) fn read_info_without_fetch(&self, oid: &ObjectId) -> Result<ObjectInfo> {
         self.try_read_info_once(oid)?
-            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+            .ok_or_else(|| self.err_object_not_found(oid))
     }
 
     /// Kind of `oid` when this database stores it, for checks that must not accept an
@@ -3050,14 +3073,14 @@ impl Odb {
         let mut lazy_retries = 0u32;
         loop {
             let Some(res) = self.resolve_promisor_miss(oid, lazy_retries)? else {
-                return Err(Error::ObjectNotFound(oid.to_hex()));
+                return Err(self.err_object_not_found(oid));
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
                     return Err(err);
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
-                    return Err(Error::ObjectNotFound(oid.to_hex()));
+                    return Err(self.err_object_not_found(oid));
                 }
                 crate::promisor_fetch::PromisorMissResolution::RetryAfterFetch => {
                     lazy_retries += 1;
@@ -5950,8 +5973,32 @@ mod tests {
         .unwrap();
         git_in(upstream.path(), &["add", "payload.txt"]);
         git_in(upstream.path(), &["commit", "-m", "seed"]);
+        for n in 0..48 {
+            let name = format!("blob-{n}.txt");
+            fs::write(
+                upstream.path().join(&name),
+                format!("alternate-only-payload-{n}").as_bytes(),
+            )
+            .unwrap();
+            git_in(upstream.path(), &["add", name.as_str()]);
+            git_in(
+                upstream.path(),
+                &["commit", "-m", &format!("packed commit {n}")],
+            );
+        }
         git_in(upstream.path(), &["repack", "-a", "-d"]);
-        let oid = git_rev_parse_oid(upstream.path(), "HEAD");
+        let rev_out = git_run(upstream.path(), &["rev-list", "HEAD"]);
+        assert!(rev_out.status.success());
+        let oids: Vec<ObjectId> = std::str::from_utf8(&rev_out.stdout)
+            .unwrap()
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|line| ObjectId::from_hex(line.trim()).expect("rev-list oid"))
+            .collect();
+        assert!(
+            oids.len() >= 32,
+            "need many distinct commit oids for metadata regression"
+        );
 
         let layout = TempDir::new().unwrap();
         git_in(
@@ -5970,7 +6017,11 @@ mod tests {
         clear_pack_cache();
         let odb = Odb::new(&objects);
         odb.hot_path_metrics().set_loose_open_counting(true);
+        odb.hot_path_metrics().set_loose_metadata_counting(true);
+        odb.hot_path_metrics().set_stamp_counting(true);
         odb.hot_path_metrics().reset_loose_path_open_attempts();
+        odb.hot_path_metrics().reset_loose_metadata_probes();
+        odb.hot_path_metrics().reset_pack_dir_metadata_probes();
         let _scope = HotPathMetricsScope::install(odb.hot_path_metrics_arc());
         pack_cache::test_reset_dir_rescan_count(&local_pack);
         let upstream_pack = upstream.path().join(".git/objects/pack");
@@ -5978,18 +6029,52 @@ mod tests {
         let upstream_store = odb.pack_store_for(&upstream_objects);
         pack_cache::test_reset_dir_rescan_count_on_store(&upstream_store, &upstream_pack);
         odb.with_pack_read_context(|| {
-            odb.read(&oid).expect("alternate read");
+            for oid in &oids {
+                odb.read(oid).expect("alternate warmup read");
+            }
             let after_first = pack_cache::test_dir_rescan_count(&local_pack);
             let after_first_alt =
                 pack_cache::test_dir_rescan_count_on_store(&upstream_store, &upstream_pack);
             let loose_after_first = odb.hot_path_metrics().loose_path_open_attempts();
-            for _ in 0..512 {
-                odb.read_info(&oid).expect("repeat read_info");
+            let root_meta_after_first = odb.hot_path_metrics().loose_objects_root_metadata_probes();
+            let fanout_meta_after_first = odb.hot_path_metrics().loose_fanout_metadata_probes();
+            let exists_meta_after_first = odb.hot_path_metrics().loose_path_exists_probes();
+            let loose_meta_after_first = odb.hot_path_metrics().loose_metadata_probe_total();
+            let pack_dir_meta_after_first = odb.hot_path_metrics().pack_dir_metadata_probes();
+            for _ in 0..2 {
+                for oid in &oids {
+                    odb.read(oid).expect("repeat alternate read");
+                }
             }
             assert_eq!(
                 odb.hot_path_metrics().loose_path_open_attempts(),
                 loose_after_first,
                 "alternate hits must not stat loose paths on the empty primary after warmup"
+            );
+            assert_eq!(
+                odb.hot_path_metrics().loose_objects_root_metadata_probes(),
+                root_meta_after_first,
+                "known-absent fanout must not re-stat the objects root after warmup"
+            );
+            assert_eq!(
+                odb.hot_path_metrics().loose_fanout_metadata_probes(),
+                fanout_meta_after_first,
+                "known-absent fanout must not re-stat fanout directories after warmup"
+            );
+            assert_eq!(
+                odb.hot_path_metrics().loose_path_exists_probes(),
+                exists_meta_after_first,
+                "known-absent fanout must not is_file/is_dir loose paths after warmup"
+            );
+            assert_eq!(
+                odb.hot_path_metrics().loose_metadata_probe_total(),
+                loose_meta_after_first,
+                "no loose metadata probes after warmup across distinct alternate oids"
+            );
+            assert_eq!(
+                odb.hot_path_metrics().pack_dir_metadata_probes(),
+                pack_dir_meta_after_first,
+                "alternate catalog hits must not stat pack directories after warmup"
             );
             assert_eq!(
                 pack_cache::test_dir_rescan_count(&local_pack),

@@ -22,11 +22,16 @@ pub struct HotPathTestMetrics {
     pack_signature_stats: AtomicUsize,
     midx_stamp_stats: AtomicUsize,
     loose_path_open_attempts: AtomicUsize,
+    loose_objects_root_metadata: AtomicUsize,
+    loose_fanout_metadata: AtomicUsize,
+    loose_path_exists_probes: AtomicUsize,
+    pack_dir_metadata: AtomicUsize,
     commit_parse_calls: AtomicUsize,
     freshen_counting: AtomicBool,
     blob_counting: AtomicBool,
     stamp_counting: AtomicBool,
     loose_open_counting: AtomicBool,
+    loose_metadata_counting: AtomicBool,
     commit_parse_counting: AtomicBool,
 }
 
@@ -169,6 +174,74 @@ impl HotPathTestMetrics {
         self.loose_open_counting.store(enabled, Ordering::Relaxed);
     }
 
+    pub fn set_loose_metadata_counting(&self, enabled: bool) {
+        self.loose_metadata_counting
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn reset_loose_metadata_probes(&self) {
+        self.loose_objects_root_metadata.store(0, Ordering::SeqCst);
+        self.loose_fanout_metadata.store(0, Ordering::SeqCst);
+        self.loose_path_exists_probes.store(0, Ordering::SeqCst);
+    }
+
+    #[must_use]
+    pub fn loose_objects_root_metadata_probes(&self) -> usize {
+        self.loose_objects_root_metadata.load(Ordering::SeqCst)
+    }
+
+    #[must_use]
+    pub fn loose_fanout_metadata_probes(&self) -> usize {
+        self.loose_fanout_metadata.load(Ordering::SeqCst)
+    }
+
+    #[must_use]
+    pub fn loose_path_exists_probes(&self) -> usize {
+        self.loose_path_exists_probes.load(Ordering::SeqCst)
+    }
+
+    #[must_use]
+    pub fn loose_metadata_probe_total(&self) -> usize {
+        self.loose_objects_root_metadata_probes()
+            + self.loose_fanout_metadata_probes()
+            + self.loose_path_exists_probes()
+    }
+
+    pub fn reset_pack_dir_metadata_probes(&self) {
+        self.pack_dir_metadata.store(0, Ordering::SeqCst);
+    }
+
+    #[must_use]
+    pub fn pack_dir_metadata_probes(&self) -> usize {
+        self.pack_dir_metadata.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_loose_objects_root_metadata(&self) {
+        if self.loose_metadata_counting.load(Ordering::Relaxed) {
+            self.loose_objects_root_metadata
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn record_loose_fanout_metadata(&self) {
+        if self.loose_metadata_counting.load(Ordering::Relaxed) {
+            self.loose_fanout_metadata.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn record_loose_path_exists_probe(&self) {
+        if self.loose_metadata_counting.load(Ordering::Relaxed) {
+            self.loose_path_exists_probes
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn record_pack_dir_metadata(&self) {
+        if self.stamp_counting.load(Ordering::Relaxed) {
+            self.pack_dir_metadata.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     pub fn reset_commit_parse_calls(&self) {
         self.commit_parse_calls.store(0, Ordering::SeqCst);
     }
@@ -232,6 +305,7 @@ impl HotPathTestMetrics {
         self.set_blob_counting(false);
         self.set_stamp_counting(false);
         self.set_loose_open_counting(false);
+        self.set_loose_metadata_counting(false);
         self.set_commit_parse_counting(false);
     }
 }
@@ -268,6 +342,38 @@ pub(crate) fn record_loose_path_open_for_active_scope() {
     with_active(|active| {
         if let Some(m) = active {
             m.record_loose_path_open();
+        }
+    });
+}
+
+pub(crate) fn record_loose_objects_root_metadata_for_active_scope() {
+    with_active(|active| {
+        if let Some(m) = active {
+            m.record_loose_objects_root_metadata();
+        }
+    });
+}
+
+pub(crate) fn record_loose_fanout_metadata_for_active_scope() {
+    with_active(|active| {
+        if let Some(m) = active {
+            m.record_loose_fanout_metadata();
+        }
+    });
+}
+
+pub(crate) fn record_loose_path_exists_probe_for_active_scope() {
+    with_active(|active| {
+        if let Some(m) = active {
+            m.record_loose_path_exists_probe();
+        }
+    });
+}
+
+pub(crate) fn record_pack_dir_metadata_for_active_scope() {
+    with_active(|active| {
+        if let Some(m) = active {
+            m.record_pack_dir_metadata();
         }
     });
 }

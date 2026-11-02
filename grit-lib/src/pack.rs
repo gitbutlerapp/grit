@@ -181,23 +181,40 @@ pub(crate) mod pack_cache {
         > = const { std::cell::RefCell::new(None) };
     }
 
+    struct AlternatePackReadStoreGuard {
+        previous: Option<std::sync::Arc<crate::pack_store::PackStore>>,
+    }
+
+    impl AlternatePackReadStoreGuard {
+        fn install(store: std::sync::Arc<crate::pack_store::PackStore>) -> Option<Self> {
+            ALTERNATE_PACK_READ_STORE.with(|cell| {
+                if cell
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|active| std::sync::Arc::ptr_eq(active, &store))
+                {
+                    return None;
+                }
+                let previous = cell.borrow_mut().replace(store);
+                Some(Self { previous })
+            })
+        }
+    }
+
+    impl Drop for AlternatePackReadStoreGuard {
+        fn drop(&mut self) {
+            ALTERNATE_PACK_READ_STORE.with(|cell| {
+                *cell.borrow_mut() = self.previous.take();
+            });
+        }
+    }
+
     pub(crate) fn with_alternate_pack_store<R>(
         store: std::sync::Arc<crate::pack_store::PackStore>,
         f: impl FnOnce() -> R,
     ) -> R {
-        ALTERNATE_PACK_READ_STORE.with(|cell| {
-            if cell
-                .borrow()
-                .as_ref()
-                .is_some_and(|active| std::sync::Arc::ptr_eq(active, &store))
-            {
-                return f();
-            }
-            let prev = cell.borrow_mut().replace(store);
-            let out = f();
-            *cell.borrow_mut() = prev;
-            out
-        })
+        let _guard = AlternatePackReadStoreGuard::install(store);
+        f()
     }
 
     fn alternate_read_store() -> Option<std::sync::Arc<crate::pack_store::PackStore>> {
@@ -818,21 +835,6 @@ pub(crate) mod pack_cache {
         });
     }
 
-    fn tls_cached_pack_dir_mtime(pack_dir: &Path) -> Option<SystemTime> {
-        if !PACK_DIR_LISTING_TRUSTED.get() {
-            return None;
-        }
-        PACK_DIR_INDEXES.with(|cell| {
-            cell.borrow()
-                .as_ref()
-                .and_then(|(dir, mt, _)| (dir == pack_dir).then_some(*mt))
-        })
-    }
-
-    fn pack_dir_mtime_for_reprepare(pack_dir: &Path) -> SystemTime {
-        tls_cached_pack_dir_mtime(pack_dir).unwrap_or_else(|| dir_mtime(pack_dir))
-    }
-
     struct CachedDir {
         dir_mtime: SystemTime,
         indexes: Vec<Arc<PackIndex>>,
@@ -1210,6 +1212,14 @@ pub(crate) mod pack_cache {
     }
 
     fn dir_mtime(path: &Path) -> SystemTime {
+        #[cfg(test)]
+        {
+            if let Some(store) = alternate_read_store() {
+                if path.starts_with(store.objects_dir()) {
+                    crate::hot_path_test_metrics::record_pack_dir_metadata_for_active_scope();
+                }
+            }
+        }
         fs::metadata(path)
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH)
@@ -1478,11 +1488,10 @@ pub(crate) mod pack_cache {
     ) -> Result<Vec<Arc<PackIndex>>> {
         debug_assert_eq!(store.objects_dir(), objects_dir);
         let pack_dir = objects_dir.join("pack");
-        let dir_mt = pack_dir_mtime_for_reprepare(&pack_dir);
         if let Some(hit) = store.with_catalog_read(|g| {
-            g.by_dir
-                .get(&pack_dir)
-                .and_then(|c| (c.dir_mtime == dir_mt).then(|| c.indexes.clone()))
+            g.by_dir.get(&pack_dir).and_then(|c| {
+                (c.idx_listing_verified || !c.indexes.is_empty()).then(|| c.indexes.clone())
+            })
         }) {
             return Ok(hit);
         }
