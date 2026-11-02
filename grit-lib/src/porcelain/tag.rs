@@ -299,6 +299,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
                 tagger: Some(tagger.clone()),
                 extra_headers: Vec::new(),
                 message,
+                raw_message: None,
             };
             claim.apply_to_tag(&mut tag);
             tree_sha256_outcome = Some(TagTreeSha256Outcome {
@@ -320,6 +321,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
                 tagger: Some(tagger.clone()),
                 extra_headers: Vec::new(),
                 message,
+                raw_message: None,
             };
             let unsigned = serialize_tag(&tag);
             let bytes = if sign {

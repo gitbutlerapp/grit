@@ -565,6 +565,7 @@ mod tests {
             tagger: Some("T <t@t> 0 +0000".into()),
             extra_headers: Vec::new(),
             message: "release\n".into(),
+            raw_message: None,
         });
         let tag_oid = repo.odb().write(ObjectKind::Tag, &tag_bytes).expect("tag");
         refs::write_ref(repo.git_dir(), "refs/tags/v1", &tag_oid).expect("tag ref");
@@ -1366,6 +1367,7 @@ mod tests {
             tagger: Some("T <t@t> 0 +0000".into()),
             message: "key\n".into(),
             extra_headers: Vec::new(),
+            raw_message: None,
         });
         let tag_oid = repo.odb().write(ObjectKind::Tag, &tag_bytes).expect("tag");
         refs::write_ref(&repo.git_dir(), "refs/tags/keytag", &tag_oid).expect("tag ref");

@@ -2038,6 +2038,7 @@ mod tests {
             tagger: Some("T <t@t> 0 +0000".into()),
             extra_headers: Vec::new(),
             message: "annotated\n".into(),
+            raw_message: None,
         });
         let tag_oid = repo
             .odb()
@@ -2135,6 +2136,7 @@ mod tests {
             tagger: Some("T <t@t> 0 +0000".into()),
             extra_headers: Vec::new(),
             message: "annotated\n".into(),
+            raw_message: None,
         });
         let tag_oid = repo
             .odb()

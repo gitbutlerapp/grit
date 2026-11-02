@@ -6097,6 +6097,7 @@ mod tests {
             tagger: Some("T <t@e.com> 1 +0000".into()),
             message: "annotated\n".into(),
             extra_headers: Vec::new(),
+            raw_message: None,
         });
         let annotated = repo.odb().write(ObjectKind::Tag, &tag_bytes)?;
         let mut tips = history.tags.clone();

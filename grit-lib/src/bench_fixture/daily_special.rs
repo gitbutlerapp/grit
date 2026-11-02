@@ -480,6 +480,7 @@ fn build_ref_records(
                 tagger: Some(tagger),
                 extra_headers: Vec::new(),
                 message: format!("annotated {tag_name}\n"),
+                raw_message: None,
             };
             let raw = serialize_tag(&tag);
             let tag_oid = repo.odb().write(ObjectKind::Tag, &raw)?;

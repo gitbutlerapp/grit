@@ -2942,6 +2942,7 @@ mod tests {
             tagger: Some("T <t@e.com>".into()),
             extra_headers: Vec::new(),
             message: "annotated".into(),
+            raw_message: None,
         };
         let tag_data = serialize_tag(&tag);
         let pack = make_pack(&[

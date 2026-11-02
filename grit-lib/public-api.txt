@@ -13485,6 +13485,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::change_id::ResolvedChang
 pub struct grit_lib::objects::TagData
 pub grit_lib::objects::TagData::extra_headers: alloc::vec::Vec<u8>
 pub grit_lib::objects::TagData::message: alloc::string::String
+pub grit_lib::objects::TagData::raw_message: core::option::Option<alloc::vec::Vec<u8>>
 pub grit_lib::objects::TagData::object: grit_lib::objects::ObjectId
 pub grit_lib::objects::TagData::object_type: alloc::string::String
 pub grit_lib::objects::TagData::tag: alloc::string::String

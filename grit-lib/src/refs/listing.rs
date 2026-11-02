@@ -948,6 +948,7 @@ mod tests {
                     tagger: Some("T <t@example.com> 1 +0000".into()),
                     extra_headers: Vec::new(),
                     message: "t\n".into(),
+                    raw_message: None,
                 }),
             )
             .unwrap();

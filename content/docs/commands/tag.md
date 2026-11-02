@@ -30,6 +30,8 @@ With no arguments, lists tag names sorted by **version** (`version:refname`). Us
 
 With a name and no `-m`/`-F`, creates a **lightweight** tag pointing at `HEAD` or the optional `<target>` revision. With `-m` or `-F`, creates an **annotated** tag object with that message (comment lines starting with `#` are stripped, matching Git's default cleanup). Use `-s` / `--sign` (or `tag.gpgSign=true`) to cryptographically sign an annotated tag; signed tags verify with `git verify-tag` and system `git tag -v`.
 
+Annotated tag messages are stored as raw bytes (Git has no `encoding` header on tags). When listing with `--json` or `--markdown`, a message that is not valid UTF-8 is shown as a Unicode string with U+FFFD replacement characters, not as a corrupt object.
+
 Use `-f` / `--force` to replace an existing tag (lightweight or annotated). The previous ref target is reported in `--json` as `replaced`.
 
 Use `--dry-run` on create or delete to preview the outcome without changing refs.
