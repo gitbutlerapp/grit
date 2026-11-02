@@ -1081,7 +1081,6 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
     owner: &dyn Cancel,
     stack_watch: &std::sync::atomic::AtomicBool,
 ) -> Result<(Vec<u8>, Option<String>)> {
-    let stall = client.low_speed_stall_window();
     let client = client.clone();
     let url = url.to_owned();
     let git_protocol = git_protocol.map(str::to_owned);
@@ -1089,7 +1088,7 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
         client.get_with_final_url(&url, git_protocol.as_deref())
     })
     .map_err(Error::Io)?
-    .wait_with_watch(cancel, Some(owner), Some(stack_watch), stall)
+    .wait_with_watch(cancel, Some(owner), Some(stack_watch), None)
 }
 
 fn info_refs_url_for_service(repo_url: &str, service: Service) -> String {

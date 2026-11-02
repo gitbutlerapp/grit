@@ -55,6 +55,12 @@ impl<T: Send + 'static> PendingHttp<T> {
 
     /// Like [`Self::wait`], but mirrors `owner` into `stack_watch` on each poll
     /// (when both are set) and checks the shared watch flag.
+    ///
+    /// When `low_speed_window` is set, this loop applies a whole-request deadline for
+    /// worker threads that may block without body-read progress (for example bundle URI
+    /// probes via [`run_interruptible`]). Discovery GETs that read the body on the worker
+    /// with [`crate::transport::http::ureq_client::LowSpeedReader`] must pass `None` so
+    /// low-speed is enforced on bytes, not wall clock alone.
     pub(crate) fn wait_with_watch(
         &self,
         cancel: &dyn Cancel,
@@ -83,5 +89,75 @@ impl<T: Send + 'static> PendingHttp<T> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{Receiver, RecvTimeoutError};
+    use std::time::Instant;
+
+    use crate::progress::NeverCancel;
+
+    /// Regression helper: the faulty #2469 follow-up treated `http.lowSpeedTime` as a
+    /// whole-request deadline on the wait loop (see `started.elapsed() >= window`).
+    fn wall_clock_low_speed_wait<T>(
+        rx: &Receiver<Result<T>>,
+        low_speed_window: Duration,
+        cancel: &dyn Cancel,
+    ) -> Result<T> {
+        cancel.poll_before_wait();
+        let signal = CancelSignal::new(cancel);
+        let started = Instant::now();
+        loop {
+            if started.elapsed() >= low_speed_window {
+                return Err(Error::Message(LOW_SPEED_STALL_MSG.to_owned()));
+            }
+            match rx.recv_timeout(HTTP_CANCEL_POLL) {
+                Ok(response) => return response,
+                Err(RecvTimeoutError::Timeout) => signal.poll()?,
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(Error::Message("HTTP worker thread panicked".to_owned()));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wall_clock_low_speed_wait_aborts_before_slow_worker_finishes() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1900));
+            let _ = tx.send(Ok(()));
+        });
+        let started = Instant::now();
+        let err = wall_clock_low_speed_wait(&rx, Duration::from_secs(1), &NeverCancel)
+            .expect_err("wall-clock low-speed must abort before the worker finishes");
+        assert!(
+            matches!(&err, Error::Message(msg) if msg == LOW_SPEED_STALL_MSG),
+            "unexpected error: {err:?}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_millis(1500),
+            "abort took {:?}, expected ~1s",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn wait_with_watch_outlasts_low_speed_window_for_slow_worker() {
+        let pending = PendingHttp::spawn("grit-http-get-test", move || {
+            std::thread::sleep(Duration::from_millis(1900));
+            Ok(42_u8)
+        })
+        .expect("spawn");
+        let started = Instant::now();
+        assert_eq!(pending.wait(&NeverCancel).expect("wait"), 42);
+        assert!(
+            started.elapsed() >= Duration::from_millis(1500),
+            "expected ~1.9s worker, got {:?}",
+            started.elapsed()
+        );
     }
 }
