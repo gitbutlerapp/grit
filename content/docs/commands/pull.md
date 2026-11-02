@@ -21,7 +21,7 @@ grit pull origin <branch>          # the same
 
 ## Description
 
-Runs [`grit fetch`](../fetch/) (same shared fetch flags: tags, prune, dry-run, quiet), then merges the fetched upstream into the **current** branch, as [`grit merge`](../merge/) would: a fast-forward when you have no new commits of your own, and a merge commit when both sides do. On a branch with no commits yet, it simply takes the remote's.
+Runs [`grit fetch`](../fetch/) (same shared fetch flags: tags, prune, dry-run, quiet), then merges the fetched upstream into the **current** branch, as [`grit merge`](../merge/) would: a fast-forward when you have no new commits of your own, and a merge commit when both sides do. Pathnames in human, stderr conflict lines, and `--markdown` output use the same quoting rules as [`grit status`](../status/) (see **Description** there). On a branch with no commits yet, it simply takes the remote's.
 
 Positional arguments follow [`grit fetch`](../fetch/): an optional remote (configured name, URL, or path), then optional refspecs. With `grit pull origin feature`, grit fetches that branch and integrates the tip recorded in `FETCH_HEAD`, even when no remote-tracking ref exists yet — the same model as `git pull origin feature`.
 

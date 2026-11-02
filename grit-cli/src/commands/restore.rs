@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::context;
+use crate::markdown::format_inline_code;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::PathspecArgs;
 use crate::ui::PathDisplayOptions;
@@ -33,7 +34,22 @@ pub struct RestoreCliOutcome {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub dry_run: bool,
     #[serde(skip)]
-    pub path_display: Option<PathDisplayOptions>,
+    #[schemars(skip)]
+    path_display: Option<PathDisplayOptions>,
+}
+
+impl RestoreCliOutcome {
+    fn with_path_display(mut self, repo: &grit_lib::repo::Repository) -> Self {
+        self.path_display = PathDisplayOptions::from_repo(repo).ok();
+        self
+    }
+
+    fn format_path(&self, path: &str) -> String {
+        self.path_display
+            .as_ref()
+            .map(|opts| opts.format_path_for_human(path))
+            .unwrap_or_else(|| path.to_owned())
+    }
 }
 
 impl From<RestoreOutcome> for RestoreCliOutcome {
@@ -75,20 +91,10 @@ impl HumanRender for RestoreCliOutcome {
             "Restored"
         };
         for path in &self.restored {
-            let shown = self
-                .path_display
-                .as_ref()
-                .map(|d| d.format_path_for_human(path))
-                .unwrap_or_else(|| path.clone());
-            outln!(w, "{prefix} {shown}");
+            outln!(w, "{prefix} {}", self.format_path(path));
         }
         for path in &self.removed {
-            let shown = self
-                .path_display
-                .as_ref()
-                .map(|d| d.format_path_for_human(path))
-                .unwrap_or_else(|| path.clone());
-            outln!(w, "Removed {shown}");
+            outln!(w, "Removed {}", self.format_path(path));
         }
         Ok(())
     }
@@ -104,13 +110,15 @@ impl MarkdownRender for RestoreCliOutcome {
         if !self.restored.is_empty() {
             outln!(w, "\n### Restored");
             for path in &self.restored {
-                outln!(w, "- `{path}`");
+                let shown = format_inline_code(&self.format_path(path));
+                outln!(w, "- {shown}");
             }
         }
         if !self.removed.is_empty() {
             outln!(w, "\n### Removed");
             for path in &self.removed {
-                outln!(w, "- `{path}`");
+                let shown = format_inline_code(&self.format_path(path));
+                outln!(w, "- {shown}");
             }
         }
         Ok(())
@@ -146,9 +154,7 @@ pub fn run_hunks(
     selection.ranges = super::add::parse_line_range_list(lines)?;
     let outcome = restore_hunks(&repo, &selection, &pathspecs, staged, worktree, dry_run)
         .map_err(map_hunk_error)?;
-    let mut cli: RestoreCliOutcome = outcome.into();
-    cli.path_display = PathDisplayOptions::from_repo(&repo).ok();
-    Ok(cli)
+    Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
 }
 
 /// Run `grit restore` with the given flags and path arguments.
@@ -216,9 +222,7 @@ pub fn run(
         &interrupt,
     )
     .map_err(map_restore_error)?;
-    let mut cli: RestoreCliOutcome = outcome.into();
-    cli.path_display = PathDisplayOptions::from_repo(&repo).ok();
-    Ok(cli)
+    Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))
 }
 
 fn map_restore_error(err: LibError) -> anyhow::Error {

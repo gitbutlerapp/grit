@@ -74,6 +74,14 @@ pub struct PathDisplayOptions {
     pub quote_path_fully: bool,
 }
 
+/// Path display options for the current repository, when the working tree is available.
+#[must_use]
+pub fn path_display_for_discovered_repo() -> Option<PathDisplayOptions> {
+    crate::context::discover()
+        .ok()
+        .and_then(|repo| PathDisplayOptions::from_repo(&repo).ok())
+}
+
 impl PathDisplayOptions {
     /// Build options from an open repository and the process current directory.
     pub fn from_repo(repo: &Repository) -> Result<Self> {

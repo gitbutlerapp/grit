@@ -726,10 +726,12 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
             );
         }
         MergeResult::Conflicts if outcome.check => {
-            if let Some(details) = &outcome.conflicts {
+            if let Some(details) = &outcome.conflict_sources {
+                let path_opts = crate::ui::path_display_for_discovered_repo();
                 crate::operation_output::render_merge_check_conflicts_markdown(
                     &outcome.branch,
                     details,
+                    path_opts.as_ref(),
                     w,
                 )?;
             }
@@ -737,8 +739,14 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         MergeResult::Conflicts => {
             outln!(w, "- Merge **`{}`** stopped with conflicts", outcome.branch);
             outln!(w);
-            if let Some(details) = &outcome.conflicts {
-                crate::operation_output::render_conflicts_markdown(details, w)?;
+            if let Some(details) = &outcome.conflict_sources {
+                let path_opts = crate::ui::path_display_for_discovered_repo();
+                crate::operation_output::render_conflicts_markdown(
+                    details,
+                    Some(outcome.branch.as_str()),
+                    path_opts.as_ref(),
+                    w,
+                )?;
             }
             crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
             if outcome.next_steps.is_some() || outcome.alternatives.is_some() {
@@ -1148,16 +1156,29 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
         PickResult::Conflicts => {
             if outcome.check {
                 outln!(w, "- Would conflict during pick");
-                if let Some(details) = &outcome.conflicts {
-                    for item in details {
-                        outln!(w, "  - `{path}`", path = item.path);
+                if let Some(details) = &outcome.conflict_sources {
+                    let path_opts = crate::ui::path_display_for_discovered_repo();
+                    for conflict in details {
+                        let shown = path_opts
+                            .as_ref()
+                            .map(|opts| {
+                                format_inline_code(&opts.format_path_for_human(&conflict.path))
+                            })
+                            .unwrap_or_else(|| format_inline_code(&conflict.path));
+                        outln!(w, "  - {shown}");
                     }
                 }
             } else {
                 outln!(w, "- Pick stopped with conflicts");
                 outln!(w);
-                if let Some(details) = &outcome.conflicts {
-                    crate::operation_output::render_conflicts_markdown(details, w)?;
+                if let Some(details) = &outcome.conflict_sources {
+                    let path_opts = crate::ui::path_display_for_discovered_repo();
+                    crate::operation_output::render_conflicts_markdown(
+                        details,
+                        None,
+                        path_opts.as_ref(),
+                        w,
+                    )?;
                 }
                 crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
                 crate::operation_output::render_operation_guidance_markdown(
@@ -1208,16 +1229,29 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
         RevertResult::Conflicts => {
             if outcome.check {
                 outln!(w, "- Would conflict during revert");
-                if let Some(details) = &outcome.conflicts {
-                    for item in details {
-                        outln!(w, "  - `{path}`", path = item.path);
+                if let Some(details) = &outcome.conflict_sources {
+                    let path_opts = crate::ui::path_display_for_discovered_repo();
+                    for conflict in details {
+                        let shown = path_opts
+                            .as_ref()
+                            .map(|opts| {
+                                format_inline_code(&opts.format_path_for_human(&conflict.path))
+                            })
+                            .unwrap_or_else(|| format_inline_code(&conflict.path));
+                        outln!(w, "  - {shown}");
                     }
                 }
             } else {
                 outln!(w, "- Revert stopped with conflicts");
                 outln!(w);
-                if let Some(details) = &outcome.conflicts {
-                    crate::operation_output::render_conflicts_markdown(details, w)?;
+                if let Some(details) = &outcome.conflict_sources {
+                    let path_opts = crate::ui::path_display_for_discovered_repo();
+                    crate::operation_output::render_conflicts_markdown(
+                        details,
+                        None,
+                        path_opts.as_ref(),
+                        w,
+                    )?;
                 }
                 crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
                 crate::operation_output::render_operation_guidance_markdown(
@@ -1310,8 +1344,14 @@ pub fn print_rebase_outcome(
         RebaseResult::Conflicts => {
             outln!(w, "- Rebase stopped with conflicts");
             outln!(w);
-            if let Some(details) = &outcome.conflicts {
-                crate::operation_output::render_conflicts_markdown(details, w)?;
+            if let Some(details) = &outcome.conflict_sources {
+                let path_opts = crate::ui::path_display_for_discovered_repo();
+                crate::operation_output::render_conflicts_markdown(
+                    details,
+                    None,
+                    path_opts.as_ref(),
+                    w,
+                )?;
             }
             crate::operation_output::render_rerere_markdown(&outcome.rerere, w)?;
             if let Some(commit) = &outcome.commit {
@@ -1376,9 +1416,14 @@ pub fn print_rebase_check_outcome(
                 }
                 None => outln!(w, "- Would conflict during rebase"),
             }
-            if let Some(conflicts) = &outcome.conflicts {
-                for c in conflicts {
-                    outln!(w, "- `{}` ({})", c.path, c.kind);
+            if let Some(conflicts) = &outcome.conflict_sources {
+                let path_opts = crate::ui::path_display_for_discovered_repo();
+                for conflict in conflicts {
+                    let shown = path_opts
+                        .as_ref()
+                        .map(|opts| format_inline_code(&opts.format_path_for_human(&conflict.path)))
+                        .unwrap_or_else(|| format_inline_code(&conflict.path));
+                    outln!(w, "- {shown} ({})", conflict.kind.as_str());
                 }
             }
         }
@@ -2028,7 +2073,11 @@ pub fn print_update_outcome(w: &mut dyn Write, outcome: &UpdateOutcome) -> anyho
 }
 
 /// Result of `grit add`.
-pub fn print_add_outcome(w: &mut dyn Write, outcome: &AddOutcome) -> anyhow::Result<()> {
+pub fn print_add_outcome(
+    w: &mut dyn Write,
+    outcome: &AddOutcome,
+    path_opts: Option<&PathDisplayOptions>,
+) -> anyhow::Result<()> {
     outln!(w, "## Add");
     outln!(w);
     let verb = if outcome.dry_run {
@@ -2052,7 +2101,10 @@ pub fn print_add_outcome(w: &mut dyn Write, outcome: &AddOutcome) -> anyhow::Res
         .chain(&outcome.intent_to_add)
         .take(10)
     {
-        outln!(w, "  - `{path}`");
+        let shown = path_opts
+            .map(|opts| format_inline_code(&opts.format_path_for_human(path)))
+            .unwrap_or_else(|| format_inline_code(path));
+        outln!(w, "  - {shown}");
     }
     let listed = outcome.added.len()
         + outcome.modified.len()

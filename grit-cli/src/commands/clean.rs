@@ -9,7 +9,9 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
+use crate::markdown::format_inline_code;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::PathDisplayOptions;
 
 /// JSON scope label for [`CleanScope`].
 fn scope_label(scope: CleanScope) -> &'static str {
@@ -29,6 +31,18 @@ pub struct CleanOutcome {
     pub dry_run: bool,
     /// Which paths were eligible for removal.
     pub scope: String,
+    #[serde(skip)]
+    #[schemars(skip)]
+    path_display: Option<PathDisplayOptions>,
+}
+
+impl CleanOutcome {
+    fn format_path(&self, path: &str) -> String {
+        self.path_display
+            .as_ref()
+            .map(|opts| opts.format_path_for_human(path))
+            .unwrap_or_else(|| path.to_owned())
+    }
 }
 
 impl HumanRender for CleanOutcome {
@@ -47,7 +61,7 @@ impl HumanRender for CleanOutcome {
             "Removed"
         };
         for path in &self.removed {
-            outln!(w, "{prefix} {path}");
+            outln!(w, "{prefix} {}", self.format_path(path));
         }
         Ok(())
     }
@@ -66,7 +80,8 @@ impl MarkdownRender for CleanOutcome {
         };
         outln!(w, "## {heading}\n");
         for path in &self.removed {
-            outln!(w, "- `{path}`");
+            let shown = format_inline_code(&self.format_path(path));
+            outln!(w, "- {shown}");
         }
         Ok(())
     }
@@ -118,5 +133,6 @@ pub fn run(
         removed: lib_outcome.removed,
         dry_run,
         scope: scope_label(scope).to_owned(),
+        path_display: PathDisplayOptions::from_repo(&repo).ok(),
     })
 }

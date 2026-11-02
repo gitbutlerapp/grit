@@ -13,7 +13,7 @@ grit rm [--cached] [-f|--force] [--dry-run] [--ignore-unmatch] [--pathspec-from-
 
 ## Description
 
-Removes tracked files or directories from the index and, by default, from the working tree. With `--cached`, the file stays on disk as an untracked file but is removed from the index.
+Removes tracked files or directories from the index and, by default, from the working tree. Pathnames in human and `--markdown` output use the same quoting rules as [`grit status`](../status/) (see **Description** there). With `--cached`, the file stays on disk as an untracked file but is removed from the index.
 
 Grit refuses to remove a path when doing so would lose content that is stored nowhere else, unless you pass `--force`. The rules match Git's safety rules for `git rm`:
 

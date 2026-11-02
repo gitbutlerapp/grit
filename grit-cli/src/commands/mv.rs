@@ -9,7 +9,9 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::context;
+use crate::markdown::format_inline_code;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::PathDisplayOptions;
 
 /// One path rename in `grit mv` JSON output.
 #[derive(Serialize, JsonSchema, Clone)]
@@ -27,6 +29,18 @@ pub struct MvOutcome {
     pub moves: Vec<PathMoveJson>,
     /// Whether this run only previewed moves.
     pub dry_run: bool,
+    #[serde(skip)]
+    #[schemars(skip)]
+    path_display: Option<PathDisplayOptions>,
+}
+
+impl MvOutcome {
+    fn format_path(&self, path: &str) -> String {
+        self.path_display
+            .as_ref()
+            .map(|opts| opts.format_path_for_human(path))
+            .unwrap_or_else(|| path.to_owned())
+    }
 }
 
 impl HumanRender for MvOutcome {
@@ -41,11 +55,21 @@ impl HumanRender for MvOutcome {
         }
         if self.moves.len() == 1 {
             let mv = &self.moves[0];
-            outln!(w, "{prefix} {} -> {}.", mv.from, mv.to);
+            outln!(
+                w,
+                "{prefix} {} -> {}.",
+                self.format_path(&mv.from),
+                self.format_path(&mv.to)
+            );
             return Ok(());
         }
         for mv in &self.moves {
-            outln!(w, "{prefix} {} -> {}.", mv.from, mv.to);
+            outln!(
+                w,
+                "{prefix} {} -> {}.",
+                self.format_path(&mv.from),
+                self.format_path(&mv.to)
+            );
         }
         Ok(())
     }
@@ -59,7 +83,9 @@ impl MarkdownRender for MvOutcome {
         }
         outln!(w, "- **moves**:");
         for mv in &self.moves {
-            outln!(w, "  - `{}` → `{}`", mv.from, mv.to);
+            let from = format_inline_code(&self.format_path(&mv.from));
+            let to = format_inline_code(&self.format_path(&mv.to));
+            outln!(w, "  - {from} → {to}");
         }
         Ok(())
     }
@@ -95,6 +121,7 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
             .map(|PathMove { from, to }| PathMoveJson { from, to })
             .collect(),
         dry_run,
+        path_display: PathDisplayOptions::from_repo(&repo).ok(),
     })
 }
 

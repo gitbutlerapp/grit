@@ -13,7 +13,7 @@ grit mv [-f|--force] [--dry-run] <source>... <destination>
 
 ## Description
 
-Renames or moves tracked paths in the working tree and index, preserving object ids and cached stat data. The last argument is the destination; earlier arguments are sources.
+Renames or moves tracked paths in the working tree and index, preserving object ids and cached stat data. Pathnames in human and `--markdown` output use the same quoting rules as [`grit status`](../status/) (see **Description** there). The last argument is the destination; earlier arguments are sources.
 
 When the destination is an existing directory, each source is moved into that directory under its original base name. A trailing slash on the destination (`docs/` or `docs//`) is accepted and means the same as naming the directory without the slash. Moving a directory renames the whole tree of tracked files. Multiple sources are validated together before anything moves; the index is updated once.
 

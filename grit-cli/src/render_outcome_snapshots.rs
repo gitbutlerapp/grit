@@ -286,6 +286,8 @@ fn sample_refresh() -> PullOutcome {
         }),
         server_branch: None,
         transfer: Default::default(),
+        conflict_sources: None,
+        conflict_merge_label: None,
     }
 }
 
@@ -337,6 +339,8 @@ fn pull_branch_render() {
             gave_change_ids: 1,
         }),
         transfer: Default::default(),
+        conflict_sources: None,
+        conflict_merge_label: None,
     };
     snapshot_modes("pull_branch_render", &outcome);
 }

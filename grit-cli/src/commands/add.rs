@@ -25,6 +25,7 @@ use crate::context;
 use crate::json_error;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::PathDisplayOptions;
 
 const HUMAN_PATH_LIMIT: usize = 10;
 
@@ -51,6 +52,9 @@ pub struct AddOutcome {
     /// Nested repositories newly recorded as gitlinks (mode 160000).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub embedded_gitlinks: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    path_display: Option<PathDisplayOptions>,
 }
 
 impl AddOutcome {
@@ -68,6 +72,7 @@ impl AddOutcome {
             staged_lines: BTreeMap::new(),
             no_paths,
             embedded_gitlinks: outcome.embedded_gitlinks,
+            path_display: None,
         }
     }
 
@@ -90,7 +95,20 @@ impl AddOutcome {
             staged_lines: outcome.staged_lines,
             no_paths: false,
             embedded_gitlinks: Vec::new(),
+            path_display: None,
         }
+    }
+
+    fn with_path_display(mut self, repo: &Repository) -> Self {
+        self.path_display = PathDisplayOptions::from_repo(repo).ok();
+        self
+    }
+
+    fn format_path(&self, path: &str) -> String {
+        self.path_display
+            .as_ref()
+            .map(|opts| opts.format_path_for_human(path))
+            .unwrap_or_else(|| path.to_owned())
     }
 }
 
@@ -110,10 +128,10 @@ impl HumanRender for AddOutcome {
         match paths.len() {
             0 if self.no_paths => outln!(w, "Nothing to stage — working tree clean."),
             0 => {}
-            1 => outln!(w, "{prefix} {}", paths[0]),
+            1 => outln!(w, "{prefix} {}", self.format_path(paths[0])),
             n => {
                 for path in paths.iter().take(HUMAN_PATH_LIMIT) {
-                    outln!(w, "{prefix} {path}");
+                    outln!(w, "{prefix} {}", self.format_path(path));
                 }
                 if n > HUMAN_PATH_LIMIT {
                     outln!(w, "… and {} more", n - HUMAN_PATH_LIMIT);
@@ -131,7 +149,7 @@ impl MarkdownRender for AddOutcome {
             &self.embedded_gitlinks,
             self.dry_run,
         );
-        markdown::print_add_outcome(w, self)?;
+        markdown::print_add_outcome(w, self, self.path_display.as_ref())?;
         Ok(())
     }
 }
@@ -245,7 +263,7 @@ pub fn run_hunks(
         &interrupt,
     )
     .map_err(map_hunk_error)?;
-    Ok(AddOutcome::from_hunks(outcome))
+    Ok(AddOutcome::from_hunks(outcome).with_path_display(&repo))
 }
 
 fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
@@ -279,6 +297,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
         staged_lines: BTreeMap::new(),
         no_paths: false,
         embedded_gitlinks: Vec::new(),
+        path_display: PathDisplayOptions::from_repo(&repo).ok(),
     })
 }
 
@@ -330,7 +349,7 @@ pub fn run(
         progress,
         &interrupt,
     )?;
-    Ok(AddOutcome::from_stage(outcome, dry_run, no_paths))
+    Ok(AddOutcome::from_stage(outcome, dry_run, no_paths).with_path_display(&repo))
 }
 
 #[allow(clippy::too_many_arguments)]

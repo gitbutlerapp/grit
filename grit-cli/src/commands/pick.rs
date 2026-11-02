@@ -10,10 +10,12 @@ use crate::operation_output::{
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::revision_errors::map_commit_spec_error;
+use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::{short_hex, ObjectId};
+use grit_lib::operation::Conflict;
 use grit_lib::operation::{
     next_step_grit_commands, operation_alternatives, operation_next_steps_empty,
 };
@@ -88,6 +90,8 @@ pub struct PickOutcome {
     /// Rerere replay or record events when `rerere.enabled` is active.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rerere: Vec<crate::operation_output::RerereEventJson>,
+    #[serde(skip)]
+    pub(crate) conflict_sources: Option<Vec<Conflict>>,
 }
 
 /// Options for [`run`].
@@ -142,11 +146,13 @@ impl HumanRender for PickOutcome {
             }
             PickResult::Conflicts => {
                 if self.check {
-                    if let Some(conflicts) = &self.conflicts {
-                        render_pick_check_conflicts_human(conflicts, w)?;
+                    if let Some(conflicts) = &self.conflict_sources {
+                        let path_opts = path_display_for_discovered_repo();
+                        render_pick_check_conflicts_human(conflicts, path_opts.as_ref(), w)?;
                     }
-                } else if let Some(conflicts) = &self.conflicts {
-                    render_conflicts_human(conflicts, w)?;
+                } else if let Some(conflicts) = &self.conflict_sources {
+                    let path_opts = path_display_for_discovered_repo();
+                    render_conflicts_human(conflicts, None, path_opts.as_ref(), w)?;
                     crate::operation_output::render_rerere_human(&self.rerere);
                     render_pick_conflict_footer_human();
                 }
@@ -299,6 +305,7 @@ impl PickOutcome {
             oid: None,
             check: false,
             rerere: Vec::new(),
+            conflict_sources: None,
         }
     }
 }
@@ -345,6 +352,7 @@ fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> Pick
             PickOutcome {
                 commits: created_so_far.iter().map(PickCommitRecord::from).collect(),
                 conflicts: Some(block.conflicts),
+                conflict_sources: Some(conflicts),
                 rerere: crate::operation_output::rerere_events_json(&rerere),
                 next_steps: Some(block.next_steps),
                 alternatives: block.alternatives,
@@ -389,6 +397,7 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
         } => PickOutcome {
             commits: vec![source_record(commit, &subject)],
             conflicts: Some(OperationConflictBlock::for_pick(&conflicts).conflicts),
+            conflict_sources: Some(conflicts),
             ..PickOutcome::new(PickResult::Conflicts)
         },
         SequencePrediction::Empty { commit, subject } => PickOutcome {

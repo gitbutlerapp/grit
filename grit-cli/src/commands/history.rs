@@ -39,6 +39,7 @@ use crate::operation_output::{
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
+use crate::ui::path_display_for_discovered_repo;
 
 /// Which local refs a history rewrite may move.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -137,6 +138,8 @@ pub struct RebaseCheckOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub refs: Option<Vec<String>>,
+    #[serde(skip)]
+    pub(crate) conflict_sources: Option<Vec<Conflict>>,
 }
 
 /// Outcome category for [`RebaseCheckOutcome`].
@@ -158,6 +161,7 @@ impl RebaseCheckOutcome {
             conflicts: None,
             commit: None,
             refs: None,
+            conflict_sources: None,
         }
     }
 
@@ -170,10 +174,12 @@ impl RebaseCheckOutcome {
             conflicts: None,
             commit: None,
             refs: None,
+            conflict_sources: None,
         }
     }
 
     fn conflicts(commit: ObjectId, conflicts: &[Conflict], refs: Vec<String>) -> Self {
+        let conflict_sources = Some(conflicts.to_vec());
         let conflicts = Some(conflicts.iter().map(|c| conflict_json(c, None)).collect());
         Self {
             operation: "rebase".into(),
@@ -183,6 +189,7 @@ impl RebaseCheckOutcome {
             conflicts,
             commit: Some(commit.to_hex()),
             refs: (!refs.is_empty()).then_some(refs),
+            conflict_sources,
         }
     }
 }
@@ -204,8 +211,9 @@ impl HumanRender for RebaseCheckOutcome {
                     ),
                     None => outln!(w, "Would conflict during rebase"),
                 }
-                if let Some(conflicts) = &self.conflicts {
-                    render_conflicts_human(conflicts, w)?;
+                if let Some(conflicts) = &self.conflict_sources {
+                    let path_opts = path_display_for_discovered_repo();
+                    render_conflicts_human(conflicts, None, path_opts.as_ref(), w)?;
                 }
             }
         }
@@ -406,6 +414,8 @@ pub struct RebaseCliOutcome {
     /// Rerere replay or record events when `rerere.enabled` is active.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rerere: Vec<crate::operation_output::RerereEventJson>,
+    #[serde(skip)]
+    pub(crate) conflict_sources: Option<Vec<Conflict>>,
 }
 
 impl RebaseCliOutcome {
@@ -425,6 +435,7 @@ impl RebaseCliOutcome {
             alternatives: None,
             exec: Vec::new(),
             rerere: Vec::new(),
+            conflict_sources: None,
         }
     }
 
@@ -444,6 +455,7 @@ impl RebaseCliOutcome {
             next_steps: None,
             alternatives: None,
             rerere: Vec::new(),
+            conflict_sources: None,
         }
     }
 
@@ -502,6 +514,7 @@ impl RebaseCliOutcome {
             alternatives: block.alternatives,
             exec: Vec::new(),
             rerere: crate::operation_output::rerere_events_json(rerere),
+            conflict_sources: Some(conflicts.to_vec()),
         }
     }
 }
@@ -541,8 +554,9 @@ impl HumanRender for RebaseCliOutcome {
                 }
             }
             RebaseResult::Conflicts => {
-                if let Some(details) = &self.conflicts {
-                    render_conflicts_human(details, w)?;
+                if let Some(details) = &self.conflict_sources {
+                    let path_opts = path_display_for_discovered_repo();
+                    render_conflicts_human(details, None, path_opts.as_ref(), w)?;
                 }
                 crate::operation_output::render_rerere_human(&self.rerere);
                 render_rebase_conflict_footer_human();

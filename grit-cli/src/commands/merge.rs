@@ -13,6 +13,7 @@ use crate::operation_output::{
     conflict_json, render_conflicts_human, ConflictJson, OperationConflictBlock,
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -109,6 +110,9 @@ pub struct MergeOutcome {
     /// True when `HEAD` was detached for this merge (not serialized in `--json`).
     #[serde(skip)]
     pub(crate) detached_head: bool,
+    /// Library conflicts for safe human/markdown path display (JSON uses [`Self::conflicts`]).
+    #[serde(skip)]
+    pub(crate) conflict_sources: Option<Vec<Conflict>>,
 }
 
 /// One conflicted path in `--json` output (pull v1 `conflict_details` and merge v2 items).
@@ -150,6 +154,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -185,6 +190,7 @@ impl MergeOutcome {
             updated_branch: fast_forward_updated_branch(head_short, label),
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -208,6 +214,7 @@ impl MergeOutcome {
             updated_branch: fast_forward_updated_branch(head_short, label),
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -237,6 +244,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -255,6 +263,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -273,10 +282,12 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
     fn conflicts_check(label: &str, details: Vec<Conflict>) -> Self {
+        let conflict_sources = Some(details.clone());
         let conflicts = Some(
             details
                 .iter()
@@ -297,6 +308,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources,
         }
     }
 
@@ -327,6 +339,7 @@ impl MergeOutcome {
             parents: None,
             updated_branch: None,
             detached_head: false,
+            conflict_sources: Some(details),
         }
     }
 
@@ -348,6 +361,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -366,6 +380,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -384,6 +399,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -408,6 +424,7 @@ impl MergeOutcome {
             updated_branch: None,
             rerere: Vec::new(),
             detached_head: false,
+            conflict_sources: None,
         }
     }
 
@@ -518,17 +535,25 @@ impl HumanRender for MergeOutcome {
                 );
             }
             MergeResult::Conflicts if self.check || self.dry_run == Some(true) => {
-                if let Some(details) = &self.conflicts {
+                if let Some(details) = &self.conflict_sources {
+                    let path_opts = path_display_for_discovered_repo();
                     crate::operation_output::render_merge_check_conflicts_human(
                         &self.branch,
                         details,
+                        path_opts.as_ref(),
                         w,
                     )?;
                 }
             }
             MergeResult::Conflicts => {
-                if let Some(details) = &self.conflicts {
-                    render_conflicts_human(details, w)?;
+                if let Some(details) = &self.conflict_sources {
+                    let path_opts = path_display_for_discovered_repo();
+                    render_conflicts_human(
+                        details,
+                        Some(self.branch.as_str()),
+                        path_opts.as_ref(),
+                        w,
+                    )?;
                 }
                 crate::operation_output::render_rerere_human(&self.rerere);
                 crate::operation_output::render_merge_conflict_footer_human();

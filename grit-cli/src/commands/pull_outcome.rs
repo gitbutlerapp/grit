@@ -3,9 +3,12 @@
 use crate::commands::checkout::{PullRefreshJson, PullServerBranchJson};
 use crate::commands::merge::MergeConflictJson;
 use crate::markdown;
-use crate::operation_output::{render_rebase_conflict_footer_human, OperationConflictBlock};
+use crate::operation_output::{
+    render_conflicts_human, render_rebase_conflict_footer_human, OperationConflictBlock,
+};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::progress::summary::{stdout_color, TransferSummary};
+use crate::ui::path_display_for_discovered_repo;
 use anyhow::Result;
 use grit_lib::change_id::ChangeId;
 use grit_lib::objects::{short_hex, ObjectId};
@@ -134,6 +137,10 @@ pub struct PullOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     pub transfer: TransferSummary,
+    #[serde(skip)]
+    pub(crate) conflict_sources: Option<Vec<Conflict>>,
+    #[serde(skip)]
+    pub(crate) conflict_merge_label: Option<String>,
 }
 
 pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
@@ -141,7 +148,14 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         outcome.result,
         LibPullResult::RebaseConflicts | LibPullResult::RebaseStopped
     );
+    let merge_label = outcome.label.clone();
     let details = outcome.conflicts.as_deref().unwrap_or(&[]);
+    let conflict_sources = outcome.conflicts.clone();
+    let conflict_merge_label = if rebase_stop {
+        None
+    } else {
+        Some(merge_label.clone())
+    };
     let (conflicts, conflict_details) = outcome
         .conflicts
         .as_ref()
@@ -189,6 +203,8 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         refresh: None,
         server_branch: None,
         transfer: TransferSummary::new(outcome.transfer, Vec::new(), Default::default()),
+        conflict_sources,
+        conflict_merge_label,
     }
 }
 
@@ -224,6 +240,8 @@ impl PullOutcome {
             refresh: None,
             server_branch: None,
             transfer: TransferSummary::default(),
+            conflict_sources: None,
+            conflict_merge_label: None,
         }
     }
 
@@ -404,9 +422,7 @@ impl HumanRender for PullOutcome {
                 );
             }
             PullResult::RebaseStopped => {
-                for item in self.conflict_details.as_deref().unwrap_or(&[]) {
-                    outln!(w, "CONFLICT ({}): {}", item.kind, item.path);
-                }
+                print_conflicts_to_stdout(w, self)?;
                 outln!(
                     w,
                     "Rebasing onto {} stopped on a conflict; the rebase is in progress.",
@@ -437,20 +453,42 @@ impl HumanRender for PullOutcome {
 
 /// The `CONFLICT (...)` lines of a pull that stopped, on stderr.
 fn print_conflicts_to_stderr(outcome: &PullOutcome) {
-    if let Some(details) = &outcome.conflict_details {
-        for item in details {
-            if let Some(summary) = &item.summary {
-                eprintln!("CONFLICT ({kind}): {summary}", kind = item.kind);
-            } else {
-                eprintln!("CONFLICT ({kind}): {}", item.path, kind = item.kind);
-            }
-        }
+    let path_opts = path_display_for_discovered_repo();
+    if let Some(details) = &outcome.conflict_sources {
+        let _ = render_conflicts_human(
+            details,
+            outcome.conflict_merge_label.as_deref(),
+            path_opts.as_ref(),
+            &mut std::io::sink(),
+        );
     } else if let Some(paths) = &outcome.conflicts {
         eprintln!("Conflicts in:");
         for path in paths {
-            eprintln!("  {path}");
+            let shown = path_opts
+                .as_ref()
+                .map(|opts| opts.format_path_for_human(path))
+                .unwrap_or_else(|| path.clone());
+            eprintln!("  {shown}");
         }
     }
+}
+
+fn print_conflicts_to_stdout(w: &mut dyn Write, outcome: &PullOutcome) -> Result<()> {
+    let path_opts = path_display_for_discovered_repo();
+    if let Some(details) = &outcome.conflict_sources {
+        for conflict in details {
+            outln!(
+                w,
+                "{}",
+                crate::operation_output::format_conflict_human_line(
+                    conflict,
+                    outcome.conflict_merge_label.as_deref(),
+                    path_opts.as_ref(),
+                )
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The first line of a refresh: whether the target moved, and what changed
@@ -551,9 +589,7 @@ fn render_server_branch(
             plural(b.own, "commit", "commits")
         ),
         PullResult::RebaseStopped => {
-            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
-                outln!(w, "CONFLICT ({}): {}", item.kind, item.path);
-            }
+            print_conflicts_to_stdout(w, outcome)?;
             outln!(
                 w,
                 "Rebasing {} onto {} stopped on a conflict; the rebase is in progress.",
