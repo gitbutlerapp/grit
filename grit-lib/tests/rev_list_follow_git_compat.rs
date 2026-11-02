@@ -1,4 +1,8 @@
 //! Path-limited history with `--follow` vs system `git log --follow`.
+//!
+//! Optional strict fixtures (`GRIT_TEST_GIT_SRC_STRICT=1`) expect a checkout of
+//! [git/git](https://github.com/git/git) at commit `50fe5cc63f9cd6e89b87a2c9ccf96a444f4cfdb7`
+//! (see `GRIT_TEST_GIT_SRC`).
 
 use crate::support;
 
