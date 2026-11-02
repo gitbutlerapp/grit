@@ -31,7 +31,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::http::{header, HeaderMap, Response, StatusCode};
 use axum::response::IntoResponse;
 use futures_util::StreamExt as _;
@@ -204,6 +204,43 @@ fn status(code: StatusCode, message: &str) -> Response<Body> {
     finish(tus(code), Body::from(format!("{message}\n")))
 }
 
+async fn reject_with_body(body: Body, response: Response<Body>) -> Response<Body> {
+    let outcome = crate::request_body::discard_request_body(body).await;
+    crate::request_body::apply_discard_outcome(response, outcome)
+}
+
+async fn read_commands(body: Body) -> Result<Bytes, Box<Response<Body>>> {
+    let mut stream = body.into_data_stream();
+    let mut buf = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(_) => {
+                drain_body_stream(&mut stream).await;
+                return Err(Box::new(status(
+                    StatusCode::BAD_REQUEST,
+                    "could not read request body",
+                )));
+            }
+        };
+        if buf.len().saturating_add(chunk.len()) > MAX_COMMANDS {
+            drain_body_stream(&mut stream).await;
+            return Err(Box::new(status(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "the command list is too large",
+            )));
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(Bytes::from(buf))
+}
+
+async fn drain_body_stream(
+    stream: &mut (impl futures_util::Stream<Item = Result<Bytes, axum::Error>> + Unpin),
+) {
+    while stream.next().await.is_some() {}
+}
+
 fn header_u64(headers: &HeaderMap, name: &str) -> Option<u64> {
     headers.get(name)?.to_str().ok()?.trim().parse().ok()
 }
@@ -287,28 +324,46 @@ pub async fn patch(
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok());
     if content_type != Some(TUS_PATCH_CONTENT_TYPE) {
-        return status(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "PATCH bodies must be application/offset+octet-stream",
-        );
+        return reject_with_body(
+            body,
+            status(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "PATCH bodies must be application/offset+octet-stream",
+            ),
+        )
+        .await;
     }
     let Some(meta) = load(repo_path, id, user) else {
-        return status(StatusCode::NOT_FOUND, "no such upload");
+        return reject_with_body(body, status(StatusCode::NOT_FOUND, "no such upload")).await;
     };
     let part = part_path(repo_path, id);
     let Some(_busy) = locks.take(&part) else {
-        return status(
-            StatusCode::CONFLICT,
-            "the upload is receiving another request",
-        );
+        return reject_with_body(
+            body,
+            status(
+                StatusCode::CONFLICT,
+                "the upload is receiving another request",
+            ),
+        )
+        .await;
     };
     let mut offset = received(repo_path, id);
     if header_u64(headers, "upload-offset") != Some(offset) {
-        return status(StatusCode::CONFLICT, "Upload-Offset does not match");
+        return reject_with_body(
+            body,
+            status(StatusCode::CONFLICT, "Upload-Offset does not match"),
+        )
+        .await;
     }
     let mut file = match tokio::fs::OpenOptions::new().append(true).open(&part).await {
         Ok(f) => f,
-        Err(e) => return status(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+        Err(e) => {
+            return reject_with_body(
+                body,
+                status(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+            )
+            .await;
+        }
     };
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
@@ -353,26 +408,29 @@ pub async fn receive(
     on_applied: impl FnOnce(),
 ) -> Response<Body> {
     let Some(meta) = load(&repo_path, id, user) else {
-        return status(StatusCode::NOT_FOUND, "no such upload");
+        return reject_with_body(body, status(StatusCode::NOT_FOUND, "no such upload")).await;
     };
     let part = part_path(&repo_path, id);
     let Some(_busy) = locks.take(&part) else {
-        return status(
-            StatusCode::CONFLICT,
-            "the upload is receiving another request",
-        );
+        return reject_with_body(
+            body,
+            status(
+                StatusCode::CONFLICT,
+                "the upload is receiving another request",
+            ),
+        )
+        .await;
     };
     if received(&repo_path, id) != meta.length {
-        return status(StatusCode::CONFLICT, "the upload is not complete");
+        return reject_with_body(
+            body,
+            status(StatusCode::CONFLICT, "the upload is not complete"),
+        )
+        .await;
     }
-    let commands = match axum::body::to_bytes(body, MAX_COMMANDS).await {
+    let commands = match read_commands(body).await {
         Ok(b) => b,
-        Err(_) => {
-            return status(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "the command list is too large",
-            )
-        }
+        Err(resp) => return *resp,
     };
     let applied = tokio::task::spawn_blocking({
         let repo_path = repo_path.clone();

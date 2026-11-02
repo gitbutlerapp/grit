@@ -213,7 +213,13 @@ pub async fn rpc_holding<H: Send + 'static>(
 ) -> (Response<Body>, RpcFollowUp) {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
-        Err(resp) => return (*resp, RpcFollowUp::default()),
+        Err(resp) => {
+            let outcome = crate::request_body::discard_request_body(body).await;
+            return (
+                crate::request_body::apply_discard_outcome(*resp, outcome),
+                RpcFollowUp::default(),
+            );
+        }
     };
     match service {
         Service::UploadPack => {
@@ -240,12 +246,17 @@ pub async fn rpc_holding<H: Send + 'static>(
         Service::ReceivePack => {
             let raw = streaming_body_reader(body);
             let result = tokio::task::spawn_blocking(move || {
-                grit_protocol::receive_pack::stateless_rpc_with_session(
+                let mut request = push_request_body(raw, encoding);
+                let result = grit_protocol::receive_pack::stateless_rpc_with_session(
                     &repo_path,
-                    &mut decoded_reader(raw, encoding),
+                    &mut request,
                     &options,
                     &session,
-                )
+                );
+                if result.is_err() {
+                    request.drain_raw_remainder();
+                }
+                result
             })
             .await;
             match result {
@@ -473,13 +484,106 @@ impl<R: Read> Read for FetchGzip<R> {
     }
 }
 
+trait DrainRawRemainder {
+    fn drain_raw_remainder(&mut self);
+}
+
+impl<R: Read> DrainRawRemainder for DecodedByteLimit<R> {
+    fn drain_raw_remainder(&mut self) {
+        crate::request_body::drain_blocking_reader(&mut self.inner);
+    }
+}
+
+impl<R: Read> DrainRawRemainder for FetchGzip<R> {
+    fn drain_raw_remainder(&mut self) {
+        crate::request_body::drain_blocking_reader(self.decoder.get_mut());
+    }
+}
+
+enum FetchRequestBody<R: Read> {
+    Plain(Box<DecodedByteLimit<R>>),
+    Gzip(Box<FetchGzip<R>>),
+}
+
+impl<R: Read> Read for FetchRequestBody<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(r) => r.read(buf),
+            Self::Gzip(r) => r.read(buf),
+        }
+    }
+}
+
+impl<R: Read> DrainRawRemainder for FetchRequestBody<R> {
+    fn drain_raw_remainder(&mut self) {
+        match self {
+            Self::Plain(r) => r.drain_raw_remainder(),
+            Self::Gzip(r) => r.drain_raw_remainder(),
+        }
+    }
+}
+
+fn fetch_request_body(
+    raw: impl Read + Send + 'static,
+    encoding: BodyEncoding,
+) -> FetchRequestBody<Box<dyn Read + Send>> {
+    let raw: Box<dyn Read + Send> = Box::new(raw);
+    let max = fetch_body_limit();
+    match encoding {
+        BodyEncoding::Identity => FetchRequestBody::Plain(Box::new(DecodedByteLimit {
+            inner: raw,
+            decoded: 0,
+            max,
+        })),
+        BodyEncoding::Gzip => FetchRequestBody::Gzip(Box::new(FetchGzip {
+            decoder: flate2::read::GzDecoder::new(raw),
+            decoded: 0,
+            max,
+        })),
+    }
+}
+
+enum PushRequestBody<R: Read> {
+    Plain(R),
+    Gzip(Box<ExpansionLimitedGzip<R>>),
+}
+
+impl<R: Read> Read for PushRequestBody<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(r) => r.read(buf),
+            Self::Gzip(r) => r.read(buf),
+        }
+    }
+}
+
+impl<R: Read> DrainRawRemainder for PushRequestBody<R> {
+    fn drain_raw_remainder(&mut self) {
+        match self {
+            Self::Plain(r) => crate::request_body::drain_blocking_reader(r),
+            Self::Gzip(g) => {
+                let counting = g.decoder.get_mut();
+                crate::request_body::drain_blocking_reader(&mut counting.inner);
+            }
+        }
+    }
+}
+
+fn push_request_body(
+    raw: impl Read + Send + 'static,
+    encoding: BodyEncoding,
+) -> PushRequestBody<Box<dyn Read + Send>> {
+    let raw: Box<dyn Read + Send> = Box::new(raw);
+    match encoding {
+        BodyEncoding::Identity => PushRequestBody::Plain(raw),
+        BodyEncoding::Gzip => PushRequestBody::Gzip(Box::new(ExpansionLimitedGzip::new(raw))),
+    }
+}
+
 /// Apply fetch-body size limits while undoing `Content-Encoding`.
 ///
 /// Call on the blocking thread: the gzip decoder reads its header as soon as it is created.
-fn decoded_fetch_reader(raw: impl Read + Send + 'static, encoding: BodyEncoding) -> Box<dyn Read> {
-    decoded_fetch_reader_with_limit(raw, encoding, fetch_body_limit())
-}
-
+#[allow(dead_code)]
 fn decoded_fetch_reader_with_limit(
     raw: impl Read + Send + 'static,
     encoding: BodyEncoding,
@@ -521,6 +625,7 @@ fn streaming_body_reader(body: Body) -> impl Read + Send + 'static {
 ///
 /// Call this on the blocking thread: the gzip decoder reads its header as soon as it is
 /// created, which would block the async runtime.
+#[allow(dead_code)]
 fn decoded_reader<'a>(raw: impl Read + 'a, encoding: BodyEncoding) -> Box<dyn Read + 'a> {
     match encoding {
         BodyEncoding::Identity => Box::new(raw),
@@ -1060,7 +1165,7 @@ async fn stream_upload_pack<H: Send + 'static>(
     let (outcome_tx, outcome_rx) = tokio::sync::oneshot::channel();
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Chunk>(STREAM_CHANNEL_DEPTH);
     let task = tokio::task::spawn_blocking(move || {
-        let mut request = decoded_fetch_reader(raw, encoding);
+        let mut request = fetch_request_body(raw, encoding);
         let mut out = ChannelWriter::new(tx);
         let result = grit_protocol::upload_pack::stateless_rpc_to_reader_with_session(
             &repo_path,
@@ -1077,6 +1182,7 @@ async fn stream_upload_pack<H: Send + 'static>(
                 out.send_pending().map_err(grit_protocol::Error::Io)
             }
             Err(e) => {
+                request.drain_raw_remainder();
                 if out.sent {
                     let _ = out.tx.blocking_send(Err(std::io::Error::other(format!(
                         "upload-pack failed: {e}"

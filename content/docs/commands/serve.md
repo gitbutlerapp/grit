@@ -22,6 +22,8 @@ grit serve users [--root <path>] [--db <file>]
 
 Fetch and clone POST bodies (`git-upload-pack`) are streamed as they arrive; the server rejects decoded bodies larger than 1 GiB with HTTP 413 (matching a generous reading of Git's `http.maxRequestBuffer`), which is enough for several million `want` lines. Push bodies are streamed separately and are limited only by each repository's `receive.maxInputSize`.
 
+When a client is still uploading a large POST body, early responses such as `401`, `404`, `403` or `413` drain the remainder of that body (up to the same 1 GiB cap) before the connection closes, so a reverse proxy relays the real status instead of answering `502 Bad Gateway`.
+
 `--root` names what to serve:
 
 - a **directory of repositories**: each child directory that is a repository (bare `project.git` or a working tree `project`) is served as `project`. New repositories show up without a restart.
