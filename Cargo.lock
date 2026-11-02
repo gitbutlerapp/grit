@@ -910,7 +910,7 @@ dependencies = [
 
 [[package]]
 name = "grit-cli"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -945,7 +945,7 @@ dependencies = [
 
 [[package]]
 name = "grit-examples"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "anyhow",
  "clap",
@@ -960,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "grit-http-server"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "anyhow",
  "argon2",
@@ -985,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "grit-lib"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "grit-protocol"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "grit-lib",
  "tempfile",
@@ -1039,7 +1039,7 @@ dependencies = [
 
 [[package]]
 name = "grit-test-support"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "flate2",
  "grit-lib",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "grit-utils"
-version = "0.5.28"
+version = "0.5.29"
 dependencies = [
  "anyhow",
  "clap",
