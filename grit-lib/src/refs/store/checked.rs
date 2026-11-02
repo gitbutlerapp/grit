@@ -201,6 +201,14 @@ impl RefStore for ObjectCheckedRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
+        self.prepare_for(txn, crate::lockfile::LockWait::Immediately)
+    }
+
+    fn prepare_for(
+        &self,
+        txn: RefTransaction,
+        wait: crate::lockfile::LockWait,
+    ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         txn.validate()?;
         let (txn, object_rejections) = if txn.allows_failures() {
             let (accepted, object_rejections) =
@@ -227,6 +235,7 @@ impl RefStore for ObjectCheckedRefStore {
             self.hooks.as_ref(),
             self.null_oid(),
             txn,
+            wait,
         )?;
         if object_rejections.is_empty() {
             Ok(prepared)

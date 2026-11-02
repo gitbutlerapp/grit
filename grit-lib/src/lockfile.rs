@@ -104,6 +104,30 @@ impl LockWait {
             }
         }
     }
+
+    /// Remaining wait budget after `elapsed` time since the outer wait started.
+    #[must_use]
+    pub fn remaining_after(self, elapsed: Duration) -> Self {
+        match self {
+            Self::Immediately => Self::Immediately,
+            Self::Indefinitely => Self::Indefinitely,
+            Self::Backoff { budget } => {
+                if elapsed >= budget {
+                    Self::Immediately
+                } else {
+                    Self::Backoff {
+                        budget: budget - elapsed,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Remaining wait budget given `start` and `now`.
+    #[must_use]
+    pub fn remaining_from(self, start: Instant, now: Instant) -> Self {
+        self.remaining_after(now.saturating_duration_since(start))
+    }
 }
 
 /// Failure to create or commit a lock file.

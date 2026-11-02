@@ -1851,6 +1851,8 @@ mod shallow_maintenance_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "signing_commit_git_compat.rs"]
 mod signing_commit_git_compat;
+#[path = "single_writer_gate_2500.rs"]
+mod single_writer_gate_2500;
 #[cfg(feature = "full-tests")]
 #[path = "skip_worktree_porcelain_2466.rs"]
 mod skip_worktree_porcelain_2466;

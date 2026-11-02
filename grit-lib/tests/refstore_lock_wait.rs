@@ -1,10 +1,10 @@
 //! Concurrent ref writers: memory/reftable single slot (issue #2181) and files per-ref locks (#2250).
 //!
-//! [`MemoryRefStore`] (like a database backend with a single write transaction) lets one
-//! prepared transaction hold the whole store, so `prepare` for a disjoint ref fails fast with
-//! [`RefStoreError::LockHeld`]. grit-lib's ref writes retry that for
-//! `core.filesRefLockTimeout`, so concurrent updates to different refs all land, while a lock
-//! that is never released still fails once the budget is spent.
+//! [`MemoryRefStore`] (like a database backend with a single write transaction) holds one
+//! prepared transaction at a time and queues concurrent writers on [`SingleWriterGate`] inside
+//! [`RefStore::prepare_for`]. grit-lib passes `core.filesRefLockTimeout` into that wait, so
+//! concurrent updates to different refs all land, while a lock that is never released still
+//! fails once the budget is spent.
 //!
 //! The default [`FilesRefStore`](grit_lib::refs::store::FilesRefStore) takes one lock file per
 //! ref, so disjoint refs prepare and commit concurrently; only the same ref (or packed-refs)

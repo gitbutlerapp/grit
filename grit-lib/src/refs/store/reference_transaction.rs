@@ -199,9 +199,10 @@ pub(crate) fn prepare_with_reference_transaction_hooks<'a>(
     hooks: Option<&'a Arc<RefHookContext>>,
     null_oid: ObjectId,
     txn: RefTransaction,
+    wait: crate::lockfile::LockWait,
 ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + 'a>> {
     let updates: Vec<RefUpdate> = txn.updates().to_vec();
-    let inner_prepared = inner.prepare(txn)?;
+    let inner_prepared = inner.prepare_for(txn, wait)?;
     let Some(hooks) = hooks else {
         return Ok(inner_prepared);
     };

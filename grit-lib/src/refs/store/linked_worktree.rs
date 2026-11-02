@@ -206,8 +206,16 @@ impl RefStore for LinkedWorktreeRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
+        self.prepare_for(txn, crate::lockfile::LockWait::Immediately)
+    }
+
+    fn prepare_for(
+        &self,
+        txn: RefTransaction,
+        wait: crate::lockfile::LockWait,
+    ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         if !txn.updates().iter().any(|update| update.name == "HEAD") {
-            return self.shared.prepare(txn);
+            return self.shared.prepare_for(txn, wait);
         }
         txn.validate()?;
         let (updates, reflog_renames, case_only_renames) = txn.into_parts();
@@ -235,13 +243,14 @@ impl RefStore for LinkedWorktreeRefStore {
         // held through the `HEAD` side's file locking.
         let head = head_update
             .map(|update| {
-                RefTransaction::from_updates(vec![update]).and_then(|txn| self.head.prepare(txn))
+                RefTransaction::from_updates(vec![update])
+                    .and_then(|txn| self.head.prepare_for(txn, wait))
             })
             .transpose()?;
         let shared = if shared_txn == RefTransaction::new() {
             None
         } else {
-            match self.shared.prepare(shared_txn) {
+            match self.shared.prepare_for(shared_txn, wait) {
                 Ok(prepared) => Some(prepared),
                 Err(err) => {
                     if let Some(head) = head {
