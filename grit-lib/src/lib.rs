@@ -248,7 +248,7 @@ pub(crate) mod hash;
 pub(crate) mod hide_refs;
 #[path = "history/mod.rs"]
 mod history_root;
-pub mod submodule_ignore;
+pub(crate) mod submodule_ignore;
 pub(crate) use history_root as history;
 pub(crate) mod alternate_boundary;
 pub(crate) mod atomic_replace;

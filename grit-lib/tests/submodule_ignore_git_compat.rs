@@ -7,6 +7,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{
     diff_index_to_worktree_with_options, diff_tree_to_worktree, DiffIndexToWorktreeOptions,
+    RenameDetection, UncommittedDiff,
 };
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
@@ -282,4 +283,135 @@ fn ignore_untracked_only_inside_submodule() {
     )
     .expect("index diff");
     assert!(diff.is_empty(), "grit diff should honor ignore=untracked");
+}
+
+fn setup_submodule_logical_name_ignore_all() -> tempfile::TempDir {
+    let root = tempdir().expect("tempdir");
+    let lib = root.path().join("lib");
+    std::fs::create_dir(&lib).expect("lib dir");
+    git(lib.as_path(), &["init", "-q"]);
+    git(lib.as_path(), &["config", "user.email", "a@b"]);
+    git(lib.as_path(), &["config", "user.name", "A"]);
+    std::fs::write(lib.join("l.txt"), "l1\n").expect("lib file");
+    git(lib.as_path(), &["add", "."]);
+    git(lib.as_path(), &["commit", "-qm", "l1"]);
+
+    let main = root.path().join("main");
+    std::fs::create_dir(&main).expect("main dir");
+    git(main.as_path(), &["init", "-q"]);
+    git(main.as_path(), &["config", "user.email", "a@b"]);
+    git(main.as_path(), &["config", "user.name", "A"]);
+    let lib_url = format!(
+        "file://{}",
+        lib.canonicalize()
+            .expect("lib path")
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    );
+    git_cmd(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "--name",
+        "logical",
+        "-q",
+        lib_url.as_str(),
+        "vendor/lib",
+    ])
+    .in_dir(main.as_path())
+    .suc();
+    let gitmodules = std::fs::read_to_string(main.join(".gitmodules")).expect("gitmodules");
+    let gitmodules = format!("{gitmodules}\tignore = all\n");
+    std::fs::write(main.join(".gitmodules"), gitmodules).expect("gitmodules ignore");
+    git(main.as_path(), &["add", ".gitmodules", "vendor/lib"]);
+    git(main.as_path(), &["commit", "-qm", "sub"]);
+    git(main.as_path(), &["config", "diff.ignoreSubmodules", "none"]);
+    let sub_l = main.join("vendor/lib/l.txt");
+    let mut content = std::fs::read_to_string(&sub_l).expect("submodule tracked file");
+    content.push_str("dirty\n");
+    std::fs::write(&sub_l, content).expect("dirty submodule file");
+    root
+}
+
+#[test]
+fn gitmodules_logical_name_ignore_all_hides_dirty_submodule() {
+    let root = setup_submodule_logical_name_ignore_all();
+    let main = root.path().join("main");
+
+    let git_short = git_status_short(main.as_path(), "none");
+    assert!(
+        git_short.trim().is_empty(),
+        "git should honor .gitmodules ignore=all via logical name: {git_short:?}"
+    );
+
+    let repo = grit_repo(&main);
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model.unstaged.is_empty(),
+        "grit status should resolve logical submodule name from .gitmodules"
+    );
+}
+
+#[test]
+fn staged_gitlink_visible_in_status_hidden_in_diff_with_ignore_all() {
+    let root = setup_submodule_parent(false);
+    let main = root.path().join("main");
+    let sub = main.join("vendor/lib");
+    std::fs::write(sub.join("x.txt"), "x\n").expect("sub file");
+    git(sub.as_path(), &["add", "x.txt"]);
+    git(sub.as_path(), &["commit", "-m", "inner"]);
+    git(main.as_path(), &["add", "vendor/lib"]);
+    git(main.as_path(), &["config", "diff.ignoreSubmodules", "all"]);
+
+    let git_status = git_status_short(main.as_path(), "all");
+    assert!(
+        git_status.contains("vendor/lib"),
+        "git status still lists staged gitlink with ignore=all: {git_status:?}"
+    );
+    let git_cached = git_cmd(&[
+        "-c",
+        "diff.ignoreSubmodules=all",
+        "diff",
+        "--cached",
+        "--stat",
+    ])
+    .in_dir(main.as_path())
+    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+    .suc()
+    .stdout;
+    assert!(
+        git_cached.trim().is_empty(),
+        "git cached diff empty with ignore=all: {git_cached:?}"
+    );
+
+    let repo = grit_repo(&main);
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model.staged.iter().any(|e| e.path() == "vendor/lib"),
+        "grit status staged gitlink with ignore=all"
+    );
+
+    let diff = repo.diff().uncommitted().expect("diff");
+    let staged = diff
+        .staged_entries(RenameDetection::Off)
+        .expect("staged entries");
+    assert!(
+        staged.is_empty(),
+        "grit staged diff should omit gitlink when ignore=all, got {staged:?}"
+    );
 }

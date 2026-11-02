@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+use crate::config::{ConfigEntry, ConfigFile, ConfigScope, ConfigSet};
 
 /// Submodule ignore mode for worktree gitlink comparisons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -32,11 +32,46 @@ pub fn parse_submodule_ignore_value(raw: &str) -> SubmoduleIgnoreMode {
     }
 }
 
-/// Submodule logical name for a gitlink path (defaults to the path when unregistered).
-#[must_use]
-pub fn submodule_name_for_gitlink_path(cfg: &ConfigSet, gitlink_path: &str) -> String {
-    let path_norm = gitlink_path.replace('\\', "/");
-    submodule_name_from_config_paths(cfg, &path_norm).unwrap_or(path_norm)
+/// Parsed `.gitmodules` entries for path→name mapping and per-name fields.
+struct GitmodulesFile {
+    entries: Vec<ConfigEntry>,
+}
+
+impl GitmodulesFile {
+    fn load(work_tree: &Path) -> Option<Self> {
+        let gitmodules = work_tree.join(".gitmodules");
+        let content = std::fs::read_to_string(&gitmodules).ok()?;
+        let (entries, _) =
+            ConfigFile::parse_gitmodules_best_effort(&gitmodules, &content, ConfigScope::Local);
+        Some(Self { entries })
+    }
+
+    fn name_for_path(&self, path: &str) -> Option<String> {
+        for e in &self.entries {
+            let key = &e.key;
+            let Some(rest) = key.strip_prefix("submodule.") else {
+                continue;
+            };
+            let Some(name) = rest.strip_suffix(".path") else {
+                continue;
+            };
+            if e.value
+                .as_deref()
+                .is_some_and(|p| p.replace('\\', "/") == path)
+            {
+                return Some(name.to_owned());
+            }
+        }
+        None
+    }
+
+    fn field_value(&self, name: &str, field: &str) -> Option<String> {
+        let key = format!("submodule.{name}.{field}");
+        self.entries
+            .iter()
+            .find(|e| e.key == key)
+            .and_then(|e| e.value.clone())
+    }
 }
 
 fn submodule_name_from_config_paths(cfg: &ConfigSet, path: &str) -> Option<String> {
@@ -56,17 +91,17 @@ fn submodule_name_from_config_paths(cfg: &ConfigSet, path: &str) -> Option<Strin
     None
 }
 
-fn gitmodules_submodule_value(work_tree: &Path, name: &str, field: &str) -> Option<String> {
-    let gitmodules = work_tree.join(".gitmodules");
-    let content = std::fs::read_to_string(&gitmodules).ok()?;
-    let (entries, _) =
-        ConfigFile::parse_gitmodules_best_effort(&gitmodules, &content, ConfigScope::Local);
-    let suffix = format!(".{field}");
-    let prefix = format!("submodule.{name}");
-    entries
-        .into_iter()
-        .find(|e| e.key.starts_with(&prefix) && e.key.ends_with(&suffix))
-        .and_then(|e| e.value)
+/// Submodule logical name for a gitlink path (defaults to the path when unregistered).
+#[must_use]
+pub fn submodule_name_for_gitlink_path(
+    cfg: &ConfigSet,
+    work_tree: &Path,
+    gitlink_path: &str,
+) -> String {
+    let path_norm = gitlink_path.replace('\\', "/");
+    submodule_name_from_config_paths(cfg, &path_norm)
+        .or_else(|| GitmodulesFile::load(work_tree).and_then(|gm| gm.name_for_path(&path_norm)))
+        .unwrap_or(path_norm)
 }
 
 /// Effective ignore mode for `gitlink_path` in the superproject work tree.
@@ -79,18 +114,30 @@ pub fn submodule_ignore_for_path(
     work_tree: &Path,
     gitlink_path: &str,
 ) -> SubmoduleIgnoreMode {
-    let name = submodule_name_for_gitlink_path(cfg, gitlink_path);
+    let name = submodule_name_for_gitlink_path(cfg, work_tree, gitlink_path);
     let per_name_key = format!("submodule.{name}.ignore");
     if let Some(v) = cfg.get(&per_name_key) {
         return parse_submodule_ignore_value(&v);
     }
-    if let Some(v) = gitmodules_submodule_value(work_tree, &name, "ignore") {
-        return parse_submodule_ignore_value(&v);
+    if let Some(gm) = GitmodulesFile::load(work_tree) {
+        if let Some(v) = gm.field_value(&name, "ignore") {
+            return parse_submodule_ignore_value(&v);
+        }
     }
     if let Some(v) = cfg.get("diff.ignoreSubmodules") {
         return parse_submodule_ignore_value(&v);
     }
     SubmoduleIgnoreMode::None
+}
+
+/// Whether staged index-vs-`HEAD` diffs should omit this gitlink (`git diff --cached` with ignore=all).
+#[must_use]
+pub fn staged_gitlink_omitted_in_diff(
+    cfg: &ConfigSet,
+    work_tree: &Path,
+    gitlink_path: &str,
+) -> bool {
+    submodule_ignore_for_path(cfg, work_tree, gitlink_path) == SubmoduleIgnoreMode::All
 }
 
 /// Whether a gitlink worktree diff entry should be omitted given ignore policy.
@@ -115,6 +162,8 @@ pub fn gitlink_worktree_change_suppressed(
 mod tests {
     use super::*;
     use crate::diff::SubmodulePorcelainFlags;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn parse_submodule_ignore_rejects_unknown() {
@@ -172,5 +221,43 @@ mod tests {
             true,
             flags
         ));
+    }
+
+    #[test]
+    fn gitmodules_logical_name_resolves_ignore_key() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join(".gitmodules"),
+            "[submodule \"logical\"]\n\tpath = vendor/lib\n\tignore = all\n",
+        )
+        .expect("gitmodules");
+        let cfg = ConfigSet::new();
+        assert_eq!(
+            submodule_name_for_gitlink_path(&cfg, dir.path(), "vendor/lib"),
+            "logical"
+        );
+        assert_eq!(
+            submodule_ignore_for_path(&cfg, dir.path(), "vendor/lib"),
+            SubmoduleIgnoreMode::All
+        );
+    }
+
+    #[test]
+    fn gitmodules_field_keys_do_not_prefix_match_longer_names() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join(".gitmodules"),
+            "[submodule \"foo\"]\n\tpath = a\n\tignore = dirty\n[submodule \"foobar\"]\n\tpath = b\n\tignore = all\n",
+        )
+        .expect("gitmodules");
+        let cfg = ConfigSet::new();
+        assert_eq!(
+            submodule_ignore_for_path(&cfg, dir.path(), "a"),
+            SubmoduleIgnoreMode::Dirty
+        );
+        assert_eq!(
+            submodule_ignore_for_path(&cfg, dir.path(), "b"),
+            SubmoduleIgnoreMode::All
+        );
     }
 }

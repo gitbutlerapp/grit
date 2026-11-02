@@ -351,21 +351,34 @@ pub(crate) fn staged_entries_in(
     restrict_to_paths: Option<&BTreeSet<String>>,
 ) -> Result<Vec<DiffEntry>> {
     let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
+    let config = repo.config()?;
     let mut entries = match restrict_to_paths.filter(|paths| !paths.is_empty()) {
         Some(paths) => diff_index_to_tree_for_paths(repo, index, head_tree.as_ref(), paths)?,
-        None => {
-            let config = repo.config()?;
-            diff_index_to_tree_with_renames(
-                repo.odb(),
-                index,
-                head_tree.as_ref(),
-                false,
-                rename_threshold,
-                config.as_ref(),
-                &repo.thread_policy(),
-            )?
-        }
+        None => diff_index_to_tree_with_renames(
+            repo.odb(),
+            index,
+            head_tree.as_ref(),
+            false,
+            rename_threshold,
+            config.as_ref(),
+            &repo.thread_policy(),
+        )?,
     };
+    if let Some(work_tree) = repo.work_tree() {
+        entries.retain(|entry| {
+            if !entry.old_mode.is_gitlink() && !entry.new_mode.is_gitlink() {
+                return true;
+            }
+            let Some(path) = entry.new_path.as_deref().or(entry.old_path.as_deref()) else {
+                return true;
+            };
+            !crate::submodule_ignore::staged_gitlink_omitted_in_diff(
+                config.as_ref(),
+                work_tree,
+                path,
+            )
+        });
+    }
     sort_entries_by_path(&mut entries);
     Ok(entries)
 }
