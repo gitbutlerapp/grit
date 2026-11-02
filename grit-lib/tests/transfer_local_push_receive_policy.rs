@@ -346,6 +346,59 @@ fn push_local_update_instead_rejects_dirty_staged() {
 }
 
 #[test]
+fn push_local_update_instead_refuses_untracked_collision() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let srv = tmp.path().join("srv");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&srv).unwrap();
+    git(&srv, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(srv.join("a"), "a\n").unwrap();
+    git(&srv, &["add", "a"]);
+    git(&srv, &["commit", "-q", "-m", "a"]);
+    git_config(&srv, "receive.denyCurrentBranch", "updateInstead");
+
+    git_cmd(&["clone", "-q", "srv", "work"])
+        .in_dir(tmp.path())
+        .suc();
+    let work_git = work.join(".git");
+    std::fs::write(work.join("collision"), "incoming\n").unwrap();
+    git(&work, &["add", "collision"]);
+    git(&work, &["commit", "-q", "-m", "add collision"]);
+    let tip = rev_parse(&work, "HEAD");
+    let srv_before = rev_parse(&srv, "refs/heads/main");
+    std::fs::write(srv.join("collision"), "keep me\n").unwrap();
+
+    let outcome = push_local(
+        &work_git,
+        srv.join(".git").as_path(),
+        &[PushRefSpec {
+            src: Some(tip),
+            src_ref: None,
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+            hook_src_ref: None,
+        }],
+        &PushOptions::default(),
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("push_local");
+
+    assert_eq!(outcome.results[0].status, PushRefStatus::RemoteRejected);
+    assert!(outcome.results[0]
+        .message
+        .as_deref()
+        .is_some_and(|m| m.contains("Could not update working tree to new HEAD")));
+    assert_eq!(rev_parse(&srv, "refs/heads/main"), srv_before);
+    assert_eq!(
+        std::fs::read_to_string(srv.join("collision")).unwrap(),
+        "keep me\n"
+    );
+}
+
+#[test]
 fn push_local_update_instead_ignore_advances_ref_without_checkout() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let srv = tmp.path().join("srv");

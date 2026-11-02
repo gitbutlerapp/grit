@@ -4,13 +4,13 @@ use std::io::Write;
 
 use crate::config::environment::RepositoryOptions;
 use crate::diff::{
-    diff_index_to_tree, diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions,
+    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, DiffIndexToWorktreeOptions,
 };
 use crate::hooks::{run_hook_opts, HookResult, RunHookOptions};
 use crate::index::index_file_mtime;
 use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_between_trees;
-use crate::porcelain::worktree_guard::load_worktree_index;
+use crate::porcelain::worktree_guard::{load_worktree_index, prepare_tree_checkout_with_changes};
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree::{admin_dirs_match, list_worktrees, worktree_admin_dir, WorktreeEntry};
@@ -96,9 +96,7 @@ fn run_push_to_checkout_hook(
     entry: &WorktreeEntry,
     new_hex: &str,
 ) -> Result<HookResult> {
-    let config = repo
-        .config()
-        .map_err(super::ServeError::Repository)?;
+    let config = repo.config().map_err(super::ServeError::Repository)?;
     let git_dir = std::path::absolute(repo.git_dir()).map_err(super::ServeError::Io)?;
     let work_tree = std::path::absolute(&entry.path).map_err(super::ServeError::Io)?;
     let env = [
@@ -171,6 +169,11 @@ fn push_to_deploy_builtin(
         .map_err(super::ServeError::Repository)?;
     if !staged.is_empty() {
         return Ok(Some(RefUpdateRefusal::PushCheckoutStagedChanges));
+    }
+    let tree_changes = diff_trees(odb, head_tree.as_ref(), Some(&new_tree), "")
+        .map_err(super::ServeError::Repository)?;
+    if prepare_tree_checkout_with_changes(repo, &tree_changes).is_err() {
+        return Ok(Some(RefUpdateRefusal::PushCheckoutFailed));
     }
     if checkout_between_trees(repo, head_tree.as_ref(), &new_tree).is_err() {
         return Ok(Some(RefUpdateRefusal::PushCheckoutFailed));
