@@ -252,6 +252,8 @@ mod exit_status_contract;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_all_cli.rs"]
 mod fetch_all_cli;
+#[path = "fetch_http_stall_interrupt.rs"]
+mod fetch_http_stall_interrupt;
 #[path = "fetch_interrupt.rs"]
 mod fetch_interrupt;
 #[cfg(feature = "full-tests")]

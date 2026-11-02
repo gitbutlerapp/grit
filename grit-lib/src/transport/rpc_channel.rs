@@ -11,6 +11,7 @@ use std::io::Read;
 use crate::error::Result;
 
 /// A single protocol round over upload-pack or receive-pack.
+#[allow(dead_code)]
 pub(crate) trait RpcChannel {
     /// Send `body` and return the server's response bytes as a stream.
     ///

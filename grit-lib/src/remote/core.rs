@@ -419,10 +419,15 @@ impl DefaultHttpClientFactory {
     }
 
     fn client(
+        &self,
         config: &ConfigSet,
         provider: Box<dyn CredentialProvider + Send + Sync>,
     ) -> RemoteResult<Box<dyn HttpClient>> {
-        let client = UreqHttpClient::from_config(config)
+        let environment = match &self.environment {
+            Some(env) => env,
+            None => &crate::environment::Environment::empty(),
+        };
+        let client = UreqHttpClient::from_config_with_environment(config, environment)
             .map_err(|e| RemoteError::InvalidUrl(e.to_string()))?
             .with_credential_provider(provider);
         Ok(Box::new(client))
@@ -432,11 +437,11 @@ impl DefaultHttpClientFactory {
 #[cfg(feature = "http-ureq")]
 impl HttpClientFactory for DefaultHttpClientFactory {
     fn create(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Self::client(config, Box::new(self.credential_provider(config)))
+        self.client(config, Box::new(self.credential_provider(config)))
     }
 
     fn create_for_probe(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        Self::client(
+        self.client(
             config,
             Box::new(KeepRejectedCredentials(self.credential_provider(config))),
         )
@@ -559,12 +564,19 @@ impl Remote {
         if opts.http_protocol_version.is_none() {
             opts.http_protocol_version = Some(protocol_version);
         }
-        let connect = ConnectOptions {
+        let (stack_watch, _wait_guard) = crate::progress::HttpWaitGuard::bind(cancel);
+        let mut connect = ConnectOptions {
             protocol_version,
             diagnostics: opts.diagnostics.clone(),
             network_trace: opts.network_trace,
+            cancel: Some(crate::progress::connect_cancel_arc(
+                cancel,
+                std::sync::Arc::clone(&stack_watch),
+            )),
+            stack_watch,
             ..Default::default()
         };
+        connect.bind_stack_cancel(cancel);
         self.dispatch_fetch(
             repo,
             &self.fetch_url,
@@ -625,11 +637,21 @@ impl Remote {
             progress,
             cancel,
             http_factory,
-            ConnectOptions {
-                protocol_version: 0,
-                diagnostics: Some(repo.diagnostics()),
-                network_trace: repo.network_trace_enabled(),
-                ..Default::default()
+            {
+                let (stack_watch, _wait_guard) = crate::progress::HttpWaitGuard::bind(cancel);
+                let mut connect = ConnectOptions {
+                    protocol_version: 0,
+                    diagnostics: Some(repo.diagnostics()),
+                    network_trace: repo.network_trace_enabled(),
+                    cancel: Some(crate::progress::connect_cancel_arc(
+                        cancel,
+                        std::sync::Arc::clone(&stack_watch),
+                    )),
+                    stack_watch,
+                    ..Default::default()
+                };
+                connect.bind_stack_cancel(cancel);
+                connect
             },
         )
     }
@@ -818,7 +840,7 @@ impl Remote {
                 Ok(fetch_local_into(repo, &remote_git, opts, progress, cancel)?)
             }
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
-                let client: Arc<dyn HttpClient> = Arc::from(http_client(http_factory, repo)?);
+                let client = http_client_for_operation(http_factory, repo, connect.cancel.clone())?;
                 let transport = SmartHttpTransport::new(client);
                 let mut conn = transport.connect(u, Service::UploadPack, &connect)?;
                 Ok(fetch_remote_into(repo, &mut *conn, opts, progress, cancel)?)
@@ -866,8 +888,8 @@ impl Remote {
                 )?)
             }
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
-                let client: Arc<dyn HttpClient> = Arc::from(http_client(http_factory, repo)?);
-                let transport = SmartHttpTransport::new(client.clone());
+                let client = http_client_for_operation(http_factory, repo, connect.cancel.clone())?;
+                let transport = SmartHttpTransport::new(Arc::clone(&client));
                 let mut conn = transport.connect(u, Service::ReceivePack, &connect)?;
                 Ok(crate::push::push_remote_with(
                     repo,
@@ -1021,6 +1043,26 @@ fn ssh_wire_environment(
     }
     repo.map(|r| r.environment().clone())
         .unwrap_or_else(crate::environment::Environment::capture_process)
+}
+
+#[cfg(feature = "http-ureq")]
+fn http_client_for_operation(
+    factory: Option<&dyn HttpClientFactory>,
+    repo: &Repository,
+    cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
+) -> RemoteResult<Arc<dyn HttpClient>> {
+    let client = http_client(factory, repo)?;
+    client.set_operation_cancel(cancel);
+    Ok(Arc::from(client))
+}
+
+#[cfg(not(feature = "http-ureq"))]
+fn http_client_for_operation(
+    factory: Option<&dyn HttpClientFactory>,
+    repo: &Repository,
+    _cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
+) -> RemoteResult<Arc<dyn HttpClient>> {
+    Ok(Arc::from(http_client(factory, repo)?))
 }
 
 fn http_client(

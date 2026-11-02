@@ -25,7 +25,7 @@ type LsRefsAdvertised = (
     std::collections::HashMap<String, ObjectId>,
     Option<ObjectId>,
 );
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::progress::{mirror_stack_cancel, poll_cancel, Cancel, ProgressSink};
 use crate::transfer::{
     classify_update, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
     validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
@@ -474,6 +474,9 @@ fn negotiate_pack(
     let mut got_ready = false;
     if !skip_local_haves {
         while let Some(oid) = negotiator.next_have()? {
+            if let Some(watch) = conn.http_stack_watch() {
+                mirror_stack_cancel(cancel, watch);
+            }
             poll_cancel(progress, cancel)?;
             pkt_line::write_line_to_vec(&mut pending, &format!("have {}", oid.to_hex()))?;
             count += 1;
@@ -526,6 +529,9 @@ fn negotiate_pack(
         let mut tail = state;
         tail.extend_from_slice(&pending);
         pkt_line::write_line_to_vec(&mut tail, "done")?;
+        if let Some(watch) = conn.http_stack_watch() {
+            mirror_stack_cancel(cancel, watch);
+        }
         conn.writer().write_all(&tail)?;
         conn.writer().flush()?;
 
@@ -1083,6 +1089,7 @@ fn negotiate_pack_v2(
     let mut seen_ack = false;
     let mut round_haves: Vec<ObjectId> = Vec::new();
     loop {
+        poll_cancel(progress, cancel)?;
         round_haves.clear();
         round_haves.extend_from_slice(&common);
         let added = match haves.as_mut() {
@@ -1584,6 +1591,10 @@ pub fn fetch_remote_into(
         opts.fetch_depth
     );
     validate_fetch_depth_local(local_git_dir, opts)?;
+    conn.set_http_stack_cancel(cancel);
+    if let Some(watch) = conn.http_stack_watch() {
+        mirror_stack_cancel(cancel, watch);
+    }
     let local_cfg = crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
     if opts.filter.is_none() {
         if let Some(remote) = opts.remote_name.as_deref() {

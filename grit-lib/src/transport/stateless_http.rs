@@ -4,17 +4,16 @@
 //! Lets [`crate::fetch::fetch_remote`] and [`crate::push::push_remote`] drive
 //! smart HTTP without a separate negotiation implementation.
 
-use std::io::{self, Cursor, Read, Write};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError};
-use std::sync::Arc;
-use std::time::Duration;
-
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::progress::{Cancel, NeverCancel};
 use crate::transport::http::HttpClient;
+use crate::transport::pending_http::{PendingHttp, HTTP_CANCEL_POLL};
 use crate::transport::rpc_channel::RpcChannel;
 use crate::transport::{Connection, Service};
+use std::io::{self, Cursor, Read, Write};
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError};
+use std::sync::Arc;
 
 /// Reader that surfaces a stored I/O error on the first read (instead of EOF).
 struct ErrRead {
@@ -37,6 +36,18 @@ const LARGE_POST: usize = 1024 * 1024;
 
 /// Bytes handed to the upload thread at a time.
 const STREAM_CHUNK: usize = 256 * 1024;
+
+/// [`std::io::ErrorKind::Interrupted`] payload for [`Error::Cancelled`] on [`Write`].
+pub(crate) const TRANSPORT_IO_CANCELLED: &str = "grit-transport-cancelled";
+
+fn io_from_transport(err: Error) -> io::Error {
+    if matches!(err, Error::Cancelled) {
+        // Not `Interrupted`: `write_all`/`read_to_end` retry that kind indefinitely.
+        io::Error::other(TRANSPORT_IO_CANCELLED)
+    } else {
+        io::Error::other(err.to_string())
+    }
+}
 
 /// Chunks queued for the upload thread before the writer waits for the network.
 const STREAM_QUEUE: usize = 4;
@@ -80,9 +91,6 @@ impl Read for ChunkReader {
     }
 }
 
-/// How often a wait for the receive-pack request checks for a cancel.
-const CANCEL_POLL: Duration = Duration::from_millis(20);
-
 /// A receive-pack response read to the end, replaying the error that ended it
 /// (a reset after the report, say) once its bytes are consumed.
 struct ReadResponse {
@@ -110,46 +118,13 @@ impl Read for ReadResponse {
     }
 }
 
-/// A receive-pack request running on its own thread, which also reads the
-/// (small) report so waiting for it can be interrupted.
-struct PendingResponse(Receiver<Result<ReadResponse>>);
-
-impl PendingResponse {
-    fn spawn<F>(request: F) -> io::Result<Self>
-    where
-        F: FnOnce() -> Result<Box<dyn Read + Send>> + Send + 'static,
-    {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::Builder::new()
-            .name("grit-http-post".to_owned())
-            .spawn(move || {
-                let _ = tx.send(request().map(ReadResponse::read_from));
-            })?;
-        Ok(Self(rx))
-    }
-
-    /// The response, or [`Error::Cancelled`] once `cancel` fires first. A cancelled
-    /// request is left to finish on its own thread.
-    fn wait(&self, cancel: &dyn Cancel) -> Result<ReadResponse> {
-        loop {
-            match self.0.recv_timeout(CANCEL_POLL) {
-                Ok(response) => return response,
-                Err(RecvTimeoutError::Timeout) if cancel.is_cancelled() => {
-                    return Err(Error::Cancelled)
-                }
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    return Err(Error::Message("HTTP upload thread panicked".to_owned()))
-                }
-            }
-        }
-    }
-}
+type PendingStreamPost = PendingHttp<Result<Box<dyn Read + Send>>>;
+type PendingReportPost = PendingHttp<ReadResponse>;
 
 /// A receive-pack POST running on its own thread while the body is written.
 struct StreamingPost {
     chunks: SyncSender<BodyChunk>,
-    response: PendingResponse,
+    response: PendingStreamPost,
 }
 
 impl StreamingPost {
@@ -160,13 +135,13 @@ impl StreamingPost {
         accept: String,
     ) -> io::Result<Self> {
         let (chunks, rx) = std::sync::mpsc::sync_channel(STREAM_QUEUE);
-        let response = PendingResponse::spawn(move || {
+        let response = PendingStreamPost::spawn("grit-http-post", move || {
             let mut body = ChunkReader {
                 chunks: rx,
                 chunk: Vec::new(),
                 pos: 0,
             };
-            client.post_streaming(&url, &content_type, &accept, &mut body, None)
+            Ok(client.post_streaming(&url, &content_type, &accept, &mut body, None))
         })?;
         Ok(Self { chunks, response })
     }
@@ -189,7 +164,7 @@ impl StreamingPost {
                         return Err(Error::Cancelled);
                     }
                     item = back;
-                    std::thread::sleep(CANCEL_POLL);
+                    std::thread::sleep(HTTP_CANCEL_POLL);
                 }
                 Err(TrySendError::Disconnected(_)) => return Err(self.ended_early()),
             }
@@ -200,7 +175,8 @@ impl StreamingPost {
     fn ended_early(&self) -> Error {
         match self.response.wait(&NeverCancel) {
             Err(e) => e,
-            Ok(_) => Error::Message("server answered before the request body was sent".into()),
+            Ok(Err(e)) => e,
+            Ok(Ok(_)) => Error::Message("server answered before the request body was sent".into()),
         }
     }
 
@@ -209,7 +185,10 @@ impl StreamingPost {
     fn finish(self, chunk: Vec<u8>, cancel: &dyn Cancel) -> Result<ReadResponse> {
         self.send_until(BodyChunk::Data(chunk), cancel)?;
         self.send_until(BodyChunk::End, cancel)?;
-        self.response.wait(cancel)
+        self.response.wait(cancel).and_then(|reader| {
+            let reader = reader?;
+            Ok(ReadResponse::read_from(reader))
+        })
     }
 }
 
@@ -239,12 +218,17 @@ pub struct StatelessHttpConnection<C: HttpClient> {
     recv_body: Vec<u8>,
     recv_stream: Option<StreamingPost>,
     recv_posted: bool,
+    cancel: Option<Arc<dyn Cancel + Send + Sync>>,
+    stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    stack_cancel: Option<crate::transport::StackCancelFatPtr>,
+    /// Set once an upload-pack POST wait observes cancellation; suppresses further POSTs.
+    upload_cancelled: std::sync::atomic::AtomicBool,
 }
 
 impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
     /// Build a connection after `info/refs` discovery.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new(
         client: C,
         service: Service,
         repo_url: String,
@@ -254,6 +238,9 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         head_symref: Option<String>,
         object_format: String,
         git_protocol: Option<String>,
+        cancel: Option<Arc<dyn Cancel + Send + Sync>>,
+        stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        stack_cancel: Option<crate::transport::StackCancelFatPtr>,
     ) -> Self {
         let wire = service.wire_name();
         let base = repo_url.trim_end_matches('/');
@@ -280,7 +267,38 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             recv_body: Vec::new(),
             recv_stream: None,
             recv_posted: false,
+            cancel,
+            stack_watch,
+            stack_cancel,
+            upload_cancelled: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    fn stack_cancel(&self) -> Option<&dyn Cancel> {
+        self.stack_cancel
+            .as_ref()
+            .map(crate::transport::StackCancelFatPtr::as_cancel)
+    }
+
+    fn wait_http<T: Send + 'static>(
+        &self,
+        pending: PendingHttp<T>,
+        cancel: &dyn Cancel,
+    ) -> Result<T> {
+        if let Some(stack) = self.stack_cancel() {
+            crate::progress::mirror_stack_cancel(stack, self.stack_watch.as_ref());
+        }
+        pending.wait_with_stack(cancel, self.stack_cancel(), Some(self.stack_watch.as_ref()))
+    }
+
+    fn operation_cancel(&self) -> Option<Arc<dyn Cancel + Send + Sync>> {
+        self.cancel.clone()
+    }
+
+    fn cancel_ref(cancel: &Option<Arc<dyn Cancel + Send + Sync>>) -> &dyn Cancel {
+        cancel
+            .as_deref()
+            .map_or(&NeverCancel as &dyn Cancel, |c| c as &dyn Cancel)
     }
 
     /// Repository URL used for subsequent POSTs.
@@ -335,7 +353,8 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         // block plus haves that the negotiation restates itself, as Git's
         // stateless upload-pack stops reading at the first flush after the haves.
         let body = std::mem::take(&mut self.pending);
-        self.response = Some(self.request(&body)?);
+        let cancel = self.operation_cancel();
+        self.response = Some(self.post_round(&body, Self::cancel_ref(&cancel))?);
         Ok(())
     }
 
@@ -356,11 +375,13 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
                     self.content_type.clone(),
                     self.accept.clone(),
                 );
-                PendingResponse::spawn(move || {
-                    client.post_into_reader(&url, &content_type, &accept, &body, None)
+                PendingReportPost::spawn("grit-http-post", move || {
+                    client
+                        .post_into_reader(&url, &content_type, &accept, &body, None)
+                        .map(ReadResponse::read_from)
                 })
                 .map_err(Error::Io)
-                .and_then(|pending| pending.wait(cancel))
+                .and_then(|pending| self.wait_http(pending, cancel))
             }
         };
         let response = response.inspect_err(|e| self.set_transport_err(e))?;
@@ -409,13 +430,18 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
     /// Post an empty command list before a streamed body, as Git does, so an
     /// authentication challenge is answered on a request that can be resent.
     fn probe_receive_pack(&mut self) -> Result<()> {
-        let mut reply = self.client.post_into_reader(
-            &self.post_url,
-            &self.content_type,
-            &self.accept,
-            b"0000",
-            None,
-        )?;
+        let client = Arc::clone(&self.client);
+        let (url, content_type, accept) = (
+            self.post_url.clone(),
+            self.content_type.clone(),
+            self.accept.clone(),
+        );
+        let cancel = self.operation_cancel();
+        let mut reply = PendingHttp::spawn("grit-http-post", move || {
+            client.post_into_reader(&url, &content_type, &accept, b"0000", None)
+        })
+        .map_err(Error::Io)
+        .and_then(|pending| self.wait_http(pending, Self::cancel_ref(&cancel)))?;
         io::copy(&mut reply, &mut io::sink()).map_err(Error::Io)?;
         Ok(())
     }
@@ -431,17 +457,42 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
 impl<C: HttpClient + 'static> RpcChannel for StatelessHttpConnection<C> {
     fn request(&mut self, body: &[u8]) -> Result<Box<dyn Read + Send>> {
         self.drain_response();
-        self.client
-            .post_into_reader(
-                &self.post_url,
-                &self.content_type,
-                &self.accept,
-                body,
-                self.git_protocol.as_deref(),
-            )
+        let cancel = self.operation_cancel();
+        self.post_round(body, Self::cancel_ref(&cancel))
             .inspect_err(|e| {
                 self.set_transport_err(e);
             })
+    }
+}
+
+impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
+    fn post_round(&mut self, body: &[u8], cancel: &dyn Cancel) -> Result<Box<dyn Read + Send>> {
+        if self
+            .upload_cancelled
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(Error::Cancelled);
+        }
+        self.drain_response();
+        let client = Arc::clone(&self.client);
+        let (url, content_type, accept) = (
+            self.post_url.clone(),
+            self.content_type.clone(),
+            self.accept.clone(),
+        );
+        let git_protocol = self.git_protocol.clone();
+        let body = body.to_vec();
+        PendingHttp::spawn("grit-http-post", move || {
+            client.post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
+        })
+        .map_err(Error::Io)
+        .and_then(|pending| self.wait_http(pending, cancel))
+        .inspect_err(|e| {
+            if matches!(e, Error::Cancelled) {
+                self.upload_cancelled
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        })
     }
 }
 
@@ -450,16 +501,14 @@ impl<C: HttpClient + 'static> Write for StatelessHttpConnection<C> {
         match self.service {
             Service::UploadPack => {
                 self.pending.extend_from_slice(buf);
-                self.maybe_post_on_flush()
-                    .map_err(|e| io::Error::other(e.to_string()))?;
+                self.maybe_post_on_flush().map_err(io_from_transport)?;
                 Ok(buf.len())
             }
             Service::ReceivePack => {
                 // A large object arrives in one write; taking a chunk at a time keeps
                 // the buffered body bounded.
                 let taken = &buf[..buf.len().min(STREAM_CHUNK)];
-                self.write_receive_pack(taken)
-                    .map_err(|e| io::Error::other(e.to_string()))?;
+                self.write_receive_pack(taken).map_err(io_from_transport)?;
                 Ok(taken.len())
             }
         }
@@ -467,8 +516,7 @@ impl<C: HttpClient + 'static> Write for StatelessHttpConnection<C> {
 
     fn flush(&mut self) -> io::Result<()> {
         if self.service == Service::UploadPack {
-            self.maybe_post_on_flush()
-                .map_err(|e| io::Error::other(e.to_string()))?;
+            self.maybe_post_on_flush().map_err(io_from_transport)?;
         }
         Ok(())
     }
@@ -514,6 +562,15 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
 
     fn stateless_rpc(&self) -> bool {
         true
+    }
+
+    fn set_http_stack_cancel(&mut self, cancel: &dyn Cancel) {
+        self.stack_cancel = Some(crate::transport::StackCancelFatPtr::capture(cancel));
+        crate::progress::mirror_stack_cancel(cancel, self.stack_watch.as_ref());
+    }
+
+    fn http_stack_watch(&self) -> Option<&std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        Some(&self.stack_watch)
     }
 
     fn finish_send(&mut self) {
@@ -634,6 +691,9 @@ mod tests {
             None,
             "sha1".to_owned(),
             None,
+            None,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            None,
         )
     }
 
@@ -659,6 +719,9 @@ mod tests {
             Vec::new(),
             None,
             "sha1".to_owned(),
+            None,
+            None,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             None,
         );
         let wants = b"0032want 0123456789012345678901234567890123456789\n0000".to_vec();

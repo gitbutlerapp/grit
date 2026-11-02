@@ -2377,6 +2377,11 @@ impl Error {
             Self::Cancelled => true,
             Self::History(e) => e.is_cancelled(),
             Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
+            Self::Io(err)
+                if err.to_string() == crate::transport::stateless_http::TRANSPORT_IO_CANCELLED =>
+            {
+                true
+            }
             _ => false,
         }
     }

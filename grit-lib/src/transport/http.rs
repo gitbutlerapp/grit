@@ -36,7 +36,9 @@ use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
+use crate::progress::{Cancel, NeverCancel};
 use crate::transfer::{FetchOptions, FetchOutcome};
+use crate::transport::pending_http::PendingHttp;
 use crate::transport::stateless_http::StatelessHttpConnection;
 use crate::transport::{ConnectOptions, Connection, Service, Transport};
 
@@ -204,6 +206,13 @@ pub trait HttpClient: Send + Sync {
             "this HTTP client cannot send {} requests",
             request.method.as_str()
         )))
+    }
+
+    /// Wire an operation [`Cancel`] checked during blocking HTTP reads (when supported).
+    fn set_operation_cancel(
+        &self,
+        _cancel: Option<std::sync::Arc<dyn crate::progress::Cancel + Send + Sync>>,
+    ) {
     }
 }
 
@@ -1003,15 +1012,25 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
         repo_url: &str,
         service: Service,
         git_protocol: Option<&str>,
+        cancel: &dyn Cancel,
+        stack: Option<&dyn Cancel>,
+        stack_watch: &std::sync::atomic::AtomicBool,
     ) -> Result<(String, Discovery)> {
         let info_url = info_refs_url_for_service(repo_url, service);
         let gp = git_protocol.or_else(|| self.client.git_protocol_header());
-        let (body, final_url) = self.client.get_with_final_url(&info_url, gp)?;
+        let (body, final_url) = get_with_final_url_interruptible(
+            &self.client,
+            &info_url,
+            gp,
+            cancel,
+            stack,
+            stack_watch,
+        )?;
         if let Some(new_base) = rebased_base_from_redirect(repo_url, final_url.as_deref()) {
             let _redirect = format!("http(s): redirected base {repo_url} -> {new_base}");
             self.client.reset_auth_after_redirect_rebase();
             let url = info_refs_url_for_service(&new_base, service);
-            let body = self.client.get(&url, gp)?;
+            let body = get_interruptible(&self.client, &url, gp, cancel, stack, stack_watch)?;
             let stripped = strip_service_advertisement_for_discovery(&body, None)?;
             let disc = parse_advertisement(stripped)?;
             return Ok((new_base, disc));
@@ -1020,6 +1039,42 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
         let disc = parse_advertisement(stripped)?;
         Ok((repo_url.to_owned(), disc))
     }
+}
+
+fn connect_cancel(opts: &ConnectOptions) -> &dyn Cancel {
+    opts.cancel
+        .as_deref()
+        .map_or(&NeverCancel as &dyn Cancel, |c| c as &dyn Cancel)
+}
+
+fn get_interruptible<C: HttpClient + Clone + 'static>(
+    client: &C,
+    url: &str,
+    git_protocol: Option<&str>,
+    cancel: &dyn Cancel,
+    stack: Option<&dyn Cancel>,
+    stack_watch: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<u8>> {
+    get_with_final_url_interruptible(client, url, git_protocol, cancel, stack, stack_watch)
+        .map(|(body, _)| body)
+}
+
+fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
+    client: &C,
+    url: &str,
+    git_protocol: Option<&str>,
+    cancel: &dyn Cancel,
+    stack: Option<&dyn Cancel>,
+    stack_watch: &std::sync::atomic::AtomicBool,
+) -> Result<(Vec<u8>, Option<String>)> {
+    let client = client.clone();
+    let url = url.to_owned();
+    let git_protocol = git_protocol.map(str::to_owned);
+    PendingHttp::spawn("grit-http-get", move || {
+        client.get_with_final_url(&url, git_protocol.as_deref())
+    })
+    .map_err(Error::Io)?
+    .wait_with_stack(cancel, stack, Some(stack_watch))
 }
 
 fn info_refs_url_for_service(repo_url: &str, service: Service) -> String {
@@ -1056,7 +1111,16 @@ impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
             opts.protocol_version
         );
         let gp = git_protocol_for_version(opts.protocol_version);
-        let (repo_url, disc) = self.discover_with_redirect(url, service, gp.as_deref())?;
+        let cancel = connect_cancel(opts);
+        let stack = opts.stack_cancel();
+        let (repo_url, disc) = self.discover_with_redirect(
+            url,
+            service,
+            gp.as_deref(),
+            cancel,
+            stack,
+            opts.stack_watch.as_ref(),
+        )?;
         let adv_refs: Vec<(String, ObjectId)> = disc
             .refs
             .iter()
@@ -1081,6 +1145,9 @@ impl<C: HttpClient + Clone + 'static> Transport for SmartHttpTransport<C> {
             disc.head_symref,
             disc.object_format,
             gp,
+            opts.cancel.clone(),
+            std::sync::Arc::clone(&opts.stack_watch),
+            opts.stack_cancel,
         )))
     }
 }
@@ -1133,3 +1200,7 @@ pub fn http_fetch(
 #[cfg(test)]
 #[path = "http_discovery_tests.rs"]
 mod discovery_tests;
+
+#[cfg(test)]
+#[path = "http_cancel_tests.rs"]
+mod cancel_tests;

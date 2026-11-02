@@ -56,7 +56,9 @@ use base64::Engine;
 
 use crate::config::{self, parse_i64, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
+use crate::environment::Environment;
 use crate::error::{AuthFailure, Error, RemoteUnreadableReason, Result};
+use crate::progress::Cancel;
 use crate::protocol::client_git_protocol_header_from_config;
 use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
@@ -138,6 +140,8 @@ pub struct UreqHttpClient {
     credential_config: ConfigSet,
     /// HTTP read timeouts and low-speed abort thresholds (`http.*` config).
     transport_timeouts: HttpTransportTimeouts,
+    /// Per-fetch cancel, checked during timed-out socket reads.
+    operation_cancel: Mutex<Option<std::sync::Arc<dyn Cancel + Send + Sync>>>,
 }
 
 impl UreqHttpClient {
@@ -161,6 +165,7 @@ impl UreqHttpClient {
             extra_headers: Vec::new(),
             credential_config: ConfigSet::default(),
             transport_timeouts: HttpTransportTimeouts::default(),
+            operation_cancel: Mutex::new(None),
         }
     }
 
@@ -186,8 +191,16 @@ impl UreqHttpClient {
     /// not compiled in for here), `protocol.version` is invalid, or the cookie
     /// file cannot be read.
     pub fn from_config(config: &ConfigSet) -> Result<Self> {
+        Self::from_config_with_environment(config, &Environment::empty())
+    }
+
+    /// Like [`Self::from_config`], but reads `GIT_HTTP_LOW_SPEED_*` from `environment`.
+    pub fn from_config_with_environment(
+        config: &ConfigSet,
+        environment: &Environment,
+    ) -> Result<Self> {
         let proxy = build_proxy(config)?;
-        let transport_timeouts = HttpTransportTimeouts::from_config(config);
+        let transport_timeouts = HttpTransportTimeouts::from_config(config, environment);
         let agent = agent_from_timeouts(proxy, &transport_timeouts);
         let mut client = Self::with_agent(agent);
 
@@ -437,13 +450,21 @@ fn default_user_agent() -> String {
     format!("grit-lib/{}", env!("CARGO_PKG_VERSION"))
 }
 
+/// Per-response stall detection while waiting for response headers (time to first byte).
+///
+/// This is not a total body budget; long transfers rely on [`LowSpeedReader`] and
+/// operation [`Cancel`] polling instead of [`ureq::ConfigBuilder::timeout_recv_body`].
+const RECV_RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
+
 /// Git-shaped HTTP timeouts and optional low-speed abort thresholds (`http.*` config).
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct HttpTransportTimeouts {
     connect: Duration,
     /// Whole-request ceiling (`http.timeout`, Git default 600s; `None` when disabled).
     global: Option<Duration>,
     low_speed: Option<LowSpeedSettings>,
+    /// Checked on timed-out socket reads so library cancel is observed mid-transfer.
+    cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -458,12 +479,13 @@ impl Default for HttpTransportTimeouts {
             connect: Duration::from_secs(30),
             global: Some(Duration::from_secs(600)),
             low_speed: None,
+            cancel: None,
         }
     }
 }
 
 impl HttpTransportTimeouts {
-    fn from_config(config: &ConfigSet) -> Self {
+    fn from_config(config: &ConfigSet, environment: &Environment) -> Self {
         let global = config
             .get("http.timeout")
             .as_deref()
@@ -480,13 +502,14 @@ impl HttpTransportTimeouts {
         Self {
             connect: Duration::from_secs(30),
             global,
-            low_speed: parse_low_speed(config),
+            low_speed: parse_low_speed(config, environment),
+            cancel: None,
         }
     }
 }
 
-fn parse_low_speed(config: &ConfigSet) -> Option<LowSpeedSettings> {
-    let limit = crate::environment::Environment::empty()
+fn parse_low_speed(config: &ConfigSet, environment: &Environment) -> Option<LowSpeedSettings> {
+    let limit = environment
         .var("GIT_HTTP_LOW_SPEED_LIMIT")
         .and_then(|v| parse_i64(v.trim()).ok())
         .or_else(|| {
@@ -494,7 +517,7 @@ fn parse_low_speed(config: &ConfigSet) -> Option<LowSpeedSettings> {
                 .get("http.lowSpeedLimit")
                 .and_then(|v| parse_i64(v.trim()).ok())
         });
-    let time_secs = crate::environment::Environment::empty()
+    let time_secs = environment
         .var("GIT_HTTP_LOW_SPEED_TIME")
         .and_then(|v| parse_i64(v.trim()).ok())
         .or_else(|| {
@@ -520,6 +543,7 @@ struct LowSpeedReader<R> {
     window_start: Instant,
     window_bytes: u64,
     global_deadline: Option<Instant>,
+    cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>,
 }
 
 impl<R: Read> LowSpeedReader<R> {
@@ -531,7 +555,15 @@ impl<R: Read> LowSpeedReader<R> {
             window_start: Instant::now(),
             window_bytes: 0,
             global_deadline,
+            cancel: timeouts.cancel.clone(),
         }
+    }
+
+    fn check_cancel(&self) -> io::Result<()> {
+        if self.cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
+            return Err(io::Error::from(io::ErrorKind::Interrupted));
+        }
+        Ok(())
     }
 
     fn check_global(&self) -> io::Result<()> {
@@ -562,6 +594,12 @@ impl<R: Read> LowSpeedReader<R> {
             self.window_bytes = 0;
             return Ok(());
         }
+        if self.window_bytes == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "HTTP transfer speed below http.lowSpeedLimit for http.lowSpeedTime",
+            ));
+        }
         let rate = self.window_bytes as f64 / secs;
         if rate < settings.bytes_per_second as f64 {
             return Err(io::Error::new(
@@ -577,11 +615,21 @@ impl<R: Read> LowSpeedReader<R> {
 
 impl<R: Read> Read for LowSpeedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.settings.is_some() || self.global_deadline.is_some() {
+        if self.settings.is_some() || self.global_deadline.is_some() || self.cancel.is_some() {
+            self.check_cancel()?;
             self.check_global()?;
             self.finish_window()?;
         }
-        let n = self.inner.read(buf)?;
+        let n = match self.inner.read(buf) {
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+                self.check_cancel()?;
+                self.check_global()?;
+                self.finish_window()?;
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        };
         if n > 0 && self.settings.is_some() {
             self.window_bytes += n as u64;
             self.finish_window()?;
@@ -618,6 +666,7 @@ fn agent_from_timeouts(
     ureq::Agent::config_builder()
         .timeout_connect(Some(timeouts.connect))
         .timeout_global(timeouts.global)
+        .timeout_recv_response(Some(RECV_RESPONSE_TIMEOUT))
         // Return >= 400 responses as `Ok` so the auth-retry logic can inspect the
         // status and `WWW-Authenticate` headers rather than treating them as hard
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
@@ -733,7 +782,9 @@ impl UreqHttpClient {
         git_protocol: Option<&str>,
         auth: Option<&str>,
     ) -> Result<RawResponse> {
-        let result = retry_interrupted(true, || {
+        let cancel = self.operation_cancel_ref();
+        let cancel_ref = cancel.as_deref();
+        let result = retry_interrupted(true, cancel_ref, || {
             let mut req = self.agent.get(url).header("User-Agent", &self.user_agent);
             if let Some(v) = resolve_git_protocol_header(git_protocol, self.git_protocol.as_deref())
             {
@@ -750,7 +801,7 @@ impl UreqHttpClient {
             }
             req.call()
         });
-        finish(url, result, &self.transport_timeouts)
+        finish(url, result, &self.effective_timeouts())
     }
 
     /// A `POST` to `url` carrying the headers every smart-HTTP request sends.
@@ -793,12 +844,14 @@ impl UreqHttpClient {
         auth: Option<&str>,
     ) -> Result<(RawResponseHead, LowSpeedReader<Box<dyn Read + Send>>)> {
         let idempotent = content_type == "application/x-git-upload-pack-request";
-        let result = retry_interrupted(idempotent, || {
+        let cancel = self.operation_cancel_ref();
+        let cancel_ref = cancel.as_deref();
+        let result = retry_interrupted(idempotent, cancel_ref, || {
             self.post_request(url, content_type, accept, git_protocol, auth)
                 .send(body)
         });
         match result {
-            Ok(resp) => open_response_body(resp, &self.transport_timeouts),
+            Ok(resp) => open_response_body(resp, &self.effective_timeouts()),
             Err(e) => Err(http_transport_error(url, &e)),
         }
     }
@@ -815,11 +868,13 @@ impl UreqHttpClient {
         // A fetch negotiation request only reads from the server, so it is safe to resend; a
         // push (receive-pack) request is not.
         let idempotent = content_type == "application/x-git-upload-pack-request";
-        let result = retry_interrupted(idempotent, || {
+        let cancel = self.operation_cancel_ref();
+        let cancel_ref = cancel.as_deref();
+        let result = retry_interrupted(idempotent, cancel_ref, || {
             self.post_request(url, content_type, accept, git_protocol, auth)
                 .send(body)
         });
-        finish(url, result, &self.transport_timeouts)
+        finish(url, result, &self.effective_timeouts())
     }
 
     fn with_auth_retry_post_stream(
@@ -917,9 +972,27 @@ impl UreqHttpClient {
             req = req.header(*name, value);
         }
         if request.long_running {
-            req = req.config().timeout_global(None).build();
+            req = req
+                .config()
+                .timeout_global(None)
+                .timeout_recv_response(Some(RECV_RESPONSE_TIMEOUT))
+                .build();
         }
         req
+    }
+
+    fn effective_timeouts(&self) -> HttpTransportTimeouts {
+        let mut timeouts = self.transport_timeouts.clone();
+        if let Ok(guard) = self.operation_cancel.lock() {
+            if guard.is_some() {
+                timeouts.cancel = guard.clone();
+            }
+        }
+        timeouts
+    }
+
+    fn operation_cancel_ref(&self) -> Option<std::sync::Arc<dyn Cancel + Send + Sync>> {
+        self.operation_cancel.lock().ok().and_then(|g| g.clone())
     }
 
     /// One attempt at [`HttpClient::send`]: the response head and an open body.
@@ -931,7 +1004,9 @@ impl UreqHttpClient {
         let url = request.url;
         // Only reads may be resent after an interrupted socket call.
         let idempotent = matches!(request.method, HttpMethod::Get | HttpMethod::Head);
-        let result = retry_interrupted(idempotent, || match request.method {
+        let cancel = self.operation_cancel_ref();
+        let cancel_ref = cancel.as_deref();
+        let result = retry_interrupted(idempotent, cancel_ref, || match request.method {
             HttpMethod::Get => self.decorate(self.agent.get(url), request, auth).call(),
             HttpMethod::Head => self.decorate(self.agent.head(url), request, auth).call(),
             HttpMethod::Post => self
@@ -958,14 +1033,17 @@ impl UreqHttpClient {
                 ))
             })
             .collect();
-        let timeouts = if request.long_running {
+        let mut timeouts = if request.long_running {
             HttpTransportTimeouts {
                 global: None,
-                ..self.transport_timeouts.clone()
+                ..self.effective_timeouts()
             }
         } else {
-            self.transport_timeouts.clone()
+            self.effective_timeouts()
         };
+        if request.long_running {
+            timeouts.global = None;
+        }
         let (head, reader) = open_response_body(resp, &timeouts)?;
         let response = HttpResponse {
             status: head.status,
@@ -1158,7 +1236,7 @@ impl HttpClient for UreqHttpClient {
             )
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
-            Ok(resp) => open_response_body(resp, &self.transport_timeouts)?,
+            Ok(resp) => open_response_body(resp, &self.effective_timeouts())?,
             Err(e) => return Err(http_transport_error(url, &e)),
         };
         self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
@@ -1204,6 +1282,12 @@ impl HttpClient for UreqHttpClient {
     fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
         self.send_with_auth_retry(request)
     }
+
+    fn set_operation_cancel(&self, cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>) {
+        if let Ok(mut guard) = self.operation_cancel.lock() {
+            *guard = cancel;
+        }
+    }
 }
 
 /// Attempts made for an idempotent request whose socket call fails with `EINTR`.
@@ -1213,6 +1297,7 @@ const INTERRUPTED_ATTEMPTS: usize = 3;
 /// request is `idempotent`. `EINTR` means "try again", not a transport failure.
 fn retry_interrupted<T>(
     idempotent: bool,
+    cancel: Option<&(dyn Cancel + Send + Sync)>,
     mut send: impl FnMut() -> std::result::Result<T, ureq::Error>,
 ) -> std::result::Result<T, ureq::Error> {
     let attempts = if idempotent { INTERRUPTED_ATTEMPTS } else { 1 };
@@ -1220,6 +1305,9 @@ fn retry_interrupted<T>(
     for _ in 1..attempts {
         match &result {
             Err(ureq::Error::Io(e)) if e.kind() == std::io::ErrorKind::Interrupted => {
+                if cancel.is_some_and(Cancel::is_cancelled) {
+                    break;
+                }
                 result = send();
             }
             _ => break,
@@ -1240,18 +1328,21 @@ fn finish(
     timeouts: &HttpTransportTimeouts,
 ) -> Result<RawResponse> {
     match result {
-        Ok(resp) => read_response(resp, timeouts),
+        Ok(resp) => read_response(url, resp, timeouts),
         Err(e) => Err(http_transport_error(url, &e)),
     }
 }
 
 fn read_response(
+    url: &str,
     resp: ureq::http::Response<ureq::Body>,
     timeouts: &HttpTransportTimeouts,
 ) -> Result<RawResponse> {
     let (head, mut reader) = open_response_body(resp, timeouts)?;
     let mut body = Vec::new();
-    reader.read_to_end(&mut body).map_err(Error::Io)?;
+    reader
+        .read_to_end(&mut body)
+        .map_err(|e| map_http_read_error(url, e))?;
     Ok(RawResponse {
         status: head.status,
         content_type: head.content_type,
@@ -1343,6 +1434,14 @@ fn http_transport_error(url: &str, err: impl std::fmt::Display) -> Error {
         url_for_display(url),
         RemoteUnreadableReason::Transport { detail },
     )
+}
+
+fn map_http_read_error(url: &str, err: std::io::Error) -> Error {
+    if err.kind() == std::io::ErrorKind::Interrupted {
+        Error::Cancelled
+    } else {
+        http_transport_error(url, err)
+    }
 }
 
 fn http_status_error(url: &str, status: u16) -> Error {
@@ -1605,7 +1704,7 @@ mod tests {
     #[test]
     fn idempotent_request_is_resent_after_eintr() {
         let mut calls = 0;
-        let result = retry_interrupted(true, || {
+        let result = retry_interrupted(true, None, || {
             calls += 1;
             if calls < 3 {
                 Err(interrupted())
@@ -1619,7 +1718,7 @@ mod tests {
     #[test]
     fn non_idempotent_request_is_not_resent_after_eintr() {
         let mut calls = 0;
-        let result: std::result::Result<(), _> = retry_interrupted(false, || {
+        let result: std::result::Result<(), _> = retry_interrupted(false, None, || {
             calls += 1;
             Err(interrupted())
         });
@@ -1630,7 +1729,7 @@ mod tests {
     #[test]
     fn other_errors_are_not_retried() {
         let mut calls = 0;
-        let result: std::result::Result<(), _> = retry_interrupted(true, || {
+        let result: std::result::Result<(), _> = retry_interrupted(true, None, || {
             calls += 1;
             Err(ureq::Error::Io(std::io::Error::from(
                 std::io::ErrorKind::ConnectionRefused,
@@ -1939,6 +2038,7 @@ mod tests {
                 bytes_per_second: 100,
                 window: Duration::from_millis(200),
             }),
+            cancel: None,
         };
         let mut reader = LowSpeedReader::new(BytePerSecond(1), &timeouts);
         let mut sink = Vec::new();

@@ -189,6 +189,9 @@ pub trait Cancel {
     fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
         None
     }
+
+    /// Mirror a stack-scoped cancel into a shared watch before blocking HTTP waits.
+    fn poll_before_wait(&self) {}
 }
 
 /// A [`Cancel`] that never signals cancellation. The default for call sites
@@ -261,6 +264,73 @@ impl Cancel for FlagCancel {
 
     fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
         Some(std::sync::Arc::clone(&self.0))
+    }
+}
+
+/// Copy a stack [`Cancel`] into `watch` for worker threads (call on the owning thread).
+#[inline]
+pub(crate) fn mirror_stack_cancel(cancel: &dyn Cancel, watch: &std::sync::atomic::AtomicBool) {
+    cancel.poll_before_wait();
+    if cancel.is_cancelled() {
+        watch.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Shared flag for smart-HTTP waits; the owning thread mirrors a stack [`Cancel`] into it.
+pub(crate) struct HttpStackWatch(pub(crate) std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl HttpStackWatch {
+    #[must_use]
+    pub(crate) fn new(cancel: &dyn Cancel) -> Self {
+        Self(cancel.shared_watch().unwrap_or_else(|| {
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(cancel.is_cancelled()))
+        }))
+    }
+}
+
+/// Keeps [`HttpStackWatch`] alive for a fetch/push scope.
+pub(crate) struct HttpWaitGuard {
+    _watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl HttpWaitGuard {
+    pub(crate) fn bind(
+        cancel: &dyn Cancel,
+    ) -> (std::sync::Arc<std::sync::atomic::AtomicBool>, Self) {
+        let watch = HttpStackWatch::new(cancel).0;
+        (std::sync::Arc::clone(&watch), Self { _watch: watch })
+    }
+}
+
+/// Share a [`Cancel`] handle with smart-HTTP connect options for worker threads.
+///
+/// When [`Cancel::shared_watch`] is set, workers observe the same flag as the caller.
+/// Otherwise `stack_watch` must be the fetch/push scope flag; the owning thread mirrors
+/// the stack [`Cancel`] into it during HTTP waits (see [`mirror_stack_cancel`]).
+#[must_use]
+pub(crate) fn connect_cancel_arc(
+    cancel: &dyn Cancel,
+    stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> std::sync::Arc<dyn Cancel + Send + Sync> {
+    mirror_stack_cancel(cancel, &stack_watch);
+    if let Some(flag) = cancel.shared_watch() {
+        return std::sync::Arc::new(FlagCancel(flag));
+    }
+    std::sync::Arc::new(ConnectOperationCancel { watch: stack_watch })
+}
+
+/// Shared watch for HTTP worker threads when the caller's [`Cancel`] has no [`Cancel::shared_watch`].
+struct ConnectOperationCancel {
+    watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Cancel for ConnectOperationCancel {
+    fn is_cancelled(&self) -> bool {
+        self.watch.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        Some(std::sync::Arc::clone(&self.watch))
     }
 }
 
@@ -380,6 +450,7 @@ impl<'a> CancelSignal<'a> {
     /// Returns [`crate::error::Error::Cancelled`] once the signal fired.
     #[inline]
     pub(crate) fn poll(&self) -> crate::error::Result<()> {
+        self.cancel.poll_before_wait();
         if self.cancel.is_cancelled() {
             self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -515,6 +586,7 @@ pub fn poll_cancel(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> crate::error::Result<()> {
+    cancel.poll_before_wait();
     if cancel.is_cancelled() || progress.should_cancel() {
         Err(crate::error::Error::Cancelled)
     } else {
