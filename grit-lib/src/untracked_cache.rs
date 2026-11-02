@@ -734,14 +734,26 @@ fn index_path_is_strictly_under_dir(path: &[u8], dir: &[u8]) -> bool {
     path.len() > dir.len() && path.starts_with(dir) && path[dir.len()] == b'/'
 }
 
-/// O(log n) probe for index entries at or under a stored directory during UNTR refresh.
+/// Indexed probe for index entries at or under a stored directory during UNTR refresh.
+///
+/// Uses binary search on sorted path bytes; descendant detection may scan the matching
+/// index run (same as [`Index::sorted_entries_under`] on sorted indexes).
 struct TrackedUnderLookup<'a> {
     index: &'a Index,
     unsorted_paths: Option<Vec<Vec<u8>>>,
+    gitlink_paths: Vec<Vec<u8>>,
 }
 
 impl<'a> TrackedUnderLookup<'a> {
     fn new(index: &'a Index) -> Self {
+        let mut gitlink_paths: Vec<Vec<u8>> = index
+            .entries
+            .iter()
+            .filter(|e| e.mode == MODE_GITLINK)
+            .map(|e| e.path.clone())
+            .collect();
+        gitlink_paths.sort();
+        gitlink_paths.dedup();
         let unsorted_paths = if index.entries_sorted {
             None
         } else {
@@ -752,7 +764,34 @@ impl<'a> TrackedUnderLookup<'a> {
         Self {
             index,
             unsorted_paths,
+            gitlink_paths,
         }
+    }
+
+    fn has_gitlink_at_dir(&self, dir: &[u8]) -> bool {
+        if self.index.entries_sorted {
+            return self.index.has_gitlink_at(dir);
+        }
+        self.gitlink_paths
+            .binary_search_by(|p| tracked_under_path_cmp(p.as_slice(), dir))
+            .is_ok()
+    }
+
+    fn has_strict_descendant_under(&self, dir: &[u8]) -> bool {
+        if self.index.entries_sorted {
+            return self
+                .index
+                .sorted_entries_under(dir)
+                .is_some_and(|run| !run.is_empty());
+        }
+        let Some(paths) = self.unsorted_paths.as_ref() else {
+            return false;
+        };
+        let mut prefix = dir.to_vec();
+        prefix.push(b'/');
+        let start = paths
+            .partition_point(|p| tracked_under_path_cmp(p.as_slice(), prefix.as_slice()).is_lt());
+        start < paths.len() && index_path_is_strictly_under_dir(&paths[start], dir)
     }
 
     fn has_tracked_under(&self, rel_dir: &str) -> bool {
@@ -760,31 +799,47 @@ impl<'a> TrackedUnderLookup<'a> {
         if dir.is_empty() {
             return !self.index.entries.is_empty();
         }
-        if self.index.entries_sorted {
-            if self.index.has_gitlink_at(dir.as_ref()) {
-                return true;
-            }
-            return self
-                .index
-                .sorted_entries_under(dir.as_ref())
-                .is_some_and(|run| !run.is_empty());
-        }
-        let Some(paths) = self.unsorted_paths.as_ref() else {
-            return false;
-        };
         let dir_ref = dir.as_ref();
-        if self
-            .index
-            .entries
-            .iter()
-            .any(|e| e.path.as_slice() == dir_ref && e.mode == MODE_GITLINK)
-        {
+        if self.has_gitlink_at_dir(dir_ref) {
             return true;
         }
-        let mut prefix = dir_ref.to_vec();
-        prefix.push(b'/');
-        let start = paths.partition_point(|p| p.as_slice() < prefix.as_slice());
-        start < paths.len() && index_path_is_strictly_under_dir(&paths[start], dir_ref)
+        self.has_strict_descendant_under(dir_ref)
+    }
+}
+
+#[cfg(test)]
+fn tracked_under_path_cmp(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    tracked_under_path_cmp_counter::bump();
+    a.cmp(b)
+}
+
+#[cfg(not(test))]
+fn tracked_under_path_cmp(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    a.cmp(b)
+}
+
+#[cfg(test)]
+mod tracked_under_path_cmp_counter {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn reset() {
+        COUNT.with(|c| c.set(0));
+    }
+
+    pub fn take() -> usize {
+        COUNT.with(|c| {
+            let n = c.get();
+            c.set(0);
+            n
+        })
+    }
+
+    pub fn bump() {
+        COUNT.with(|c| c.set(c.get() + 1));
     }
 }
 
@@ -2267,19 +2322,27 @@ mod tests {
         let index = test_index_with_paths(&[
             b"a/x",
             b"ab/y",
+            b"dir",
             b"dir/file",
             b"dir2/other",
             fe_file.as_bytes(),
         ]);
         let lookup = TrackedUnderLookup::new(&index);
-        for rel in ["", "a", "ab", "dir", "dir2", "missing", &fe_dir] {
+        assert!(
+            !TrackedUnderLookup::new(&test_index_with_paths(&[b"dir"])).has_tracked_under("dir"),
+            "tracked blob at exact path dir must not count as having tracked descendants"
+        );
+        assert!(
+            lookup.has_tracked_under("dir"),
+            "dir/file must still match directory dir"
+        );
+        for rel in ["", "a", "ab", "dir2", "missing", &fe_dir] {
             assert_eq!(
                 lookup.has_tracked_under(rel),
                 tracked_under_oracle(&index, rel),
                 "rel={rel:?}"
             );
         }
-        assert!(lookup.has_tracked_under("dir"));
         assert!(
             !lookup.has_tracked_under("d"),
             "prefix dir must not match unrelated paths"
@@ -2302,6 +2365,48 @@ mod tests {
         assert_eq!(
             lookup.has_tracked_under("parent"),
             tracked_under_oracle(&index, "parent")
+        );
+    }
+
+    #[test]
+    fn tracked_under_lookup_unsorted_many_probes_stay_logarithmic() {
+        use crate::index::MODE_REGULAR;
+
+        const N: usize = 100_000;
+        const M: usize = 1_000;
+        let mut index = Index::empty(2);
+        for i in 0..N {
+            index.push_entry_unsorted(IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size: 0,
+                oid: ObjectId::from_bytes(&[0u8; 20]).expect("oid"),
+                flags: 0,
+                flags_extended: None,
+                path: format!("tracked/{i:06}.txt").into_bytes(),
+                base_index_pos: 0,
+            });
+        }
+        index.mark_entries_unsorted();
+        let lookup = TrackedUnderLookup::new(&index);
+        tracked_under_path_cmp_counter::reset();
+        for i in 0..M {
+            let rel = format!("missing/{i:06}");
+            assert!(!lookup.has_tracked_under(&rel));
+        }
+        let cmps = tracked_under_path_cmp_counter::take();
+        let log_n = (N as f64).log2().ceil() as usize;
+        let bound = 32 * M * log_n;
+        assert!(
+            cmps < bound,
+            "unsorted tracked-under path comparisons {cmps} should stay under {bound} (N={N}, M={M})"
         );
     }
 
