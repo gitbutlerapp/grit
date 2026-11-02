@@ -278,7 +278,7 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
         upstream.path(),
         &["bundle", "create", bundle.to_str().expect("utf8"), "main"],
     );
-    let (dir, repo, store) = memory_repo();
+    let (_dir, repo, store) = memory_repo();
     let before = object_files(repo.git_dir());
 
     let outcome = repo.bundles().unbundle(&bundle).expect("unbundle");
@@ -347,10 +347,13 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
         BundleError::PrerequisitesNotConnected
     ));
 
-    git(
-        dir.path(),
-        &["update-ref", "refs/heads/main", &tip.to_hex()],
-    );
+    grit_lib::refs::update_direct_ref_on_store(
+        repo.refs(),
+        repo.git_dir(),
+        "refs/heads/main",
+        &tip,
+    )
+    .expect("connect prerequisite to local ref");
     let connected = opened.verify(&repo).expect("verify after ref");
     assert!(connected.is_ok(), "{connected:?}");
 
