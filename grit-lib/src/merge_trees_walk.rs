@@ -743,7 +743,8 @@ pub(crate) fn three_way_on_touched_paths(
 
     // When the other side renamed base paths to `new`, those destinations are also in
     // `touched`. When ours still has the rename source, the source iteration already merges
-    // at `new`; skip duplicate passes (issue #1093). Do not skip when ours deleted the source.
+    // at `new`; skip duplicate passes (issue #1093). When ours deleted the source, the source
+    // path iteration already merged at `new` (rename/delete conflict); skip the destination too.
     let mut theirs_rename_destinations: HSet<&[u8]> = HSet::new();
     for (old, new) in theirs_old_to_new {
         if old != new && touched.contains(old) {
@@ -772,6 +773,8 @@ pub(crate) fn three_way_on_touched_paths(
                         }
                         continue;
                     }
+                } else {
+                    continue;
                 }
             }
         }

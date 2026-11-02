@@ -174,6 +174,8 @@ CONFLICT (deleted_by_us): f deleted on the current branch and modified in feat; 
 Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
 ```
 
+When one branch deleted a file and the other renamed it, grit reports the same `deleted_by_us` conflict at the **new** path (the rename target), with unmerged stages in the index and the renamed side's content in the work tree. `grit merge --check` exits **1** for this case, as it does for modify/delete.
+
 When both branches renamed the same file to different names, grit cannot pick a name, so it stops (like Git) and keeps both names in the work tree. Each one holds the merged content. The old name stays unmerged in the index next to the two new names. To keep one name, remove the old name and the other new name with `grit rm`, then run `grit merge --continue`. `grit merge --check` exits **1** for this case.
 
 ```console
