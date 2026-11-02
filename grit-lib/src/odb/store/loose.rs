@@ -88,8 +88,17 @@ impl LooseNegativeCache {
     }
 
     fn may_skip_open(&mut self, objects_dir: &Path, path: &Path) -> bool {
+        let root_before = self.root_mtime;
         self.sync_root(objects_dir);
+        let root_unchanged =
+            root_before == self.root_mtime && root_before != SystemTime::UNIX_EPOCH;
         if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
+            if root_unchanged && self.absent_fanout.contains(&prefix) {
+                let mt = fanout_dir_mtime(objects_dir, &prefix);
+                if self.fanout_mtime.get(&prefix) == Some(&mt) {
+                    return true;
+                }
+            }
             self.sync_fanout(objects_dir, &prefix);
             if self.absent_fanout.contains(&prefix) {
                 return true;

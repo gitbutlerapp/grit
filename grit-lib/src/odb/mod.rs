@@ -5982,9 +5982,15 @@ mod tests {
             let after_first = pack_cache::test_dir_rescan_count(&local_pack);
             let after_first_alt =
                 pack_cache::test_dir_rescan_count_on_store(&upstream_store, &upstream_pack);
+            let loose_after_first = odb.hot_path_metrics().loose_path_open_attempts();
             for _ in 0..512 {
                 odb.read_info(&oid).expect("repeat read_info");
             }
+            assert_eq!(
+                odb.hot_path_metrics().loose_path_open_attempts(),
+                loose_after_first,
+                "alternate hits must not stat loose paths on the empty primary after warmup"
+            );
             assert_eq!(
                 pack_cache::test_dir_rescan_count(&local_pack),
                 after_first,
