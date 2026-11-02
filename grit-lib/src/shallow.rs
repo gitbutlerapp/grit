@@ -6,7 +6,7 @@ use crate::odb::Odb;
 use crate::pkt_line;
 use std::collections::HashSet;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 /// A sentinel `deepen` depth requesting *complete* history, used to drive an
@@ -77,6 +77,43 @@ pub fn add_shallow_boundaries(
     let mut body = hexes.join("\n");
     body.push('\n');
     fs::write(shallow_file_path(git_dir), body)
+}
+
+/// Write the union of `receiver_grafts` and `client` to a temporary shallow file next to
+/// the repository's own, for hook scripts via `GIT_SHALLOW_FILE`.
+pub(crate) fn temporary_push_shallow_file(
+    git_dir: &Path,
+    receiver_grafts: &HashSet<ObjectId>,
+    client: &[ObjectId],
+) -> Result<tempfile::NamedTempFile> {
+    let mut hexes: Vec<String> = receiver_grafts
+        .iter()
+        .chain(client)
+        .map(ObjectId::to_hex)
+        .collect();
+    hexes.sort_unstable();
+    hexes.dedup();
+    let dir = shallow_file_path(git_dir)
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| git_dir.to_path_buf());
+    let mut file = tempfile::Builder::new()
+        .prefix("shallow_")
+        .tempfile_in(dir)?;
+    for hex in hexes {
+        writeln!(file, "{hex}")?;
+    }
+    file.flush()?;
+    Ok(file)
+}
+
+/// Environment entries that point hook scripts at a shallow-boundary file.
+pub(crate) fn git_shallow_hook_env(file: &Path) -> Result<Vec<(String, String)>> {
+    let path = std::path::absolute(file)?;
+    Ok(vec![(
+        "GIT_SHALLOW_FILE".to_owned(),
+        path.to_string_lossy().into_owned(),
+    )])
 }
 
 /// The shallow boundaries a pushing client announced with `shallow <oid>` lines, classified
