@@ -3,13 +3,31 @@
 //! POST setup, receive-pack report).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
 use crate::progress::{mirror_stack_cancel, Cancel, CancelSignal};
 
 /// How often a wait for an HTTP worker checks for cancellation.
 pub(crate) const HTTP_CANCEL_POLL: Duration = Duration::from_millis(20);
+
+/// Git-shaped low-speed abort message for silent-socket waits on worker threads.
+pub(crate) const LOW_SPEED_STALL_MSG: &str =
+    "HTTP transfer speed below http.lowSpeedLimit for http.lowSpeedTime";
+
+/// Run blocking HTTP work on a worker thread while polling `cancel` on the caller.
+pub(crate) fn run_interruptible<T, F>(
+    thread_name: &str,
+    cancel: &dyn Cancel,
+    low_speed_window: Option<Duration>,
+    work: F,
+) -> Result<T>
+where
+    F: FnOnce() -> Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    PendingHttp::spawn(thread_name, work)?.wait_with_watch(cancel, None, None, low_speed_window)
+}
 
 /// A blocking HTTP operation running on its own thread.
 pub(crate) struct PendingHttp<T>(Receiver<Result<T>>);
@@ -32,7 +50,7 @@ impl<T: Send + 'static> PendingHttp<T> {
     /// The result, or [`Error::Cancelled`] once `cancel` fires first. A cancelled
     /// request is left to finish on its own thread.
     pub(crate) fn wait(&self, cancel: &dyn Cancel) -> Result<T> {
-        self.wait_with_watch(cancel, None, None)
+        self.wait_with_watch(cancel, None, None, None)
     }
 
     /// Like [`Self::wait`], but mirrors `owner` into `stack_watch` on each poll
@@ -42,15 +60,20 @@ impl<T: Send + 'static> PendingHttp<T> {
         cancel: &dyn Cancel,
         owner: Option<&dyn Cancel>,
         stack_watch: Option<&std::sync::atomic::AtomicBool>,
+        low_speed_window: Option<Duration>,
     ) -> Result<T> {
         cancel.poll_before_wait();
         let signal = CancelSignal::new(cancel);
+        let started = Instant::now();
         loop {
             if let (Some(owner), Some(watch)) = (owner, stack_watch) {
                 mirror_stack_cancel(owner, watch);
             }
             if stack_watch.is_some_and(|w| w.load(std::sync::atomic::Ordering::Relaxed)) {
                 return Err(Error::Cancelled);
+            }
+            if low_speed_window.is_some_and(|window| started.elapsed() >= window) {
+                return Err(Error::Message(LOW_SPEED_STALL_MSG.to_owned()));
             }
             match self.0.recv_timeout(HTTP_CANCEL_POLL) {
                 Ok(response) => return response,

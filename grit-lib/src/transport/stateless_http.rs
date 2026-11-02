@@ -279,7 +279,12 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         cancel: &dyn Cancel,
         owner: Option<&dyn Cancel>,
     ) -> Result<T> {
-        pending.wait_with_watch(cancel, owner, Some(self.stack_watch.as_ref()))
+        pending.wait_with_watch(
+            cancel,
+            owner,
+            Some(self.stack_watch.as_ref()),
+            self.client.low_speed_stall_window(),
+        )
     }
 
     fn finish_in_flight_upload(

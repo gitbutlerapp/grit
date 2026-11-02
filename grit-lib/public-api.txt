@@ -21535,9 +21535,9 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::S
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::SeededBundle
 pub const grit_lib::remote::bundle_uri::BUNDLE_REFS_PREFIX: &str
 pub fn grit_lib::remote::bundle_uri::bundle_cache_path(&std::path::Path, &str) -> std::path::PathBuf
-pub fn grit_lib::remote::bundle_uri::fetch_bundle_list(&dyn grit_lib::remote::transport::http::HttpClient, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::remote::bundle_uri::BundleList>>
+pub fn grit_lib::remote::bundle_uri::fetch_bundle_list(alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &str, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<core::option::Option<grit_lib::remote::bundle_uri::BundleList>>
 pub fn grit_lib::remote::bundle_uri::remove_bundle_refs(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
-pub fn grit_lib::remote::bundle_uri::seed_from_bundle_uri(&grit_lib::repo::Repository, &dyn grit_lib::remote::transport::http::HttpClient, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::bundle_uri::BundleSeed
+pub fn grit_lib::remote::bundle_uri::seed_from_bundle_uri(&grit_lib::repo::Repository, alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::bundle_uri::BundleSeed
 pub mod grit_lib::remote::clone
 pub enum grit_lib::remote::clone::CloneCheckout
 pub grit_lib::remote::clone::CloneCheckout::CheckedOut(grit_lib::objects::ObjectId)
@@ -22402,6 +22402,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -22421,6 +22422,7 @@ pub fn grit_lib::remote::http_client::HttpClient::get(&self, &str, core::option:
 pub fn grit_lib::remote::http_client::HttpClient::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::http_client::HttpClient::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::http_client::HttpClient::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn grit_lib::remote::http_client::HttpClient::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn grit_lib::remote::http_client::HttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::http_client::HttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::http_client::HttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -22433,6 +22435,7 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -22445,6 +22448,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -22457,6 +22461,7 @@ pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> 
 pub fn alloc::rcs::arc::Arc<C>::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<C>::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<C>::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn alloc::rcs::arc::Arc<C>::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn alloc::rcs::arc::Arc<C>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<C>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<C>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -25515,6 +25520,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -25612,6 +25618,7 @@ pub fn grit_lib::remote::transport::http::HttpClient::get(&self, &str, core::opt
 pub fn grit_lib::remote::transport::http::HttpClient::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::HttpClient::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::HttpClient::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn grit_lib::remote::transport::http::HttpClient::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn grit_lib::remote::transport::http::HttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::HttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::HttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -25624,6 +25631,7 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -25636,6 +25644,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
@@ -25648,6 +25657,7 @@ pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> 
 pub fn alloc::rcs::arc::Arc<C>::get_with_final_url(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<C>::get_with_final_url_exact(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, core::option::Option<alloc::string::String>)>
 pub fn alloc::rcs::arc::Arc<C>::git_protocol_header(&self) -> core::option::Option<&str>
+pub fn alloc::rcs::arc::Arc<C>::low_speed_stall_window(&self) -> core::option::Option<core::time::Duration>
 pub fn alloc::rcs::arc::Arc<C>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<C>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<C>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>

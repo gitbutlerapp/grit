@@ -23,6 +23,7 @@
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
@@ -37,6 +38,7 @@ use crate::resumable::{
 };
 use crate::transfer::TransferStats;
 use crate::transport::http::{discover_upload_pack_exact, HttpClient};
+use crate::transport::pending_http::run_interruptible;
 
 /// Ref namespace a clone records bundle tips under while it fetches.
 pub const BUNDLE_REFS_PREFIX: &str = "refs/bundles/";
@@ -183,10 +185,26 @@ impl BundleList {
 ///
 /// # Errors
 ///
-/// HTTP failures and malformed answers.
-pub fn fetch_bundle_list(client: &dyn HttpClient, repo_url: &str) -> Result<Option<BundleList>> {
+/// HTTP failures and malformed answers, or [`Error::Cancelled`] when `cancel` fires
+/// while waiting on the server (discovery GET or `bundle-uri` POST).
+pub fn fetch_bundle_list(
+    client: Arc<dyn HttpClient>,
+    repo_url: &str,
+    cancel: &dyn Cancel,
+) -> Result<Option<BundleList>> {
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
+    let repo_url_owned = repo_url.to_owned();
+    let client_disc = Arc::clone(&client);
+    let stall = client.low_speed_stall_window();
     let (version, _refs, caps, _head) =
-        discover_upload_pack_exact(client, repo_url, Some("version=2"))?;
+        run_interruptible("grit-http-get", cancel, stall, move || {
+            discover_upload_pack_exact(client_disc.as_ref(), &repo_url_owned, Some("version=2"))
+        })?;
+    if cancel.is_cancelled() {
+        return Err(Error::Cancelled);
+    }
     if version != 2 || !server_advertises_bundle_uri(&caps) {
         return Ok(None);
     }
@@ -198,13 +216,16 @@ pub fn fetch_bundle_list(client: &dyn HttpClient, repo_url: &str) -> Result<Opti
     request.extend_from_slice(b"0001");
     request.extend_from_slice(b"0000");
     let url = format!("{}/git-upload-pack", repo_url.trim_end_matches('/'));
-    let body = client.post(
-        &url,
-        "application/x-git-upload-pack-request",
-        "application/x-git-upload-pack-result",
-        &request,
-        Some("version=2"),
-    )?;
+    let client_post = Arc::clone(&client);
+    let body = run_interruptible("grit-http-post", cancel, stall, move || {
+        client_post.post(
+            &url,
+            "application/x-git-upload-pack-request",
+            "application/x-git-upload-pack-result",
+            &request,
+            Some("version=2"),
+        )
+    })?;
     let mut lines = Vec::new();
     let mut cursor = Cursor::new(body);
     while let Some(packet) = pkt_line::read_packet(&mut cursor)? {
@@ -288,13 +309,19 @@ pub fn bundle_cache_path(cache_dir: &Path, uri: &str) -> PathBuf {
 #[must_use]
 pub fn seed_from_bundle_uri(
     repo: &Repository,
-    client: &dyn HttpClient,
+    client: Arc<dyn HttpClient>,
     repo_url: &str,
     cache_dir: &Path,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
 ) -> BundleSeed {
-    let list = match fetch_bundle_list(client, repo_url) {
+    if cancel.is_cancelled() {
+        return BundleSeed::Failed {
+            uri: None,
+            reason: Error::Cancelled.to_string(),
+        };
+    }
+    let list = match fetch_bundle_list(Arc::clone(&client), repo_url, cancel) {
         Ok(Some(list)) => list,
         Ok(None) => return BundleSeed::NotOffered,
         Err(e) => {
@@ -314,7 +341,7 @@ pub fn seed_from_bundle_uri(
             reason: "the bundle URI is not a valid URL".to_owned(),
         };
     };
-    match seed_from(repo, client, &uri, cache_dir, progress, cancel) {
+    match seed_from(repo, client.as_ref(), &uri, cache_dir, progress, cancel) {
         Ok(seeded) => BundleSeed::Seeded(seeded),
         Err(e) => BundleSeed::Failed {
             uri: Some(uri),

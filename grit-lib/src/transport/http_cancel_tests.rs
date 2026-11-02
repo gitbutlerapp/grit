@@ -9,9 +9,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::clone::{clone, CloneError, CloneOptions};
+use crate::environment::Environment;
 use crate::error::Error;
 use crate::pkt_line::write_line_to_vec;
-use crate::progress::{connect_cancel_arc, mirror_stack_cancel, Cancel, FlagCancel, HttpWaitGuard};
+use crate::progress::{
+    connect_cancel_arc, mirror_stack_cancel, Cancel, FlagCancel, HttpWaitGuard, NeverCancel,
+};
 use crate::remote::fetch::NoProgress;
 use crate::remote::transfer::FetchOptions;
 use crate::remote::{DefaultHttpClientFactory, Remote};
@@ -444,6 +448,147 @@ fn stateless_upload_pack_post_wait_cancels_without_full_fetch() {
             );
         },
     );
+}
+
+#[test]
+fn clone_cancels_during_stalled_bundle_uri_probe() {
+    run_with_hard_timeout("clone_cancels_during_stalled_bundle_uri_probe", || {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stall server");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let port = listener.local_addr().expect("addr").port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_server = Arc::clone(&stop);
+        let listener = Arc::new(listener);
+        let accept_listener = Arc::clone(&listener);
+        thread::spawn(move || {
+            while !stop_server.load(Ordering::Relaxed) {
+                let Ok((mut stream, _)) = accept_listener.accept() else {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+                let stop_conn = Arc::clone(&stop_server);
+                thread::spawn(move || {
+                    let mut buf = [0u8; 65536];
+                    let _ = stream.read(&mut buf);
+                    while !stop_conn.load(Ordering::Relaxed) {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                });
+            }
+        });
+
+        let cancel = FlagCancel::new();
+        let cancel_arm = cancel.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(300));
+            cancel_arm.cancel();
+        });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dest = tmp.path().join("cl");
+        let cache = tmp.path().join("bundle-cache");
+        std::fs::create_dir_all(&cache).expect("cache dir");
+        let url = format!("http://127.0.0.1:{port}/x.git");
+        let started = Instant::now();
+        let err = clone(
+            CloneOptions {
+                bundle_cache: Some(cache),
+                checkout: false,
+                ..CloneOptions::new(url.clone(), dest)
+            },
+            &mut NoProgress,
+            &cancel,
+            Some(&DefaultHttpClientFactory::new()),
+        )
+        .expect_err("stalled bundle probe must not succeed");
+        stop.store(true, Ordering::Relaxed);
+        drop(listener);
+        assert!(err.is_cancelled(), "expected Cancelled, got {err:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "cancel took {:?}",
+            started.elapsed()
+        );
+    });
+}
+
+#[test]
+fn clone_times_out_on_low_speed_stall_without_cancel() {
+    run_with_hard_timeout("clone_times_out_on_low_speed_stall_without_cancel", || {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind stall server");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let port = listener.local_addr().expect("addr").port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_server = Arc::clone(&stop);
+        let listener = Arc::new(listener);
+        let accept_listener = Arc::clone(&listener);
+        thread::spawn(move || {
+            while !stop_server.load(Ordering::Relaxed) {
+                let Ok((mut stream, _)) = accept_listener.accept() else {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                };
+                stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+                let stop_conn = Arc::clone(&stop_server);
+                thread::spawn(move || {
+                    let mut buf = [0u8; 65536];
+                    let _ = stream.read(&mut buf);
+                    while !stop_conn.load(Ordering::Relaxed) {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                });
+            }
+        });
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dest = tmp.path().join("cl");
+        let cache = tmp.path().join("bundle-cache");
+        std::fs::create_dir_all(&cache).expect("cache dir");
+        let url = format!("http://127.0.0.1:{port}/x.git");
+        let env = Environment::empty()
+            .with_var("GIT_HTTP_LOW_SPEED_LIMIT", "1")
+            .with_var("GIT_HTTP_LOW_SPEED_TIME", "1");
+        let factory = DefaultHttpClientFactory::with_environment(env.clone());
+        let started = Instant::now();
+        let err = clone(
+            CloneOptions {
+                bundle_cache: Some(cache),
+                checkout: false,
+                environment: env,
+                ..CloneOptions::new(url, dest)
+            },
+            &mut NoProgress,
+            &NeverCancel,
+            Some(&factory),
+        )
+        .expect_err("low-speed stall must not succeed");
+        stop.store(true, Ordering::Relaxed);
+        drop(listener);
+        assert!(
+            matches!(err, CloneError::Remote(_) | CloneError::Library(_)),
+            "expected transport failure, got {err:?}"
+        );
+        assert!(
+            !err.is_cancelled(),
+            "low-speed timeout must not look like cancel: {err:?}"
+        );
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "low-speed timeout took {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed >= Duration::from_millis(900),
+            "expected ~1s low-speed window, got {:?}",
+            elapsed
+        );
+    });
 }
 
 #[test]

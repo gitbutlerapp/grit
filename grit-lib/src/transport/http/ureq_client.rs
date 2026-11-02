@@ -995,6 +995,17 @@ impl UreqHttpClient {
         let idempotent = matches!(request.method, HttpMethod::Get | HttpMethod::Head);
         let cancel = self.operation_cancel_ref();
         let cancel_ref = cancel.as_deref();
+        let mut timeouts = if request.long_running {
+            HttpTransportTimeouts {
+                global: None,
+                ..self.effective_timeouts()
+            }
+        } else {
+            self.effective_timeouts()
+        };
+        if request.long_running {
+            timeouts.global = None;
+        }
         let result = retry_interrupted(idempotent, cancel_ref, || match request.method {
             HttpMethod::Get => self.decorate(self.agent.get(url), request, auth).call(),
             HttpMethod::Head => self.decorate(self.agent.head(url), request, auth).call(),
@@ -1022,17 +1033,6 @@ impl UreqHttpClient {
                 ))
             })
             .collect();
-        let mut timeouts = if request.long_running {
-            HttpTransportTimeouts {
-                global: None,
-                ..self.effective_timeouts()
-            }
-        } else {
-            self.effective_timeouts()
-        };
-        if request.long_running {
-            timeouts.global = None;
-        }
         let (head, reader) = open_response_body(resp, &timeouts)?;
         let response = HttpResponse {
             status: head.status,
@@ -1170,6 +1170,12 @@ impl UreqHttpClient {
 }
 
 impl HttpClient for UreqHttpClient {
+    fn low_speed_stall_window(&self) -> Option<Duration> {
+        self.transport_timeouts
+            .low_speed
+            .map(|settings| settings.window)
+    }
+
     fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
         self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, _)| body)
@@ -1684,6 +1690,9 @@ fn parse_header_cookie(line: &str) -> Option<CookieSpec> {
 
 #[cfg(test)]
 mod tests {
+    use std::net::TcpListener;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
 
     fn interrupted() -> ureq::Error {
@@ -1726,6 +1735,162 @@ mod tests {
         });
         assert!(result.is_err());
         assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn delayed_info_refs_404_uses_one_connection() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        let connections = Arc::new(AtomicUsize::new(0));
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).ok();
+        let port = listener.local_addr().expect("addr").port();
+        let count = Arc::clone(&connections);
+        thread::spawn(move || {
+            accept_once_and_serve(
+                listener,
+                &count,
+                Duration::from_millis(100),
+                404,
+                b"missing",
+            )
+        });
+
+        let url = format!("http://127.0.0.1:{port}/x.git/info/refs?service=git-upload-pack");
+        let client = UreqHttpClient::new();
+        let err = client
+            .get(&url, None)
+            .expect_err("404 must fail at HTTP layer");
+        assert!(
+            matches!(
+                err,
+                Error::RemoteUnreadable {
+                    reason: RemoteUnreadableReason::HttpStatus { status: 404 },
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(connections.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn response_body_arriving_after_20ms_succeeds() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        let connections = Arc::new(AtomicUsize::new(0));
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).ok();
+        let port = listener.local_addr().expect("addr").port();
+        let count = Arc::clone(&connections);
+        let body = b"hello-pack-bytes";
+        thread::spawn(move || {
+            accept_once_and_serve(listener, &count, Duration::from_millis(80), 200, body);
+        });
+
+        let url = format!("http://127.0.0.1:{port}/git-upload-pack");
+        let client = UreqHttpClient::new();
+        let got = client
+            .post(
+                &url,
+                "application/x-git-upload-pack-request",
+                "application/x-git-upload-pack-result",
+                b"0000",
+                None,
+            )
+            .expect("slow body must complete");
+        assert_eq!(got, body);
+        assert_eq!(connections.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn delayed_receive_pack_report_uses_one_connection() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+
+        let connections = Arc::new(AtomicUsize::new(0));
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).ok();
+        let port = listener.local_addr().expect("addr").port();
+        let count = Arc::clone(&connections);
+        thread::spawn(move || {
+            accept_once_and_serve(listener, &count, Duration::from_millis(100), 200, b"0000");
+        });
+
+        let url = format!("http://127.0.0.1:{port}/git-receive-pack");
+        let client = UreqHttpClient::new();
+        let got = client
+            .post(
+                &url,
+                "application/x-git-receive-pack-request",
+                "application/x-git-receive-pack-result",
+                b"0000",
+                None,
+            )
+            .expect("delayed receive-pack report must succeed");
+        assert_eq!(got, b"0000");
+        assert_eq!(connections.load(Ordering::Relaxed), 1);
+    }
+
+    fn accept_once_and_serve(
+        listener: TcpListener,
+        count: &AtomicUsize,
+        delay: Duration,
+        status: u16,
+        body: &[u8],
+    ) {
+        loop {
+            let Ok((mut stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            count.fetch_add(1, Ordering::Relaxed);
+            serve_delayed_http(&mut stream, delay, status, body);
+            return;
+        }
+    }
+
+    fn serve_delayed_http(
+        stream: &mut std::net::TcpStream,
+        delay: Duration,
+        status: u16,
+        body: &[u8],
+    ) {
+        use std::io::{Read, Write};
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+        let mut buf = [0u8; 4096];
+        let mut got = 0usize;
+        while got < buf.len() {
+            let Ok(n) = stream.read(&mut buf[got..]) else {
+                return;
+            };
+            if n == 0 {
+                return;
+            }
+            got += n;
+            if buf[..got].windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        std::thread::sleep(delay);
+        let reason = if status == 404 { "Not Found" } else { "OK" };
+        let header = format!(
+            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(header.as_bytes());
+        let _ = stream.write_all(body);
     }
 
     #[test]
