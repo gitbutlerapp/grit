@@ -3967,9 +3967,18 @@ pub fn read_object_info_from_pack_at_offset(idx: &PackIndex, offset: u64) -> Res
 /// Compressed bytes [`read_packed_commit_header_block_into`] fetches with one positioned read.
 const COMMIT_HEADER_BLOCK_WINDOW: usize = 4096;
 
-/// Most commit bytes [`read_packed_commit_header_block_into`] inflates looking for the blank
-/// line that ends the headers. Covers ordinary headers; long signatures take the whole read.
+/// Commit bytes [`read_packed_commit_header_block_into`] must find the blank line that ends the
+/// headers within. Covers ordinary headers; long signatures take the whole read.
 const COMMIT_HEADER_BLOCK_MAX: usize = 1024;
+
+/// Output space past the bytes a header read needs. zlib decodes with its fast loop only while
+/// at least this much output room remains, so a buffer sized exactly to the object would decode
+/// most of a short commit one symbol at a time.
+const INFLATE_FAST_OUTPUT_SLACK: usize = 258;
+
+/// Bytes the first read of [`read_packed_commit_header_block_into`] fetches. Compressed commit
+/// headers rarely reach this, so most reads copy a quarter of the full window.
+const COMMIT_HEADER_BLOCK_FIRST_READ: usize = 1024;
 
 /// Inflate the header block of commit `oid`, stored whole in a local pack, into `out`.
 ///
@@ -4008,36 +4017,144 @@ pub(crate) fn read_packed_commit_header_block_into(
     Ok(false)
 }
 
-fn read_commit_header_block_at(idx: &PackIndex, offset: u64, out: &mut Vec<u8>) -> bool {
-    let Ok(pack_bytes) = read_pack_bytes_cached(&idx.pack_path) else {
-        return false;
-    };
-    if !pack_cache::pack_object_count_validated(&idx.pack_path) {
-        if validate_pack_index_object_count(&pack_bytes, idx).is_err() {
-            return false;
+/// [`read_packed_commit_header_block_into`] for many commits at once.
+///
+/// Calls `found(i, header)` for every `oids[i]` the shortcut applies to, with the bytes
+/// [`read_packed_commit_header_block_into`] would leave in its buffer; commits it does not
+/// apply to get no call, and callers read those whole. The pack lookup, the pack's cached
+/// bytes and the read buffers are set up once for the batch rather than once per commit,
+/// which is most of the cost of a header read when a walk seeds from hundreds of tags.
+///
+/// # Errors
+///
+/// Propagates pack directory listing and pack index lookup errors.
+pub(crate) fn read_packed_commit_header_blocks(
+    objects_dir: &Path,
+    oids: &[ObjectId],
+    mut found: impl FnMut(usize, &[u8]),
+) -> Result<()> {
+    if oids.is_empty() {
+        return Ok(());
+    }
+    if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+    }
+    let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
+    let mut packs: Vec<Option<Option<Arc<PackData>>>> = vec![None; indexes.len()];
+    let mut readers: Vec<Option<Option<crate::pack_index::PackIndexRowReader<'_>>>> =
+        std::iter::repeat_with(|| None)
+            .take(indexes.len())
+            .collect();
+    let mut window = vec![0u8; COMMIT_HEADER_BLOCK_WINDOW];
+    let mut out = Vec::with_capacity(COMMIT_HEADER_BLOCK_MAX + INFLATE_FAST_OUTPUT_SLACK);
+    let mut last_hit = 0usize;
+    WHOLE_OBJECT_ZLIB.with(|slot| {
+        let mut zlib = slot.borrow_mut();
+        for (i, oid) in oids.iter().enumerate() {
+            let order =
+                std::iter::once(last_hit).chain((0..indexes.len()).filter(|&p| p != last_hit));
+            for p in order {
+                let (Some(idx), Some(reader)) = (indexes.get(p), readers.get_mut(p)) else {
+                    continue;
+                };
+                let offset = match reader.get_or_insert_with(|| idx.row_reader()) {
+                    Some(reader) => reader.find_offset(oid)?,
+                    None => idx.find_offset(oid)?,
+                };
+                let Some(offset) = offset else {
+                    continue;
+                };
+                last_hit = p;
+                let pack = packs[p].get_or_insert_with(|| validated_pack_bytes(idx));
+                if let Some(pack) = pack {
+                    if read_commit_header_block_from(pack, offset, &mut window, &mut zlib, &mut out)
+                    {
+                        found(i, &out);
+                    }
+                }
+                break;
+            }
         }
+        Ok(())
+    })
+}
+
+/// The bytes of `idx`'s pack, once their object count is known to match the index.
+fn validated_pack_bytes(idx: &PackIndex) -> Option<Arc<PackData>> {
+    let pack_bytes = read_pack_bytes_cached(&idx.pack_path).ok()?;
+    if !pack_cache::pack_object_count_validated(&idx.pack_path) {
+        validate_pack_index_object_count(&pack_bytes, idx).ok()?;
         pack_cache::mark_pack_object_count_validated(&idx.pack_path);
     }
-    let mut window = [0u8; COMMIT_HEADER_BLOCK_WINDOW];
-    let Some(len) = pack_bytes.read_sparse(offset, &mut window) else {
+    Some(pack_bytes)
+}
+
+fn read_commit_header_block_at(idx: &PackIndex, offset: u64, out: &mut Vec<u8>) -> bool {
+    let Some(pack_bytes) = validated_pack_bytes(idx) else {
         return false;
     };
-    let window = &window[..len];
+    let mut window = [0u8; COMMIT_HEADER_BLOCK_WINDOW];
+    WHOLE_OBJECT_ZLIB.with(|slot| {
+        read_commit_header_block_from(
+            &pack_bytes,
+            offset,
+            &mut window,
+            &mut slot.borrow_mut(),
+            out,
+        )
+    })
+}
+
+/// Read the commit entry at `offset` with a positioned read into `window` and inflate its
+/// header block into `out` (see [`read_packed_commit_header_block_into`]).
+///
+/// The first read fetches [`COMMIT_HEADER_BLOCK_FIRST_READ`] bytes, which hold the compressed
+/// header block of nearly every commit; only an entry that does not inflate from those is
+/// read again with the whole window.
+fn read_commit_header_block_from(
+    pack_bytes: &PackData,
+    offset: u64,
+    window: &mut [u8],
+    zlib: &mut ZlibInflateScratch,
+    out: &mut Vec<u8>,
+) -> bool {
+    let first_read = COMMIT_HEADER_BLOCK_FIRST_READ.min(window.len());
+    let Some(len) = pack_bytes.read_sparse(offset, &mut window[..first_read]) else {
+        return false;
+    };
     let mut pos = 0usize;
-    let Ok((PackedType::Commit, size)) = parse_pack_object_header(window, &mut pos) else {
+    let Ok((PackedType::Commit, size)) = parse_pack_object_header(&window[..len], &mut pos) else {
         return false;
     };
     let want = usize::try_from(size).map_or(COMMIT_HEADER_BLOCK_MAX, |size| {
         size.min(COMMIT_HEADER_BLOCK_MAX)
     });
-    let inflated = WHOLE_OBJECT_ZLIB.with(|slot| {
-        slot.borrow_mut()
-            .decompress_prefix_into(&window[pos..], want, out)
-    });
-    if inflated.is_err() || out.len() != want {
+    if inflate_commit_header_block(&window[pos..len], size, want, zlib, out) {
+        return true;
+    }
+    if len < first_read || first_read == window.len() {
         return false;
     }
-    let Some(blank) = out.windows(2).position(|pair| pair == b"\n\n") else {
+    let Some(len) = pack_bytes.read_sparse(offset, window) else {
+        return false;
+    };
+    inflate_commit_header_block(&window[pos..len], size, want, zlib, out)
+}
+
+/// Inflate the zlib stream of a `size`-byte commit from `compressed` into `out` and keep its
+/// headers through the blank line that ends them, which must lie within its first `want` bytes.
+fn inflate_commit_header_block(
+    compressed: &[u8],
+    size: u64,
+    want: usize,
+    zlib: &mut ZlibInflateScratch,
+    out: &mut Vec<u8>,
+) -> bool {
+    let inflated = zlib.decompress_prefix_into(compressed, want + INFLATE_FAST_OUTPUT_SLACK, out);
+    if inflated.is_err() || out.len() < want || out.len() as u64 > size {
+        return false;
+    }
+    let Some(blank) = memchr::memmem::find(&out[..want], b"\n\n") else {
         return false;
     };
     out.truncate(blank + 2);
@@ -7885,6 +8002,93 @@ mod tests {
         assert_ne!(before, after);
         assert!(after.iter().all(|p| p.is_file()), "{after:?}");
     }
+
+    /// A pack holding one commit entry whose zlib stream uses stored blocks, so it takes more
+    /// compressed bytes than the commit has.
+    fn stored_commit_entry(body: &[u8]) -> Arc<PackData> {
+        let mut entry = Vec::new();
+        crate::pack_objects::encode_pack_object_header(&mut entry, 1, body.len());
+        let mut zlib = ZlibEncoder::new(Vec::new(), Compression::none());
+        zlib.write_all(body).unwrap();
+        entry.extend(zlib.finish().unwrap());
+        entry.extend_from_slice(&[0u8; 64]);
+        PackData::from_owned(entry)
+    }
+
+    fn commit_with_long_headers(header_padding: usize) -> (Vec<u8>, usize) {
+        let mut body = format!(
+            "tree {}\nauthor a <a@example.com> 1 +0000\ncommitter c <c@example.com> 2 +0000\n",
+            "4b825dc642cb6eb9a060e54bf8d69288e0ee4904"
+        )
+        .into_bytes();
+        body.extend_from_slice(b"x-pad ");
+        body.extend(std::iter::repeat_n(b'p', header_padding));
+        body.extend_from_slice(b"\n\n");
+        let header_len = body.len();
+        body.extend(std::iter::repeat_n(b'm', 2000));
+        (body, header_len)
+    }
+
+    #[test]
+    fn commit_header_block_read_takes_a_second_read_when_the_first_is_short() {
+        let (body, header_len) = commit_with_long_headers(800);
+        assert!(header_len < COMMIT_HEADER_BLOCK_MAX);
+        let pack = stored_commit_entry(&body);
+        let mut zlib = ZlibInflateScratch::default();
+        let mut out = Vec::new();
+
+        let mut window = vec![0u8; COMMIT_HEADER_BLOCK_WINDOW];
+        assert!(read_commit_header_block_from(
+            &pack,
+            0,
+            &mut window,
+            &mut zlib,
+            &mut out
+        ));
+        assert_eq!(out, &body[..header_len]);
+
+        let mut first_read_only = vec![0u8; COMMIT_HEADER_BLOCK_FIRST_READ];
+        assert!(
+            !read_commit_header_block_from(&pack, 0, &mut first_read_only, &mut zlib, &mut out),
+            "the stored stream does not fit the first read alone"
+        );
+    }
+
+    #[test]
+    fn commit_header_block_read_rejects_headers_past_the_inflate_budget() {
+        let (body, header_len) = commit_with_long_headers(COMMIT_HEADER_BLOCK_MAX);
+        assert!(header_len > COMMIT_HEADER_BLOCK_MAX);
+        let pack = stored_commit_entry(&body);
+        let mut window = vec![0u8; COMMIT_HEADER_BLOCK_WINDOW];
+        let mut out = Vec::new();
+        assert!(!read_commit_header_block_from(
+            &pack,
+            0,
+            &mut window,
+            &mut ZlibInflateScratch::default(),
+            &mut out
+        ));
+    }
+
+    #[test]
+    fn commit_header_block_read_rejects_a_stream_longer_than_the_declared_size() {
+        let (body, header_len) = commit_with_long_headers(10);
+        let mut entry = Vec::new();
+        crate::pack_objects::encode_pack_object_header(&mut entry, 1, header_len + 5);
+        let mut zlib = ZlibEncoder::new(Vec::new(), Compression::default());
+        zlib.write_all(&body).unwrap();
+        entry.extend(zlib.finish().unwrap());
+        let pack = PackData::from_owned(entry);
+        let mut window = vec![0u8; COMMIT_HEADER_BLOCK_WINDOW];
+        let mut out = Vec::new();
+        assert!(!read_commit_header_block_from(
+            &pack,
+            0,
+            &mut window,
+            &mut ZlibInflateScratch::default(),
+            &mut out
+        ));
+    }
 }
 #[cfg(test)]
 mod cached_lookup_tests {
@@ -8018,6 +8222,74 @@ mod cached_lookup_tests {
                 "{why}"
             );
         }
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn packed_commit_header_blocks_match_single_reads() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        // Enough commits that the pack index is read with positioned reads.
+        let commits = 1500;
+        let mut stream = String::new();
+        for i in 1..=commits {
+            let content = format!("revision {i}\n");
+            let message = format!("commit {i}\n");
+            stream.push_str(&format!(
+                "commit refs/heads/main\nmark :{i}\n\
+                 committer T <t@example.com> {} +0000\ndata {}\n{message}\
+                 M 100644 inline f\ndata {}\n{content}\n",
+                1_000_000 + i,
+                message.len(),
+                content.len()
+            ));
+        }
+        git_stdout(root, &["fast-import", "--quiet"], Some(&stream));
+        git(root, &["tag", "-a", "-m", "annotated", "v1", "main~10"]);
+        git(root, &["repack", "-a", "-d", "--window=0"]);
+        git(root, &["checkout", "-q", "main"]);
+        fs::write(root.join("f"), "loose\n").unwrap();
+        git(root, &["commit", "-qam", "loose"]);
+
+        let mut oids: Vec<ObjectId> = (1..commits)
+            .step_by(7)
+            .map(|n| oid_of(root, &format!("HEAD~{n}")))
+            .collect();
+        oids.extend([
+            oid_of(root, "v1"),
+            oid_of(root, "HEAD~1^{tree}"),
+            oid_of(root, "HEAD"),
+            ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap(),
+        ]);
+        let objects = root.join(".git/objects");
+        let mut batch: Vec<Option<Vec<u8>>> = vec![None; oids.len()];
+        read_packed_commit_header_blocks(&objects, &oids, |i, header| {
+            assert!(
+                batch[i].replace(header.to_vec()).is_none(),
+                "one call per commit"
+            );
+        })
+        .unwrap();
+        let mut single = Vec::new();
+        for (oid, from_batch) in oids.iter().zip(&batch) {
+            let read = read_packed_commit_header_block_into(&objects, oid, &mut single).unwrap();
+            assert_eq!(
+                from_batch.as_deref(),
+                read.then_some(single.as_slice()),
+                "{oid}"
+            );
+        }
+        assert_eq!(
+            batch.iter().filter(|header| header.is_some()).count(),
+            oids.len() - 4,
+            "every packed commit, and nothing else, is read"
+        );
     }
 
     fn init_repo_with_pack(dir: &Path) -> ObjectId {

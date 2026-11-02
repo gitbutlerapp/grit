@@ -3305,6 +3305,10 @@ fn reduce_to_best(
 /// front; merge-base and range walks start from one or two tips and keep the plain reads.
 const PRIME_TIPS_MIN: usize = 64;
 
+/// Fewest tips each [`CommitGraphCache::prime_tips`] worker thread reads: a header read costs
+/// a few microseconds, so smaller shares spend more on starting threads than they save.
+const PRIME_TIPS_PER_THREAD_MIN: usize = 128;
+
 pub(crate) struct CommitGraphCache<'r> {
     repo: &'r Repository,
     closures: OidHashMap<OidHashSet>,
@@ -3586,6 +3590,22 @@ impl<'r> CommitGraphCache<'r> {
         time: i64,
         parsed_parents: &[ObjectId],
     ) -> Vec<ObjectId> {
+        let parents = self.linkage_parents(oid, commit_oid, parsed_parents);
+        self.with_linkage(|link| {
+            link.times.insert(oid, time);
+            link.parents.insert(oid, parents.clone());
+        });
+        parents
+    }
+
+    /// The parents [`Self::record_linkage`] records for `oid` (read as `commit_oid`) after
+    /// shallow boundaries, promisor stops and grafts.
+    fn linkage_parents(
+        &self,
+        oid: ObjectId,
+        commit_oid: ObjectId,
+        parsed_parents: &[ObjectId],
+    ) -> Vec<ObjectId> {
         let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
             Vec::new()
         } else {
@@ -3595,12 +3615,7 @@ impl<'r> CommitGraphCache<'r> {
                 .filter(|p| !self.promisor_stop.contains(p))
                 .collect()
         };
-        let parents = self.grafted_parents(oid, parents);
-        self.with_linkage(|link| {
-            link.times.insert(oid, time);
-            link.parents.insert(oid, parents.clone());
-        });
-        parents
+        self.grafted_parents(oid, parents)
     }
 
     /// Whether `oid` names itself: no replace ref, promisor stop or shallow boundary rewrites it.
@@ -3617,7 +3632,7 @@ impl<'r> CommitGraphCache<'r> {
     }
 
     /// Record the linkage of every plain packed commit among `tips` from its header block
-    /// ([`crate::odb::Odb::read_packed_commit_header_block_into`]), reading them in parallel.
+    /// ([`crate::odb::Odb::read_packed_commit_header_blocks`]), reading them in parallel.
     ///
     /// Hide sets hold every ref in the repository, so a walk can start from hundreds of
     /// scattered tips whose dates it needs before taking a single step. Their reads are
@@ -3639,25 +3654,42 @@ impl<'r> CommitGraphCache<'r> {
             .copied()
             .collect();
         let repo = self.repo;
-        let read_linkage = |oid: &ObjectId| -> Option<(i64, Vec<ObjectId>)> {
-            let mut buf = Vec::new();
-            if !repo
+        let read_linkages = |part: &[ObjectId]| -> Vec<Option<(i64, Vec<ObjectId>)>> {
+            let mut linkages = vec![None; part.len()];
+            let _ = repo
                 .odb()
-                .read_packed_commit_header_block_into(oid, &mut buf)
-                .ok()?
-            {
-                return None;
-            }
-            let commit = CommitRef::parse(&buf).ok()?;
-            Some((commit.committer_timestamp(), commit.parents().to_vec()))
+                .read_packed_commit_header_blocks(part, |i, header| {
+                    if let (Some(slot), Ok(commit)) =
+                        (linkages.get_mut(i), CommitRef::parse(header))
+                    {
+                        *slot = Some((commit.committer_timestamp(), commit.parents().to_vec()));
+                    }
+                });
+            linkages
         };
-        let read = crate::rev_list::map_commits_in_parallel(&pending, read_linkage);
-        for (oid, linkage) in pending.into_iter().zip(read) {
-            if let Some((time, parents)) = linkage {
-                self.record_linkage(oid, oid, time, &parents);
-                self.header_primed.insert(oid);
+        let read = crate::rev_list::map_commit_chunks_in_parallel(
+            &pending,
+            PRIME_TIPS_PER_THREAD_MIN,
+            read_linkages,
+        );
+        let primed: Vec<(ObjectId, i64, Vec<ObjectId>)> = pending
+            .into_iter()
+            .zip(read)
+            .filter_map(|(oid, linkage)| {
+                let (time, parents) = linkage?;
+                Some((oid, time, self.linkage_parents(oid, oid, &parents)))
+            })
+            .collect();
+        self.header_primed
+            .extend(primed.iter().map(|(oid, _, _)| *oid));
+        self.with_linkage(|link| {
+            link.times.reserve(primed.len());
+            link.parents.reserve(primed.len());
+            for (oid, time, parents) in primed {
+                link.times.insert(oid, time);
+                link.parents.insert(oid, parents);
             }
-        }
+        });
     }
 
     /// Peel a walk tip to its commit, like [`try_peel_to_commit_for_merge_base`], without a read

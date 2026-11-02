@@ -2763,6 +2763,29 @@ impl Odb {
         files.read_packed_commit_header_block_into(oid, buf)
     }
 
+    /// [`Self::read_packed_commit_header_block_into`] for many commits, setting up the pack
+    /// lookup and read buffers once for the batch.
+    ///
+    /// Calls `found(i, header)` for each `oids[i]` the shortcut applies to; read the others
+    /// whole. Nothing is called when the primary store is custom.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack directory listing and pack index lookup errors.
+    pub(crate) fn read_packed_commit_header_blocks(
+        &self,
+        oids: &[ObjectId],
+        found: impl FnMut(usize, &[u8]),
+    ) -> Result<()> {
+        if self.custom_primary.is_some() {
+            return Ok(());
+        }
+        let Ok(files) = self.primary() else {
+            return Ok(());
+        };
+        files.read_packed_commit_header_blocks(oids, found)
+    }
+
     #[cold]
     #[inline(never)]
     fn read_into_after_promisor_miss(

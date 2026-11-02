@@ -449,11 +449,9 @@ impl PackIndex {
             return self.binary_search(lo, hi, needle);
         }
 
-        // Hashes normally spread evenly within a fanout bucket. Predict a row from the
-        // next three bytes without touching either end of the mapped OID table: those
-        // extra probes otherwise fault in unrelated pages on short, scattered reads.
-        let fraction = u32::from_be_bytes([0, needle[1], needle[2], needle[3]]);
-        let guess = lo + ((u64::from(fraction) * (hi - lo) as u64) >> 24) as usize;
+        // Predict a row without touching either end of the mapped OID table: those extra
+        // probes otherwise fault in unrelated pages on short, scattered reads.
+        let guess = bucket_guess(lo, hi, needle);
         let mut step = 1usize;
         match compare_oid_bytes(self.oid_at(guess), needle) {
             Ordering::Equal => return Some(guess),
@@ -504,6 +502,153 @@ impl PackIndex {
         }
         None
     }
+
+    /// Start positioned-read lookups in this index ([`PackIndexRowReader`]).
+    ///
+    /// Returns `None` for version-1 and small indexes, off Unix, and when the file at
+    /// [`Self::idx_path`] cannot be opened or no longer holds these bytes (its length or
+    /// trailer checksums differ); look rows up through [`Self::find_offset`] then.
+    pub(crate) fn row_reader(&self) -> Option<PackIndexRowReader<'_>> {
+        if self.layout.version != PackIndexVersion::V2 || self.layout.count < ROW_READER_MIN_COUNT {
+            return None;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            let file = std::fs::File::open(&self.idx_path).ok()?;
+            let len = self.storage.len();
+            if file.metadata().ok()?.len() != u64::try_from(len).ok()? {
+                return None;
+            }
+            let trailer_len = self.layout.hash_bytes * 2;
+            let trailer_start = len.checked_sub(trailer_len)?;
+            let mut trailer = [0u8; 64];
+            let trailer = trailer.get_mut(..trailer_len)?;
+            file.read_exact_at(trailer, u64::try_from(trailer_start).ok()?)
+                .ok()?;
+            if *trailer != self.storage[trailer_start..] {
+                return None;
+            }
+            Some(PackIndexRowReader {
+                index: self,
+                file,
+                rows: Vec::new(),
+            })
+        }
+        #[cfg(not(unix))]
+        None
+    }
+}
+
+/// Fewest objects an index needs before [`PackIndex::row_reader`] reads its rows with
+/// positioned reads; smaller tables cost little to keep resident.
+const ROW_READER_MIN_COUNT: usize = 4096;
+
+/// Object id rows [`PackIndexRowReader`] reads around its predicted row: wide enough that a
+/// uniformly hashed bucket of a few thousand rows nearly always brackets the target.
+const ROW_READER_WINDOW: usize = 128;
+
+/// Pack index lookups that read the rows they compare with positioned reads from the index
+/// file instead of through its mapping ([`PackIndex::row_reader`]).
+///
+/// A batch of lookups for scattered objects, such as the tips of every ref in a large
+/// repository, touches a page or two of the mapped object id table per object, and the kernel
+/// faults a window of neighbouring pages in with each: a few hundred lookups keep most of a
+/// large index resident. Reading a window of rows copies a few kilobytes per lookup instead.
+/// The matching offset row is still read through the mapping: that table is a fifth the size
+/// of the object id table, and a second read per lookup would cost more than it saves.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) struct PackIndexRowReader<'a> {
+    index: &'a PackIndex,
+    file: std::fs::File,
+    rows: Vec<u8>,
+}
+
+impl PackIndexRowReader<'_> {
+    /// Same result as [`PackIndex::find_offset`].
+    ///
+    /// Falls back to the mapped table when the rows read do not settle the lookup (an
+    /// unusually skewed bucket, a failed read).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the matching row encodes an invalid offset.
+    pub(crate) fn find_offset(&mut self, oid: &ObjectId) -> Result<Option<u64>> {
+        let index = self.index;
+        let needle = oid.as_bytes();
+        let hash_bytes = index.layout.hash_bytes;
+        if needle.len() != hash_bytes {
+            return Ok(None);
+        }
+        let first = usize::from(needle[0]);
+        let lo = if first == 0 {
+            0
+        } else {
+            index.fanout[first - 1] as usize
+        };
+        let hi = index.fanout[first] as usize;
+        if lo >= hi || hi > index.layout.count {
+            return Ok(None);
+        }
+        let (start, end) = if hi - lo <= ROW_READER_WINDOW {
+            (lo, hi)
+        } else {
+            let guess = bucket_guess(lo, hi, needle);
+            let start = guess
+                .saturating_sub(ROW_READER_WINDOW / 2)
+                .clamp(lo, hi - ROW_READER_WINDOW);
+            (start, start + ROW_READER_WINDOW)
+        };
+        let rows_at = index.layout.oid_base + start * hash_bytes;
+        let Some(rows) = self.read(rows_at, (end - start) * hash_bytes) else {
+            return index.find_offset(oid);
+        };
+        match search_rows(rows, hash_bytes, needle) {
+            Ok(row) => index.offset_at(start + row).map(Some),
+            Err(0) if start > lo => index.find_offset(oid),
+            Err(row) if row == end - start && end < hi => index.find_offset(oid),
+            Err(_) => Ok(None),
+        }
+    }
+
+    /// Read `len` bytes at `offset` of the index file into the reused buffer.
+    #[cfg(unix)]
+    fn read(&mut self, offset: usize, len: usize) -> Option<&[u8]> {
+        use std::os::unix::fs::FileExt;
+        self.rows.resize(len, 0);
+        self.file
+            .read_exact_at(&mut self.rows, u64::try_from(offset).ok()?)
+            .ok()?;
+        Some(&self.rows)
+    }
+
+    #[cfg(not(unix))]
+    fn read(&mut self, _offset: usize, _len: usize) -> Option<&[u8]> {
+        None
+    }
+}
+
+/// Binary search of `needle` in `rows`, sorted object ids of `hash_bytes` each: `Ok` with
+/// its row, or `Err` with the row it would be inserted at.
+fn search_rows(rows: &[u8], hash_bytes: usize, needle: &[u8]) -> std::result::Result<usize, usize> {
+    let mut below = 0usize;
+    let mut above = rows.len() / hash_bytes;
+    while below < above {
+        let mid = below + (above - below) / 2;
+        match compare_oid_bytes(&rows[mid * hash_bytes..(mid + 1) * hash_bytes], needle) {
+            Ordering::Less => below = mid + 1,
+            Ordering::Greater => above = mid,
+            Ordering::Equal => return Ok(mid),
+        }
+    }
+    Err(below)
+}
+
+/// Predicted row of `needle` in the fanout bucket `lo..hi`, from the three bytes after its
+/// first: hashes spread evenly within a bucket.
+fn bucket_guess(lo: usize, hi: usize, needle: &[u8]) -> usize {
+    let fraction = u32::from_be_bytes([0, needle[1], needle[2], needle[3]]);
+    lo + ((u64::from(fraction) * (hi - lo) as u64) >> 24) as usize
 }
 
 /// Lexicographic compare for fixed-width object ids (hot path for pack index search).
@@ -904,6 +1049,97 @@ fn read_u32_be(bytes: &[u8], pos: &mut usize) -> Result<u32> {
 mod tests {
     use super::*;
     use crate::objects::ObjectId;
+
+    /// Deterministic, evenly spread object ids.
+    fn spread_oids(count: usize, seed: u64) -> Vec<ObjectId> {
+        let mut state = seed | 1;
+        (0..count)
+            .map(|_| {
+                let mut bytes = [0u8; 20];
+                for chunk in bytes.chunks_mut(8) {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    let word = state.to_be_bytes();
+                    chunk.copy_from_slice(&word[..chunk.len()]);
+                }
+                ObjectId::from_bytes(&bytes).unwrap()
+            })
+            .collect()
+    }
+
+    fn write_v2_index(path: &Path, oids: &[ObjectId]) -> PackIndex {
+        let entries: Vec<(ObjectId, u64, u32)> = oids
+            .iter()
+            .enumerate()
+            .map(|(i, oid)| {
+                // Every hundredth object sits past 2 GiB, in the large offset table.
+                let offset = if i % 100 == 7 {
+                    (1u64 << 32) + i as u64
+                } else {
+                    12 + 31 * i as u64
+                };
+                (*oid, offset, 0)
+            })
+            .collect();
+        crate::pack::write_v2_pack_index_with_trailer(path, &entries, &[0u8; 20], 20, None)
+            .unwrap();
+        crate::pack::read_pack_index(path).unwrap()
+    }
+
+    #[test]
+    fn row_reader_finds_the_same_offsets_as_the_mapped_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut oids = spread_oids(ROW_READER_MIN_COUNT + 500, 0x9e37_79b9);
+        // Hundreds of ids share the bytes the row prediction reads, so most of them sit
+        // outside the window read around it and take the mapped fallback.
+        for (i, oid) in spread_oids(600, 7).into_iter().enumerate() {
+            let mut bytes = oid.as_bytes().to_vec();
+            bytes[..4].copy_from_slice(&[0x7f, 0x80, 0, 0]);
+            bytes[4..8].copy_from_slice(&u32::try_from(i).unwrap().to_be_bytes());
+            oids.push(ObjectId::from_bytes(&bytes).unwrap());
+        }
+        let index = write_v2_index(&dir.path().join("pack-a.idx"), &oids);
+        let mut reader = index.row_reader().expect("large v2 index");
+
+        for oid in &oids {
+            let mapped = index.find_offset(oid).unwrap();
+            assert!(mapped.is_some(), "{oid}");
+            assert_eq!(reader.find_offset(oid).unwrap(), mapped, "{oid}");
+        }
+        let mut absent = spread_oids(300, 0x51ed_270b);
+        absent.extend((0..50u32).map(|i| {
+            let mut bytes = [0x7fu8; 20];
+            bytes[1..4].copy_from_slice(&[0x80, 0, 0]);
+            bytes[4..8].copy_from_slice(&(i * 13 + 5).to_be_bytes());
+            ObjectId::from_bytes(&bytes).unwrap()
+        }));
+        for oid in absent.iter().filter(|oid| !oids.contains(oid)) {
+            assert_eq!(index.find_offset(oid).unwrap(), None, "{oid}");
+            assert_eq!(reader.find_offset(oid).unwrap(), None, "{oid}");
+        }
+    }
+
+    #[test]
+    fn row_reader_declines_small_and_replaced_indexes() {
+        let dir = tempfile::tempdir().unwrap();
+        let small = write_v2_index(
+            &dir.path().join("pack-small.idx"),
+            &spread_oids(ROW_READER_MIN_COUNT - 1, 3),
+        );
+        assert!(small.row_reader().is_none(), "small index");
+
+        let path = dir.path().join("pack-b.idx");
+        let index = write_v2_index(&path, &spread_oids(ROW_READER_MIN_COUNT, 5));
+        assert!(index.row_reader().is_some());
+        let replacement = dir.path().join("pack-b.idx.tmp");
+        write_v2_index(&replacement, &spread_oids(ROW_READER_MIN_COUNT, 11));
+        std::fs::rename(&replacement, &path).unwrap();
+        assert!(
+            index.row_reader().is_none(),
+            "the file at the path no longer holds this index"
+        );
+    }
 
     #[test]
     fn pack_index_api_coverage_smoke() {

@@ -855,29 +855,52 @@ where
     T: Send,
     F: Fn(&ObjectId) -> T + Sync,
 {
+    map_commit_chunks_in_parallel(commits, PARALLEL_COMMIT_MAP_MIN_PER_THREAD, |part| {
+        part.iter().map(&f).collect()
+    })
+}
+
+/// Split `commits` into one contiguous chunk per worker thread (each at least
+/// `min_per_thread` long) and concatenate what `f` returns for each, in order.
+///
+/// For per-commit work with a per-call setup cost worth sharing across a chunk. `f` must
+/// return one result per commit of its chunk.
+pub(crate) fn map_commit_chunks_in_parallel<T, F>(
+    commits: &[ObjectId],
+    min_per_thread: usize,
+    f: F,
+) -> Vec<T>
+where
+    T: Send,
+    F: Fn(&[ObjectId]) -> Vec<T> + Sync,
+{
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1)
         .clamp(1, 8)
-        .min(commits.len() / PARALLEL_COMMIT_MAP_MIN_PER_THREAD);
+        .min(commits.len() / min_per_thread.max(1));
     if threads <= 1 {
-        return commits.iter().map(f).collect();
+        return f(commits);
     }
     let chunk = commits.len().div_ceil(threads);
+    // The calling thread takes the first chunk: starting a thread costs about as much as a
+    // chunk of the short work this is used for, so it would otherwise sit idle meanwhile.
+    let (first, rest) = commits.split_at(chunk);
     let f = &f;
     std::thread::scope(|scope| {
-        let handles: Vec<_> = commits
+        let handles: Vec<_> = rest
             .chunks(chunk)
-            .map(|part| scope.spawn(move || part.iter().map(f).collect::<Vec<T>>()))
+            .map(|part| scope.spawn(move || f(part)))
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|handle| {
+        let mut out = f(first);
+        for handle in handles {
+            out.extend(
                 handle
                     .join()
-                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-            })
-            .collect()
+                    .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            );
+        }
+        out
     })
 }
 
@@ -10017,6 +10040,27 @@ mod tests {
     use crate::repo::{InitOptions, Repository};
 
     use tempfile::{tempdir, TempDir};
+
+    #[test]
+    fn map_commit_chunks_in_parallel_keeps_commit_order() {
+        let commits: Vec<ObjectId> = (0..=255u8)
+            .map(|b| ObjectId::from_bytes(&[b; 20]).expect("oid"))
+            .collect();
+        for min_per_thread in [1, 16, 100, 1000] {
+            let chunk_lens = std::sync::Mutex::new(Vec::new());
+            let mapped = map_commit_chunks_in_parallel(&commits, min_per_thread, |part| {
+                chunk_lens
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(part.len());
+                part.to_vec()
+            });
+            assert_eq!(mapped, commits, "min_per_thread {min_per_thread}");
+            let chunk_lens = chunk_lens.into_inner().unwrap_or_else(|e| e.into_inner());
+            assert_eq!(chunk_lens.iter().sum::<usize>(), commits.len());
+            assert!(chunk_lens.len() <= (commits.len() / min_per_thread).max(1));
+        }
+    }
 
     #[test]
     fn object_filter_parse_success_variants() {

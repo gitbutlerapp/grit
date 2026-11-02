@@ -1125,6 +1125,54 @@ from the target (7.59 ms on main, 7.21 ms on the branch), every row stays within
 The apparent move in `reset/sparse@sparse-unique-120k` reversed in an interleaved rerun (38.6 and
 42.5 ms on main, 38.4 and 37.5 ms on the branch).
 
+## Reading the tagged commits' headers in a batch (2026-11-02)
+
+In the daily `reset/undo-commit@git-git` shape the tags are packed seconds before the undone
+commit, so the orphaned-commit report still dates all 946 tagged commits before its first step.
+Profiling showed where those header reads went. Each one looked the pack and its cached bytes up
+by path (two SipHash lookups of the full path) and zeroed a 4 KiB read window. Its inflate buffer
+was sized exactly to the object, and zlib only runs its fast decode loop with 258 bytes of output
+room to spare, so most of every commit was decoded one symbol at a time. The scattered pack index
+lookups also faulted in 8.6 MB of the 10 MB `.idx`, through kernel fault-around.
+
+The tips are now read through a batch call that resolves the pack, its bytes and its object-count
+check once per worker chunk and reuses its buffers. Inflate gets its spare output room. The first
+read fetches 1 KiB of the entry, enough for 99.9% of these commits, and a second read takes the
+full window only when that falls short. In an index of 4,096 objects or more, a batch lookup
+reads the 128 object ids around the predicted row with a positioned read, after checking that the
+file at the index path still has the mapped index's trailer. The matching offset comes from the
+mapping, so only the offset table, a fifth the size of the object ids, can become resident. The
+calling thread works on the first chunk while the other workers start, and the dates and parents
+read are recorded under one lock. The report's counts are unchanged.
+
+Factory VM, four vCPUs, Rust 1.99.0, `release` profile, system Git 2.43.0. Main is `285dbe512`.
+`grit-bench daily`, 20 runs per tool, in four alternating rounds:
+
+| Tool | Round 1 (ms / MiB) | Round 2 (ms / MiB) | Round 3 (ms / MiB) | Round 4 (ms / MiB) |
+| --- | ---: | ---: | ---: | ---: |
+| System Git | 1.99 / 8.1 | 2.03 / 8.3 | 2.00 / 8.3 | 1.96 / 8.2 |
+| Main | 6.47 / 24.3 | | | 6.45 / 24.3 |
+| Branch | | 6.09 / 19.0 | 6.15 / 19.3 | |
+
+Of the remaining gap to Git, about 0.7 ms is process start-up (`grit --version` takes 1.4 ms,
+`git --version` 0.7 ms), about 0.45 ms lists the refs, and the parallel header reads take
+1.5 to 2 ms. Most of that is zlib building each commit's Huffman tables. Without a commit-graph,
+reading the tagged commits cannot be avoided: Git's own orphan warning in `checkout` walks
+`--not --all` the same way.
+
+The committed `daily-reset-undo-commit-6751-before.json` (main) and
+`daily-reset-undo-commit-6751-after.json` (branch) cover every `reset/*` scenario except
+`reset/blobless@git-git`, plus the rows that paint against many refs or map patch-ids in parallel:
+`branch/contains`, `branch/merged`, `tag/contains`, `fetch/noop`, `push/incremental`, `log`,
+`merge-base`, `shortlog/ahead`, `switch/branch`, `pick/one` and `rebase/onto` (10 runs each).
+Apart from the target, every row stays within run-to-run noise. Seven rows read 2 to 6% slower
+in that first pass, while Git itself ran 1 to 3% slower in the branch's round: `branch/contains`,
+`fetch/noop`, `push/incremental`, `tag/contains`, `merge-base/branches`, `rebase/onto` and
+`log/json-n10-loose-tags`. In four alternating reruns `fetch/noop` was faster on the branch, and
+the others were within 3.5% either way. Alternating single runs, 80 to 100 per binary, put
+`merge-base v2.46.0 v2.47.0` at 3.78 ms on main and 3.80 ms on the branch, and `log -n 10 --json`
+with 955 loose tags at 12.62 and 12.71 ms.
+
 ## Tree metadata diff (2026-10-27)
 
 Issue [#2083](https://github.com/gitbutlerapp/grit/issues/2083) exposed a second,
