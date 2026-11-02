@@ -161,6 +161,11 @@ impl LooseStore {
             .is_some_and(|mut guard| guard.may_skip_open(&self.objects_dir, path))
     }
 
+    /// Whether a prior miss recorded `oid`'s loose path (or fanout) as absent.
+    pub(crate) fn may_skip_open_for(&self, oid: &ObjectId) -> bool {
+        self.open_may_be_absent(&self.object_path(oid))
+    }
+
     fn record_absent_path(&self, path: &Path) {
         if let Ok(mut guard) = self.negative_cache.lock() {
             guard.record_absent(&self.objects_dir, path);

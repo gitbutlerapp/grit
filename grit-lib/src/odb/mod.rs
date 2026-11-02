@@ -1734,9 +1734,21 @@ impl Odb {
         if self.custom_primary.is_some() {
             return None;
         }
-        self.shared_config_state
-            .as_ref()?
-            .commit_graph_chain(self.objects_dir())
+        let caches = self.shared_config_state.as_ref()?;
+        let mut alternate_object_dirs = Vec::new();
+        if self.alternates_enabled {
+            for alt in self.file_alternate_dirs_snapshot().iter() {
+                if !alternate_object_dirs.iter().any(|d| d == alt) {
+                    alternate_object_dirs.push(alt.clone());
+                }
+            }
+            for alt in self.env_alternate_dirs_snapshot().iter() {
+                if !alternate_object_dirs.iter().any(|d| d == alt) {
+                    alternate_object_dirs.push(alt.clone());
+                }
+            }
+        }
+        caches.commit_graph_chain(self.objects_dir(), &alternate_object_dirs)
     }
 
     fn try_read_extra_sources(&self, oid: &ObjectId) -> Result<Option<Object>> {
@@ -5844,6 +5856,7 @@ mod tests {
     )]
     #[test]
     fn alternate_packed_reads_do_not_rescan_local_pack_dir() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
         use crate::pack::{clear_pack_cache, pack_cache};
 
         let upstream = TempDir::new().unwrap();
@@ -5876,17 +5889,38 @@ mod tests {
 
         clear_pack_cache();
         let odb = Odb::new(&objects);
+        odb.hot_path_metrics().set_loose_open_counting(true);
+        odb.hot_path_metrics().reset_loose_path_open_attempts();
+        let _scope = HotPathMetricsScope::install(odb.hot_path_metrics_arc());
         pack_cache::test_reset_dir_rescan_count(&local_pack);
-        odb.read(&oid).expect("alternate read");
-        let after_first = pack_cache::test_dir_rescan_count(&local_pack);
-        for _ in 0..512 {
-            odb.read_info(&oid).expect("repeat read_info");
-        }
-        assert_eq!(
-            pack_cache::test_dir_rescan_count(&local_pack),
-            after_first,
-            "alternate hits must not re-list the local pack directory"
-        );
+        let upstream_pack = upstream.path().join(".git/objects/pack");
+        let upstream_objects = upstream.path().join(".git/objects");
+        let upstream_store = odb.pack_store_for(&upstream_objects);
+        pack_cache::test_reset_dir_rescan_count_on_store(&upstream_store, &upstream_pack);
+        odb.with_pack_read_context(|| {
+            odb.read(&oid).expect("alternate read");
+            let after_first = pack_cache::test_dir_rescan_count(&local_pack);
+            let after_first_alt =
+                pack_cache::test_dir_rescan_count_on_store(&upstream_store, &upstream_pack);
+            for _ in 0..512 {
+                odb.read_info(&oid).expect("repeat read_info");
+            }
+            assert_eq!(
+                pack_cache::test_dir_rescan_count(&local_pack),
+                after_first,
+                "alternate hits must not re-list the local pack directory"
+            );
+            assert_eq!(
+                pack_cache::test_dir_rescan_count_on_store(&upstream_store, &upstream_pack),
+                after_first_alt,
+                "alternate hits must not re-list the alternate pack directory"
+            );
+
+            let fresh = b"loose in primary after warmup\n";
+            let local_oid = odb.write(ObjectKind::Blob, fresh).expect("local loose");
+            let obj = odb.read(&local_oid).expect("read local loose after warmup");
+            assert_eq!(obj.data.as_slice(), fresh);
+        });
     }
 
     #[test]
@@ -6000,6 +6034,62 @@ mod tests {
         filetime::set_file_mtime(&pack_dir, filetime::FileTime::now()).unwrap();
 
         let obj = odb.read(&new_oid).expect("new pack via reprepare");
+        assert_eq!(obj.kind, ObjectKind::Commit);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn external_pack_drop_in_visible_after_empty_primary_miss() {
+        use crate::pack::{clear_pack_cache, pack_cache_test_guard};
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let source = TempDir::new().unwrap();
+        git_in(source.path(), &["init", "-q", "-b", "main"]);
+        git_in(source.path(), &["config", "user.email", "t@example.com"]);
+        git_in(source.path(), &["config", "user.name", "T"]);
+        fs::write(source.path().join("drop-in.txt"), b"external pack payload").unwrap();
+        git_in(source.path(), &["add", "drop-in.txt"]);
+        git_in(source.path(), &["commit", "-m", "drop-in"]);
+        git_in(source.path(), &["repack", "-a", "-d"]);
+        let commit_oid = git_rev_parse_oid(source.path(), "HEAD");
+        let source_pack = source.path().join(".git/objects/pack");
+        let (pack_path, idx_path) = fs::read_dir(&source_pack)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find_map(|path| {
+                path.extension()
+                    .is_some_and(|ext| ext == "pack")
+                    .then(|| (path.clone(), path.with_extension("idx")))
+            })
+            .expect("source pack");
+
+        let bare = TempDir::new().unwrap();
+        let objects = bare.path().join("objects");
+        fs::create_dir_all(objects.join("pack")).unwrap();
+        let odb = Odb::new(&objects);
+        assert!(
+            odb.read(&commit_oid).is_err(),
+            "empty primary must miss before the pack exists"
+        );
+
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let dest_pack = objects
+            .join("pack")
+            .join(pack_path.file_name().expect("pack basename"));
+        let dest_idx = objects
+            .join("pack")
+            .join(idx_path.file_name().expect("idx basename"));
+        fs::copy(&pack_path, &dest_pack).unwrap();
+        fs::copy(&idx_path, &dest_idx).unwrap();
+
+        let obj = odb
+            .read(&commit_oid)
+            .expect("external pack drop-in must be visible after reprepare");
         assert_eq!(obj.kind, ObjectKind::Commit);
     }
 

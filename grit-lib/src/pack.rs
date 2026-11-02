@@ -126,6 +126,7 @@ pub(crate) mod pack_cache {
 
     type ThreadLocalDirListing = Option<(PathBuf, SystemTime, Vec<Arc<PackIndex>>)>;
 
+    #[derive(Clone)]
     enum CachedPackBytes {
         Retained(Arc<PackData>),
         Positioned(Weak<PackData>),
@@ -165,12 +166,138 @@ pub(crate) mod pack_cache {
             const { std::cell::RefCell::new(None) };
         static SINGLE_READER_MEMO: std::cell::RefCell<Option<SingleReaderMemo>> =
             const { std::cell::RefCell::new(None) };
+        static STORE_TLS_SNAPSHOTS: std::cell::RefCell<HashMap<u64, PackThreadLocalSnapshot>> =
+            std::cell::RefCell::new(HashMap::new());
+        static ACTIVE_TLS_STORE_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    #[derive(Clone)]
+    struct PackThreadLocalSnapshot {
+        dir_indexes: ThreadLocalDirListing,
+        hit_index: Option<(PathBuf, Arc<PackIndex>)>,
+        pack_bytes: HashMap<PathBuf, CachedPackBytes>,
+        pack_indexes: HashMap<PathBuf, Arc<PackIndex>>,
+        pack_ids: hashbrown::HashMap<std::ffi::OsString, u32>,
+        count_validated: HashSet<PathBuf>,
+        listing_trusted: bool,
+        warm_epoch: u64,
+        warm_store: u64,
+        monotonic_cursor: Option<(PathBuf, usize)>,
+        single_reader_memo: Option<SingleReaderMemo>,
+    }
+
+    fn capture_tls_snapshot() -> PackThreadLocalSnapshot {
+        PackThreadLocalSnapshot {
+            dir_indexes: PACK_DIR_INDEXES.with(|cell| cell.borrow().clone()),
+            hit_index: PACK_HIT_INDEX.with(|cell| cell.borrow().clone()),
+            pack_bytes: PACK_BYTES.with(|cell| cell.borrow().clone()),
+            pack_indexes: PACK_INDEXES.with(|cell| cell.borrow().clone()),
+            pack_ids: PACK_IDS.with(|cell| cell.borrow().clone()),
+            count_validated: PACK_COUNT_VALIDATED.with(|cell| cell.borrow().clone()),
+            listing_trusted: PACK_DIR_LISTING_TRUSTED.get(),
+            warm_epoch: THREAD_WARM_EPOCH.get(),
+            warm_store: THREAD_WARM_STORE.get(),
+            monotonic_cursor: PACK_MONOTONIC_CURSOR.with(|cell| cell.borrow().clone()),
+            single_reader_memo: SINGLE_READER_MEMO.with(|cell| cell.borrow().clone()),
+        }
+    }
+
+    fn apply_tls_snapshot(snap: PackThreadLocalSnapshot) {
+        PACK_DIR_INDEXES.with(|cell| *cell.borrow_mut() = snap.dir_indexes);
+        PACK_HIT_INDEX.with(|cell| *cell.borrow_mut() = snap.hit_index);
+        PACK_BYTES.with(|cell| *cell.borrow_mut() = snap.pack_bytes);
+        PACK_INDEXES.with(|cell| *cell.borrow_mut() = snap.pack_indexes);
+        PACK_IDS.with(|cell| *cell.borrow_mut() = snap.pack_ids);
+        PACK_COUNT_VALIDATED.with(|cell| *cell.borrow_mut() = snap.count_validated);
+        PACK_DIR_LISTING_TRUSTED.set(snap.listing_trusted);
+        THREAD_WARM_EPOCH.set(snap.warm_epoch);
+        THREAD_WARM_STORE.set(snap.warm_store);
+        PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = snap.monotonic_cursor);
+        SINGLE_READER_MEMO.with(|cell| *cell.borrow_mut() = snap.single_reader_memo);
+    }
+
+    fn seed_tls_from_store_catalog(store: &crate::pack_store::PackStore) {
+        PACK_BYTES.with(|cell| cell.borrow_mut().clear());
+        PACK_INDEXES.with(|cell| cell.borrow_mut().clear());
+        PACK_IDS.with(|cell| cell.borrow_mut().clear());
+        PACK_COUNT_VALIDATED.with(|cell| cell.borrow_mut().clear());
+        PACK_HIT_INDEX.with(|cell| *cell.borrow_mut() = None);
+        forget_single_reader_memo();
+        super::clear_pack_read_info_cache();
+        let objects_dir = store.objects_dir();
+        let pack_dir = objects_dir.join("pack");
+        store.with_catalog_read(|g| {
+            let listing = g
+                .by_dir
+                .get(&pack_dir)
+                .map(|cached| (pack_dir.clone(), cached.dir_mtime, cached.indexes.clone()));
+            PACK_DIR_INDEXES.with(|cell| *cell.borrow_mut() = listing);
+            for (path, entry) in &g.by_pack {
+                remember_pack_bytes(path, &entry.bytes);
+            }
+            for (path, entry) in &g.by_idx {
+                remember_index(path, &entry.idx);
+            }
+            PACK_IDS.with(|cell| {
+                cell.borrow_mut().extend(
+                    g.pack_ids
+                        .iter()
+                        .map(|(k, v)| (k.as_os_str().to_owned(), *v)),
+                );
+            });
+            PACK_COUNT_VALIDATED.with(|cell| {
+                cell.borrow_mut()
+                    .extend(g.validated_pack_counts.iter().cloned());
+            });
+            PACK_DIR_LISTING_TRUSTED.set(true);
+            THREAD_WARM_EPOCH.set(store.cache_epoch());
+            THREAD_WARM_STORE.set(store_thread_local_key(store));
+        });
+    }
+
+    pub(crate) fn drop_store_tls_snapshot(store_id: u64) {
+        STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().remove(&store_id));
+    }
+
+    pub(crate) fn switch_tls_for_store(store: &crate::pack_store::PackStore) {
+        if !crate::pack_store::PackStore::has_context() {
+            return;
+        }
+        let new_id = store.id();
+        let epoch = store.cache_epoch();
+        // Match legacy `sync_thread_local_with_store`: epoch + store identity only.
+        // Pack-path invalidation clears listing trust (and may reseed hints) without
+        // bumping the store epoch, so requiring `PACK_DIR_LISTING_TRUSTED` here would
+        // re-seed from the catalog and drop a warm pack hint on every directory sync.
+        if ACTIVE_TLS_STORE_ID.get() == new_id
+            && THREAD_WARM_EPOCH.get() == epoch
+            && THREAD_WARM_STORE.get() == new_id
+        {
+            return;
+        }
+        let old_id = ACTIVE_TLS_STORE_ID.get();
+        if old_id != 0 && old_id != new_id {
+            let snap = capture_tls_snapshot();
+            STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().insert(old_id, snap));
+        }
+        ACTIVE_TLS_STORE_ID.set(new_id);
+        if let Some(snap) = STORE_TLS_SNAPSHOTS.with(|map| map.borrow().get(&new_id).cloned()) {
+            if snap.warm_epoch == epoch {
+                apply_tls_snapshot(snap);
+                return;
+            }
+        }
+        seed_tls_from_store_catalog(store);
+        STORE_TLS_SNAPSHOTS.with(|map| {
+            map.borrow_mut().insert(new_id, capture_tls_snapshot());
+        });
     }
 
     /// The pack a [`super::SingleLocalPackReader`] last opened on this thread.
     ///
     /// Lets repeated opens (one per object read) skip re-deriving the same pack through the
     /// path-keyed caches and the shared catalog.
+    #[derive(Clone)]
     struct SingleReaderMemo {
         objects_dir: PathBuf,
         pack_dir: PathBuf,
@@ -258,6 +385,8 @@ pub(crate) mod pack_cache {
         PACK_DIR_LISTING_TRUSTED.set(false);
         THREAD_WARM_EPOCH.set(0);
         THREAD_WARM_STORE.set(0);
+        STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().clear());
+        ACTIVE_TLS_STORE_ID.set(0);
         super::clear_pack_read_info_cache();
         PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = None);
         forget_single_reader_memo();
@@ -359,17 +488,7 @@ pub(crate) mod pack_cache {
     }
 
     pub(crate) fn sync_thread_local_with_store(store: &crate::pack_store::PackStore) {
-        if !crate::pack_store::PackStore::has_context() {
-            return;
-        }
-        let epoch = store.cache_epoch();
-        let store_key = store_thread_local_key(store);
-        if THREAD_WARM_EPOCH.get() == epoch && THREAD_WARM_STORE.get() == store_key {
-            return;
-        }
-        clear_thread_local_dir_indexes();
-        THREAD_WARM_EPOCH.set(epoch);
-        THREAD_WARM_STORE.set(store_key);
+        switch_tls_for_store(store);
     }
 
     fn drop_thread_local_dir_listing(pack_dir: &Path) {
@@ -422,55 +541,23 @@ pub(crate) mod pack_cache {
 
     /// Seed thread-local pack caches from `store` (one catalog read lock; hot reads avoid the catalog).
     pub(crate) fn warm_thread_local_from_store(store: &crate::pack_store::PackStore) {
-        if !crate::pack_store::PackStore::has_context() {
-            return;
+        switch_tls_for_store(store);
+    }
+
+    /// True when this thread trusts an verified-empty pack listing for `objects_dir`.
+    pub(crate) fn trusted_verified_empty_pack_listing(objects_dir: &Path) -> bool {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return false;
         }
-        let epoch = store.cache_epoch();
-        let store_key = store_thread_local_key(store);
-        if THREAD_WARM_EPOCH.get() == epoch
-            && THREAD_WARM_STORE.get() == store_key
-            && PACK_DIR_LISTING_TRUSTED.get()
-        {
-            return;
+        if !PACK_DIR_LISTING_TRUSTED.get() {
+            return false;
         }
-        PACK_BYTES.with(|cell| cell.borrow_mut().clear());
-        PACK_INDEXES.with(|cell| cell.borrow_mut().clear());
-        PACK_IDS.with(|cell| cell.borrow_mut().clear());
-        PACK_COUNT_VALIDATED.with(|cell| cell.borrow_mut().clear());
-        PACK_HIT_INDEX.with(|cell| *cell.borrow_mut() = None);
-        forget_single_reader_memo();
-        super::clear_pack_read_info_cache();
-        let objects_dir = store.objects_dir();
         let pack_dir = objects_dir.join("pack");
-        store.with_catalog_read(|g| {
-            // Replace the listing even when this store has none yet: one left by another store
-            // on this thread may predate a repack, and the listing is trusted from here on.
-            let listing = g
-                .by_dir
+        crate::pack_store::PackStore::active_for_reads().with_catalog_read(|g| {
+            g.by_dir
                 .get(&pack_dir)
-                .map(|cached| (pack_dir.clone(), cached.dir_mtime, cached.indexes.clone()));
-            PACK_DIR_INDEXES.with(|cell| *cell.borrow_mut() = listing);
-            for (path, entry) in &g.by_pack {
-                remember_pack_bytes(path, &entry.bytes);
-            }
-            for (path, entry) in &g.by_idx {
-                remember_index(path, &entry.idx);
-            }
-            PACK_IDS.with(|cell| {
-                cell.borrow_mut().extend(
-                    g.pack_ids
-                        .iter()
-                        .map(|(k, v)| (k.as_os_str().to_owned(), *v)),
-                );
-            });
-            PACK_COUNT_VALIDATED.with(|cell| {
-                cell.borrow_mut()
-                    .extend(g.validated_pack_counts.iter().cloned());
-            });
-            PACK_DIR_LISTING_TRUSTED.set(true);
-            THREAD_WARM_EPOCH.set(store.cache_epoch());
-            THREAD_WARM_STORE.set(store_thread_local_key(store));
-        });
+                .is_some_and(|c| c.idx_listing_verified && c.indexes.is_empty())
+        })
     }
 
     fn cached_pack_bytes(pack_path: &Path) -> Option<Arc<PackData>> {
@@ -1164,6 +1251,10 @@ pub(crate) mod pack_cache {
                 },
             );
         });
+        STORE_TLS_SNAPSHOTS.with(|map| {
+            map.borrow_mut()
+                .remove(&crate::pack_store::PackStore::active_for_reads().id());
+        });
         Ok(out)
     }
 
@@ -1283,6 +1374,15 @@ pub(crate) mod pack_cache {
         let pack_dir = objects_dir.join("pack");
         let dir_mt = dir_mtime(&pack_dir);
         let store = crate::pack_store::PackStore::active_for_reads();
+        if store.with_catalog_read(|g| {
+            g.by_dir.get(&pack_dir).is_some_and(|c| {
+                c.idx_listing_verified && c.indexes.is_empty() && c.dir_mtime == dir_mt
+            })
+        }) && crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir)
+            && PACK_DIR_LISTING_TRUSTED.get()
+        {
+            return Ok(false);
+        }
         enum ReprepareDecision {
             Fresh,
             Rescan,
@@ -1291,7 +1391,7 @@ pub(crate) mod pack_cache {
         let decision = store.with_catalog_read(|g| match g.by_dir.get(&pack_dir) {
             None => ReprepareDecision::Rescan,
             Some(c) if c.dir_mtime != dir_mt => ReprepareDecision::Rescan,
-            Some(c) if c.idx_listing_verified => ReprepareDecision::Fresh,
+            Some(c) if c.idx_listing_verified && !c.indexes.is_empty() => ReprepareDecision::Fresh,
             Some(_) => ReprepareDecision::VerifyIdxSet,
         });
         match decision {
