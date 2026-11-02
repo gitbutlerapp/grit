@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
 use crate::environment::RepositoryOptions;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::git_path::CanonicalizeExt;
 
 use super::{
@@ -62,7 +62,8 @@ impl RepositoryLocation {
     /// # Errors
     ///
     /// The same errors as [`Repository::discover`]: [`crate::error::Error::NotARepository`]
-    /// when no repository is found, [`crate::error::Error::DubiousOwnership`] when
+    /// when no repository is found, [`crate::error::Error::Config`] when a config file in the
+    /// cascade cannot be parsed or contains an invalid value, [`crate::error::Error::DubiousOwnership`] when
     /// `safe.directory` rejects it, and repository format errors such as
     /// [`crate::error::Error::UnsupportedRepositoryFormatVersion`].
     pub fn discover(options: &RepositoryOptions) -> Result<Self> {
@@ -173,15 +174,19 @@ fn accept_dot_git_dir(
         return Ok(None);
     };
     let env = &options.environment;
-    let Ok(config) = ConfigSet::load(env, Some(&git_dir), true) else {
-        return Ok(None);
+    let config = match ConfigSet::load(env, Some(&git_dir), true) {
+        Ok(c) => c,
+        Err(Error::Config(e)) => return Err(Error::Config(e)),
+        Err(_) => return Ok(None),
     };
 
     let config_path = git_dir.join("config");
     match fs::read_to_string(&config_path) {
         Ok(content) => {
-            let Ok(format) = parse_repository_format(&content, &config_path) else {
-                return Ok(None);
+            let format = match parse_repository_format(&content, &config_path) {
+                Ok(f) => f,
+                Err(Error::Config(e)) => return Err(Error::Config(e)),
+                Err(_) => return Ok(None),
             };
             validate_repository_format_parsed(&format)?;
         }
@@ -189,7 +194,7 @@ fn accept_dot_git_dir(
         Err(_) => return Ok(None),
     }
 
-    let (bare, core_worktree) = read_core_bare_and_worktree_from_config(&config);
+    let (bare, core_worktree) = read_core_bare_and_worktree_from_config(&config)?;
     if bare || core_worktree.is_some() {
         return Ok(None);
     }

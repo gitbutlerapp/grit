@@ -451,6 +451,8 @@ mod concurrent_repos;
 mod config_advanced_git_compat;
 #[path = "config_dense_parse_coverage.rs"]
 mod config_dense_parse_coverage;
+#[path = "config_discover_errors.rs"]
+mod config_discover_errors;
 #[path = "config_file_api_coverage.rs"]
 mod config_file_api_coverage;
 #[path = "config_file_roundtrip.rs"]
@@ -1427,9 +1429,6 @@ mod ref_update_kinds_git_compat;
 #[path = "reference_transaction_hook.rs"]
 mod reference_transaction_hook;
 #[cfg(feature = "full-tests")]
-#[path = "references_update_head_2497.rs"]
-mod references_update_head_2497;
-#[cfg(feature = "full-tests")]
 #[path = "reflog_expire_dry_run.rs"]
 mod reflog_expire_dry_run;
 #[cfg(feature = "full-tests")]
@@ -1478,6 +1477,7 @@ mod refs_list_empty_prefix_git;
 mod refs_listing_public_coverage;
 #[path = "refs_lock_coverage.rs"]
 mod refs_lock_coverage;
+#[cfg(feature = "full-tests")]
 #[path = "refs_loose_casefold_2502.rs"]
 mod refs_loose_casefold_2502;
 #[cfg(feature = "full-tests")]

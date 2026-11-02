@@ -19,8 +19,10 @@ pub fn human_error_message(err: &Error) -> String {
         if let Some(structured) = cause.downcast_ref::<StructuredCliError>() {
             return structured.human.clone();
         }
-        if let Some(lib @ (LibError::HashCollision { .. } | LibError::LockHeld { .. })) =
-            cause.downcast_ref::<LibError>()
+        if let Some(
+            lib
+            @ (LibError::HashCollision { .. } | LibError::LockHeld { .. } | LibError::Config(_)),
+        ) = cause.downcast_ref::<LibError>()
         {
             return map_lib_error(lib);
         }
@@ -76,6 +78,20 @@ mod tests {
         assert!(human.contains(&path.display().to_string()), "{human}");
         assert!(human.contains("stale lock"), "{human}");
         assert!(human.contains("process 42"), "{human}");
+    }
+
+    #[test]
+    fn context_wrapped_config_error_keeps_config_message() {
+        use grit_lib::error::{ConfigError, Error as LibError};
+        let err = Error::new(LibError::Config(ConfigError::BadConfigLineInFile {
+            file: ".git/config".into(),
+            line: 6,
+        }))
+        .context("not in a repository");
+        let human = human_error_message(&err);
+        assert!(human.contains("bad config line"), "{human}");
+        assert!(!human.contains("not in a repository"), "{human}");
+        assert!(human.starts_with("fatal:"), "{human}");
     }
 
     #[test]
