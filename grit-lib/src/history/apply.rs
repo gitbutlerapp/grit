@@ -16,7 +16,8 @@ use crate::notes::{
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
-    materialize_gitlink_worktree, write_blob_to_worktree, LeadingDirCache,
+    materialize_gitlink_worktree, restore_checkout_rollback_paths, write_blob_to_worktree,
+    CheckoutRollbackRestore, LeadingDirCache,
 };
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, checkout_tree_transition_allow_local_with_preserved,
@@ -24,6 +25,7 @@ use crate::porcelain::switch::{
     TreeTransitionPrepareError, TreeTransitionVerifyError,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
+use crate::progress::{poll_cancel, Cancel, NeverCancel, NullProgress, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
 use crate::refs::read_symbolic_ref_for_repository;
 use crate::refs::ref_update_flags;
@@ -328,7 +330,9 @@ fn apply_absorb_refs_and_worktree(
         plan,
         opts,
         rewrite_journal::RewriteApplyKind::Absorb,
-        |repo, old_tree, new_tree| {
+        &mut NullProgress,
+        &NeverCancel,
+        |repo, old_tree, new_tree, _progress, _cancel| {
             let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
                 message: "missing old HEAD commit for absorb apply".into(),
             })?;
@@ -779,7 +783,9 @@ fn apply_fixup_refs_and_worktree(
         plan,
         opts,
         rewrite_journal::RewriteApplyKind::Fixup,
-        |repo, old_tree, new_tree| {
+        &mut NullProgress,
+        &NeverCancel,
+        |repo, old_tree, new_tree, _progress, _cancel| {
             let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
                 message: "missing old HEAD commit for fixup apply".into(),
             })?;
@@ -1010,7 +1016,9 @@ pub fn apply_rewrite(
         plan,
         opts,
         rewrite_journal::RewriteApplyKind::Standard,
-        |repo, old_tree, new_tree| {
+        progress,
+        cancel,
+        |repo, old_tree, new_tree, progress, cancel| {
             apply_head_tree_to_worktree(repo, old_tree, new_tree, None, progress, cancel)?;
             Ok(None)
         },
@@ -1067,15 +1075,17 @@ pub(crate) fn apply_undo_rewrite(
         plan,
         opts,
         rewrite_journal::RewriteApplyKind::Standard,
-        |repo, old_tree, new_tree| {
+        &mut NullProgress,
+        &NeverCancel,
+        |repo, old_tree, new_tree, _progress, _cancel| {
             let checkout = |repo: &Repository| {
                 apply_head_tree_to_worktree(
                     repo,
                     old_tree,
                     new_tree,
                     None,
-                    &mut crate::progress::NullProgress,
-                    &crate::progress::NeverCancel,
+                    &mut NullProgress,
+                    &NeverCancel,
                 )
             };
             let Some(work) = work else {
@@ -1112,10 +1122,18 @@ fn run_planned_rewrite_apply<F>(
     plan: &RewritePlan,
     opts: &ApplyOptions,
     apply_kind: rewrite_journal::RewriteApplyKind,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
     apply_worktree: F,
 ) -> Result<AppliedRewrite, HistoryError>
 where
-    F: FnOnce(&Repository, Option<&ObjectId>, &ObjectId) -> Result<Option<UndoWork>, HistoryError>,
+    F: FnOnce(
+        &Repository,
+        Option<&ObjectId>,
+        &ObjectId,
+        &mut dyn ProgressSink,
+        &dyn Cancel,
+    ) -> Result<Option<UndoWork>, HistoryError>,
 {
     let mut work = None;
     let (old_tree, new_tree) = head_tree_transition(plan);
@@ -1170,6 +1188,13 @@ where
         prepare_notes_for_rewrite(repo, NotesRewriteCommand::Rebase, &rewritten_pairs)
             .map_err(HistoryError::from)?;
 
+    if poll_cancel(progress, cancel).is_err() {
+        if needs_worktree {
+            let _ = rewrite_journal::clear_rewrite_apply_journal(repo);
+        }
+        return Err(HistoryError::from(crate::error::Error::Cancelled));
+    }
+
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
     }
@@ -1188,7 +1213,7 @@ where
                 message: "missing head tree for worktree apply".into(),
             });
         };
-        match apply_worktree(repo, Some(&old), &new) {
+        match apply_worktree(repo, Some(&old), &new, progress, cancel) {
             Ok(recorded) => work = recorded,
             Err(checkout_err) => {
                 let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts).err();
@@ -1597,8 +1622,11 @@ pub(crate) enum WorktreePathKind {
 pub(crate) struct WorktreePathSnapshot {
     pub(crate) kind: WorktreePathKind,
     pub(crate) bytes: Option<Vec<u8>>,
-    /// When set, rollback rebuilds this path from the journal's pre-apply `head-tree` OID.
+    /// When set, rollback rebuilds this path from the pre-apply tree entry in `tree_oid`.
     pub(crate) from_old_tree: bool,
+    /// Blob or tree identity from the pre-apply tree when `from_old_tree`.
+    pub(crate) tree_oid: Option<ObjectId>,
+    pub(crate) tree_mode: u32,
     #[cfg(unix)]
     mode: u32,
 }
@@ -1631,13 +1659,34 @@ impl WorktreePathSnapshot {
             kind,
             bytes,
             from_old_tree: false,
+            tree_oid: None,
+            tree_mode: 0,
             #[cfg(unix)]
             mode: unix_mode,
         }
     }
 
     /// Pre-apply path that matches the old tree; rollback materializes it from the ODB.
-    pub(crate) fn from_old_tree(kind: WorktreePathKind) -> Self {
+    pub(crate) fn from_old_tree(kind: WorktreePathKind, oid: ObjectId, mode: u32) -> Self {
+        #[cfg(unix)]
+        let unix_mode = match kind {
+            WorktreePathKind::Directory => 0o755,
+            WorktreePathKind::Regular => 0o644,
+            _ => 0,
+        };
+        Self {
+            kind,
+            bytes: None,
+            from_old_tree: true,
+            tree_oid: Some(oid),
+            tree_mode: mode,
+            #[cfg(unix)]
+            mode: unix_mode,
+        }
+    }
+
+    /// Pre-apply tree path without stored oid/mode (legacy rewrite-apply journals).
+    pub(crate) fn from_old_tree_legacy(kind: WorktreePathKind) -> Self {
         #[cfg(unix)]
         let mode = match kind {
             WorktreePathKind::Directory => 0o755,
@@ -1648,6 +1697,8 @@ impl WorktreePathSnapshot {
             kind,
             bytes: None,
             from_old_tree: true,
+            tree_oid: None,
+            tree_mode: 0,
             #[cfg(unix)]
             mode,
         }
@@ -1737,6 +1788,8 @@ fn worktree_snapshot_from_tree_change(
     if change.status == DiffStatus::Added {
         return Ok(WorktreePathSnapshot::from_old_tree(
             WorktreePathKind::Absent,
+            change.old_oid,
+            change.old_mode.bits(),
         ));
     }
     let mode = change.old_mode.bits();
@@ -1745,7 +1798,11 @@ fn worktree_snapshot_from_tree_change(
         0o120000 => WorktreePathKind::Symlink,
         _ => WorktreePathKind::Regular,
     };
-    Ok(WorktreePathSnapshot::from_old_tree(kind))
+    Ok(WorktreePathSnapshot::from_old_tree(
+        kind,
+        change.old_oid,
+        mode,
+    ))
 }
 
 fn tree_transition_path(change: &crate::diff::DiffEntry) -> Option<&str> {
@@ -1764,6 +1821,8 @@ pub(crate) fn read_worktree_path_snapshot(
                 kind: WorktreePathKind::Absent,
                 bytes: None,
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             });
@@ -1776,6 +1835,8 @@ pub(crate) fn read_worktree_path_snapshot(
             kind: WorktreePathKind::Symlink,
             bytes: Some(target.as_os_str().as_encoded_bytes().to_vec()),
             from_old_tree: false,
+            tree_oid: None,
+            tree_mode: 0,
             #[cfg(unix)]
             mode: 0,
         });
@@ -1790,6 +1851,8 @@ pub(crate) fn read_worktree_path_snapshot(
                 kind: WorktreePathKind::Regular,
                 bytes: Some(bytes),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 mode,
             });
         }
@@ -1799,6 +1862,8 @@ pub(crate) fn read_worktree_path_snapshot(
                 kind: WorktreePathKind::Regular,
                 bytes: Some(bytes),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
             });
         }
     }
@@ -1806,6 +1871,8 @@ pub(crate) fn read_worktree_path_snapshot(
         kind: WorktreePathKind::Directory,
         bytes: None,
         from_old_tree: false,
+        tree_oid: None,
+        tree_mode: 0,
         #[cfg(unix)]
         mode: 0o755,
     })
@@ -1842,21 +1909,63 @@ pub(crate) fn restore_worktree_after_failed_apply(
         })?;
     }
     paths.sort_by(|a, b| path_depth_cmp(a, b));
+    let mut rollback_targets: Vec<CheckoutRollbackRestore> = Vec::new();
+    let mut dir_cache = LeadingDirCache::new();
     for path in &paths {
         let saved = &snapshot[*path];
-        if saved.from_old_tree {
-            let old_tree = old_tree.ok_or_else(|| HistoryError::WorktreeApply {
-                message: "missing head-tree for from-tree worktree restore".into(),
-            })?;
-            restore_worktree_path_from_old_tree(repo, work_tree, path.as_str(), old_tree, saved)
-                .map_err(|e| HistoryError::WorktreeApply {
-                    message: format!("failed to restore '{path}' from tree: {e}"),
-                })?;
-        } else {
+        if !saved.from_old_tree {
             let abs = work_tree.join(path.as_str());
             restore_worktree_path(&abs, saved).map_err(|e| HistoryError::WorktreeApply {
                 message: format!("failed to restore '{path}': {e}"),
             })?;
+            continue;
+        }
+        match saved.kind {
+            WorktreePathKind::Absent => {}
+            WorktreePathKind::Directory => {
+                let abs = work_tree.join(path.as_str());
+                fs::create_dir_all(&abs).map_err(|e| HistoryError::WorktreeApply {
+                    message: format!("failed to restore directory '{path}': {e}"),
+                })?;
+            }
+            WorktreePathKind::Regular | WorktreePathKind::Symlink => {
+                if saved.tree_mode == crate::index::MODE_GITLINK {
+                    materialize_gitlink_worktree(work_tree, path.as_str(), &mut dir_cache)
+                        .map_err(|e| HistoryError::WorktreeApply {
+                            message: format!("failed to restore gitlink '{path}': {e}"),
+                        })?;
+                } else if let Some(oid) = saved.tree_oid {
+                    rollback_targets.push(CheckoutRollbackRestore {
+                        path: (*path).clone(),
+                        oid,
+                        mode: saved.tree_mode,
+                    });
+                } else {
+                    let old_tree = old_tree.ok_or_else(|| HistoryError::WorktreeApply {
+                        message: "missing head-tree for from-tree worktree restore".into(),
+                    })?;
+                    restore_worktree_path_from_old_tree(
+                        repo,
+                        work_tree,
+                        path.as_str(),
+                        old_tree,
+                        saved,
+                    )
+                    .map_err(|e| HistoryError::WorktreeApply {
+                        message: format!("failed to restore '{path}' from tree: {e}"),
+                    })?;
+                }
+            }
+        }
+    }
+    if !rollback_targets.is_empty() {
+        let mut progress = NullProgress;
+        let failed =
+            restore_checkout_rollback_paths(repo, work_tree, &rollback_targets, &mut progress);
+        if !failed.is_empty() {
+            return Err(HistoryError::WorktreeApply {
+                message: format!("failed to restore {} path(s) from tree blobs", failed.len()),
+            });
         }
     }
     Ok(())
@@ -2791,6 +2900,8 @@ mod inject_and_apply_tests {
             kind: WorktreePathKind::Regular,
             bytes: Some(b"original file\n".to_vec()),
             from_old_tree: false,
+            tree_oid: None,
+            tree_mode: 0,
             #[cfg(unix)]
             mode: 0o100644,
         };
@@ -2819,6 +2930,8 @@ mod inject_and_apply_tests {
             kind: WorktreePathKind::Regular,
             bytes: Some(b"original file\n".to_vec()),
             from_old_tree: false,
+            tree_oid: None,
+            tree_mode: 0,
             mode: 0o100644,
         };
         restore_worktree_path(&tracked, &saved).expect("restore");
@@ -2845,6 +2958,8 @@ mod inject_and_apply_tests {
             kind: WorktreePathKind::Symlink,
             bytes: Some(b"link-target.txt".to_vec()),
             from_old_tree: false,
+            tree_oid: None,
+            tree_mode: 0,
             mode: 0,
         };
         restore_worktree_path(&tracked, &saved).expect("restore symlink");
@@ -2880,6 +2995,8 @@ mod inject_and_apply_tests {
             kind: WorktreePathKind::Symlink,
             bytes: Some(vec![0xff]),
             from_old_tree: false,
+            tree_oid: None,
+            tree_mode: 0,
         };
         let err = restore_worktree_path(&tracked, &saved).expect_err("non-utf8 target");
         assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
@@ -2924,6 +3041,8 @@ mod inject_and_apply_tests {
                 kind: WorktreePathKind::Directory,
                 bytes: None,
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o755,
             },
@@ -2934,6 +3053,8 @@ mod inject_and_apply_tests {
                 kind: WorktreePathKind::Regular,
                 bytes: Some(b"child\n".to_vec()),
                 from_old_tree: false,
+                tree_oid: None,
+                tree_mode: 0,
                 #[cfg(unix)]
                 mode: 0o644,
             },

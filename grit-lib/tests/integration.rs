@@ -1388,6 +1388,9 @@ mod racy_index_git_compat;
 #[path = "read_info_git_compat.rs"]
 mod read_info_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "rebase_cancel_rollback_wide_perf.rs"]
+mod rebase_cancel_rollback_wide_perf;
+#[cfg(feature = "full-tests")]
 #[path = "receive_pack_ignorecase_ref_2471.rs"]
 mod receive_pack_ignorecase_ref_2471;
 #[cfg(feature = "full-tests")]
@@ -1833,14 +1836,14 @@ mod shallow_maintenance_git_compat;
 #[path = "signing_commit_git_compat.rs"]
 mod signing_commit_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "skip_worktree_porcelain_2466.rs"]
+mod skip_worktree_porcelain_2466;
+#[cfg(feature = "full-tests")]
 #[path = "sparse_checkout_checkout.rs"]
 mod sparse_checkout_checkout;
 #[cfg(feature = "full-tests")]
 #[path = "sparse_checkout_git_compat.rs"]
 mod sparse_checkout_git_compat;
-
-#[path = "skip_worktree_porcelain_2466.rs"]
-mod skip_worktree_porcelain_2466;
 #[cfg(feature = "full-tests")]
 #[path = "sparse_index_collapse_git_compat.rs"]
 mod sparse_index_collapse_git_compat;
