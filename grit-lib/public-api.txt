@@ -19742,6 +19742,8 @@ pub fn grit_lib::refs::handle::References<'repo>::reflog(&self, &grit_lib::refs:
 pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::handle::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::refs::handle::References<'repo>
@@ -21283,6 +21285,8 @@ pub fn grit_lib::refs::handle::References<'repo>::reflog(&self, &grit_lib::refs:
 pub fn grit_lib::refs::handle::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::handle::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::handle::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::handle::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::handle::References<'repo>
 pub fn grit_lib::refs::handle::References<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::refs::handle::References<'repo>
