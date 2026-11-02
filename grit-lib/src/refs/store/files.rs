@@ -14,7 +14,7 @@ use std::fs;
 use std::io;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use crate::error::{Error, Result};
 use crate::git_dir::io_error::{
@@ -42,7 +42,8 @@ use super::transaction::expected_matches;
 use super::transaction::RefTransaction;
 use super::types::Expected;
 use super::validation::{
-    validate_storable_refname, verify_create_conflicts, verify_name_available_for_create,
+    validate_storable_refname, verify_create_casefold_conflicts, verify_create_conflicts,
+    verify_name_available_for_create,
 };
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 use crate::refs::RefnameUnavailable;
@@ -71,6 +72,7 @@ pub struct FilesRefStore {
     common_dir: PathBuf,
     namespace_prefix: Option<String>,
     packed_cache: Mutex<PackedCacheEntry>,
+    ignorecase: OnceLock<bool>,
 }
 
 /// What a cached `packed-refs` view was read from. Writers replace the file by rename, so the
@@ -152,7 +154,58 @@ impl FilesRefStore {
                 map: None,
                 map_is_complete: false,
             }),
+            ignorecase: OnceLock::new(),
         }
+    }
+
+    /// Whether ref names are compared with ASCII case folding for create availability.
+    fn refs_ignore_ascii_case(&self) -> bool {
+        *self.ignorecase.get_or_init(|| {
+            use crate::config::ConfigSet;
+            use crate::environment::Environment;
+            let config = ConfigSet::load(&Environment::empty(), Some(&self.common_dir), true).ok();
+            if let Some(cfg) = config.as_ref() {
+                if cfg.get("core.ignorecase").is_some() {
+                    return cfg
+                        .get_bool("core.ignorecase")
+                        .unwrap_or(Ok(false))
+                        .unwrap_or(false);
+                }
+            }
+            crate::init_filesystem::probe_filesystem_case_insensitive(&self.common_dir)
+                .unwrap_or(false)
+        })
+    }
+
+    fn verify_create_casefold_for_name(
+        &self,
+        name: &str,
+        extras: &BTreeSet<&str>,
+    ) -> StoreResult<()> {
+        if !self.refs_ignore_ascii_case() {
+            return Ok(());
+        }
+        let existing = self
+            .load_raw_map_prefix("", None)
+            .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+        if existing
+            .keys()
+            .any(|other| other.as_str() != name && other.eq_ignore_ascii_case(name))
+        {
+            return Err(RefStoreError::CreateExists {
+                name: name.to_owned(),
+            });
+        }
+        if extras
+            .iter()
+            .copied()
+            .any(|other| other != name && other.eq_ignore_ascii_case(name))
+        {
+            return Err(RefStoreError::CreateExists {
+                name: name.to_owned(),
+            });
+        }
+        Ok(())
     }
 
     /// Git directory this store reads `HEAD` and per-worktree refs from.
@@ -340,7 +393,7 @@ impl FilesRefStore {
         name: &str,
         extras: &BTreeSet<&str>,
         held_lock: Option<&Path>,
-    ) -> std::result::Result<(), RefnameUnavailable> {
+    ) -> StoreResult<()> {
         let packed = self.packed_refs_view().ok().flatten();
         self.verify_create_available_in(
             name,
@@ -360,7 +413,7 @@ impl FilesRefStore {
         held_lock: Option<&Path>,
         packed: Option<&crate::refs::PackedRefsFileView>,
         ancestors: &mut HashMap<String, bool>,
-    ) -> std::result::Result<(), RefnameUnavailable> {
+    ) -> StoreResult<()> {
         let route = self.route(name);
         for base in self.store_bases() {
             let ref_path = base.join(&route.storage_name);
@@ -371,7 +424,8 @@ impl FilesRefStore {
                 return Err(RefnameUnavailable::DescendantExists {
                     blocking,
                     new_ref: name.to_owned(),
-                });
+                }
+                .into());
             }
         }
         let mut blocking = BTreeSet::new();
@@ -404,7 +458,8 @@ impl FilesRefStore {
             }
         }
         blocking.extend(storage_names.iter().map(|s| self.logical_name(s)));
-        verify_name_available_for_create(name, &blocking, extras)
+        verify_name_available_for_create(name, &blocking, extras).map_err(RefStoreError::from)?;
+        self.verify_create_casefold_for_name(name, extras)
     }
 
     /// Directories holding loose refs and logs: the common dir, then the per-worktree
@@ -1037,6 +1092,7 @@ impl FilesRefStore {
             return Ok(None);
         }
         verify_create_conflicts(&existing, updates)?;
+        verify_create_casefold_conflicts(self.refs_ignore_ascii_case(), &existing, updates)?;
 
         let odb = crate::odb::Odb::new(&self.common_dir.join("objects"))
             .with_config_git_dir(self.git_dir.clone());
@@ -2104,12 +2160,28 @@ impl RefStore for FilesRefStore {
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
         self.insert_create_conflict_neighbors(&mut preliminary.refs, &updates)
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+        let ascii_casefold_existing = if self.refs_ignore_ascii_case() {
+            Some(
+                self.load_raw_map_prefix("", None)
+                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?,
+            )
+        } else {
+            None
+        };
+        let ascii_casefold_existing = ascii_casefold_existing.as_ref();
         let updates = if allow_failures {
-            let (accepted, part) = partition_updates_allowing_failures(&preliminary, updates)?;
+            let (accepted, part) = partition_updates_allowing_failures(
+                &preliminary,
+                updates,
+                ascii_casefold_existing,
+            )?;
             rejections.extend(part);
             accepted
         } else {
             verify_create_conflicts(&preliminary.refs, &updates)?;
+            if let Some(existing) = ascii_casefold_existing {
+                verify_create_casefold_conflicts(true, existing, &updates)?;
+            }
             updates
         };
         for rename in &reflog_renames {
@@ -2163,14 +2235,13 @@ impl RefStore for FilesRefStore {
                 available_updates.push(update.clone());
                 continue;
             }
-            if let Err(reason) = self.verify_create_available_in(
+            if let Err(err) = self.verify_create_available_in(
                 &update.name,
                 &extras,
                 ref_locks.get(&update.name).map(PathBuf::as_path),
                 packed.as_ref(),
                 &mut ancestors,
             ) {
-                let err: RefStoreError = reason.into();
                 if allow_failures && is_per_ref_rejectable(&err) {
                     rejections.push((update.name.clone(), err));
                     continue;
@@ -3194,18 +3265,16 @@ mod tests {
             "refs/tags/v1/x",
             "refs/tags/v2",
         ] {
+            let extras_ref: BTreeSet<&str> = extras.iter().map(String::as_str).collect();
             assert_eq!(
-                refs.verify_create_available(
-                    name,
-                    &extras.iter().map(String::as_str).collect(),
-                    None
-                ),
+                refs.verify_create_available(name, &extras_ref, None),
                 crate::refs::verify_refname_available_for_create(
                     path,
                     name,
                     &extras,
                     &HashSet::new()
-                ),
+                )
+                .map_err(RefStoreError::from),
                 "{name}"
             );
         }

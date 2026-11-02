@@ -37,7 +37,7 @@ type PartitionUpdatesResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
 
 pub use super::apply::RefBatchState;
 pub use super::transaction::expected_matches;
-pub use super::validation::verify_create_conflicts;
+pub use super::validation::{verify_create_casefold_conflicts, verify_create_conflicts};
 
 /// Reject `name` when Git refuses to store it (path traversal, illegal components, a
 /// `.lock` suffix, an empty `refs/` name, …).
@@ -195,8 +195,12 @@ fn names_branch(name: &str) -> bool {
 pub(crate) fn check_transaction_updates(
     state: &RefBatchState,
     updates: &[RefUpdate],
+    ascii_casefold_existing: Option<&BTreeMap<String, RawRef>>,
 ) -> Result<(), RefStoreError> {
     verify_create_conflicts(&state.refs, updates)?;
+    if let Some(existing) = ascii_casefold_existing {
+        verify_create_casefold_conflicts(true, existing, updates)?;
+    }
     simulate_batch_apply(state, updates, &[], &[])
 }
 
@@ -207,6 +211,7 @@ pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
         err,
         RefStoreError::ExpectedMismatch { .. }
             | RefStoreError::NameUnavailable { .. }
+            | RefStoreError::CreateExists { .. }
             | RefStoreError::MissingObject { .. }
             | RefStoreError::NotACommit { .. }
     )
@@ -219,13 +224,18 @@ pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
 pub fn partition_updates_allowing_failures(
     state: &RefBatchState,
     updates: Vec<RefUpdate>,
+    ascii_casefold_existing: Option<&BTreeMap<String, RawRef>>,
 ) -> Result<PartitionUpdatesResult, RefStoreError> {
     let mut working = state.clone();
     let mut accepted = Vec::with_capacity(updates.len());
     let mut rejected = Vec::new();
     for update in updates {
         let name = update.name.clone();
-        match check_transaction_updates(&working, std::slice::from_ref(&update)) {
+        match check_transaction_updates(
+            &working,
+            std::slice::from_ref(&update),
+            ascii_casefold_existing,
+        ) {
             Ok(()) => {
                 apply_update(&mut working, &update)?;
                 accepted.push(update);

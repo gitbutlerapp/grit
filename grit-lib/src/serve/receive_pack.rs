@@ -270,6 +270,9 @@ pub enum RefUpdateRefusal {
         /// The target branch's name, without `refs/heads/`.
         target: String,
     },
+    /// A create collided with an existing ref under ASCII case folding.
+    #[error("reference already exists")]
+    ReferenceAlreadyExists,
     /// Writing the ref failed after every check passed.
     #[error("failed to update ref: {0}")]
     RefStore(String),
@@ -1169,10 +1172,10 @@ fn apply_commands_with_hooks(
     let ref_lock_wait = store.ref_lock_wait();
     if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
-        if let Err(e) =
+        if let Err(crate::error::Error::RefStore(e)) =
             crate::refs::commit_ref_updates_on_store_with_wait(store, &batch, || ref_lock_wait)
         {
-            let refusal = RefUpdateRefusal::RefStore(e.to_string());
+            let refusal = ref_update_refusal_from_store(&e);
             for (idx, _) in pending {
                 if results[idx].error.is_none() {
                     results[idx].error = Some(refusal.clone());
@@ -1180,8 +1183,8 @@ fn apply_commands_with_hooks(
             }
         }
     } else {
-        for (idx, message) in commit_receive_ref_updates_on_store(store, pending, ref_lock_wait) {
-            results[idx].error = Some(RefUpdateRefusal::RefStore(message));
+        for (idx, refusal) in commit_receive_ref_updates_on_store(store, pending, ref_lock_wait) {
+            results[idx].error = Some(refusal);
         }
     }
 
@@ -1370,11 +1373,20 @@ fn receive_updates_eligible_for_initial_packed(updates: &[crate::refs::store::Re
 /// Plain creates use the initial packed-refs path; mixed batches use a regular transaction.
 /// When a batch fails, fall back to a non-atomic batch (one reftable table write per phase)
 /// so sibling updates still commit while individual refs can be rejected.
+fn ref_update_refusal_from_store(err: &crate::refs::store::RefStoreError) -> RefUpdateRefusal {
+    match err {
+        crate::refs::store::RefStoreError::CreateExists { .. } => {
+            RefUpdateRefusal::ReferenceAlreadyExists
+        }
+        other => RefUpdateRefusal::RefStore(other.to_string()),
+    }
+}
+
 fn commit_receive_ref_updates_on_store(
     store: &dyn crate::refs::store::RefStore,
     pending: Vec<(usize, crate::refs::store::RefUpdate)>,
     ref_lock_wait: crate::lockfile::LockWait,
-) -> Vec<(usize, String)> {
+) -> Vec<(usize, RefUpdateRefusal)> {
     if pending.is_empty() {
         return Vec::new();
     }
@@ -1394,11 +1406,26 @@ fn commit_receive_ref_updates_on_store(
         Ok(outcomes) => indices
             .into_iter()
             .zip(outcomes)
-            .filter_map(|(idx, outcome)| outcome.result.err().map(|e| (idx, e.to_string())))
+            .filter_map(|(idx, outcome)| {
+                outcome
+                    .result
+                    .err()
+                    .map(|e| (idx, ref_update_refusal_from_store(&e)))
+            })
             .collect(),
         Err(e) => indices
             .into_iter()
-            .map(|idx| (idx, e.to_string()))
+            .map(|idx| {
+                (
+                    idx,
+                    match &e {
+                        crate::error::Error::RefStore(store) => {
+                            ref_update_refusal_from_store(store)
+                        }
+                        other => RefUpdateRefusal::RefStore(other.to_string()),
+                    },
+                )
+            })
             .collect(),
     }
 }
@@ -1821,6 +1848,10 @@ mod tests {
             (
                 RefUpdateRefusal::RefStore("locked".into()),
                 "failed to update ref: locked",
+            ),
+            (
+                RefUpdateRefusal::ReferenceAlreadyExists,
+                "reference already exists",
             ),
         ];
         for (refusal, wire) in cases {

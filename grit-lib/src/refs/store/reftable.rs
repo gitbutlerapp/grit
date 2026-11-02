@@ -618,11 +618,11 @@ impl RefStore for ReftableRefStore {
             };
             let group = if allow_failures {
                 let (accepted, group_rejections) =
-                    partition_updates_allowing_failures(&snapshot, group)?;
+                    partition_updates_allowing_failures(&snapshot, group, None)?;
                 rejections.extend(group_rejections);
                 accepted
             } else {
-                check_transaction_updates(&snapshot, &group)?;
+                check_transaction_updates(&snapshot, &group, None)?;
                 group
             };
             let refs = snapshot.refs;
