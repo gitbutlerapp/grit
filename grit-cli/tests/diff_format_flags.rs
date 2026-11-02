@@ -1,7 +1,7 @@
 //! CLI tests for `grit diff --stat`, `--numstat`, `--name-only`, `--name-status`.
 
 use grit_test_support::cli_fixture::CliFixture;
-use grit_test_support::{git, grit};
+use grit_test_support::{git, git_cmd, grit};
 
 #[test]
 fn diff_detail_flags_conflict() {
@@ -403,4 +403,116 @@ fn name_status_with_default_renames_reads_no_blobs_when_nothing_pairs() {
     let files = value["files"].as_array().expect("files");
     assert_eq!(files.len(), 14);
     assert!(files.iter().all(|f| f["status"] == "modified"), "{value}");
+}
+
+/// Binary `--stat` rows carry old and new byte sizes, and a zero-change text row
+/// has no trailing space. Compared with system `git diff HEAD --stat`.
+#[test]
+fn diff_stat_binary_sizes_match_git() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-b", "main"]);
+    std::fs::write(root.join("edit.bin"), [0_u8, 1, 2, 3, 4]).expect("edit");
+    std::fs::write(root.join("gone.bin"), vec![0_u8; 50]).expect("gone");
+    std::fs::write(root.join("keep.txt"), b"keep\n").expect("keep");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "base"]);
+
+    std::fs::write(root.join("edit.bin"), [0_u8, 9]).expect("edit");
+    std::fs::remove_file(root.join("gone.bin")).expect("delete");
+    std::fs::write(root.join("new.bin"), vec![0_u8; 20]).expect("new");
+    git(root, &["add", "--", "new.bin"]);
+    let keep = root.join("keep.txt");
+    let mut perms = std::fs::metadata(&keep).expect("meta").permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&keep, perms).expect("chmod");
+
+    let git_out = git_cmd(&["diff", "HEAD", "--stat"]).in_dir(root).exec();
+    assert!(
+        matches!(git_out.status, Some(0 | 1)),
+        "{}",
+        git_out.dump("git diff HEAD --stat")
+    );
+    let grit_out = grit(root, &["diff", "--stat"]);
+    assert!(grit_out.ok(), "{}", grit_out.dump("grit diff --stat"));
+
+    let file_lines = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter(|line| line.contains(" | "))
+            .map(str::to_owned)
+            .collect()
+    };
+    let git_files = file_lines(&git_out.stdout);
+    let grit_files = file_lines(&grit_out.stdout);
+    assert_eq!(
+        grit_files, git_files,
+        "git:\n{}\ngrit:\n{}",
+        git_out.stdout, grit_out.stdout
+    );
+    assert!(
+        grit_files
+            .iter()
+            .any(|line| line.contains("edit.bin") && line.contains("Bin 5 -> 2 bytes")),
+        "{grit_files:?}"
+    );
+    assert!(
+        grit_files
+            .iter()
+            .any(|line| line.contains("gone.bin") && line.contains("Bin 50 -> 0 bytes")),
+        "{grit_files:?}"
+    );
+    assert!(
+        grit_files
+            .iter()
+            .any(|line| line.contains("new.bin") && line.contains("Bin 0 -> 20 bytes")),
+        "{grit_files:?}"
+    );
+    let keep_line = grit_files
+        .iter()
+        .find(|line| line.contains("keep.txt"))
+        .expect("mode-only row");
+    assert!(
+        !keep_line.ends_with(' '),
+        "zero-change row keeps a trailing space: {keep_line:?}"
+    );
+
+    let json = grit(root, &["diff", "--json"]);
+    assert!(json.ok(), "{}", json.dump("diff json"));
+    let value: serde_json::Value = serde_json::from_str(&json.stdout).expect("json");
+    let files = value["files"].as_array().expect("files");
+    let sizes = |name: &str| -> (u64, u64) {
+        let file = files
+            .iter()
+            .find(|file| file["path"] == name)
+            .unwrap_or_else(|| panic!("missing {name} in {value}"));
+        assert_eq!(file["binary"], true, "{file}");
+        (
+            file["old_size"].as_u64().expect("old_size"),
+            file["new_size"].as_u64().expect("new_size"),
+        )
+    };
+    assert_eq!(sizes("edit.bin"), (5, 2));
+    assert_eq!(sizes("gone.bin"), (50, 0));
+    assert_eq!(sizes("new.bin"), (0, 20));
+    let keep_json = files
+        .iter()
+        .find(|file| file["path"] == "keep.txt")
+        .expect("keep.txt");
+    assert!(keep_json.get("old_size").is_none(), "{keep_json}");
+    assert!(keep_json.get("new_size").is_none(), "{keep_json}");
+
+    let stat_json = grit(root, &["diff", "--stat", "--json"]);
+    assert!(stat_json.ok(), "{}", stat_json.dump("stat json"));
+    let stat_value: serde_json::Value = serde_json::from_str(&stat_json.stdout).expect("stat json");
+    let edit = stat_value["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .find(|file| file["path"] == "edit.bin")
+        .expect("edit.bin");
+    assert_eq!(edit["old_size"], 5);
+    assert_eq!(edit["new_size"], 2);
+    assert!(edit.get("stat").is_none(), "{edit}");
 }

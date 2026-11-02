@@ -33,6 +33,16 @@ pub enum DiffDetail {
     NameOnly,
 }
 
+/// Byte sizes to store on a binary [`FileDiff`], or `None` for a text file.
+#[must_use]
+pub(crate) fn binary_size_fields(binary: bool, old: u64, new: u64) -> (Option<u64>, Option<u64>) {
+    if binary {
+        (Some(old), Some(new))
+    } else {
+        (None, None)
+    }
+}
+
 /// Line insertion/deletion counts for one file (`--numstat`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct LineStat {
@@ -81,6 +91,14 @@ pub struct FileDiff {
     pub new_mode: Option<String>,
     /// Either side looks like a binary blob.
     pub binary: bool,
+    /// Old-side size in bytes when [`Self::binary`] is true. An absent side is 0.
+    ///
+    /// `None` for text files and for listings that did not load blob sizes.
+    pub old_size: Option<u64>,
+    /// New-side size in bytes when [`Self::binary`] is true. An absent side is 0.
+    ///
+    /// `None` for text files and for listings that did not load blob sizes.
+    pub new_size: Option<u64>,
     /// Rename/copy similarity (0–100), when applicable.
     pub similarity: Option<u32>,
     /// Line counts when [`DiffDetail::Stat`] was requested.

@@ -4104,8 +4104,10 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::structured::Struct
 pub struct grit_lib::diff::structured::SideBytes
 pub grit_lib::diff::structured::SideBytes::data: alloc::vec::Vec<u8>
 pub grit_lib::diff::structured::SideBytes::encoding_lossy: bool
+pub grit_lib::diff::structured::SideBytes::size: u64
 impl grit_lib::diff::structured::SideBytes
 pub fn grit_lib::diff::structured::SideBytes::from_bytes(alloc::vec::Vec<u8>) -> Self
+pub fn grit_lib::diff::structured::SideBytes::omitted_binary(u64) -> Self
 pub fn grit_lib::diff::structured::SideBytes::text(&self) -> alloc::string::String
 impl core::clone::Clone for grit_lib::diff::structured::SideBytes
 pub fn grit_lib::diff::structured::SideBytes::clone(&self) -> Self
@@ -5075,10 +5077,12 @@ pub grit_lib::diff::FileDiff::line_stat: core::option::Option<grit_lib::diff::Li
 pub grit_lib::diff::FileDiff::new_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::new_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::new_oid: grit_lib::objects::ObjectId
+pub grit_lib::diff::FileDiff::new_size: core::option::Option<u64>
 pub grit_lib::diff::FileDiff::old_encoding_lossy: bool
 pub grit_lib::diff::FileDiff::old_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::FileDiff::old_oid: grit_lib::objects::ObjectId
 pub grit_lib::diff::FileDiff::old_path: core::option::Option<alloc::string::String>
+pub grit_lib::diff::FileDiff::old_size: core::option::Option<u64>
 pub grit_lib::diff::FileDiff::path: alloc::string::String
 pub grit_lib::diff::FileDiff::status: grit_lib::diff::DiffStatus
 impl core::clone::Clone for grit_lib::diff::FileDiff
@@ -5099,7 +5103,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::FileDiff
 pub struct grit_lib::diff::FileStat
 pub grit_lib::diff::FileStat::binary: bool
 pub grit_lib::diff::FileStat::lines: grit_lib::diff::LineStat
+pub grit_lib::diff::FileStat::new_size: core::option::Option<u64>
 pub grit_lib::diff::FileStat::old_path: core::option::Option<alloc::string::String>
+pub grit_lib::diff::FileStat::old_size: core::option::Option<u64>
 pub grit_lib::diff::FileStat::path: alloc::string::String
 pub grit_lib::diff::FileStat::similarity: core::option::Option<u32>
 pub grit_lib::diff::FileStat::status: grit_lib::diff::DiffStatus
@@ -5217,8 +5223,10 @@ pub grit_lib::diff::ListedFileDiff::binary: bool
 pub grit_lib::diff::ListedFileDiff::combined: core::option::Option<grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff>
 pub grit_lib::diff::ListedFileDiff::combined_status: core::option::Option<alloc::string::String>
 pub grit_lib::diff::ListedFileDiff::new_mode: core::option::Option<alloc::string::String>
+pub grit_lib::diff::ListedFileDiff::new_size: core::option::Option<u64>
 pub grit_lib::diff::ListedFileDiff::old_mode: core::option::Option<alloc::string::String>
 pub grit_lib::diff::ListedFileDiff::old_path: core::option::Option<alloc::string::String>
+pub grit_lib::diff::ListedFileDiff::old_size: core::option::Option<u64>
 pub grit_lib::diff::ListedFileDiff::path: alloc::string::String
 pub grit_lib::diff::ListedFileDiff::similarity: core::option::Option<u32>
 pub grit_lib::diff::ListedFileDiff::stat: core::option::Option<grit_lib::diff::LineStat>
@@ -5402,6 +5410,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::TreeDiffContent
 pub struct grit_lib::diff::TreeDiffStructured
 pub grit_lib::diff::TreeDiffStructured::binary: bool
 pub grit_lib::diff::TreeDiffStructured::entry: grit_lib::diff::DiffEntry
+pub grit_lib::diff::TreeDiffStructured::new_size: u64
+pub grit_lib::diff::TreeDiffStructured::old_size: u64
 pub grit_lib::diff::TreeDiffStructured::patch_bytes: core::option::Option<(grit_lib::diff::structured::SideBytes, grit_lib::diff::structured::SideBytes)>
 pub grit_lib::diff::TreeDiffStructured::structured: grit_lib::diff::structured::StructuredFileDiff
 impl core::clone::Clone for grit_lib::diff::TreeDiffStructured

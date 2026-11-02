@@ -24,19 +24,43 @@ pub(crate) use line_engine::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SideBytes {
     /// Raw file contents.
+    ///
+    /// Empty when a binary payload was omitted. [`Self::size`] still holds the length.
     pub data: Vec<u8>,
     /// `true` when [`SideBytes::text`] used lossy UTF-8 decoding.
     pub encoding_lossy: bool,
+    /// Content length in bytes.
+    ///
+    /// Equals `data.len()` when the payload is kept. When a binary payload is omitted,
+    /// this is the length already known from the object header or from the bytes just
+    /// classified, so stat output does not read the blob again.
+    pub size: u64,
 }
 
 impl SideBytes {
     /// Decode as text for diffing (NUL in the first 8 KiB ⇒ treat as binary upstream).
     #[must_use]
     pub fn from_bytes(data: Vec<u8>) -> Self {
+        let size = data.len() as u64;
         let encoding_lossy = !data.is_empty() && std::str::from_utf8(&data).is_err();
         Self {
             data,
             encoding_lossy,
+            size,
+        }
+    }
+
+    /// A binary side whose payload was not kept.
+    ///
+    /// # Parameters
+    ///
+    /// - `size`: content length already known (object size or the dropped buffer's length).
+    #[must_use]
+    pub fn omitted_binary(size: u64) -> Self {
+        Self {
+            data: Vec::new(),
+            encoding_lossy: false,
+            size,
         }
     }
 

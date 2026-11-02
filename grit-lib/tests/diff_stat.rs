@@ -97,6 +97,12 @@ fn stat_and_patch_details_give_the_same_diffstat() {
         }
     );
     assert_eq!(from_stat.max_changes(), 3);
+    let bin = &from_stat.files()[0];
+    assert_eq!(bin.old_size, Some(3));
+    assert_eq!(bin.new_size, Some(4));
+    assert_eq!(from_stat.files()[1].old_size, None);
+    assert_eq!(from_patch.files()[0].old_size, Some(3));
+    assert_eq!(from_patch.files()[0].new_size, Some(4));
     assert_eq!(
         from_stat.files()[1].lines.bar(from_stat.max_changes(), 40),
         StatBar { plus: 2, minus: 1 }
@@ -115,6 +121,8 @@ fn diffstat_from_rows_sums_totals_in_order() {
         old_path: None,
         status: DiffStatus::Modified,
         binary: false,
+        old_size: None,
+        new_size: None,
         similarity: None,
         lines: LineStat {
             insertions,

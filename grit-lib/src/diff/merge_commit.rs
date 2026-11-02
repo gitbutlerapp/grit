@@ -74,6 +74,8 @@ fn file_diff_from_combined_path(path: CombinedDiffPath) -> FileDiff {
         old_mode: None,
         new_mode: None,
         binary: false,
+        old_size: None,
+        new_size: None,
         similarity: None,
         stat: None,
         structured: None,
@@ -269,6 +271,8 @@ fn combined_commit_diff_files(
                 old_mode: None,
                 new_mode: None,
                 binary: false,
+                old_size: None,
+                new_size: None,
                 similarity: None,
                 stat: None,
                 structured: None,
@@ -359,6 +363,11 @@ fn combined_path_file_diff(
     if binary {
         let parent_oids: Vec<ObjectId> = path.parents.iter().map(|s| s.oid).collect();
         let _patch = format_combined_binary(&path.path, &parent_oids, &path.merge_oid, 7, true);
+        let old_size = parent_blobs
+            .first()
+            .map(|blob| blob.len() as u64)
+            .unwrap_or(0);
+        let new_size = result_blob.len() as u64;
         return Ok((
             FileDiff {
                 path: path.path.clone(),
@@ -367,6 +376,8 @@ fn combined_path_file_diff(
                 old_mode: None,
                 new_mode: None,
                 binary: true,
+                old_size: Some(old_size),
+                new_size: Some(new_size),
                 similarity: None,
                 stat: if detail == DiffDetail::Stat {
                     Some(LineStat::default())
@@ -404,6 +415,8 @@ fn combined_path_file_diff(
             old_mode: None,
             new_mode: None,
             binary: false,
+            old_size: None,
+            new_size: None,
             similarity: None,
             stat,
             structured: None,

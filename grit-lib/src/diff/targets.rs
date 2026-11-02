@@ -80,6 +80,14 @@ pub struct FileDiff {
     pub new_oid: ObjectId,
     /// True when either side was treated as binary (NUL in the first 8 KiB).
     pub binary: bool,
+    /// Old-side size in bytes when [`Self::binary`] is true. An absent side is 0.
+    ///
+    /// `None` for text files.
+    pub old_size: Option<u64>,
+    /// New-side size in bytes when [`Self::binary`] is true. An absent side is 0.
+    ///
+    /// `None` for text files.
+    pub new_size: Option<u64>,
     /// True when blob content changed (not a mode-only touch on the same OID).
     pub content_changed: bool,
     /// Old side was decoded with lossy UTF-8.
@@ -612,6 +620,8 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
         old_oid: e.old_oid,
         new_oid: e.new_oid,
         binary: t.binary,
+        old_size: t.binary.then_some(t.old_size),
+        new_size: t.binary.then_some(t.new_size),
         content_changed: e.old_oid != e.new_oid,
         old_encoding_lossy: t.structured.old_encoding_lossy,
         new_encoding_lossy: t.structured.new_encoding_lossy,
@@ -649,6 +659,8 @@ fn build_file_diff(fc: &FileChange, diff_options: DiffOptions) -> FileDiff {
         old_oid: fc.old_oid,
         new_oid: fc.new_oid,
         binary: fc.binary,
+        old_size: fc.binary.then_some(fc.old_bytes.size),
+        new_size: fc.binary.then_some(fc.new_bytes.size),
         content_changed: fc.content_changed,
         old_encoding_lossy: structured.old_encoding_lossy,
         new_encoding_lossy: structured.new_encoding_lossy,
@@ -1390,6 +1402,8 @@ mod tests {
             old_oid: ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap(),
             new_oid: ObjectId::from_hex("0000000000000000000000000000000000000002").unwrap(),
             binary: false,
+            old_size: None,
+            new_size: None,
             content_changed: true,
             old_encoding_lossy: false,
             new_encoding_lossy: false,
@@ -1413,6 +1427,8 @@ mod tests {
             old_oid: oid,
             new_oid: oid,
             binary: false,
+            old_size: None,
+            new_size: None,
             content_changed: false,
             old_encoding_lossy: false,
             new_encoding_lossy: false,
@@ -1436,6 +1452,8 @@ mod tests {
             old_oid: oid,
             new_oid: oid,
             binary: false,
+            old_size: None,
+            new_size: None,
             content_changed: false,
             old_encoding_lossy: false,
             new_encoding_lossy: false,
@@ -1458,6 +1476,8 @@ mod tests {
             old_oid: ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap(),
             new_oid: ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap(),
             binary: false,
+            old_size: None,
+            new_size: None,
             content_changed: false,
             old_encoding_lossy: false,
             new_encoding_lossy: false,

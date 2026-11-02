@@ -632,6 +632,8 @@ fn build_file_diff(change: &FileChange, opts: &DiffOptions) -> FileDiff {
         old_oid: change.old_oid,
         new_oid: change.new_oid,
         binary: change.binary,
+        old_size: change.binary.then_some(change.old_bytes.size),
+        new_size: change.binary.then_some(change.new_bytes.size),
         content_changed: change.content_changed,
         old_encoding_lossy: structured.old_encoding_lossy,
         new_encoding_lossy: structured.new_encoding_lossy,

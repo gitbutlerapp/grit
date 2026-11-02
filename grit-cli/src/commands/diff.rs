@@ -159,6 +159,18 @@ pub struct FileDiff {
     #[schemars(default)]
     pub new_encoding_lossy: bool,
     pub binary: bool,
+    /// Old-side size in bytes when `binary` is true. An added file is 0.
+    ///
+    /// Omitted from JSON for text files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub old_size: Option<u64>,
+    /// New-side size in bytes when `binary` is true. A deleted file is 0.
+    ///
+    /// Omitted from JSON for text files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub new_size: Option<u64>,
     /// True when the blob OID changed (not a mode-only touch on the same content).
     #[serde(skip_serializing)]
     #[schemars(skip)]
@@ -461,6 +473,8 @@ fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -
             old_encoding_lossy: fc.old_bytes.encoding_lossy,
             new_encoding_lossy: fc.new_bytes.encoding_lossy,
             binary: fc.binary,
+            old_size: fc.binary.then_some(fc.old_bytes.size),
+            new_size: fc.binary.then_some(fc.new_bytes.size),
             content_changed: fc.content_changed,
             similarity: fc.similarity,
             stat: None,
@@ -640,6 +654,8 @@ fn lib_file_to_cli(f: ListedFileDiff, detail: DiffDetail) -> FileDiff {
         old_encoding_lossy,
         new_encoding_lossy,
         binary: f.binary,
+        old_size: f.old_size,
+        new_size: f.new_size,
         content_changed,
         similarity: f.similarity,
         stat: f.stat.map(LineStatJson::from),
@@ -1242,6 +1258,8 @@ fn file_diff_from_lib(f: grit_lib::diff::FileDiff, detail: DiffDetail) -> FileDi
         old_encoding_lossy: f.old_encoding_lossy,
         new_encoding_lossy: f.new_encoding_lossy,
         binary: f.binary,
+        old_size: f.old_size,
+        new_size: f.new_size,
         content_changed: f.content_changed,
         similarity: None,
         stat,
@@ -1274,6 +1292,8 @@ fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
         old_encoding_lossy: structured.old_encoding_lossy,
         new_encoding_lossy: structured.new_encoding_lossy,
         binary: t.binary,
+        old_size: t.binary.then_some(t.old_size),
+        new_size: t.binary.then_some(t.new_size),
         content_changed: e.old_oid != e.new_oid,
         similarity,
         stat: None,
@@ -1482,6 +1502,8 @@ fn outcome_stat_from_changes(
                 old_encoding_lossy: fc.old_bytes.encoding_lossy,
                 new_encoding_lossy: fc.new_bytes.encoding_lossy,
                 binary: fc.binary,
+                old_size: fc.binary.then_some(fc.old_bytes.size),
+                new_size: fc.binary.then_some(fc.new_bytes.size),
                 content_changed: fc.content_changed,
                 similarity: fc.similarity,
                 stat,
@@ -1646,6 +1668,8 @@ fn build_file_diff(
         old_encoding_lossy: structured.old_encoding_lossy,
         new_encoding_lossy: structured.new_encoding_lossy,
         binary: fc.binary,
+        old_size: fc.binary.then_some(fc.old_bytes.size),
+        new_size: fc.binary.then_some(fc.new_bytes.size),
         content_changed: fc.content_changed,
         similarity: fc.similarity,
         stat: None,

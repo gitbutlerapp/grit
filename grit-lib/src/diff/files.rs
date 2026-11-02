@@ -5,10 +5,8 @@ use crate::error::Result;
 use crate::odb::Odb;
 use crate::parallel::ThreadPolicy;
 
-use super::detail::{DiffDetail, DiffTotals, FileDiff, LineStat};
-use super::tree_content::{
-    tree_diff_stat_parallel, tree_diff_structured_parallel, TreeDiffStructured,
-};
+use super::detail::{binary_size_fields, DiffDetail, DiffTotals, FileDiff};
+use super::tree_content::{tree_diff_stat_rows, tree_diff_structured_parallel, TreeDiffStructured};
 use super::{
     detect_renames_with_policy, DetectRenamesOptions, DiffEntry, DiffOptions, DiffStatus,
     InexactRenameDetectionSkipped,
@@ -93,6 +91,8 @@ impl FileDiff {
             old_mode: entry.old_mode.octal_if_present(),
             new_mode: entry.new_mode.octal_if_present(),
             binary: false,
+            old_size: None,
+            new_size: None,
             similarity,
             stat: None,
             structured: None,
@@ -104,6 +104,7 @@ impl FileDiff {
 
 fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
     let path = path_from_entry(&t.entry);
+    let (old_size, new_size) = binary_size_fields(t.binary, t.old_size, t.new_size);
     FileDiff {
         path: path.clone(),
         old_path: old_path_from_entry(&t.entry, &path),
@@ -111,6 +112,8 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
         old_mode: t.structured.old_mode.clone(),
         new_mode: t.structured.new_mode.clone(),
         binary: t.binary,
+        old_size,
+        new_size,
         similarity: t.entry.rename_similarity(),
         stat: None,
         structured: Some(t.structured),
@@ -119,17 +122,20 @@ fn file_diff_from_structured(t: TreeDiffStructured) -> FileDiff {
     }
 }
 
-fn file_diff_from_stat(entry: DiffEntry, binary: bool, stat: Option<LineStat>) -> FileDiff {
-    let path = path_from_entry(&entry);
+fn file_diff_from_stat(row: super::tree_content::TreeDiffStatRow) -> FileDiff {
+    let path = path_from_entry(&row.entry);
+    let (old_size, new_size) = binary_size_fields(row.binary, row.old_size, row.new_size);
     FileDiff {
         path: path.clone(),
-        old_path: old_path_from_entry(&entry, &path),
-        status: entry.status,
-        old_mode: entry.old_mode.octal_if_present(),
-        new_mode: entry.new_mode.octal_if_present(),
-        binary,
-        similarity: entry.rename_similarity(),
-        stat,
+        old_path: old_path_from_entry(&row.entry, &path),
+        status: row.entry.status,
+        old_mode: row.entry.old_mode.octal_if_present(),
+        new_mode: row.entry.new_mode.octal_if_present(),
+        binary: row.binary,
+        old_size,
+        new_size,
+        similarity: row.entry.rename_similarity(),
+        stat: row.stat,
         structured: None,
         combined: None,
         combined_status: None,
@@ -186,11 +192,8 @@ pub fn build_file_diffs(
             })
         }
         DiffDetail::Stat => {
-            let rows = tree_diff_stat_parallel(odb, entries, config, thread_policy, diff_options)?;
-            let files: Vec<FileDiff> = rows
-                .into_iter()
-                .map(|(entry, binary, stat)| file_diff_from_stat(entry, binary, stat))
-                .collect();
+            let rows = tree_diff_stat_rows(odb, entries, config, thread_policy, diff_options)?;
+            let files: Vec<FileDiff> = rows.into_iter().map(file_diff_from_stat).collect();
             let totals = Some(DiffTotals::from_files(&files));
             Ok(DiffFilesOutput {
                 files,

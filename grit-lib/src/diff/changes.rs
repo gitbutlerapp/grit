@@ -179,7 +179,9 @@ pub(crate) struct WorktreeSide<'a> {
 /// Load one entry's sides: the old side from the object database, the new side from the
 /// working tree when `worktree` is given, otherwise from the object database.
 ///
-/// A binary new side makes the whole change binary, so the old blob is then not read at all.
+/// A binary new side makes the whole change binary, so the old blob payload is not inflated.
+/// Its byte length is still recorded from the index entry when that entry names the same blob,
+/// or from the object header otherwise.
 pub(crate) fn load_change(
     odb: &Odb,
     entry: DiffEntry,
@@ -190,7 +192,7 @@ pub(crate) fn load_change(
         None => load_new_side(odb, &entry, None)?,
     };
     let (old_bytes, old_binary) = if new_binary {
-        (SideBytes::from_bytes(Vec::new()), false)
+        old_side_size_only(odb, &entry, worktree)?
     } else {
         load_old_side(odb, &entry, None)?
     };
@@ -200,6 +202,44 @@ pub(crate) fn load_change(
         new_bytes,
         old_binary || new_binary,
     ))
+}
+
+/// Old side for a binary new side: length only, no payload inflation.
+fn old_side_size_only(
+    odb: &Odb,
+    entry: &DiffEntry,
+    worktree: Option<&WorktreeSide<'_>>,
+) -> Result<(SideBytes, bool)> {
+    if entry.old_mode == FileMode::ABSENT || entry.old_oid.is_zero() {
+        return Ok((SideBytes::from_bytes(Vec::new()), false));
+    }
+    if entry.old_mode == FileMode::GITLINK {
+        return load_old_side(odb, entry, None);
+    }
+    if let Some(size) = index_cached_blob_size(entry, worktree) {
+        return Ok((SideBytes::omitted_binary(size), false));
+    }
+    let size = odb.read_info(&entry.old_oid)?.size;
+    Ok((SideBytes::omitted_binary(size), false))
+}
+
+/// Index stat size when the stage-0 entry still names `entry.old_oid`.
+///
+/// A zero cached size is trusted only for the empty blob; a racy smudge leaves size 0 on a
+/// real blob and must not be used.
+fn index_cached_blob_size(entry: &DiffEntry, worktree: Option<&WorktreeSide<'_>>) -> Option<u64> {
+    let side = worktree?;
+    let path = entry.old_path.as_deref().or(entry.new_path.as_deref())?;
+    let ie = side
+        .index
+        .get(&crate::repo_relpath::storage_bytes(path), 0)?;
+    if ie.oid != entry.old_oid {
+        return None;
+    }
+    if ie.size == 0 && !ie.oid.is_empty_blob() {
+        return None;
+    }
+    Some(u64::from(ie.size))
 }
 
 /// Load every entry with [`load_change`], in order.
