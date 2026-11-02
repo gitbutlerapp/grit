@@ -2264,6 +2264,33 @@ impl Odb {
         PackStore::with_context(store, f)
     }
 
+    /// Run `f` with pack read caches for `objects_dir` without nesting away from the primary
+    /// pack-read context (alternate directories during a primary object walk).
+    pub(crate) fn with_objects_dir_pack_read_access<R>(
+        &self,
+        objects_dir: &Path,
+        f: impl FnOnce() -> R,
+    ) -> R {
+        if PackStore::read_context_matches_objects_dir(objects_dir) {
+            f()
+        } else if PackStore::has_context() {
+            pack::with_alternate_pack_store(self.pack_store_for(objects_dir), f)
+        } else {
+            PackStore::with_context(self.pack_store_for(objects_dir), f)
+        }
+    }
+
+    /// Skip probing the empty primary store when objects are expected from alternates.
+    ///
+    /// A later primary retry still runs on total miss ([`Self::object_not_found_after_primary_revalidate`])
+    /// so locally materialized primary loose objects remain visible.
+    fn skip_primary_for_alternate_backed_reads(&self) -> bool {
+        self.custom_primary.is_none()
+            && self.alternates_enabled
+            && self.alternate_object_lookup_needed()
+            && crate::pack::pack_cache::primary_has_verified_empty_listing(&self.objects_dir)
+    }
+
     /// Run a read against the primary store.
     ///
     /// Only the files primary reads packs under `objects/`, so only it gets this database's
@@ -2284,7 +2311,22 @@ impl Odb {
     /// Use for batch workloads (for example `cat-file --batch`) so each object read does not
     /// reinstall thread-local pack context.
     pub fn with_pack_read_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.with_pack_store_for(&self.objects_dir, f)
+        self.with_pack_store_for(&self.objects_dir, || {
+            self.pin_shared_alternate_pack_store_if_needed();
+            f()
+        })
+    }
+
+    fn pin_shared_alternate_pack_store_if_needed(&self) {
+        if !self.skip_primary_for_alternate_backed_reads() {
+            return;
+        }
+        let alts = self.file_alternate_dirs_snapshot();
+        let Some(alt) = alts.first() else {
+            return;
+        };
+        let store = self.pack_store_for(alt);
+        pack::with_alternate_pack_store(store, || ());
     }
 
     /// Install the pack read context of [`Self::with_pack_read_context`] on the current
@@ -2545,21 +2587,23 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
-        let primary = self.primary_writable()?;
-        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
-        let read_primary = || primary.read(oid);
-        match self.with_primary_read_context(read_primary) {
-            Ok(Some(obj)) => return self.finish_session_loose_read(oid, obj, remember),
-            Ok(None) => {}
-            Err(err)
-                if files_primary
-                    .as_ref()
-                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
-            {
-                unreadable_local_loose = Some(err);
+        if !self.skip_primary_for_alternate_backed_reads() {
+            let primary = self.primary_writable()?;
+            let files_primary = self.primary().ok();
+            let read_primary = || primary.read(oid);
+            match self.with_primary_read_context(read_primary) {
+                Ok(Some(obj)) => return self.finish_session_loose_read(oid, obj, remember),
+                Ok(None) => {}
+                Err(err)
+                    if files_primary
+                        .as_ref()
+                        .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+                {
+                    unreadable_local_loose = Some(err);
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
 
         if let Some(obj) = self.try_read_extra_sources(oid)? {
@@ -2634,21 +2678,23 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
-        let primary = self.primary_writable()?;
-        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
-        let read_primary = || primary.read(oid);
-        match self.with_primary_read_context(read_primary) {
-            Ok(Some(obj)) => return Ok(Some(self.finish_session_loose_read(oid, obj, true)?)),
-            Ok(None) => {}
-            Err(err)
-                if files_primary
-                    .as_ref()
-                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
-            {
-                unreadable_local_loose = Some(err);
+        if !self.skip_primary_for_alternate_backed_reads() {
+            let primary = self.primary_writable()?;
+            let files_primary = self.primary().ok();
+            let read_primary = || primary.read(oid);
+            match self.with_primary_read_context(read_primary) {
+                Ok(Some(obj)) => return Ok(Some(self.finish_session_loose_read(oid, obj, true)?)),
+                Ok(None) => {}
+                Err(err)
+                    if files_primary
+                        .as_ref()
+                        .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+                {
+                    unreadable_local_loose = Some(err);
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
 
         if let Some(obj) = self.try_read_extra_sources(oid)? {
@@ -2743,21 +2789,23 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
-        let primary = self.primary_writable()?;
-        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
-        let read_primary = || primary.read_into(oid, buf);
-        match self.with_primary_read_context(read_primary) {
-            Ok(Some(kind)) => return Ok(kind),
-            Ok(None) => {}
-            Err(err)
-                if files_primary
-                    .as_ref()
-                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
-            {
-                unreadable_local_loose = Some(err);
+        if !self.skip_primary_for_alternate_backed_reads() {
+            let primary = self.primary_writable()?;
+            let files_primary = self.primary().ok();
+            let read_primary = || primary.read_into(oid, buf);
+            match self.with_primary_read_context(read_primary) {
+                Ok(Some(kind)) => return Ok(kind),
+                Ok(None) => {}
+                Err(err)
+                    if files_primary
+                        .as_ref()
+                        .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+                {
+                    unreadable_local_loose = Some(err);
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
 
         if let Some(kind) = self.try_read_into_extra_sources(oid, buf)? {
@@ -2931,21 +2979,23 @@ impl Odb {
 
         self.sync_delta_base_cache_limit();
 
-        let primary = self.primary_writable()?;
-        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
-        let read_primary = || primary.read_into(oid, buf);
-        match self.with_primary_read_context(read_primary) {
-            Ok(Some(kind)) => return Ok(Some(kind)),
-            Ok(None) => {}
-            Err(err)
-                if files_primary
-                    .as_ref()
-                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
-            {
-                unreadable_local_loose = Some(err);
+        if !self.skip_primary_for_alternate_backed_reads() {
+            let primary = self.primary_writable()?;
+            let files_primary = self.primary().ok();
+            let read_primary = || primary.read_into(oid, buf);
+            match self.with_primary_read_context(read_primary) {
+                Ok(Some(kind)) => return Ok(Some(kind)),
+                Ok(None) => {}
+                Err(err)
+                    if files_primary
+                        .as_ref()
+                        .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+                {
+                    unreadable_local_loose = Some(err);
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
 
         if let Some(kind) = self.try_read_into_extra_sources(oid, buf)? {
@@ -3041,20 +3091,22 @@ impl Odb {
             self.ensure_midx_prepared();
         }
 
-        let primary = self.primary_writable()?;
-        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
-        match primary.read_info(oid) {
-            Ok(Some(info)) => return Ok(info),
-            Ok(None) => {}
-            Err(err)
-                if files_primary
-                    .as_ref()
-                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
-            {
-                unreadable_local_loose = Some(err);
+        if !self.skip_primary_for_alternate_backed_reads() {
+            let primary = self.primary_writable()?;
+            let files_primary = self.primary().ok();
+            match primary.read_info(oid) {
+                Ok(Some(info)) => return Ok(info),
+                Ok(None) => {}
+                Err(err)
+                    if files_primary
+                        .as_ref()
+                        .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+                {
+                    unreadable_local_loose = Some(err);
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
 
         if let Some(info) = self.try_read_info_extra_sources(oid)? {
@@ -3176,20 +3228,22 @@ impl Odb {
             self.ensure_midx_prepared();
         }
 
-        let primary = self.primary_writable()?;
-        let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
-        match primary.read_info(oid) {
-            Ok(Some(info)) => return Ok(Some(info)),
-            Ok(None) => {}
-            Err(err)
-                if files_primary
-                    .as_ref()
-                    .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
-            {
-                unreadable_local_loose = Some(err);
+        if !self.skip_primary_for_alternate_backed_reads() {
+            let primary = self.primary_writable()?;
+            let files_primary = self.primary().ok();
+            match primary.read_info(oid) {
+                Ok(Some(info)) => return Ok(Some(info)),
+                Ok(None) => {}
+                Err(err)
+                    if files_primary
+                        .as_ref()
+                        .is_some_and(|p| p.local_loose_exists_but_unreadable(oid, &err)) =>
+                {
+                    unreadable_local_loose = Some(err);
+                }
+                Err(err) => return Err(err),
             }
-            Err(err) => return Err(err),
         }
 
         if let Some(info) = self.try_read_info_extra_sources(oid)? {

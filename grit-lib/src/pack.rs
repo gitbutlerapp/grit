@@ -209,15 +209,33 @@ pub(crate) mod pack_cache {
         }
     }
 
+    pub(crate) fn clear_alternate_pack_read_store() {
+        ALTERNATE_PACK_READ_STORE.with(|cell| *cell.borrow_mut() = None);
+    }
+
     pub(crate) fn with_alternate_pack_store<R>(
         store: std::sync::Arc<crate::pack_store::PackStore>,
         f: impl FnOnce() -> R,
     ) -> R {
+        if crate::pack_store::PackStore::has_context()
+            && !crate::pack_store::PackStore::read_context_matches_objects_dir(store.objects_dir())
+        {
+            ALTERNATE_PACK_READ_STORE.with(|cell| {
+                let mut slot = cell.borrow_mut();
+                if slot
+                    .as_ref()
+                    .is_none_or(|active| !std::sync::Arc::ptr_eq(active, &store))
+                {
+                    *slot = Some(store);
+                }
+            });
+            return f();
+        }
         let _guard = AlternatePackReadStoreGuard::install(store);
         f()
     }
 
-    fn alternate_read_store() -> Option<std::sync::Arc<crate::pack_store::PackStore>> {
+    pub(crate) fn alternate_read_store() -> Option<std::sync::Arc<crate::pack_store::PackStore>> {
         ALTERNATE_PACK_READ_STORE.with(|cell| cell.borrow().clone())
     }
 
@@ -238,6 +256,25 @@ pub(crate) mod pack_cache {
             return true;
         }
         alternate_read_store().is_some_and(|store| store.objects_dir() == objects_dir)
+    }
+
+    /// Cached per-thread: primary `objects/` has a trusted verified-empty pack listing.
+    pub(crate) fn primary_has_verified_empty_listing(objects_dir: &Path) -> bool {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return false;
+        }
+        thread_local! {
+            static PRIMARY_EMPTY: std::cell::Cell<Option<bool>> =
+                const { std::cell::Cell::new(None) };
+        }
+        PRIMARY_EMPTY.with(|cell| {
+            if let Some(hit) = cell.get() {
+                return hit;
+            }
+            let hit = trusted_verified_empty_pack_listing(objects_dir);
+            cell.set(Some(hit));
+            hit
+        })
     }
 
     pub(crate) fn set_skip_store_tls_release(skip: bool) {
@@ -529,9 +566,10 @@ pub(crate) mod pack_cache {
         objects_dir: &Path,
         oid: &crate::objects::ObjectId,
     ) -> Result<Option<crate::objects::Object>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return Ok(None);
         }
+        sync_thread_local_for_objects_dir(objects_dir);
         let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
             return Ok(None);
         };
@@ -555,9 +593,10 @@ pub(crate) mod pack_cache {
         oid: &crate::objects::ObjectId,
         limit: u64,
     ) -> Result<Option<super::BoundedRead>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return Ok(None);
         }
+        sync_thread_local_for_objects_dir(objects_dir);
         let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
             return Ok(None);
         };
@@ -580,10 +619,10 @@ pub(crate) mod pack_cache {
         objects_dir: &Path,
         oid: &crate::objects::ObjectId,
     ) -> Result<Option<Vec<u8>>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return Ok(None);
         }
-        sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+        sync_thread_local_for_objects_dir(objects_dir);
         let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
             return Ok(None);
         };
@@ -596,9 +635,10 @@ pub(crate) mod pack_cache {
         populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<crate::objects::ObjectKind>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_thread_locals_apply_to(objects_dir) {
             return Ok(None);
         }
+        sync_thread_local_for_objects_dir(objects_dir);
         let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
             return Ok(None);
         };
@@ -4312,15 +4352,13 @@ pub(crate) fn read_packed_commit_header_block_into(
 ) -> Result<bool> {
     pack_cache::sync_thread_local_for_objects_dir(objects_dir);
     if let Some(idx) = pack_cache::hinted_pack_index(objects_dir) {
-        if let Some(offset) =
-            pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
+        if let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
         {
             return Ok(read_commit_header_block_at(&idx, offset, out));
         }
     }
     for idx in pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)? {
-        if let Some(offset) =
-            pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
+        if let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
         {
             pack_cache::remember_pack_hit(objects_dir, &idx);
             return Ok(read_commit_header_block_at(&idx, offset, out));
@@ -5041,10 +5079,10 @@ impl SingleLocalPackReader {
         allow_loose: bool,
         commit_hint: Option<&crate::objects::ObjectId>,
     ) -> Result<Option<Self>> {
-        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+        if !pack_cache::pack_thread_locals_apply_to(objects_dir) {
             return Ok(None);
         }
-        pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+        pack_cache::sync_thread_local_for_objects_dir(objects_dir);
         let memo_eligible = allow_loose && commit_hint.is_none();
         if memo_eligible {
             if let Some((idx, pack_bytes, pack_id)) = pack_cache::single_reader_for(objects_dir) {
