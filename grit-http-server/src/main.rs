@@ -197,7 +197,13 @@ async fn main() -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&args.bind).await?;
     eprintln!("Listening on {}", args.bind);
-    axum::serve(listener, app).await?;
+    grit_http_server::shutdown::serve_until_shutdown(
+        listener,
+        app,
+        grit_http_server::server::Shutdown::default(),
+        || {},
+    )
+    .await?;
 
     Ok(())
 }

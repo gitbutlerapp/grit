@@ -1,7 +1,7 @@
 //! The multi-repository server behind `grit serve`.
 //!
 //! [`Server::bind`] opens the [`AuthStore`] and finds the repositories to
-//! serve; [`Server::run`] answers requests until the process stops.
+//! serve; [`Server::run`] answers requests until graceful shutdown.
 //!
 //! Git requests carry an access token from the store, either as the password
 //! of HTTP basic auth (what Git sends from a credential helper or a
@@ -52,6 +52,7 @@ use grit_protocol::RepositoryOptions;
 use crate::bundles::{BundleScheduler, BundleSettings};
 use crate::checkout_locks::CheckoutLocks;
 use crate::login::{LoginError, PendingLogins, PollOutcome};
+use crate::shutdown::serve_until_shutdown;
 use crate::smart_http::{self, Service};
 use crate::store::{
     normalize_repository_name, Access, AuthStore, HashedPassword, StoreError, Token, User,
@@ -217,6 +218,8 @@ pub struct Server {
     state: Arc<ServerState>,
 }
 
+pub use crate::shutdown::Shutdown;
+
 impl Server {
     /// Open the database, find the repositories and bind `address`.
     ///
@@ -273,20 +276,28 @@ impl Server {
         self.state.repositories.list()
     }
 
-    /// Serve requests until the process stops. Blocks the calling thread.
+    /// Serve requests until shutdown. Blocks the calling thread.
+    ///
+    /// Shutdown starts on SIGTERM, SIGINT or SIGHUP (Ctrl+C on Windows), or when
+    /// [`Shutdown::triggered`] fires in tests. See [`Shutdown::grace`].
     ///
     /// # Errors
     ///
     /// [`ServerError::Io`] when the async runtime cannot start or the
     /// listener fails.
-    pub fn run(self) -> Result<(), ServerError> {
+    pub fn run(self, shutdown: Shutdown) -> Result<(), ServerError> {
         self.start_bundles();
+        let state = self.state.clone();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
         runtime.block_on(async move {
             let listener = tokio::net::TcpListener::from_std(self.listener)?;
-            axum::serve(listener, router(self.state)).await
+            let app = router(self.state);
+            serve_until_shutdown(listener, app, shutdown, move || {
+                *state.scheduler.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            })
+            .await
         })?;
         Ok(())
     }
