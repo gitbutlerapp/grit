@@ -50,6 +50,7 @@ pub fn run(
     db: Option<&Path>,
     bind: &str,
     bundles: grit_http_server::bundles::BundleSettings,
+    shutdown: grit_http_server::server::Shutdown,
 ) -> Result<()> {
     let root =
         std::fs::canonicalize(root).with_context(|| format!("cannot serve {}", root.display()))?;
@@ -96,7 +97,7 @@ pub fn run(
             format_interval(bundles.interval)
         );
     }
-    server.run()?;
+    server.run(shutdown)?;
     Ok(())
 }
 

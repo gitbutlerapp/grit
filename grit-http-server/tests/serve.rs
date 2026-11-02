@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use grit_http_server::bundles::BundleSettings;
-use grit_http_server::server::{ServeConfig, Server, ServerError};
+use grit_http_server::server::{ServeConfig, Server, ServerError, Shutdown};
 use grit_http_server::store::{Access, AuthStore, HashedPassword, Token};
 
 const ADMIN_EMAIL: &str = "admin@example.com";
@@ -143,7 +143,9 @@ fn start_with(root: &Path, database: &Path, bundles: BundleSettings) -> SocketAd
     )
     .expect("bind server");
     let addr = server.local_addr().expect("local addr");
-    std::thread::spawn(move || server.run());
+    std::thread::spawn(move || {
+        let _ = server.run(Shutdown::default());
+    });
     addr
 }
 
@@ -1140,7 +1142,9 @@ fn snapshot_checkouts_of_offloaded_blobs_follow_lazy_fetch() {
     )
     .expect("bind server");
     let addr = server.local_addr().expect("local addr");
-    std::thread::spawn(move || server.run());
+    std::thread::spawn(move || {
+        let _ = server.run(Shutdown::default());
+    });
     let auth = [bearer(ADMIN_TOKEN)];
     let request = br#"{"paths":[]}"#;
 

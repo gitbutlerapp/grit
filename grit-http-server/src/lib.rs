@@ -25,6 +25,7 @@ mod checkout_locks;
 pub mod checkouts;
 pub mod login;
 pub mod server;
+pub mod shutdown;
 pub mod smart_http;
 pub mod store;
 pub mod uploads;

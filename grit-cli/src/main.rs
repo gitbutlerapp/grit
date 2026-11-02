@@ -2265,6 +2265,14 @@ enum Command {
         /// Do not build or offer clone bundles.
         #[arg(long)]
         no_bundles: bool,
+        /// After SIGTERM, SIGINT or SIGHUP, keep serving in-flight requests for this long before closing remaining connections (`0s` waits until they finish).
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "30s",
+            value_parser = commands::serve_http::parse_interval
+        )]
+        shutdown_timeout: std::time::Duration,
     },
     /// Serve a fetch or clone over stdin/stdout (run by ssh and grit-http-server).
     #[command(name = "upload-pack", hide = true)]
@@ -4510,6 +4518,7 @@ fn dispatch(
             email,
             bundle_interval,
             no_bundles,
+            shutdown_timeout,
         } => {
             let db = db.as_deref();
             match action {
@@ -4552,7 +4561,13 @@ fn dispatch(
                         interval: bundle_interval,
                         ..Default::default()
                     };
-                    commands::serve_http::run(&root, db, &bind, bundles)?;
+                    commands::serve_http::run(
+                        &root,
+                        db,
+                        &bind,
+                        bundles,
+                        grit_http_server::server::Shutdown::grace(shutdown_timeout),
+                    )?;
                     Ok(ExitStatus::Success)
                 }
             }
