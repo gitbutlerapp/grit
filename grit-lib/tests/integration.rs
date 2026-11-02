@@ -79,6 +79,9 @@ mod apply_blob_engine;
 #[path = "apply_git_compat.rs"]
 mod apply_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "assume_unchanged_porcelain_2521.rs"]
+mod assume_unchanged_porcelain_2521;
+#[cfg(feature = "full-tests")]
 #[path = "attributes_rules.rs"]
 mod attributes_rules;
 #[cfg(feature = "full-tests")]
@@ -1428,9 +1431,6 @@ mod ref_update_kinds_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "reference_transaction_hook.rs"]
 mod reference_transaction_hook;
-#[cfg(feature = "full-tests")]
-#[path = "references_update_head_2497.rs"]
-mod references_update_head_2497;
 #[cfg(feature = "full-tests")]
 #[path = "reflog_expire_dry_run.rs"]
 mod reflog_expire_dry_run;

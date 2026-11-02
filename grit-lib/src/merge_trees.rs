@@ -1991,11 +1991,13 @@ fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> Tre
                 row.stage() == 0 && existing.oid == row.oid && existing.mode == row.mode
             }
             (Some([row]), Some(existing)) => {
+                const FLAG_ASSUME_UNCHANGED: u16 = 0x8000;
                 row.stage() == 0
                     && (row.mode == MODE_REGULAR || row.mode == crate::index::MODE_EXECUTABLE)
                     && existing.oid == row.oid
                     && existing.mode == row.mode
-                    && existing.flags == row.flags
+                    && (existing.flags & !FLAG_ASSUME_UNCHANGED)
+                        == (row.flags & !FLAG_ASSUME_UNCHANGED)
                     && IndexEntry::extended_flags_equal_ignoring_volatile(
                         existing.flags_extended,
                         row.flags_extended,

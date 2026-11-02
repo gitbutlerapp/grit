@@ -987,6 +987,7 @@ fn checkout_hard_to_tree_journaled(
         .filter(|entry| entry.stage() == 0 && entry.skip_worktree())
         .map(|entry| (entry.path.clone(), entry.oid))
         .collect();
+    let assume_unchanged_snapshot = hard_reset_assume_unchanged_snapshot(&index);
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&index, None);
     let config = repo.config()?;
     let index_sparse = config.bool_or("index.sparse", false);
@@ -1237,6 +1238,7 @@ fn checkout_hard_to_tree_journaled(
             );
         }
         hard_reset_apply_skip_worktree_snapshot(&mut index, &skip_worktree_snapshot);
+        hard_reset_apply_assume_unchanged_snapshot(&mut index, &assume_unchanged_snapshot);
         let mtime_hint = Some(crate::index::stage0_mtime_max(&index.entries));
         crate::progress::poll_cancel(progress, cancel)?;
         write_checkout_index(repo, &mut index, lock, true, mtime_hint, journal)?;
@@ -1589,6 +1591,7 @@ fn checkout_hard_to_tree_journaled(
         );
     }
     hard_reset_apply_skip_worktree_snapshot(&mut index, &skip_worktree_snapshot);
+    hard_reset_apply_assume_unchanged_snapshot(&mut index, &assume_unchanged_snapshot);
     let mtime_hint = Some(crate::index::stage0_mtime_max(&index.entries));
     crate::progress::poll_cancel(progress, cancel)?;
     if trees_differ && !written_by_tree_diff.is_empty() {
@@ -2052,6 +2055,35 @@ fn hard_reset_apply_skip_worktree_snapshot(
     for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
         if snapshot.contains_key(entry.path.as_slice()) {
             entry.set_skip_worktree(true);
+        }
+    }
+}
+
+type AssumeUnchangedSnapshot = BTreeMap<Vec<u8>, (ObjectId, u32)>;
+
+fn hard_reset_assume_unchanged_snapshot(index: &Index) -> AssumeUnchangedSnapshot {
+    index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0 && entry.assume_unchanged())
+        .map(|entry| (entry.path.clone(), (entry.oid, entry.mode)))
+        .collect()
+}
+
+/// Reapply assume-unchanged when the stage-0 row still has the same blob and mode.
+fn hard_reset_apply_assume_unchanged_snapshot(
+    index: &mut Index,
+    snapshot: &AssumeUnchangedSnapshot,
+) {
+    if snapshot.is_empty() {
+        return;
+    }
+    for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+        let Some(&(oid, mode)) = snapshot.get(entry.path.as_slice()) else {
+            continue;
+        };
+        if entry.oid == oid && entry.mode == mode {
+            entry.set_assume_unchanged(true);
         }
     }
 }

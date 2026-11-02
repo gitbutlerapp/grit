@@ -2723,6 +2723,12 @@ fn apply_stash_commit(
         .filter(|entry| entry.stage() == 0 && entry.skip_worktree())
         .map(|entry| entry.path.clone())
         .collect();
+    let assume_unchanged_before: BTreeMap<Vec<u8>, (ObjectId, u32)> = new_index
+        .entries
+        .iter()
+        .filter(|entry| entry.stage() == 0 && entry.assume_unchanged())
+        .map(|entry| (entry.path.clone(), (entry.oid, entry.mode)))
+        .collect();
     let head_at_stash_tree = repo.odb().commit_tree(head_at_stash)?;
     let idx_tree = repo.odb().commit_tree(index_commit_oid)?;
     let merged_index_tree = if restore_index {
@@ -3267,6 +3273,15 @@ fn apply_stash_commit(
         if !stashed_worktree_paths.contains(path) {
             if let Some(entry) = new_index.get_mut(path, 0) {
                 entry.set_skip_worktree(true);
+            }
+        }
+    }
+    for (path, &(oid, mode)) in &assume_unchanged_before {
+        if !stashed_worktree_paths.contains(path) {
+            if let Some(entry) = new_index.get_mut(path, 0) {
+                if entry.oid == oid && entry.mode == mode {
+                    entry.set_assume_unchanged(true);
+                }
             }
         }
     }

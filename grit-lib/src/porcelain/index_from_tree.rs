@@ -188,12 +188,16 @@ fn index_from_matching_seed(seed: &mut Index, tree_oid: &ObjectId) -> Option<Ind
     for entry in &mut index.entries {
         let keep_stat = seed_row_stat_reusable(entry);
         let skip_worktree = entry.skip_worktree();
+        let assume_unchanged = entry.assume_unchanged();
         let mut row = tree_entry(std::mem::take(&mut entry.path), entry.mode, entry.oid);
         if keep_stat {
             copy_stat(&mut row, entry);
         }
         if skip_worktree {
             row.set_skip_worktree(true);
+        }
+        if assume_unchanged {
+            row.set_assume_unchanged(true);
         }
         *entry = row;
     }
@@ -220,6 +224,7 @@ pub(crate) fn index_from_tree_with_seeded_stats(
     }
     seed_stage0_stat_data(&mut index, seed);
     carry_seed_skip_worktree(&mut index, seed);
+    carry_seed_assume_unchanged(&mut index, seed);
     Ok(index)
 }
 
@@ -244,6 +249,33 @@ fn carry_seed_skip_worktree(index: &mut Index, seed: &Index) {
             continue;
         }
         entry.set_skip_worktree(true);
+        seeds.next();
+    }
+}
+
+/// Copy assume-unchanged from seed stage-0 rows when path, mode, and oid still match.
+fn carry_seed_assume_unchanged(index: &mut Index, seed: &Index) {
+    let mut seeds = seed
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.assume_unchanged())
+        .peekable();
+    for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+        while seeds
+            .peek()
+            .is_some_and(|s| s.path.as_slice() < entry.path.as_slice())
+        {
+            seeds.next();
+        }
+        let Some(src) = seeds.peek() else {
+            break;
+        };
+        if src.path.as_slice() != entry.path.as_slice() {
+            continue;
+        }
+        if src.oid == entry.oid && src.mode == entry.mode {
+            entry.set_assume_unchanged(true);
+        }
         seeds.next();
     }
 }
@@ -1763,10 +1795,13 @@ mod tests {
 
         let borrowed = index_from_tree_with_seeded_stats(&repo, &t2, &seed).expect("borrowed");
         assert!(borrowed.get(b"top", 0).expect("top").skip_worktree());
+        assert!(borrowed.get(b"a/x", 0).expect("a/x").assume_unchanged());
         let owned = index_from_matching_seed(&mut seed.clone(), &t2).expect("seed matches t2");
         assert!(owned.get(b"top", 0).expect("top").skip_worktree());
+        assert!(owned.get(b"a/x", 0).expect("a/x").assume_unchanged());
         assert_same_index(&owned, &borrowed);
         let owned = index_from_matching_seed(&mut seed.clone(), &t2).expect("matches");
+        assert!(owned.get(b"a/x", 0).expect("a/x").assume_unchanged());
         assert!(owned.get(b"a/x", 0).expect("a/x").stat_cache_unset());
         assert!(!owned.get(b"a/b/y", 0).expect("a/b/y").stat_cache_unset());
 

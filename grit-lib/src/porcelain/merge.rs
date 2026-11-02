@@ -179,6 +179,13 @@ pub fn compose_fast_forward_index(
     current_index: &Index,
 ) -> Result<Index> {
     let mut new_entries = tree_to_index_entries(repo, &target_tree, "")?;
+    for entry in &mut new_entries {
+        if let Some(old) = current_index.get(&entry.path, 0) {
+            if old.assume_unchanged() && old.oid == entry.oid && old.mode == entry.mode {
+                entry.set_assume_unchanged(true);
+            }
+        }
+    }
     let target_paths: BTreeSet<Vec<u8>> = new_entries.iter().map(|e| e.path.clone()).collect();
     let head_entries = tree_to_map(tree_to_index_entries(repo, &head_tree, "")?);
     for e in &current_index.entries {
