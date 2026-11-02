@@ -927,6 +927,21 @@ impl GcTaskReport {
             }
             Self::CommitGraph {
                 duration_ms,
+                commit_count: 0,
+                skipped: None,
+                ..
+            } => {
+                if dry_run {
+                    outln!(
+                        w,
+                        "commit-graph: would skip; no reachable commits ({duration_ms} ms)."
+                    );
+                } else {
+                    outln!(w, "commit-graph: no reachable commits ({duration_ms} ms).");
+                }
+            }
+            Self::CommitGraph {
+                duration_ms,
                 commit_count,
                 path,
                 ..

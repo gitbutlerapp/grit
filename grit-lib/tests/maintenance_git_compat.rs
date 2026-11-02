@@ -7,13 +7,16 @@ use std::process::Command;
 
 use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::{self, issue_msg_id, FsckOptions, FsckReport};
 use grit_lib::maintenance::{
-    auto_gc_needed, gc, gc_auto, pack_refs, prune_loose_objects, repack_all, AutoGcOutcome,
-    AutoGcReason, GcOptions, PackRefsOptions, PruneOptions, RepackOptions,
+    auto_gc_needed, gc, gc_auto, pack_refs, prune_loose_objects, repack_all, write_commit_graph,
+    AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcOptions, PackRefsOptions, PruneOptions,
+    RepackOptions,
 };
+use grit_lib::objects::commit_graph::{build_commit_graph_bytes, CommitGraphChain};
 use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
@@ -3209,4 +3212,92 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
     duplicate_repo_tree(dir.path(), twin.path());
     git(twin.path(), &["gc"]);
     assert_eq!(git_garbage_count(twin.path()), 1);
+}
+
+#[test]
+fn gc_empty_history_writes_no_commit_graph_and_fsck_clean() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let graph = stats.commit_graph.expect("commit-graph task");
+    assert_eq!(graph.commit_count, 0);
+    assert!(graph.skipped.is_none());
+    let graph_path = dir.path().join(".git/objects/info/commit-graph");
+    assert!(
+        !graph_path.is_file(),
+        "empty history must not create commit-graph (like git commit-graph write --reachable)"
+    );
+    git(dir.path(), &["commit-graph", "write", "--reachable"]);
+    assert!(
+        !graph_path.is_file(),
+        "git also writes no commit-graph for empty history"
+    );
+    let (_, ok) = repo_fsck(&repo, &objects_and_refs(false));
+    assert!(ok, "grit fsck must pass after gc on empty repo");
+}
+
+#[test]
+fn legacy_empty_commit_graph_file_parses_and_git_verify_accepts() {
+    use std::collections::HashMap;
+
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let objects_dir = repo.odb().objects_dir();
+    std::fs::create_dir_all(objects_dir.join("info")).expect("info");
+    let (bytes, _) = build_commit_graph_bytes(
+        &[],
+        &HashMap::new(),
+        repo.odb(),
+        false,
+        &BloomFilterSettings::default(),
+        None,
+        &[],
+        None,
+        &HashMap::new(),
+        &HashMap::new(),
+        true,
+    )
+    .expect("build empty graph");
+    assert_eq!(
+        bytes.len(),
+        1112,
+        "empty graph size matches legacy grit gc output"
+    );
+    std::fs::write(objects_dir.join("info/commit-graph"), &bytes).expect("seed");
+    CommitGraphChain::verify_on_disk(objects_dir).expect("grit verify");
+    git(dir.path(), &["commit-graph", "verify"]);
+    let (_, ok) = repo_fsck(&repo, &objects_and_refs(false));
+    assert!(ok, "grit fsck must accept legacy empty commit-graph");
+}
+
+#[test]
+fn gc_after_one_commit_writes_commit_graph_both_fsck_clean() {
+    let _pack_guard = test_pack_cache_guard();
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    many_grit_commits(&repo, 1);
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
+    let graph_path = dir.path().join(".git/objects/info/commit-graph");
+    assert!(
+        graph_path.is_file(),
+        "one commit + gc must write commit-graph"
+    );
+    CommitGraphChain::verify_on_disk(repo.odb().objects_dir()).expect("grit verify");
+    git(dir.path(), &["commit-graph", "verify"]);
+    let (_, ok) = repo_fsck(&repo, &objects_and_refs(false));
+    assert!(ok);
+    git_fsck(dir.path(), true);
+}
+
+#[test]
+fn write_commit_graph_empty_history_is_no_op() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
+    assert_eq!(report.commit_count, 0);
+    assert!(report.skipped.is_none());
+    assert!(
+        !dir.path().join(".git/objects/info/commit-graph").is_file(),
+        "write_commit_graph must not create a file for empty history"
+    );
 }
