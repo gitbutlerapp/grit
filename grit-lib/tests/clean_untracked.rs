@@ -623,3 +623,150 @@ fn clean_dry_run_collapsed_dirs_match_git_on_dense_tree() {
         "only-ignored clean dry-run must match git clean -nX -d"
     );
 }
+
+/// Issue #2514: `clean --force` must remove non-UTF-8 untracked paths, not skip them silently.
+#[cfg(unix)]
+#[test]
+fn force_removes_non_utf8_untracked_paths_like_git() {
+    use std::collections::BTreeSet;
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    use grit_lib::repo_relpath::storage_string;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    init_tracked_repo(root.path());
+
+    let junk = b"junk\xfd";
+    let junk2 = b"junk2";
+    fs::write(root.path().join(OsStr::from_bytes(junk)), b"x").unwrap();
+    fs::write(root.path().join(OsStr::from_bytes(junk2)), b"y").unwrap();
+
+    let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
+    let dry = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: true,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("dry run");
+
+    let expected: BTreeSet<String> = [storage_string(junk), storage_string(junk2)]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        dry.removed.iter().cloned().collect::<BTreeSet<_>>(),
+        expected,
+        "dry-run must list UTF-8 and non-UTF-8 untracked paths in storage form"
+    );
+
+    let outcome = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("force clean");
+
+    assert_eq!(
+        outcome.removed.iter().cloned().collect::<BTreeSet<_>>(),
+        expected,
+        "force clean removed list must match dry-run"
+    );
+    assert!(
+        !root.path().join(OsStr::from_bytes(junk)).exists(),
+        "non-UTF-8 file must be deleted"
+    );
+    assert!(!root.path().join("junk2").exists());
+    assert!(
+        git_clean_preview(root.path(), &[]).is_empty(),
+        "git clean -n must be empty after grit clean -fd"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn force_removes_non_utf8_untracked_directory_like_git() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    init_tracked_repo(root.path());
+
+    let dir = b"empty-\xff";
+    fs::create_dir_all(root.path().join(OsStr::from_bytes(dir))).unwrap();
+
+    let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("force clean");
+
+    assert!(
+        !root.path().join(OsStr::from_bytes(dir)).exists(),
+        "non-UTF-8 empty directory must be removed with -d"
+    );
+    assert!(
+        git_clean_preview(root.path(), &[]).is_empty(),
+        "git agrees the tree is clean"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn force_removes_literal_grit_pathhex_filename() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    use grit_lib::repo_relpath::storage_string;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    init_tracked_repo(root.path());
+
+    let literal = b"grit+pathhex:6162";
+    fs::write(root.path().join(OsStr::from_bytes(literal)), b"literal\n").unwrap();
+
+    let stored = storage_string(literal);
+    assert_ne!(stored, "grit+pathhex:6162");
+
+    let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
+    let dry = clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: true,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("dry run");
+    assert_eq!(dry.removed, vec![stored.clone()]);
+
+    clean_untracked(
+        &repo,
+        &CleanOptions {
+            directories: true,
+            dry_run: false,
+            ..CleanOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("force clean");
+
+    assert!(
+        !root.path().join(OsStr::from_bytes(literal)).exists(),
+        "literal grit+pathhex: file must be removed"
+    );
+}

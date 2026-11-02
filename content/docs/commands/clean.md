@@ -75,7 +75,7 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `dry_run` | boolean | `true` when `-f` was not passed (preview only); `false` when paths were actually deleted. |
-| `removed` | array of strings | Repository-relative paths removed, or that would be removed when `-f` was not passed. |
+| `removed` | array of strings | Repository-relative paths removed, or that would be removed when `-f` was not passed. Non-UTF-8 names use the reversible `grit+pathhex:` storage form (same as `grit status` and `grit diff --json`); a work tree file literally named `grit+pathhex:…` is double-encoded in this field. |
 | `scope` | string | `untracked`, `untracked_and_ignored`, or `only_ignored`. |
 
 Example (dry run):
