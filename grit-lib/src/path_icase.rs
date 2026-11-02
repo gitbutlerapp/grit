@@ -1,7 +1,7 @@
 //! Case-insensitive path identity when `core.ignorecase` is enabled.
 
 use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -321,6 +321,42 @@ pub(crate) fn fold_untracked_staging_path(
         return existing;
     }
     dir_map.fold_directory_prefixes(rel_path)
+}
+
+/// Membership test for scheduled wholesale-delete paths under `core.ignorecase`.
+///
+/// When ignorecase is enabled, paths are matched by ASCII lowercasing (same rule as
+/// [`paths_equal`] with `ignorecase = true`), built once for O(1) lookups during directory walks.
+#[derive(Debug)]
+pub(crate) enum ScheduledDeletePathLookup<'a> {
+    Exact(&'a HashSet<String>),
+    Folded(HashSet<String>),
+}
+
+impl<'a> ScheduledDeletePathLookup<'a> {
+    /// View of `delete_paths` suitable for repeated membership checks while walking the work tree.
+    #[must_use]
+    pub fn new(delete_paths: &'a HashSet<String>, ignorecase: bool) -> Self {
+        if ignorecase {
+            Self::Folded(
+                delete_paths
+                    .iter()
+                    .map(|path| path.to_ascii_lowercase())
+                    .collect(),
+            )
+        } else {
+            Self::Exact(delete_paths)
+        }
+    }
+
+    /// True when `rel` is listed for removal (case-insensitive when configured).
+    #[must_use]
+    pub fn contains(&self, rel: &str) -> bool {
+        match self {
+            Self::Exact(set) => set.contains(rel),
+            Self::Folded(set) => set.contains(&rel.to_ascii_lowercase()),
+        }
+    }
 }
 
 /// Compare two repository-relative paths for identity.
