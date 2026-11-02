@@ -13148,6 +13148,10 @@ fn read_submodule_head(sub_dir: &Path) -> Option<ObjectId> {
 /// Resolve the embedded git directory for a submodule work tree (`sub_dir/.git`).
 #[must_use]
 pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
+    let sub_meta = fs::symlink_metadata(sub_dir).ok()?;
+    if !sub_meta.is_dir() || sub_meta.file_type().is_symlink() {
+        return None;
+    }
     let gitfile = sub_dir.join(".git");
     let meta = fs::metadata(&gitfile).ok()?;
     if meta.is_file() {

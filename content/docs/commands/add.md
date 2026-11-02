@@ -25,7 +25,7 @@ On filesystems where Grit sets `core.filemode=false` (typical on Windows), every
 
 [`grit commit`](../commit/) stages every change before it records a commit, so you don't need `grit add` to commit. It's useful for starting to track a new file and checking what will be committed.
 
-Copying or cloning another Git repository into your tree (a directory that contains its own `.git`) is recorded as a **gitlink** (mode `160000`), not as ordinary files. Clones of your repository get an empty directory at that path. When `grit add` newly records such a path, human and `--markdown` output print a **warning** on stderr; `--json` includes `embedded_gitlinks` (omitted when empty). Remove `<path>/.git` and stage again if you meant to vendor the files inside.
+Copying or cloning another Git repository into your tree (a directory that contains its own `.git`) is recorded as a **gitlink** (mode `160000`), not as ordinary files. Clones of your repository get an empty directory at that path. When `grit add` newly records such a path, human and `--markdown` output print a **warning** on stderr; `--json` includes `embedded_gitlinks` (omitted when empty). Remove `<path>/.git` and stage again if you meant to vendor the files inside. A symlink (including one aimed at a repository directory) is staged as mode `120000` and does not trigger this warning.
 
 Touching a tracked file's timestamp without changing its bytes or mode is not a stage: `grit add` refreshes the index stat cache silently (same as Git) and reports nothing to stage.
 
