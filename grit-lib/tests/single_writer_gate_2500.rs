@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
-use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
     MemoryRefStore, PreparedRefTransaction, RawRef, RefName, RefStore, RefStoreError,
@@ -115,7 +115,17 @@ impl RefStore for Slow {
     }
 }
 
-fn run_concurrent(threads: usize, per_thread: usize, delay_ms: u64) -> (usize, usize, Duration) {
+struct ConcurrentRun {
+    ok: usize,
+    fail: usize,
+    elapsed: Duration,
+    repo: Arc<Repository>,
+    tree: ObjectId,
+    threads: usize,
+    per_thread: usize,
+}
+
+fn run_concurrent(threads: usize, per_thread: usize, delay_ms: u64) -> ConcurrentRun {
     let dir = tempfile::tempdir().expect("tempdir");
     Repository::init(
         dir.path(),
@@ -171,27 +181,55 @@ fn run_concurrent(threads: usize, per_thread: usize, delay_ms: u64) -> (usize, u
             });
         }
     });
-    (
-        ok.load(Ordering::Relaxed),
-        fail.load(Ordering::Relaxed),
-        start.elapsed(),
-    )
+    ConcurrentRun {
+        ok: ok.load(Ordering::Relaxed),
+        fail: fail.load(Ordering::Relaxed),
+        elapsed: start.elapsed(),
+        repo,
+        tree,
+        threads,
+        per_thread,
+    }
+}
+
+fn assert_each_branch_at_final_oid(run: &ConcurrentRun) {
+    for th in 0..run.threads {
+        let i = run.per_thread - 1;
+        let body = format!(
+            "tree {}\nauthor A <a@x> {i} +0000\ncommitter A <a@x> {i} +0000\n\nt{th} i{i}\n",
+            run.tree
+        );
+        let expected = run
+            .repo
+            .odb()
+            .write(ObjectKind::Commit, body.as_bytes())
+            .expect("expected oid");
+        let name = RefName::try_from(format!("refs/heads/t{th}").as_str()).expect("name");
+        let resolved = run.repo.references().resolve(&name).expect("resolve");
+        assert_eq!(
+            resolved, expected,
+            "refs/heads/t{th} should point at the last update"
+        );
+    }
 }
 
 #[test]
 fn disjoint_refs_under_slow_single_slot_store_all_succeed() {
-    let (ok, fail, elapsed) = run_concurrent(4, 20, 3);
-    assert_eq!(fail, 0, "expected zero LockHeld failures");
-    assert_eq!(ok, 80);
+    let run = run_concurrent(4, 20, 3);
+    assert_eq!(run.fail, 0, "expected zero LockHeld failures");
+    assert_eq!(run.ok, 80);
     assert!(
-        elapsed < Duration::from_secs(2),
-        "serialized work should finish quickly, took {elapsed:?}"
+        run.elapsed < Duration::from_secs(2),
+        "serialized work should finish quickly, took {:?}",
+        run.elapsed
     );
+    assert_each_branch_at_final_oid(&run);
 }
 
 #[test]
 fn disjoint_refs_sixteen_threads_under_slow_single_slot_store() {
-    let (ok, fail, _) = run_concurrent(16, 10, 3);
-    assert_eq!(fail, 0);
-    assert_eq!(ok, 160);
+    let run = run_concurrent(16, 10, 3);
+    assert_eq!(run.fail, 0);
+    assert_eq!(run.ok, 160);
+    assert_each_branch_at_final_oid(&run);
 }

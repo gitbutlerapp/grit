@@ -242,20 +242,41 @@ fn prepare_retrying(
     txn: RefTransaction,
     wait: impl FnOnce() -> LockWait,
 ) -> std::result::Result<Box<dyn PreparedRefTransaction + Send + '_>, RefStoreError> {
-    use crate::lockfile::{retry_while_held, LockClock, SystemLockClock, SystemLockJitter};
+    use crate::lockfile::{backoff_delay, LockClock, SystemLockClock, SystemLockJitter};
+    let clock = &SystemLockClock;
+    let jitter = &SystemLockJitter;
+    let key = Path::new("refs");
+    let start = clock.now();
+
+    let mut err = match store.prepare_for(txn.clone(), LockWait::Immediately) {
+        Ok(prepared) => return Ok(prepared),
+        Err(err) if matches!(err, RefStoreError::LockHeld { .. }) => err,
+        other => return other,
+    };
+
     let wait_policy = wait();
-    let start = SystemLockClock.now();
-    retry_while_held(
-        Path::new("refs"),
-        || wait_policy,
-        &SystemLockClock,
-        &SystemLockJitter,
-        || {
-            let remaining = wait_policy.remaining_from(start, SystemLockClock.now());
-            store.prepare_for(txn.clone(), remaining)
-        },
-        |err| matches!(err, RefStoreError::LockHeld { .. }),
-    )
+    let deadline = match wait_policy {
+        LockWait::Immediately => return Err(err),
+        LockWait::Backoff { budget } => Some(start + budget),
+        LockWait::Indefinitely => None,
+    };
+    let mut tries: u32 = 0;
+    loop {
+        if deadline.is_some_and(|deadline| clock.now() >= deadline) {
+            return Err(err);
+        }
+        let delay = backoff_delay(key, tries, jitter);
+        tries = tries.saturating_add(1);
+        clock.sleep(match deadline {
+            Some(deadline) => delay.min(deadline.saturating_duration_since(clock.now())),
+            None => delay,
+        });
+        match store.prepare_for(txn.clone(), wait_policy.remaining_from(start, clock.now())) {
+            Ok(prepared) => return Ok(prepared),
+            Err(held) if matches!(held, RefStoreError::LockHeld { .. }) => err = held,
+            other => return other,
+        }
+    }
 }
 
 /// How long ref writes wait for a busy store when the caller has no config at hand.

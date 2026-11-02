@@ -493,7 +493,7 @@ pub(crate) fn retry_while_held<T, E>(
     }
 }
 
-fn backoff_delay(lock_path: &Path, attempt: u32, jitter: &dyn LockJitter) -> Duration {
+pub(crate) fn backoff_delay(lock_path: &Path, attempt: u32, jitter: &dyn LockJitter) -> Duration {
     const INITIAL_MS: u64 = 1;
     const CAP_MS: u64 = 50;
     let shift = attempt.min(16);
