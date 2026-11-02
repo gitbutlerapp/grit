@@ -14,7 +14,7 @@ grit blame [<rev>] [--rev <commit>] [--contents <file>] [-L RANGE] [--first-pare
 
 ## Description
 
-Walks history for one file and prints each line with the commit that last modified it, the author, when that commit was made, and the line number in the blamed file. The file operand uses Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, a bare name like `f.txt` refers to that path under your current directory.
+Walks history for one file and prints each line with the commit that last modified it, the author, when that commit was made, and the line number in the blamed file. Human and `--markdown` output use collision-aware short commit ids (`core.abbrev`); `--json` always includes full oids. The file operand uses Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, a bare name like `f.txt` refers to that path under your current directory.
 
 Paths returned by `grit status --json` can be passed directly as the file operand, including reversible `grit+pathhex:` strings for non-UTF-8 filenames. These encoded paths are repository-relative, even when invoked from a subdirectory. Blame decodes one storage layer and compares exact filename bytes, so raw invalid-byte names, valid Unicode names, and literal names beginning with `grit+pathhex:` remain distinct. JSON `original_path` values (both lines and grouped hunks) use the same reversible encoding, including rename and copy origins. In Rust, use `repo_relpath::storage_bytes` to recover the original bytes; use `storage_string` when supplying raw names that begin with the reserved prefix.
 

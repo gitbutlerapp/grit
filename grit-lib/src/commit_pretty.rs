@@ -1,5 +1,6 @@
 //! Human-oriented commit one-line formats shared by porcelain commands.
 
+use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
@@ -40,6 +41,28 @@ pub fn auto_abbrev_len_for_object_count(count: usize) -> usize {
 /// Propagates ODB pack listing and loose enumeration errors.
 pub fn approximate_object_count(odb: &Odb) -> Result<usize> {
     odb.approximate_object_count()
+}
+
+/// Minimum abbreviated oid length from `core.abbrev` and object count (Git-compatible).
+///
+/// Missing `core.abbrev` or the value `auto` uses [`auto_abbrev_len_for_object_count`].
+/// Numeric values are clamped to 4–40.
+///
+/// # Errors
+///
+/// Propagates ODB object-count errors.
+pub fn resolve_core_abbrev_len(config: &ConfigSet, odb: &Odb) -> Result<usize> {
+    if let Some(v) = config.get("core.abbrev") {
+        if v.eq_ignore_ascii_case("auto") {
+            let count = approximate_object_count(odb)?;
+            return Ok(auto_abbrev_len_for_object_count(count));
+        }
+        if let Ok(n) = v.parse::<i64>() {
+            return Ok((n as usize).clamp(4, 40));
+        }
+    }
+    let count = approximate_object_count(odb)?;
+    Ok(auto_abbrev_len_for_object_count(count))
 }
 
 /// Return the pretty subject for a commit or tag message.
@@ -135,4 +158,27 @@ pub fn format_reference_line(
     let abbrev = abbrev_hex(oid, abbrev_len);
     let date = format_short_date_from_ident(committer_ident);
     format!("{abbrev} ({subject_first_line}, {date})")
+}
+
+#[cfg(test)]
+mod resolve_core_abbrev_tests {
+    use crate::repo::{InitOptions, Repository};
+
+    use super::{auto_abbrev_len_for_object_count, resolve_core_abbrev_len};
+
+    #[test]
+    fn auto_abbrev_len_floors_at_seven() {
+        assert_eq!(auto_abbrev_len_for_object_count(0), 7);
+        assert_eq!(auto_abbrev_len_for_object_count(1), 7);
+    }
+
+    #[test]
+    fn resolve_core_abbrev_default_matches_auto_for_empty_repo() -> crate::error::Result<()> {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let config = repo.config()?.clone();
+        let len = resolve_core_abbrev_len(&config, repo.odb())?;
+        assert_eq!(len, auto_abbrev_len_for_object_count(0));
+        Ok(())
+    }
 }

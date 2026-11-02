@@ -3,6 +3,7 @@
 use std::io::Write;
 
 use grit_lib::diff::{DiffEntry, DiffStatus};
+use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::short_hex;
 
 use crate::commands::add::AddOutcome;
@@ -40,9 +41,11 @@ pub fn print_commit_list(
         outln!(w, "No commits.");
         return Ok(());
     }
+    let repo = context::discover()?;
     let now = ctx.now.unix_timestamp();
     for c in commits {
-        outln!(w, "{}", commit_bullet(c, now));
+        let short = abbreviate_for_display(&repo, c.oid, true)?;
+        outln!(w, "{}", commit_bullet_with_short(c, &short, now));
     }
     Ok(())
 }
@@ -50,11 +53,11 @@ pub fn print_commit_list(
 /// One commit bullet with optional `--decorate` parenthetical after the short oid.
 pub fn commit_bullet_with_decorations(
     c: &CommitSummary,
+    short: &str,
     refs: &[crate::output::CommitRefJson],
     head_branch: Option<&str>,
     now: i64,
 ) -> String {
-    let short = c.oid.to_short_hex();
     let date = context::relative_date_from(c.timestamp, now);
     let deco = crate::log_display::format_decorations_folded(refs, head_branch);
     let decoration = if deco.is_empty() {
@@ -69,8 +72,8 @@ pub fn commit_bullet_with_decorations(
     )
 }
 
-fn commit_bullet(c: &CommitSummary, now: i64) -> String {
-    commit_bullet_with_decorations(c, &[], None, now)
+fn commit_bullet_with_short(c: &CommitSummary, short: &str, now: i64) -> String {
+    commit_bullet_with_decorations(c, short, &[], None, now)
 }
 
 /// Print a titled group of index/worktree changes.

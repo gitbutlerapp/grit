@@ -180,16 +180,7 @@ pub fn change_short_code(change_id: &str) -> String {
     change_id.chars().take(CHANGE_ID_DISPLAY_LEN).collect()
 }
 
-/// Format commit-list rows (status / shortlog / log) as
-/// `<dim sha>  <author>  <dim relative-date>  <subject>`, with the author and
-/// date columns aligned. Colors are applied only on a TTY. The author is capped
-/// at [`AUTHOR_MAX`], and on a terminal the subject is truncated so the row never
-/// wraps.
-pub fn commit_rows(commits: &[CommitSummary], now: i64) -> Vec<String> {
-    commit_rows_with(commits, now, &CommitRowOptions::default())
-}
-
-/// Widths of the author and date columns of [`commit_rows`].
+/// Widths of the author and date columns of [`commit_rows_with`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CommitColumns {
     /// Author column width; longer names are cut with `…`.
@@ -248,6 +239,8 @@ pub struct CommitRowOptions<'a> {
     pub line_counts: &'a [Option<LineCounts>],
     /// Column widths to use instead of measuring these rows, so batches line up.
     pub columns: Option<CommitColumns>,
+    /// Collision-aware abbreviated oids aligned with `commits` (from [`crate::log_display::abbrev_commit_summaries`]).
+    pub sha_abbrevs: Option<&'a [String]>,
 }
 
 /// Like [`commit_rows`], with the per-row extras in `opts`.
@@ -264,14 +257,21 @@ pub fn commit_rows_with(
 
     let cells: Vec<(String, String, String, String, &str)> = commits
         .iter()
-        .map(|c| {
-            let sha = c.oid.to_short_hex();
+        .enumerate()
+        .map(|(i, c)| {
+            let sha = opts
+                .sha_abbrevs
+                .and_then(|abbrevs| abbrevs.get(i))
+                .cloned()
+                .unwrap_or_else(|| c.oid.to_short_hex());
             let change = change_display_segment(&c.change_id);
             let author = truncate(&c.author, AUTHOR_MAX.min(columns.author.max(1)));
             let date = context::relative_date_from(c.timestamp, now);
             (sha, change, author, date, c.subject.as_str())
         })
         .collect();
+
+    let sha_w = cells.iter().map(|c| c.0.chars().count()).max().unwrap_or(7);
 
     let change_w = cells
         .iter()
@@ -285,8 +285,8 @@ pub fn commit_rows_with(
         });
     let author_w = columns.author;
     let date_w = columns.date;
-    // Columns before the subject: "  " + sha(7) + "  " + change + "  " + author + "  " + date + "  ".
-    let prefix_w = 2 + 7 + 2 + change_w + 2 + author_w + 2 + date_w + 2;
+    // Columns before the subject: "  " + sha + "  " + change + "  " + author + "  " + date + "  ".
+    let prefix_w = 2 + sha_w + 2 + change_w + 2 + author_w + 2 + date_w + 2;
     let digits = |n: usize| n.to_string().len();
     let added_w = opts
         .line_counts

@@ -119,7 +119,13 @@ impl ShortlogOutcome {
         diffs: &[Option<DiffOutcome>],
     ) -> Result<()> {
         let color = use_color();
-        for (row, (commit, diff)) in ui::commit_rows(rows, ctx.now.unix_timestamp())
+        let repo = crate::context::discover()?;
+        let sha_abbrevs = crate::log_display::abbrev_commit_summaries(&repo, rows)?;
+        let opts = ui::CommitRowOptions {
+            sha_abbrevs: Some(&sha_abbrevs),
+            ..ui::CommitRowOptions::default()
+        };
+        for (row, (commit, diff)) in ui::commit_rows_with(rows, ctx.now.unix_timestamp(), &opts)
             .iter()
             .zip(commits.iter().zip(diffs))
         {

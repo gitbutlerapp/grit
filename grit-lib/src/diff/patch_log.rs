@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use super::structured::{StructuredFileDiff, StructuredLine, StructuredLineKind};
 use crate::attributes::load_gitattributes_for_check_attr_source;
-use crate::commit_pretty::{
-    abbrev_hex, approximate_object_count, auto_abbrev_len_for_object_count,
-};
+use crate::commit_pretty::{abbrev_hex, resolve_core_abbrev_len};
 use crate::config::ConfigSet;
 use crate::diff::options::DiffOptions;
 use crate::error::{Error, Result};
@@ -430,20 +428,6 @@ fn write_patch_unified_body_from_bytes<W: Write>(
         )?;
     }
     Ok(())
-}
-
-fn resolve_core_abbrev_len(config: &ConfigSet, odb: &Odb) -> Result<usize> {
-    if let Some(v) = config.get("core.abbrev") {
-        if v.eq_ignore_ascii_case("auto") {
-            let count = approximate_object_count(odb)?;
-            return Ok(auto_abbrev_len_for_object_count(count));
-        }
-        if let Ok(n) = v.parse::<i64>() {
-            return Ok((n as usize).clamp(4, 40));
-        }
-    }
-    let count = approximate_object_count(odb)?;
-    Ok(auto_abbrev_len_for_object_count(count))
 }
 
 fn effective_log_patch_options(

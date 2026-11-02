@@ -4,7 +4,8 @@
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::gitbutler::GitButlerWorkspace;
-use grit_lib::objects::{short_hex, ObjectId};
+use grit_lib::object_inspect::abbreviate_for_display;
+use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
     short_status_lines, status, status_options_from_config, ConflictGroup, IgnoredMode,
@@ -66,6 +67,9 @@ pub struct StatusOutcome {
     pub detached: bool,
     /// HEAD commit (full oid), or `null` on an unborn / invalid HEAD.
     pub head: Option<String>,
+    /// Collision-aware abbreviated HEAD oid for human and Markdown output.
+    #[serde(skip)]
+    pub head_short: Option<String>,
     /// Target branch name, or `null` when none applies / was found.
     pub target: Option<String>,
     /// Number of commits ahead of `target` (full count), or `null` when counts were skipped.
@@ -452,7 +456,7 @@ impl StatusOutcome {
                 outln!(w);
             }
             StatusHeader::Branch(StandingHeader::Detached) => {
-                let short = self.head.as_deref().map(short_hex).unwrap_or_default();
+                let short = self.head_short.as_deref().unwrap_or_default();
                 outln!(w, "Detached at {short}");
                 outln!(w);
             }
@@ -602,8 +606,11 @@ impl StatusOutcome {
         let names: Vec<String> = workspace.heads.iter().map(workspace_head_label).collect();
         let name_w = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
         let reserved = vec![name_w + 2; names.len()];
+        let repo = context::discover()?;
+        let sha_abbrevs = crate::log_display::abbrev_commit_summaries(&repo, &self.workspace_rows)?;
         let opts = ui::CommitRowOptions {
             reserved: &reserved,
+            sha_abbrevs: Some(&sha_abbrevs),
             ..ui::CommitRowOptions::default()
         };
         for (name, row) in names
@@ -621,6 +628,7 @@ impl StatusOutcome {
         w: &mut dyn Write,
         workspace: &GitButlerWorkspaceJson,
     ) -> Result<()> {
+        let repo = context::discover()?;
         let code = |s: &str| format!("`{s}`");
         outln!(
             w,
@@ -634,11 +642,16 @@ impl StatusOutcome {
                 .ahead
                 .map(|n| format!(" · {n} ahead"))
                 .unwrap_or_default();
+            let commit_oid: ObjectId = head
+                .commit
+                .parse()
+                .context("invalid workspace head commit oid")?;
+            let short = abbreviate_for_display(&repo, commit_oid, true)?;
             outln!(
                 w,
                 "- **{}** `{}` {}{ahead}",
                 code(&workspace_head_label(head)),
-                short_hex(&head.commit),
+                short,
                 head.subject
             );
         }
@@ -647,7 +660,13 @@ impl StatusOutcome {
     }
 
     fn render_ahead_shortlog(&self, w: &mut dyn Write, now: i64) -> Result<()> {
-        for row in ui::commit_rows(&self.commit_rows, now)
+        let repo = context::discover()?;
+        let sha_abbrevs = crate::log_display::abbrev_commit_summaries(&repo, &self.commit_rows)?;
+        let opts = ui::CommitRowOptions {
+            sha_abbrevs: Some(&sha_abbrevs),
+            ..ui::CommitRowOptions::default()
+        };
+        for row in ui::commit_rows_with(&self.commit_rows, now, &opts)
             .iter()
             .take(SHORTLOG_LIMIT)
         {
@@ -770,7 +789,7 @@ impl StatusOutcome {
                 outln!(w);
             }
             StatusHeader::Branch(StandingHeader::Detached) => {
-                let short = self.head.as_deref().map(short_hex).unwrap_or_default();
+                let short = self.head_short.as_deref().unwrap_or_default();
                 outln!(w, "Detached at `{short}`");
                 outln!(w);
             }
@@ -1044,11 +1063,17 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
                 running: h.running,
             })
         });
+    let head_short = model
+        .head
+        .oid()
+        .map(|oid| abbreviate_for_display(&repo, *oid, true))
+        .transpose()?;
     Ok(StatusOutcome {
         warnings: sink.warnings(),
         branch,
         detached: matches!(model.head, HeadState::Detached { .. }),
         head: model.head.oid().map(ObjectId::to_hex),
+        head_short,
         target: standing.target.as_ref().map(|t| t.name.clone()),
         ahead: standing
             .target

@@ -32240,6 +32240,7 @@ impl core::marker::Unpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::marker::UnsafeUnpin for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::ref_storage::RefStorageFormat
+pub fn grit_lib::resolve_core_abbrev_len(&grit_lib::config::ConfigSet, &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<usize>
 pub struct grit_lib::OidAbbrevBatch
 impl grit_lib::OidAbbrevBatch
 pub fn grit_lib::OidAbbrevBatch::abbrev_known(&mut self, &grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::string::String>

@@ -290,10 +290,14 @@ impl HumanRender for LogOutcome {
             } else {
                 Vec::new()
             };
+            let repo = crate::context::discover()?;
+            let sha_abbrevs =
+                crate::log_display::abbrev_commit_summaries(&repo, &self.commit_rows)?;
             let opts = ui::CommitRowOptions {
                 reserved: &reserved,
                 line_counts: &self.line_counts,
                 columns: self.display.columns,
+                sha_abbrevs: Some(&sha_abbrevs),
             };
             // `commits` and `commit_diffs` are empty when the rows need neither refs nor diffs.
             for (i, row) in ui::commit_rows_with(&self.commit_rows, now, &opts)
@@ -386,14 +390,18 @@ impl MarkdownRender for LogOutcome {
                 outln!(w, "- `{line}`");
             }
         } else if self.display.decorate {
+            let repo = crate::context::discover()?;
             let now = ctx.now.unix_timestamp();
             let head_branch = self.head_branch.as_deref();
             for (summary, commit) in self.commit_rows.iter().zip(&self.commits) {
+                let short =
+                    grit_lib::object_inspect::abbreviate_for_display(&repo, summary.oid, true)?;
                 outln!(
                     w,
                     "{}",
                     markdown::commit_bullet_with_decorations(
                         summary,
+                        &short,
                         &commit.commit.refs,
                         head_branch,
                         now,
@@ -1208,9 +1216,8 @@ fn build_commit_outcome(
 
     if plain_oneline {
         use grit_lib::objects::read_commit_subject_line;
-        use grit_lib::OidAbbrevBatch;
 
-        let mut abbrev = OidAbbrevBatch::new(7);
+        let mut abbrev = crate::log_display::display_abbrev_batch(repo)?;
         let oneline_lines = oids
             .iter()
             .map(|oid| {
@@ -1587,7 +1594,7 @@ fn build_graph_oneline_lines(
     };
     let blocks = graph_blocks(oids, &parent_map, display);
     let term_width = ui::terminal_width();
-    let mut abbrev_batch = grit_lib::OidAbbrevBatch::new(7);
+    let mut abbrev_batch = crate::log_display::display_abbrev_batch(repo)?;
     let texts = oids
         .iter()
         .zip(commit_prefix_widths(&blocks))
@@ -1674,10 +1681,12 @@ fn build_graph_text_lines(
                 }
             })
             .collect();
+        let sha_abbrevs = crate::log_display::abbrev_commit_summaries(repo, summaries)?;
         let opts = ui::CommitRowOptions {
             reserved: &reserved,
             line_counts,
             columns: display.columns,
+            sha_abbrevs: Some(&sha_abbrevs),
         };
         ui::commit_rows_with(summaries, now, &opts)
             .into_iter()

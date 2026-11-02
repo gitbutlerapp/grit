@@ -23,7 +23,7 @@ grit log [<REV>…] [-n <N>] [--cursor <token>] [--no-pager]
 
 ## Description
 
-Lists commits reachable from the selected revisions (default `HEAD`), newest first. Each line shows the short commit id, the change id, the author, when the commit was made and its subject (the first line of its message). The author is the commit's author name when present, otherwise the part of their email address before the `@`.
+Lists commits reachable from the selected revisions (default `HEAD`), newest first. Each line shows the short commit id, the change id, the author, when the commit was made and its subject (the first line of its message). Short ids follow `core.abbrev` (Git’s auto length from object count when unset) and extend when needed so they always resolve with `grit show` or `grit log <id>`. The author is the commit's author name when present, otherwise the part of their email address before the `@`.
 
 How much it shows depends on who is reading:
 
@@ -80,7 +80,7 @@ With `--graph`, human output draws a commit graph in the left margin (Unicode bo
 | `--name-status` | Status letter and path(s) per line per commit. |
 | `-U`, `--unified <N>` | Context lines for `-p` (Git `-U`). |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries when `-p` is set. |
-| `--oneline` | One line per commit: short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
+| `--oneline` | One line per commit: collision-aware short oid and subject (`--json` unchanged). With `--decorate`, refs appear in parentheses after the oid. |
 | `--graph` | Draw a commit graph beside each commit in human output only (implies topological order; Unicode lanes by default). |
 | `--no-pager` | On a terminal, write straight to it instead of through the pager. |
 | `--graph-ascii` | Use ASCII `*|` lane characters in `--graph` output instead of Unicode. |

@@ -25,7 +25,7 @@ By default only annotated tags are considered; `--tags` includes lightweight tag
 | `--tags` | Include lightweight tags (default: annotated only). |
 | `--match GLOB` | Only consider tags whose short name matches `GLOB`. |
 | `--first-parent` | Count distance along first-parent chains only. |
-| `--abbrev N` | Minimum abbreviated commit id length (default 7). |
+| `--abbrev N` | Minimum abbreviated commit id length (default follows `core.abbrev`, extending on collision like Git). |
 
 ## Examples
 

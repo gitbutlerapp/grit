@@ -17,7 +17,7 @@ grit st
 
 The status screen is your home base. It shows, from top to bottom:
 
-- **Where you are.** The current branch and how it compares with its target branch: ahead and behind counts, followed by ahead commits (up to ten). A branch with no commits says `no commits yet`, and a detached HEAD shows the commit it's on.
+- **Where you are.** The current branch and how it compares with its target branch: ahead and behind counts, followed by ahead commits (up to ten). A branch with no commits says `no commits yet`, and a detached HEAD shows the commit it's on (short id follows `core.abbrev` and always resolves).
 - **Staged** changes, which are ready to commit.
 - **Changed (not staged)** files, which have been modified since they were last staged.
 - **Untracked** files, which `grit` isn't tracking yet.
