@@ -1060,15 +1060,38 @@ impl Repository {
         if self.environment.git_no_replace_objects {
             return true;
         }
+        let Some(prefix) =
+            Self::replace_ref_prefix_from_config(cfg, self.environment.as_ref())
+        else {
+            return true;
+        };
+        self.references()
+            .list(&prefix)
+            .map(|refs| refs.is_empty())
+            .unwrap_or(true)
+    }
+
+    fn replace_ref_prefix_from_config(
+        cfg: &ConfigSet,
+        environment: &Environment,
+    ) -> Option<String> {
         if !cfg
             .get_bool("core.useReplaceRefs")
             .and_then(|r| r.ok())
             .unwrap_or(true)
         {
-            return true;
+            return None;
         }
-        let replace_dir = self.common_git_dir.join("refs/replace");
-        !replace_dir_is_non_empty(&replace_dir)
+        let replace_ref_base = environment
+            .git_replace_ref_base
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("refs/replace");
+        Some(if replace_ref_base.ends_with('/') {
+            replace_ref_base.to_owned()
+        } else {
+            format!("{replace_ref_base}/")
+        })
     }
 
     /// Return the diagnostic sink installed on this repository.
@@ -2838,28 +2861,14 @@ fn load_replace_redirect_map(repo: &Repository) -> crate::objects::OidHashMap<Ob
     let Some(ref_base) = repo.replace_ref_base_if_enabled() else {
         return direct;
     };
-    let replace_dir = repo.common_git_dir.join(ref_base.trim_end_matches('/'));
-    let Ok(entries) = fs::read_dir(replace_dir) else {
+    let Ok(refs) = crate::refs::list_refs_for_repository(repo, &ref_base) else {
         return direct;
     };
-    for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else {
+    for (name, replacement) in refs {
+        let Some(hex) = name.strip_prefix(&ref_base) else {
             continue;
         };
-        if !file_type.is_file() {
-            continue;
-        }
-        let file_name = entry.file_name();
-        let Some(name) = file_name.to_str() else {
-            continue;
-        };
-        let Ok(original) = name.parse::<ObjectId>() else {
-            continue;
-        };
-        let Ok(content) = fs::read_to_string(entry.path()) else {
-            continue;
-        };
-        let Ok(replacement) = content.trim().parse::<ObjectId>() else {
+        let Ok(original) = hex.parse::<ObjectId>() else {
             continue;
         };
         if repo.odb().read_info(&replacement).is_ok() {
@@ -2882,19 +2891,6 @@ fn load_replace_redirect_map(repo: &Repository) -> crate::objects::OidHashMap<Ob
         }
     }
     resolved
-}
-
-/// Resolve the common git directory for linked worktrees.
-fn replace_dir_is_non_empty(replace_dir: &Path) -> bool {
-    let Ok(entries) = fs::read_dir(replace_dir) else {
-        return false;
-    };
-    entries.filter_map(|e| e.ok()).any(|e| {
-        let Ok(ft) = e.file_type() else {
-            return false;
-        };
-        ft.is_file()
-    })
 }
 
 /// Resolve the common git directory for linked worktrees.
