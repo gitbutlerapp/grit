@@ -1805,6 +1805,14 @@ pub enum Error {
         n: usize,
     },
 
+    /// A stash commit id was given to [`crate::repo_handles::RepositoryStash::pop`] but is not on
+    /// `refs/stash` (use [`crate::repo_handles::RepositoryStash::apply_commit`] to recover it).
+    #[error("stash commit {oid} is not on the stash stack")]
+    StashCommitNotOnStack {
+        /// Stash W commit object id.
+        oid: crate::objects::ObjectId,
+    },
+
     /// Ref does not exist and has no reflog entries.
     #[error("unknown ref '{refname}'")]
     ReflogUnknownRef {
@@ -2256,6 +2264,7 @@ impl Error {
             Self::Worktree(..) => "worktree",
             Self::CorruptStash(..) => "corrupt_stash",
             Self::StashNotFound { .. } => "stash_not_found",
+            Self::StashCommitNotOnStack { .. } => "stash_commit_not_on_stack",
             Self::ReflogUnknownRef { .. } => "reflog_unknown_ref",
             Self::ReflogInvalidSelector { .. } => "reflog_invalid_selector",
             Self::ReflogInvalidIndex { .. } => "reflog_invalid_index",

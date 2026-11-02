@@ -22,6 +22,12 @@
     },
     "index_restored": {
       "type": "boolean"
+    },
+    "oid": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

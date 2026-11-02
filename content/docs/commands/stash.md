@@ -11,10 +11,10 @@ order: 4
 grit stash [-m <msg>] [-u] [-- path…]
 grit stash push [-m <msg>] [-u] [-S] [-k] [--hunks <id,...>] [--lines <path:start-end>] [--dry-run] [--pathspec-from-file <file|->] [--pathspec-file-nul] [-- path…]
 grit stash list
-grit stash show [<n>] [--stat] [-p] [-u]
-grit stash apply [<n>] [--index]
-grit stash pop [<n>] [--index]
-grit stash branch <name> [<n>]
+grit stash show [<n>|<commit>] [--stat] [-p] [-u]
+grit stash apply [<n>|<commit>] [--index]
+grit stash pop [<n>|<commit>] [--index]
+grit stash branch <name> [<n>|<commit>]
 grit stash drop [<n>]
 grit stash clear [--force] [--dry-run]
 ```
@@ -27,7 +27,7 @@ Like Git, stash never signs the commits it records, even when `commit.gpgsign` i
 
 Pass `--` followed by pathspecs (or `--pathspec-from-file`) on push to stash only matching paths; other staged and unstaged changes stay in place. The stash commit still records the full index on its index parent; the working-tree parent and optional untracked parent are limited to those paths, matching `git stash push -- <pathspec>`. Attribute pathspecs such as `:(attr:myattr)` use the same `.gitattributes` stack as [`grit log`](log.md).
 
-Stash indices follow Git: `0` is the newest entry. You can pass an integer or `stash@{n}`.
+Stash indices follow Git: `0` is the newest entry. You can pass an integer or `stash@{n}`. An all-decimal token is always an index (never a short object id). Any other revision resolves to a stash commit id: `apply` and `branch` accept dangling stash commits (for example after `drop`), and `pop` accepts a commit id only while that commit is still on the stack.
 
 `grit stash pop` applies the entry and removes it when there are no conflicts. When applying would leave merge conflicts, the stash entry is kept and the command exits non-zero; conflicting paths are listed. There is no merge to continue: edit the files, mark them resolved with `grit add <file>`, then remove the kept entry with `grit stash drop` (or pick a side with `grit restore --ours|--theirs <file>`). `grit stash apply` stops the same way but never drops the entry.
 
@@ -123,7 +123,7 @@ stash untracked restore blocked: 'notes.txt' already exists on disk
 
 ## JSON output
 
-Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v2](/schemas/stash.list/v2.json), [v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v1](/schemas/stash.drop/v1.json) · [stash.branch v1](/schemas/stash.branch/v1.json) · [stash.clear v1](/schemas/stash.clear/v1.json)
+Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v2](/schemas/stash.list/v2.json), [v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v2](/schemas/stash.apply/v2.json), [v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v2](/schemas/stash.drop/v2.json), [v1](/schemas/stash.drop/v1.json) · [stash.branch v2](/schemas/stash.branch/v2.json), [v1](/schemas/stash.branch/v1.json) · [stash.clear v1](/schemas/stash.clear/v1.json)
 
 Pass `--json` for stable, scripting-friendly output.
 
@@ -236,6 +236,7 @@ With `--patch`, a `patch` object with the same shape as [`grit diff`](../diff/) 
 {
   "branch": "from-stash",
   "base": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "oid": "d78432c4772cb8509513bca138a60d13e5ad50fd",
   "index": 0,
   "conflicts": false
 }
@@ -247,7 +248,8 @@ When `conflicts` is true, `conflict_paths` lists paths with unmerged index entri
 | ----- | ---- | ------- |
 | `branch` | string | Branch created and checked out. |
 | `base` | string | Stash base commit (parent 1 of the W commit). |
-| `index` | number | Stash index that was applied. |
+| `oid` | string | Stash W commit that was applied. |
+| `index` | number | Stash index when the commit was on the stack (omitted for an off-stack commit id). |
 | `conflicts` | boolean | Whether merge conflicts remain after apply. |
 | `conflict_paths` | array of strings | Conflicted paths when `conflicts` is true. |
 
@@ -280,6 +282,7 @@ After `grit stash clear --force`:
 
 ```json
 {
+  "oid": "d78432c4772cb8509513bca138a60d13e5ad50fd",
   "index": 0,
   "conflicts": false,
   "index_restored": false,
@@ -293,7 +296,8 @@ Pop adds `dropped` (whether the entry was removed):
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `index` | number | Stash index targeted. |
+| `oid` | string | Stash W commit id (always set on apply). |
+| `index` | number | Stash index when the selector was on the stack (omitted for a bare commit id). |
 | `conflicts` | boolean | Whether merge conflicts remain. |
 | `index_restored` | boolean | Whether `--index` was used. |
 | `conflict_paths` | array of strings | Paths with unmerged index entries when `conflicts` is true. |
@@ -303,13 +307,15 @@ Pop adds `dropped` (whether the entry was removed):
 
 ```json
 {
-  "index": 0
+  "index": 0,
+  "oid": "d78432c4772cb8509513bca138a60d13e5ad50fd"
 }
 ```
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `index` | number | Stash index removed. |
+| `oid` | string | Full hex id of the dropped stash W commit (for recovery with `grit stash apply <oid>`). |
 
 ## Markdown output
 

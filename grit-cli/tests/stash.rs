@@ -404,8 +404,37 @@ fn stash_branch_json() {
     assert_eq!(v["branch"], "wip-branch");
     assert_eq!(v["base"], base);
     assert_eq!(v["index"], 0);
+    assert!(v.get("oid").and_then(|o| o.as_str()).is_some());
     assert_eq!(v["conflicts"], false);
     assert!(git(&dir, &["stash", "list"]).trim().is_empty());
+}
+
+#[test]
+fn stash_drop_prints_oid_and_apply_by_oid_after_drop() {
+    let dir = scratch("drop-oid-recover");
+    init_repo(&dir);
+    fs::write(dir.join("f"), "1\n").expect("write");
+    git(&dir, &["add", "f"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("f"), "2\n").expect("modify");
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "-m", "important", "--json"]);
+    assert_eq!(code, 0, "{stderr}");
+    let saved_oid = serde_json::from_str::<serde_json::Value>(stdout.trim()).expect("json")["oid"]
+        .as_str()
+        .expect("oid")
+        .to_owned();
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "drop", "--json"]);
+    assert_eq!(code, 0, "{stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["index"], 0);
+    assert_eq!(v["oid"].as_str(), Some(saved_oid.as_str()));
+    assert_eq!(v["oid"].as_str().unwrap().len(), 40);
+
+    let (code, _, stderr) = grit(&dir, &["stash", "apply", &saved_oid]);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(fs::read_to_string(dir.join("f")).expect("read"), "2\n");
 }
 
 #[test]

@@ -13,7 +13,9 @@ use grit_lib::diff::DiffOptions;
 use grit_lib::error::Error;
 use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
-use grit_lib::stash::{StashApplyOptions, StashDiffOptions, StashMode, StashPushOptions};
+use grit_lib::stash::{
+    StashApplyOptions, StashDiffOptions, StashMode, StashPushOptions, StashReference,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -256,7 +258,10 @@ impl MarkdownRender for StashShowOutcome {
 /// Result of `grit stash apply`.
 #[derive(Serialize, JsonSchema)]
 pub struct StashApplyOutcome {
-    pub index: usize,
+    pub oid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub index: Option<usize>,
     pub conflicts: bool,
     pub index_restored: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -272,8 +277,10 @@ impl HumanRender for StashApplyOutcome {
                 eprintln!("  {path}");
             }
             eprintln!("→ resolve conflicts, then grit add <file> to mark them resolved");
+        } else if let Some(n) = self.index {
+            outln!(w, "Applied stash@{{{n}}}");
         } else {
-            outln!(w, "Applied stash@{{{}}}", self.index);
+            outln!(w, "Applied stash {}", short_hex(&self.oid));
         }
         Ok(())
     }
@@ -290,6 +297,9 @@ impl MarkdownRender for StashApplyOutcome {
 #[derive(Serialize, JsonSchema)]
 pub struct StashPopOutcome {
     pub index: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub oid: Option<String>,
     pub dropped: bool,
     pub conflicts: bool,
     pub index_restored: bool,
@@ -343,11 +353,17 @@ impl MarkdownRender for StashPopOutcome {
 #[derive(Serialize, JsonSchema)]
 pub struct StashDropOutcome {
     pub index: usize,
+    pub oid: String,
 }
 
 impl HumanRender for StashDropOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "Dropped stash@{{{}}}", self.index);
+        outln!(
+            w,
+            "Dropped stash@{{{}}} ({})",
+            self.index,
+            short_hex(&self.oid)
+        );
         Ok(())
     }
 }
@@ -507,7 +523,7 @@ pub fn run_show(
     include_untracked: bool,
 ) -> Result<StashShowOutcome> {
     let repo = context::discover()?;
-    let n = parse_stash_index(index.as_deref())?;
+    let n = resolve_stash_index(&repo, index.as_deref())?;
     let stash_options = StashDiffOptions { include_untracked };
     if patch {
         let entries = repo
@@ -540,7 +556,10 @@ pub fn run_show(
 pub struct StashBranchOutcome {
     pub branch: String,
     pub base: String,
-    pub index: usize,
+    pub oid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub index: Option<usize>,
     pub conflicts: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
@@ -554,13 +573,20 @@ impl HumanRender for StashBranchOutcome {
             for path in &self.conflict_paths {
                 eprintln!("  {path}");
             }
+        } else if let Some(n) = self.index {
+            outln!(
+                w,
+                "Created branch '{}' at {} and applied stash@{{{n}}}",
+                self.branch,
+                &self.base[..7.min(self.base.len())],
+            );
         } else {
             outln!(
                 w,
-                "Created branch '{}' at {} and applied stash@{{{}}}",
+                "Created branch '{}' at {} and applied stash {}",
                 self.branch,
                 &self.base[..7.min(self.base.len())],
-                self.index
+                short_hex(&self.oid)
             );
         }
         Ok(())
@@ -574,13 +600,20 @@ impl MarkdownRender for StashBranchOutcome {
             for path in &self.conflict_paths {
                 outln!(w, "- `{path}`");
             }
+        } else if let Some(n) = self.index {
+            outln!(
+                w,
+                "Created branch **{}** at `{}` and applied stash@{{{n}}}.",
+                self.branch,
+                self.base,
+            );
         } else {
             outln!(
                 w,
-                "Created branch **{}** at `{}` and applied stash@{{{}}}.",
+                "Created branch **{}** at `{}` and applied stash `{}`.",
                 self.branch,
                 self.base,
-                self.index
+                self.oid,
             );
         }
         Ok(())
@@ -591,11 +624,15 @@ pub fn run_branch(index: Option<String>, name: &str) -> Result<StashBranchOutcom
     let repo = context::discover()?;
     repo.work_tree()
         .context("grit stash branch needs a working tree")?;
-    let n = parse_stash_index(index.as_deref())?;
-    let outcome = repo.stash().branch(name, n).map_err(map_stash_error)?;
+    let reference = repo.stash().parse_reference(index.as_deref())?;
+    let outcome = repo
+        .stash()
+        .branch_reference(name, reference)
+        .map_err(map_stash_error)?;
     Ok(StashBranchOutcome {
         branch: outcome.branch,
         base: outcome.base.to_hex(),
+        oid: outcome.stash_oid.to_hex(),
         index: outcome.index,
         conflicts: outcome.conflicts,
         conflict_paths: outcome.conflict_paths,
@@ -703,12 +740,13 @@ pub fn run_apply(
     let repo = context::discover()?;
     repo.work_tree()
         .context("grit stash apply needs a working tree")?;
-    let n = parse_stash_index(index.as_deref())?;
+    let reference = repo.stash().parse_reference(index.as_deref())?;
+    let (stack_index, oid) = stash_reference_parts(&repo, reference)?;
     let interrupt = crate::interrupt::InterruptCancel::install();
     let applied = repo
         .stash()
-        .apply(
-            n,
+        .apply_reference(
+            reference,
             &StashApplyOptions {
                 restore_index,
                 ..Default::default()
@@ -718,7 +756,8 @@ pub fn run_apply(
         )
         .map_err(map_stash_error)?;
     Ok(StashApplyOutcome {
-        index: n,
+        oid: oid.to_hex(),
+        index: stack_index,
         conflicts: applied.has_conflicts(),
         index_restored: restore_index,
         conflict_paths: crate::operation_output::conflict_paths(applied.conflicts),
@@ -733,12 +772,14 @@ pub fn run_pop(
     let repo = context::discover()?;
     repo.work_tree()
         .context("grit stash pop needs a working tree")?;
-    let n = parse_stash_index(index.as_deref())?;
+    let reference = repo.stash().parse_reference(index.as_deref())?;
+    let (stack_index, oid) = stash_reference_parts(&repo, reference)?;
+    let n = stack_index.unwrap_or(0);
     let interrupt = crate::interrupt::InterruptCancel::install();
     let popped = repo
         .stash()
-        .pop(
-            n,
+        .pop_reference(
+            reference,
             &StashApplyOptions {
                 restore_index,
                 ..Default::default()
@@ -750,6 +791,7 @@ pub fn run_pop(
     let conflicts = popped.has_conflicts();
     Ok(StashPopOutcome {
         index: n,
+        oid: Some(oid.to_hex()),
         dropped: !conflicts,
         conflicts,
         index_restored: restore_index,
@@ -759,25 +801,53 @@ pub fn run_pop(
 
 pub fn run_drop(index: Option<String>) -> Result<StashDropOutcome> {
     let repo = context::discover()?;
-    let n = parse_stash_index(index.as_deref())?;
-    repo.stash().drop(n).map_err(map_stash_error)?;
-    Ok(StashDropOutcome { index: n })
+    let reference = repo.stash().parse_reference(index.as_deref())?;
+    let (stack_index, _) = stash_reference_parts(&repo, reference)?;
+    let n = stack_index.ok_or_else(|| {
+        anyhow::anyhow!("stash drop requires a stack index, not a bare commit id")
+    })?;
+    let oid = repo.stash().drop(n).map_err(map_stash_error)?;
+    Ok(StashDropOutcome {
+        index: n,
+        oid: oid.to_hex(),
+    })
 }
 
-/// Parse `n` or `stash@{n}` (default `0`).
-pub fn parse_stash_index(spec: Option<&str>) -> Result<usize> {
-    let raw = spec.unwrap_or("0").trim();
-    let digits = if let Some(inner) = raw
-        .strip_prefix("stash@{")
-        .and_then(|s| s.strip_suffix('}'))
-    {
-        inner
-    } else {
-        raw
-    };
-    digits
-        .parse::<usize>()
-        .with_context(|| format!("invalid stash index '{raw}'"))
+fn resolve_stash_index(repo: &grit_lib::repo::Repository, spec: Option<&str>) -> Result<usize> {
+    let reference = repo
+        .stash()
+        .parse_reference(spec)
+        .map_err(map_stash_error)?;
+    match reference {
+        StashReference::Index(n) => Ok(n),
+        StashReference::Commit(oid) => {
+            if let Some(n) = repo.stash().index_for_oid(&oid) {
+                Ok(n)
+            } else {
+                Err(map_stash_error(Error::StashNotFound { n: 0 }))
+            }
+        }
+    }
+}
+
+fn stash_reference_parts(
+    repo: &grit_lib::repo::Repository,
+    reference: StashReference,
+) -> Result<(Option<usize>, grit_lib::objects::ObjectId)> {
+    match reference {
+        StashReference::Index(n) => {
+            let oid = repo
+                .stash()
+                .list()
+                .map_err(map_stash_error)?
+                .into_iter()
+                .find(|e| e.index == n)
+                .map(|e| e.oid)
+                .ok_or(Error::StashNotFound { n })?;
+            Ok((Some(n), oid))
+        }
+        StashReference::Commit(oid) => Ok((repo.stash().index_for_oid(&oid), oid)),
+    }
 }
 
 fn map_stash_error(err: Error) -> anyhow::Error {
@@ -786,6 +856,11 @@ fn map_stash_error(err: Error) -> anyhow::Error {
             anyhow::anyhow!("you do not have the initial commit yet")
         }
         stash @ Error::StashNotFound { .. } => anyhow::Error::new(stash),
+        Error::StashCommitNotOnStack { oid } => anyhow::anyhow!(
+            "stash commit {} is not on the stash stack; use `grit stash apply {}` instead",
+            oid.to_short_hex(),
+            oid.to_hex()
+        ),
         Error::CorruptStash(msg) => anyhow::anyhow!("corrupt stash commit: {msg}"),
         Error::StashWouldOverwriteLocalChanges { paths } => {
             anyhow::anyhow!("local changes would be overwritten by stash:\n{paths}")
