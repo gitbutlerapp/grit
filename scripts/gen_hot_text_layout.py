@@ -22,9 +22,9 @@ Two fragments come out of one profile:
 Both lists are the union of what common operations run (repository discovery and config,
 refs and branches, object reads, revision walks, diffs, blame, the index and work tree,
 staging, committing, switching over many files and over fewer than
-`checkout.thresholdForParallelism`, stashing), profiled with callgrind on a clone through
-`grit` binaries built like the ones that run them, so inlining matches what is linked: the
-shipped `dist` build (fat LTO, one codegen unit) and the `release` build that development
+`checkout.thresholdForParallelism`, stashing, picking, reverting, merging), profiled with
+callgrind on a clone through `grit` binaries built like the ones that run them, so inlining
+matches what is linked: the shipped `dist` build (fat LTO, one codegen unit) and the `release` build that development
 and local benchmarking use (ThinLTO over many codegen units, which inlines less and keeps
 more functions apart). Functions that the same set of workloads runs are kept together, and
 those groups follow each other in reflected binary (Gray code) order over the workloads in
@@ -41,7 +41,7 @@ window each.
 
 Both orders are only the starting point of a search (`searched`): with each build's code
 sizes, it moves groups of functions that run together and keeps a move when the windows
-all workloads touch, summed over both builds, do not rise and no workload's own count rises
+all workloads touch, summed over the profiled builds, do not rise and no workload's own count rises
 above what the starting order gave it. On the profile it was added with, that cut the
 library section's windows by 6 to 7% and the CLI section's by 10 to 13% over all workloads,
 with the largest gains on the later workloads (refs, branch, show, revs, resolve, stash).
@@ -54,13 +54,22 @@ symbol ends with is wildcarded too: LLVM merges identical instantiations from di
 crates into one copy, and which crate's name the survivor keeps changes from build to build
 (a stripped build differs from the unstripped one profiled here). A renamed or removed
 function simply stops matching and stays in `.text`; nothing breaks, the layout only
-degrades. Regenerate after large changes:
+degrades. Impl disambiguators (`Ms<n>_`) are not wildcarded, and they shift with grit-lib's
+features: building `grit` together with `grit-utils`, as the census does, turns on
+`serde-models` and its impls, while shipped binaries build `grit-cli` alone. Profile both
+builds of each profile. Regenerate after large changes:
 
-    CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \\
-        cargo build --profile dist -p grit-cli
-    CARGO_TARGET_DIR=target/hot-text cargo build --release -p grit-cli
+    for p in "-p grit-cli" "-p grit-cli -p grit-utils"; do
+        CARGO_PROFILE_DIST_STRIP=false CARGO_TARGET_DIR=target/hot-text \\
+            cargo build --profile dist $p
+        CARGO_TARGET_DIR=target/hot-text cargo build --release $p
+        n=$(echo "$p" | wc -w)
+        cp target/hot-text/dist/grit target/hot-text/grit-dist-$n
+        cp target/hot-text/release/grit target/hot-text/grit-release-$n
+    done
     python3 scripts/gen_hot_text_layout.py \\
-        --grit target/hot-text/dist/grit --grit target/hot-text/release/grit
+        --grit target/hot-text/grit-dist-2 --grit target/hot-text/grit-release-2 \\
+        --grit target/hot-text/grit-dist-4 --grit target/hot-text/grit-release-4
 
 (Linking the `release` build against the fragments being replaced is fine: the profile
 reads function names, not addresses.)
@@ -136,6 +145,10 @@ WORKLOADS: list[tuple[str, str, list[list[str]]]] = [
     # Fewer files than `checkout.thresholdForParallelism`: the serial write path.
     ("switch-near", "clean", [["switch", NEAR_BRANCH], ["switch", "main"]]),
     ("stash", "dirty", [["stash"], ["stash", "pop"]]),
+    # Last, so the Gray order splits the earlier workloads' runs as little as possible.
+    ("pick", "untracked-cache", [["pick", "origin/topic"]]),
+    ("revert", "untracked-cache", [["revert", "HEAD"]]),
+    ("merge", "untracked-cache", [["merge", "origin/topic"]]),
 ]
 
 CRATE_DISAMBIGUATOR = re.compile(r"Cs[0-9A-Za-z]+_")
@@ -199,6 +212,14 @@ def build_fixture(root: Path, files: int) -> tuple[Path, list[Path]]:
             with path.open("a") as f:
                 f.write(f"round {round_}\n")
         git(source, "commit", "-q", "-a", "-m", f"round {round_}")
+    # A topic forked before the last round that edits the first line of every fifth file:
+    # picking, reverting or merging it is a clean three-way merge over thousands of files,
+    # some of them merged line by line against the last round's appended line.
+    git(source, "checkout", "-q", "-b", "topic", "HEAD~1")
+    for path in sorted(source.glob("data/*/*.txt"))[50::5]:
+        path.write_text("topic\n" + path.read_text().split("\n", 1)[1])
+    git(source, "commit", "-q", "-a", "-m", "topic")
+    git(source, "checkout", "-q", "main")
     git(source, "repack", "-adq")
     repo = root / "repo"
     git(root, "clone", "-q", "--no-hardlinks", str(source), str(repo))
@@ -216,11 +237,31 @@ def build_fixture(root: Path, files: int) -> tuple[Path, list[Path]]:
 
 
 def apply_shape(repo: Path, paths: list[Path], shape: str) -> None:
-    """Back on `main` at `origin/main` with a clean tree, then `shape` applied."""
+    """Back on `main` at `origin/main` with a clean tree, then `shape` applied.
+
+    `untracked-cache` is a clean tree under the default `core.untrackedCache`, with an
+    untracked cache in the index: grit adds one to a large repository's index under that
+    default, as in the census's pick and merge fixtures, and every later index read and
+    write carries it. Every other shape turns the untracked cache off, as the census's
+    status fixtures do.
+    """
+    if shape == "untracked-cache":
+        subprocess.run(
+            ["git", "config", "--unset", "core.untrackedCache"],
+            cwd=repo,
+            env=run_env(isolated=False),
+            check=False,
+        )
+    else:
+        git(repo, "config", "core.untrackedCache", "false")
+        git(repo, "update-index", "--no-untracked-cache")
     git(repo, "checkout", "-q", "-f", "main")
     git(repo, "reset", "-q", "--hard", "origin/main")
     git(repo, "clean", "-fdq")
     git(repo, "stash", "clear")
+    if shape == "untracked-cache":
+        git(repo, "-c", "core.untrackedCache=true", "update-index", "--untracked-cache")
+        git(repo, "-c", "core.untrackedCache=true", "status")
     count = max(len(paths) // 100, 1)
     if shape == "dirty":
         for path in paths[:count]:
