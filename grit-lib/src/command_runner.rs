@@ -331,17 +331,6 @@ impl RunningCommand {
             RunningCommandInner::Recording { .. } => Ok(()),
         }
     }
-
-    /// Readable stdout when the spec requested a pipe.
-    pub fn stdout_mut(&mut self) -> Option<&mut dyn Read> {
-        match &mut self.inner {
-            RunningCommandInner::System { stdout, .. } => {
-                stdout.as_mut().map(|s| s as &mut dyn Read)
-            }
-            RunningCommandInner::Recording { .. } => None,
-        }
-    }
-
     /// Wait for the child and return its exit status.
     ///
     /// # Errors

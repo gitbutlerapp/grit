@@ -90,12 +90,6 @@ impl FilesSource {
         &self.packs
     }
 
-    /// MIDX layer for this directory.
-    #[must_use]
-    pub fn midx_objects(&self) -> &MidxObjects {
-        &self.midx
-    }
-
     /// Whether `oid` is materialized under this `objects/` tree (local loose or non-promisor pack).
     #[must_use]
     pub fn exists_local_materialized(&self, oid: &ObjectId) -> bool {

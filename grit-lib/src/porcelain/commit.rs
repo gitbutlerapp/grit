@@ -291,13 +291,6 @@ impl CommitRequest {
         self.skip_pre_commit_tree_match = skip;
         self
     }
-
-    /// Index-only commit scope (see [`Self::index_only`]).
-    #[doc(hidden)]
-    pub fn index_only_commit(mut self, index_only: bool) -> Self {
-        self.index_only = index_only;
-        self
-    }
 }
 
 /// One path-level change that would be recorded in a commit.

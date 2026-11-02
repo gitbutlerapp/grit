@@ -116,31 +116,6 @@ pub fn index_pack_threads_for_ingest(
     Ok(None)
 }
 
-/// Lazy name-hash thread count from config and Git's `LAZY_THREAD_COST` thresholds.
-#[must_use]
-pub fn index_load_lazy_thread_count(
-    policy: &ThreadPolicy,
-    config: &crate::config::ConfigSet,
-    cache_nr: usize,
-    try_threaded: bool,
-) -> usize {
-    if !try_threaded {
-        return 0;
-    }
-    let opts = policy.resolve(ParallelOp::IndexLoad, config);
-    if opts.threads.get() <= 1 {
-        return 0;
-    }
-    if cache_nr < 2 * crate::index_name_hash_lazy::LAZY_THREAD_COST {
-        return 0;
-    }
-    let mut nr = opts.threads.get();
-    if cache_nr < nr * crate::index_name_hash_lazy::LAZY_THREAD_COST {
-        nr = cache_nr / crate::index_name_hash_lazy::LAZY_THREAD_COST;
-    }
-    nr
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

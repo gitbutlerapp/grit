@@ -1485,28 +1485,7 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
 /// Uses the same cutoff semantics as unreachable loose-object pruning: when
 /// `keep_newer_than` is `None` (`gc.pruneExpire=now|all`), every temporary entry is
 /// eligible; otherwise only entries whose modification time is not newer than the cutoff
-/// are removed. When `keep_newer_than` is `None` and the caller wants to skip entirely,
-/// pass `GcLoosePrunePolicy::Disabled` at the call site instead of calling this function.
-///
-/// # Errors
-///
-/// Returns I/O errors from directory traversal or removal.
-pub fn prune_stale_temporary_objects(
-    repo: &Repository,
-    keep_newer_than: Option<SystemTime>,
-    dry_run: bool,
-) -> Result<PruneStats> {
-    repo.odb()
-        .require_files_primary("prune temporary objects")?;
-    let objects_dir = repo
-        .odb()
-        .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
-            operation: "prune temporary objects",
-        })?;
-    prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, dry_run)
-}
-
+/// are removed.
 fn prune_stale_temporary_objects_with_cutoff(
     objects_dir: &Path,
     keep_newer_than: Option<SystemTime>,

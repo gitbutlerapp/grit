@@ -1620,7 +1620,6 @@ pub fn grit_lib::command_runner::RunningCommand::from_system(std::process::Child
 pub fn grit_lib::command_runner::RunningCommand::into_system_parts(self) -> core::result::Result<(std::process::Child, core::option::Option<std::process::ChildStdin>, core::option::Option<std::process::ChildStdout>, core::option::Option<std::process::ChildStderr>), grit_lib::command_runner::CommandHandleError>
 pub fn grit_lib::command_runner::RunningCommand::kill(&mut self) -> core::io::error::Result<()>
 pub fn grit_lib::command_runner::RunningCommand::stdin_mut(&mut self) -> core::option::Option<&mut dyn core::io::write::Write>
-pub fn grit_lib::command_runner::RunningCommand::stdout_mut(&mut self) -> core::option::Option<&mut dyn alloc::io::read::Read>
 pub fn grit_lib::command_runner::RunningCommand::try_wait(&mut self) -> core::io::error::Result<core::option::Option<grit_lib::command_runner::CommandExit>>
 pub fn grit_lib::command_runner::RunningCommand::wait(self) -> core::io::error::Result<grit_lib::command_runner::CommandExit>
 pub fn grit_lib::command_runner::RunningCommand::wait_with_output(self) -> core::io::error::Result<grit_lib::command_runner::CommandOutput>
@@ -4266,7 +4265,6 @@ pub grit_lib::diff::DiffAlgorithm::Myers
 pub grit_lib::diff::DiffAlgorithm::Patience
 impl grit_lib::diff::DiffAlgorithm
 pub fn grit_lib::diff::DiffAlgorithm::similar_algorithm(self) -> similar::types::Algorithm
-pub fn grit_lib::diff::DiffAlgorithm::uses_git_histogram(self) -> bool
 impl core::clone::Clone for grit_lib::diff::DiffAlgorithm
 pub fn grit_lib::diff::DiffAlgorithm::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::diff::DiffAlgorithm
@@ -9041,7 +9039,6 @@ pub fn grit_lib::maintenance::gc_auto(&grit_lib::repo::Repository, &grit_lib::ma
 pub fn grit_lib::maintenance::offload_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::OffloadOptions) -> grit_lib::error::Result<grit_lib::maintenance::OffloadReport>
 pub fn grit_lib::maintenance::pack_refs(&grit_lib::repo::Repository, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
 pub fn grit_lib::maintenance::prune_loose_objects(&grit_lib::repo::Repository, &grit_lib::maintenance::PruneOptions) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
-pub fn grit_lib::maintenance::prune_stale_temporary_objects(&grit_lib::repo::Repository, core::option::Option<std::time::SystemTime>, bool) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
 pub fn grit_lib::maintenance::repack(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::maintenance::repack_all(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackStats>
 pub fn grit_lib::maintenance::write_commit_graph(&grit_lib::repo::Repository, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
@@ -10569,8 +10566,6 @@ pub fn grit_lib::objects::odb::FilesSource::local_loose_exists_but_unreadable(&s
 pub fn grit_lib::objects::odb::FilesSource::local_loose_exists_but_unreadable(&self, &grit_lib::objects::ObjectId, &grit_lib::error::Error) -> bool
 pub fn grit_lib::objects::odb::FilesSource::loose_store(&self) -> &grit_lib::objects::odb::store::loose::LooseStore
 pub fn grit_lib::objects::odb::FilesSource::loose_store(&self) -> &grit_lib::objects::odb::store::loose::LooseStore
-pub fn grit_lib::objects::odb::FilesSource::midx_objects(&self) -> &grit_lib::objects::odb::store::MidxObjects
-pub fn grit_lib::objects::odb::FilesSource::midx_objects(&self) -> &grit_lib::objects::odb::store::MidxObjects
 pub fn grit_lib::objects::odb::FilesSource::objects_dir(&self) -> &std::path::Path
 pub fn grit_lib::objects::odb::FilesSource::objects_dir(&self) -> &std::path::Path
 pub fn grit_lib::objects::odb::FilesSource::open(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, grit_lib::objects::odb::store::loose::LooseStore, bool, bool, grit_lib::diagnostics::DiagnosticsHandle) -> grit_lib::error::Result<Self>
@@ -10779,8 +10774,6 @@ impl grit_lib::objects::odb::store::MidxObjects
 impl grit_lib::objects::odb::store::MidxObjects
 pub fn grit_lib::objects::odb::store::MidxObjects::covered_pack_basenames(&self) -> grit_lib::error::Result<std::collections::hash::set::HashSet<alloc::string::String>>
 pub fn grit_lib::objects::odb::store::MidxObjects::covered_pack_basenames(&self) -> grit_lib::error::Result<std::collections::hash::set::HashSet<alloc::string::String>>
-pub fn grit_lib::objects::odb::store::MidxObjects::multi_pack_index_enabled(&self) -> bool
-pub fn grit_lib::objects::odb::store::MidxObjects::multi_pack_index_enabled(&self) -> bool
 pub fn grit_lib::objects::odb::store::MidxObjects::new(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::odb::store::MidxObjects::new(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, bool) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::odb::store::MidxObjects::packed_objects(&self) -> &grit_lib::objects::odb::store::PackedObjects
@@ -11298,7 +11291,6 @@ impl grit_lib::objects::odb::FilesSource
 pub fn grit_lib::objects::odb::FilesSource::exists_local_materialized(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::odb::FilesSource::local_loose_exists_but_unreadable(&self, &grit_lib::objects::ObjectId, &grit_lib::error::Error) -> bool
 pub fn grit_lib::objects::odb::FilesSource::loose_store(&self) -> &grit_lib::objects::odb::store::loose::LooseStore
-pub fn grit_lib::objects::odb::FilesSource::midx_objects(&self) -> &grit_lib::objects::odb::store::MidxObjects
 pub fn grit_lib::objects::odb::FilesSource::objects_dir(&self) -> &std::path::Path
 pub fn grit_lib::objects::odb::FilesSource::open(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, grit_lib::objects::odb::store::loose::LooseStore, bool, bool, grit_lib::diagnostics::DiagnosticsHandle) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::odb::FilesSource::packed_objects(&self) -> &grit_lib::objects::odb::store::PackedObjects
@@ -13926,7 +13918,6 @@ impl core::marker::Unpin for grit_lib::parallel::ThreadPolicy
 impl core::marker::UnsafeUnpin for grit_lib::parallel::ThreadPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::parallel::ThreadPolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::parallel::ThreadPolicy
-pub fn grit_lib::parallel::index_load_lazy_thread_count(&grit_lib::parallel::ThreadPolicy, &grit_lib::config::ConfigSet, usize, bool) -> usize
 pub fn grit_lib::parallel::index_pack_threads_for_ingest(grit_lib::parallel::ThreadPolicy, &grit_lib::config::ConfigSet, core::option::Option<usize>) -> core::result::Result<core::option::Option<usize>, grit_lib::error::ConfigError>
 pub fn grit_lib::parallel::index_parallelism_from_config(&grit_lib::config::ConfigSet) -> grit_lib::parallel::Parallelism
 pub fn grit_lib::parallel::par_map<T, R, F>(&[T], grit_lib::parallel::ParallelOptions, usize, F) -> alloc::vec::Vec<R> where T: core::marker::Sync, R: core::marker::Send, F: core::ops::function::Fn(&T) -> R + core::marker::Sync
@@ -21171,7 +21162,6 @@ impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::handle::Re
 pub const grit_lib::refs::SYMREF_MAXDEPTH: usize
 pub fn grit_lib::refs::append_reflog(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::append_reflog_with_config(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool, core::option::Option<&grit_lib::config::ConfigSet>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::append_reflog_with_signature(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &grit_lib::ident::Signature, &str, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::collect_alternate_ref_oids(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::commit_ref_batch_on_store(&dyn grit_lib::refs::store::RefStore, &[grit_lib::refs::store::RefUpdate], &[grit_lib::refs::store::RefReflogRename], &[grit_lib::refs::store::RefCaseOnlyRename]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::commit_ref_store_batch(&std::path::Path, &[grit_lib::refs::store::RefUpdate]) -> grit_lib::error::Result<()>

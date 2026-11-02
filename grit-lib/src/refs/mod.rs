@@ -79,11 +79,9 @@ use store::{
 use crate::check_ref_format::{check_refname_format_borrowed, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, RefLockError, Result};
-use crate::ident::Signature;
 use crate::lockfile::LockWait;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::pack;
-use store::format_reflog_identity;
 
 /// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
 pub const SYMREF_MAXDEPTH: usize = 5;
@@ -3556,34 +3554,6 @@ fn validate_reflog_identity_string(identity: &str) -> Result<()> {
 /// Reject reflog metadata that would forge or corrupt a log line on either backend.
 fn validate_reflog_update(log: &ReflogUpdate) -> Result<()> {
     store::validate_reflog_update(log).map_err(map_reflog_store_validation)
-}
-
-/// Append one line to the reflog for `refname` using a validated [`Signature`].
-///
-/// # Errors
-///
-/// Propagates I/O failures, invalid refname errors, and [`Error::InvalidSignature`].
-pub fn append_reflog_with_signature(
-    git_dir: &Path,
-    refname: &str,
-    old_oid: &ObjectId,
-    new_oid: &ObjectId,
-    identity: &Signature,
-    message: &str,
-    force_create: bool,
-) -> Result<()> {
-    identity.validate().map_err(Error::InvalidSignature)?;
-    let formatted = format_reflog_identity(&identity.reflog_name_email(), identity.time);
-    append_reflog_with_config(
-        git_dir,
-        refname,
-        old_oid,
-        new_oid,
-        &formatted,
-        message,
-        force_create,
-        None,
-    )
 }
 
 /// Append one line to the reflog for `refname`.

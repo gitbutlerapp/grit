@@ -85,12 +85,6 @@ impl MidxObjects {
             .unwrap_or(MidxObjectsStatus::Unusable)
     }
 
-    /// Whether `core.multiPackIndex` was enabled when this store was built.
-    #[must_use]
-    pub fn multi_pack_index_enabled(&self) -> bool {
-        self.multi_pack_index
-    }
-
     /// Pack index basenames covered by the active MIDX chain (empty when inactive).
     ///
     /// Callers skip these indexes in [`PackedObjects`] so MIDX-covered OIDs are not scanned twice.

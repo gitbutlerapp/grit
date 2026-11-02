@@ -49,12 +49,6 @@ impl DiffAlgorithm {
             Self::Patience => similar::Algorithm::Patience,
         }
     }
-
-    /// Whether this selection uses the histogram line-diff engine.
-    #[must_use]
-    pub fn uses_git_histogram(self) -> bool {
-        matches!(self, Self::Histogram)
-    }
 }
 
 /// u32 rename APIs: thresholds `0`–`100` run detection at that Git `-M` percent;
