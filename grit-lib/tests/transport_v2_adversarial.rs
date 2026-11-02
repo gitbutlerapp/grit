@@ -343,10 +343,7 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = match transport.connect(&srv.url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {
@@ -428,10 +425,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     };
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
 
     let tmp = tempfile::tempdir().unwrap();
     let local = tmp.path().join("local");
@@ -580,10 +574,7 @@ fn v2_unborn_remote_is_empty_and_does_not_hang() {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = match transport.connect(&srv.url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {
@@ -672,10 +663,7 @@ fn v2_tag_modes_all_and_following() {
     let v1_oid = rev_parse(&srv.source, "refs/tags/v1");
     let vside_oid = rev_parse(&srv.source, "refs/tags/vside");
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
 
     // --- TagMode::All: both tags land. ---
     {
@@ -784,10 +772,7 @@ fn v2_ref_prefix_filtering_excludes_tags() {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = match transport.connect(&srv.url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {
@@ -912,10 +897,7 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = match transport.connect(&srv.url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {

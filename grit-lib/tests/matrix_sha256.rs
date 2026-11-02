@@ -332,10 +332,7 @@ fn sha256_fetch_over_git_daemon_v2() {
     assert_eq!(open_odb(&local_git).hash_algo(), HashAlgo::Sha256);
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = match transport.connect(&url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {

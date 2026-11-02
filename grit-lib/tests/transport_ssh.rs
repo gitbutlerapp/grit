@@ -236,10 +236,7 @@ fn fetch_over_ssh_v2_lands_refs_and_objects() {
     git(&local_root, &["init", "-q", "-b", "main", "."]);
     let local_git = local_root.join(".git");
 
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = transport
         .connect(&url, Service::UploadPack, &opts_v2)
         .expect("SshTransport::connect v2");
@@ -365,10 +362,7 @@ eval "exec $cmd"
 
     let transport = SshTransport::with_program(&script);
     let url = format!("fakehost:{}", source.to_str().expect("utf8 path"));
-    let opts = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts = ConnectOptions::with_protocol_version(2);
     let conn = transport
         .connect(&url, Service::UploadPack, &opts)
         .expect("connect");

@@ -1,6 +1,6 @@
 //! Integration test for protocol **v2** fetch over the `git://` streaming
 //! transport: `GitDaemonTransport` + `fetch::fetch_remote` with
-//! `ConnectOptions { protocol_version: 2, .. }`.
+//! `ConnectOptions::with_protocol_version(2)`.
 //!
 //! This is the v2 counterpart of `transport_git_daemon.rs`. It builds the same
 //! source repo (two commits on `main`, a `topic` branch, an annotated tag),
@@ -146,10 +146,7 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
 
     // Connect requesting protocol v2.
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let mut conn = match transport.connect(&url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {
@@ -326,10 +323,7 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
 
     // First fetch (v2) to seed the local repo with main's full history.
     {

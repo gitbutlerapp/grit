@@ -25694,6 +25694,7 @@ impl core::clone::Clone for grit_lib::remote::transport::ConnectOptions
 pub fn grit_lib::remote::transport::ConnectOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::transport::ConnectOptions
 pub fn grit_lib::remote::transport::ConnectOptions::default() -> Self
+pub fn grit_lib::remote::transport::ConnectOptions::with_protocol_version(u8) -> Self
 impl core::marker::Freeze for grit_lib::remote::transport::ConnectOptions
 impl core::marker::Send for grit_lib::remote::transport::ConnectOptions
 impl core::marker::Sync for grit_lib::remote::transport::ConnectOptions

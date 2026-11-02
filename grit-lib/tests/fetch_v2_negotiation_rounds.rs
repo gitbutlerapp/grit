@@ -183,10 +183,7 @@ fn server_commit(srv: &Server) -> ObjectId {
 
 fn fetch_main(git_dir: &Path, srv: &Server) -> Result<(), grit_lib::error::Error> {
     let transport = GitDaemonTransport::new();
-    let connect = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let connect = ConnectOptions::with_protocol_version(2);
     let mut conn = transport.connect(&srv.url, Service::UploadPack, &connect)?;
     assert_eq!(conn.protocol_version(), 2, "expected protocol v2");
     let mut opts = FetchOptions::new();

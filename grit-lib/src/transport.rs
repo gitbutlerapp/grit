@@ -97,6 +97,15 @@ impl Default for ConnectOptions {
 }
 
 impl ConnectOptions {
+    /// Returns options with the given [`Self::protocol_version`]; other fields match [`Default`].
+    #[must_use]
+    pub fn with_protocol_version(protocol_version: u8) -> Self {
+        Self {
+            protocol_version,
+            ..Self::default()
+        }
+    }
+
     /// Seed `stack_watch` from a stack-scoped [`Cancel`] before connect/fetch.
     pub(crate) fn bind_stack_cancel(&mut self, cancel: &dyn Cancel) {
         crate::progress::mirror_stack_cancel(cancel, &self.stack_watch);

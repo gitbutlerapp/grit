@@ -142,10 +142,7 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let connect_opts = ConnectOptions {
-        protocol_version,
-        ..Default::default()
-    };
+    let connect_opts = ConnectOptions::with_protocol_version(protocol_version);
     let mut conn = match transport.connect(&url, Service::UploadPack, &connect_opts) {
         Ok(c) => c,
         Err(e) => {
@@ -317,10 +314,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     let local_git = local.join(".git");
 
     let transport = GitDaemonTransport::new();
-    let v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let v2 = ConnectOptions::with_protocol_version(2);
 
     // 1. Shallow depth=1 fetch.
     let mut conn = match transport.connect(&url, Service::UploadPack, &v2) {

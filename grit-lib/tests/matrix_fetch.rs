@@ -305,10 +305,7 @@ fn daemon_driver(protocol: u8) -> Driver {
         }),
         fetch: Box::new(move |url, local_git, opts| {
             let transport = GitDaemonTransport::new();
-            let copts = ConnectOptions {
-                protocol_version: protocol,
-                ..Default::default()
-            };
+            let copts = ConnectOptions::with_protocol_version(protocol);
             let mut conn = transport.connect(url, Service::UploadPack, &copts)?;
             fetch_remote(local_git, &mut *conn, opts, &mut NoProgress, &NeverCancel)
         }),
@@ -341,10 +338,7 @@ fn ssh_driver(protocol: u8, scratch: PathBuf) -> Option<Driver> {
         }),
         fetch: Box::new(move |url, local_git, opts| {
             let transport = SshTransport::with_program(fake_ssh.as_os_str());
-            let copts = ConnectOptions {
-                protocol_version: protocol,
-                ..Default::default()
-            };
+            let copts = ConnectOptions::with_protocol_version(protocol);
             let mut conn = transport.connect(url, Service::UploadPack, &copts)?;
             fetch_remote(local_git, &mut *conn, opts, &mut NoProgress, &NeverCancel)
         }),

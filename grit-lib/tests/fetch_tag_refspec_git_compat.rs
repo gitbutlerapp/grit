@@ -184,10 +184,7 @@ fn ssh_fetch(
             0,
         )
     };
-    let connect_opts = ConnectOptions {
-        protocol_version,
-        ..Default::default()
-    };
+    let connect_opts = ConnectOptions::with_protocol_version(protocol_version);
     let mut conn = transport
         .connect(&url, Service::UploadPack, &connect_opts)
         .expect("connect");

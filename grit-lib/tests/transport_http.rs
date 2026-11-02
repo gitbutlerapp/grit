@@ -607,10 +607,7 @@ fn fetch_over_smart_http_v2_lands_refs_and_objects() {
     // block (no refs on connect; protocol_version == 2).
     let recording = Arc::new(RecordingClient::new("version=2"));
     let transport = SmartHttpTransport::new(Arc::clone(&recording));
-    let opts_v2 = ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    };
+    let opts_v2 = ConnectOptions::with_protocol_version(2);
     let conn = match transport.connect(&url, Service::UploadPack, &opts_v2) {
         Ok(c) => c,
         Err(e) => {

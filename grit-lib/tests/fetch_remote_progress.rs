@@ -164,10 +164,7 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
     let local_git = local_root.join(".git");
 
     let connect_opts = if protocol_v2 {
-        ConnectOptions {
-            protocol_version: 2,
-            ..Default::default()
-        }
+        ConnectOptions::with_protocol_version(2)
     } else {
         ConnectOptions::default()
     };

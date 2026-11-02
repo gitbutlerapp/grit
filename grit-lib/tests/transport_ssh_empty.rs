@@ -61,10 +61,7 @@ fn ssh_url(bare: &Path) -> String {
 
 fn connect_opts_v2() -> ConnectOptions {
     // Matches `Remote::fetch`, which negotiates protocol v2 for SSH remotes.
-    ConnectOptions {
-        protocol_version: 2,
-        ..Default::default()
-    }
+    ConnectOptions::with_protocol_version(2)
 }
 
 #[test]
