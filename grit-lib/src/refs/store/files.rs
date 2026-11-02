@@ -42,8 +42,8 @@ use super::transaction::expected_matches;
 use super::transaction::RefTransaction;
 use super::types::Expected;
 use super::validation::{
-    validate_storable_refname, verify_create_casefold_conflicts, verify_create_conflicts,
-    verify_name_available_for_create,
+    validate_storable_refname, verify_create_casefold_against_existing,
+    verify_create_casefold_conflicts, verify_create_conflicts, verify_name_available_for_create,
 };
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 use crate::refs::RefnameUnavailable;
@@ -193,13 +193,14 @@ impl FilesRefStore {
                 name: name.to_owned(),
             });
         }
-        if extras
+        if let Some(other) = extras
             .iter()
             .copied()
-            .any(|other| other != name && other.eq_ignore_ascii_case(name))
+            .find(|other| *other != name && other.eq_ignore_ascii_case(name))
         {
-            return Err(RefStoreError::CreateExists {
+            return Err(RefStoreError::CaseConflict {
                 name: name.to_owned(),
+                other: other.to_owned(),
             });
         }
         Ok(())
@@ -1089,7 +1090,15 @@ impl FilesRefStore {
             return Ok(None);
         }
         verify_create_conflicts(&existing, updates)?;
-        verify_create_casefold_conflicts(self.refs_ignore_ascii_case(), &existing, updates)?;
+        if txn.allows_initial_ignorecase_same_batch_refs() {
+            verify_create_casefold_against_existing(
+                self.refs_ignore_ascii_case(),
+                &existing,
+                updates,
+            )?;
+        } else {
+            verify_create_casefold_conflicts(self.refs_ignore_ascii_case(), &existing, updates)?;
+        }
 
         let odb = crate::odb::Odb::new(&self.common_dir.join("objects"))
             .with_config_git_dir(self.git_dir.clone());

@@ -3038,6 +3038,7 @@ fn ref_store_error_refname(err: &Error) -> Option<String> {
     };
     Some(match store_err {
         crate::refs::store::RefStoreError::CreateExists { name }
+        | crate::refs::store::RefStoreError::CaseConflict { name, .. }
         | crate::refs::store::RefStoreError::ExpectedMismatch { name, .. }
         | crate::refs::store::RefStoreError::DuplicateUpdate { name }
         | crate::refs::store::RefStoreError::LockHeld { name }
@@ -4081,6 +4082,8 @@ fn fetch_ref_store_error_rejectable(err: &Error) -> bool {
         err,
         Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { .. })
             | Error::RefStore(crate::refs::store::RefStoreError::LockHeld { .. })
+            | Error::RefStore(crate::refs::store::RefStoreError::CreateExists { .. })
+            | Error::RefStore(crate::refs::store::RefStoreError::CaseConflict { .. })
     )
 }
 
@@ -4131,6 +4134,16 @@ fn mark_fetch_ref_update_rejected(
         Error::RefStore(crate::refs::store::RefStoreError::LockHeld { name }) => {
             format!("ref '{name}' is locked")
         }
+        Error::RefStore(crate::refs::store::RefStoreError::CaseConflict { name, other }) => {
+            format!(
+                "cannot store '{name}' and '{other}' as loose refs when core.ignorecase is enabled \
+                 — use `grit init --ref-format=reftable` and fetch again to keep both spellings"
+            )
+        }
+        Error::RefStore(crate::refs::store::RefStoreError::CreateExists { name }) => format!(
+            "reference '{name}' already exists when core.ignorecase treats names as case-insensitive \
+             — use `grit init --ref-format=reftable` and fetch again to keep both spellings"
+        ),
         _ => err.to_string(),
     };
     if note.is_empty() {
@@ -4247,7 +4260,7 @@ pub(crate) fn apply_fetch_ref_updates(
             .into_iter()
             .map(&store_update)
             .collect::<Result<Vec<_>>>()?;
-        if crate::refs::commit_initial_ref_updates_on_store(store, direct).is_ok() {
+        if crate::refs::commit_initial_clone_ref_updates_on_store(store, direct).is_ok() {
             pending = rest;
         }
     }

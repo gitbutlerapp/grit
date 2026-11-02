@@ -61,6 +61,17 @@ pub enum RefStoreError {
         name: String,
     },
 
+    /// Two creates in one transaction differ only by ASCII case while `core.ignorecase`
+    /// is enabled. The files ref backend cannot store both as loose refs; packed-refs
+    /// during an initial clone can hold both spellings.
+    #[error("cannot store refs '{name}' and '{other}' together when core.ignorecase is enabled")]
+    CaseConflict {
+        /// One ref in the conflicting pair.
+        name: String,
+        /// The other ref, equal under ASCII case folding.
+        other: String,
+    },
+
     /// The same ref name appears more than once in one transaction.
     #[error("multiple updates for ref '{name}' not allowed")]
     DuplicateUpdate {
