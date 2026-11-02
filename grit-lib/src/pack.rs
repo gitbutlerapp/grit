@@ -169,6 +169,15 @@ pub(crate) mod pack_cache {
         static STORE_TLS_SNAPSHOTS: std::cell::RefCell<HashMap<u64, PackThreadLocalSnapshot>> =
             std::cell::RefCell::new(HashMap::new());
         static ACTIVE_TLS_STORE_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        static ACTIVE_STORE_LIFETIME: std::cell::RefCell<Option<Weak<()>>> =
+            const { std::cell::RefCell::new(None) };
+        /// Suppress [`release_store_thread_local`] while pack-read TLS slots are being torn down.
+        static SKIP_STORE_TLS_RELEASE: std::cell::Cell<bool> =
+            const { std::cell::Cell::new(false) };
+    }
+
+    pub(crate) fn set_skip_store_tls_release(skip: bool) {
+        SKIP_STORE_TLS_RELEASE.set(skip);
     }
 
     #[derive(Clone)]
@@ -184,9 +193,10 @@ pub(crate) mod pack_cache {
         warm_store: u64,
         monotonic_cursor: Option<(PathBuf, usize)>,
         single_reader_memo: Option<SingleReaderMemo>,
+        store_lifetime: Weak<()>,
     }
 
-    fn capture_tls_snapshot() -> PackThreadLocalSnapshot {
+    fn capture_tls_snapshot(store_lifetime: Weak<()>) -> PackThreadLocalSnapshot {
         PackThreadLocalSnapshot {
             dir_indexes: PACK_DIR_INDEXES.with(|cell| cell.borrow().clone()),
             hit_index: PACK_HIT_INDEX.with(|cell| cell.borrow().clone()),
@@ -199,6 +209,7 @@ pub(crate) mod pack_cache {
             warm_store: THREAD_WARM_STORE.get(),
             monotonic_cursor: PACK_MONOTONIC_CURSOR.with(|cell| cell.borrow().clone()),
             single_reader_memo: SINGLE_READER_MEMO.with(|cell| cell.borrow().clone()),
+            store_lifetime,
         }
     }
 
@@ -214,6 +225,20 @@ pub(crate) mod pack_cache {
         THREAD_WARM_STORE.set(snap.warm_store);
         PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = snap.monotonic_cursor);
         SINGLE_READER_MEMO.with(|cell| *cell.borrow_mut() = snap.single_reader_memo);
+        ACTIVE_STORE_LIFETIME.with(|cell| *cell.borrow_mut() = Some(snap.store_lifetime));
+    }
+
+    fn clear_live_tls_pack_mappings() {
+        PACK_DIR_INDEXES.with(|cell| *cell.borrow_mut() = None);
+        PACK_HIT_INDEX.with(|cell| *cell.borrow_mut() = None);
+        PACK_BYTES.with(|cell| cell.borrow_mut().clear());
+        PACK_INDEXES.with(|cell| cell.borrow_mut().clear());
+        PACK_IDS.with(|cell| cell.borrow_mut().clear());
+        PACK_COUNT_VALIDATED.with(|cell| cell.borrow_mut().clear());
+        PACK_DIR_LISTING_TRUSTED.set(false);
+        PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = None);
+        forget_single_reader_memo();
+        super::clear_pack_read_info_cache();
     }
 
     fn seed_tls_from_store_catalog(store: &crate::pack_store::PackStore) {
@@ -252,11 +277,38 @@ pub(crate) mod pack_cache {
             PACK_DIR_LISTING_TRUSTED.set(true);
             THREAD_WARM_EPOCH.set(store.cache_epoch());
             THREAD_WARM_STORE.set(store_thread_local_key(store));
+            ACTIVE_STORE_LIFETIME.with(|cell| *cell.borrow_mut() = Some(store.lifetime_weak()));
         });
     }
 
     pub(crate) fn drop_store_tls_snapshot(store_id: u64) {
         STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().remove(&store_id));
+    }
+
+    fn release_store_thread_local_inner(store_id: u64) {
+        if SKIP_STORE_TLS_RELEASE.get() {
+            return;
+        }
+        drop_store_tls_snapshot(store_id);
+        if ACTIVE_TLS_STORE_ID.get() != store_id && THREAD_WARM_STORE.get() != store_id {
+            return;
+        }
+        clear_live_tls_pack_mappings();
+        if ACTIVE_TLS_STORE_ID.get() == store_id {
+            ACTIVE_TLS_STORE_ID.set(0);
+        }
+        if THREAD_WARM_STORE.get() == store_id {
+            THREAD_WARM_STORE.set(0);
+            THREAD_WARM_EPOCH.set(0);
+        }
+        ACTIVE_STORE_LIFETIME.with(|cell| *cell.borrow_mut() = None);
+    }
+
+    /// Drop this store's thread-local pack/idx mappings when its [`PackStore`] is destroyed.
+    pub(crate) fn release_store_thread_local(store_id: u64) {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            release_store_thread_local_inner(store_id);
+        }));
     }
 
     pub(crate) fn switch_tls_for_store(store: &crate::pack_store::PackStore) {
@@ -277,19 +329,36 @@ pub(crate) mod pack_cache {
         }
         let old_id = ACTIVE_TLS_STORE_ID.get();
         if old_id != 0 && old_id != new_id {
-            let snap = capture_tls_snapshot();
-            STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().insert(old_id, snap));
+            let outgoing_alive = ACTIVE_STORE_LIFETIME.with(|cell| {
+                cell.borrow()
+                    .as_ref()
+                    .and_then(|weak| weak.upgrade())
+                    .is_some()
+            });
+            if outgoing_alive {
+                if let Some(lifetime) = ACTIVE_STORE_LIFETIME.with(|cell| cell.borrow().clone()) {
+                    let snap = capture_tls_snapshot(lifetime);
+                    STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().insert(old_id, snap));
+                } else {
+                    clear_live_tls_pack_mappings();
+                }
+            } else {
+                clear_live_tls_pack_mappings();
+            }
         }
         ACTIVE_TLS_STORE_ID.set(new_id);
+        ACTIVE_STORE_LIFETIME.with(|cell| *cell.borrow_mut() = Some(store.lifetime_weak()));
         if let Some(snap) = STORE_TLS_SNAPSHOTS.with(|map| map.borrow().get(&new_id).cloned()) {
-            if snap.warm_epoch == epoch {
+            if snap.warm_epoch == epoch && snap.store_lifetime.upgrade().is_some() {
                 apply_tls_snapshot(snap);
                 return;
             }
+            STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().remove(&new_id));
         }
         seed_tls_from_store_catalog(store);
         STORE_TLS_SNAPSHOTS.with(|map| {
-            map.borrow_mut().insert(new_id, capture_tls_snapshot());
+            map.borrow_mut()
+                .insert(new_id, capture_tls_snapshot(store.lifetime_weak()));
         });
     }
 
@@ -387,6 +456,7 @@ pub(crate) mod pack_cache {
         THREAD_WARM_STORE.set(0);
         STORE_TLS_SNAPSHOTS.with(|map| map.borrow_mut().clear());
         ACTIVE_TLS_STORE_ID.set(0);
+        ACTIVE_STORE_LIFETIME.with(|cell| *cell.borrow_mut() = None);
         super::clear_pack_read_info_cache();
         PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = None);
         forget_single_reader_memo();

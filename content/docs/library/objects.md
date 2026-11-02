@@ -119,7 +119,7 @@ A ref tip can name an annotated tag, or a tag of a tag. `Odb::peel_tags` (on [`O
 
 ## Pack read caching
 
-[`Odb`](rustdoc:grit_lib::objects::odb::Odb) owns a repository-scoped [`PackStore`](rustdoc:grit_lib::objects::pack_store::PackStore): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](rustdoc:grit_lib::objects::odb::Odb).
+[`Odb`](rustdoc:grit_lib::objects::odb::Odb) owns a repository-scoped [`PackStore`](rustdoc:grit_lib::objects::pack_store::PackStore): pack directory listings, parsed `.idx` files, pack bytes, MIDX layers, and the delta-base LRU. Cloned [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handles share the same store; alternate object directories get separate stores on the parent [`Odb`](rustdoc:grit_lib::objects::odb::Odb). When the last handle to a [`PackStore`](rustdoc:grit_lib::objects::pack_store::PackStore) is dropped, thread-local pack and index mappings for that store are released on the dropping thread.
 
 After repack, garbage collection, or installing a pack with [`install_pack_bytes`](rustdoc:grit_lib::objects::index_pack::install_pack_bytes), call [`Odb::invalidate_packs`](rustdoc:grit_lib::objects::odb::Odb) so the next read rescans `objects/pack/`. If another [`Odb`](rustdoc:grit_lib::objects::odb::Odb) in the same process still holds a stale listing, a lookup miss retriggers directory reprepare when the pack folder’s mtime changes.
 
