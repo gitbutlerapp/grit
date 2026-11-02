@@ -6,9 +6,13 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::gitbutler::{GitButlerWorkspace, WorkspaceHead, WORKSPACE_COMMIT_MARKER};
+use grit_lib::gitbutler::{
+    GitButlerWorkspace, WorkspaceHead, WorkspaceStanding, WORKSPACE_COMMIT_MARKER,
+};
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::branch_tracking::{BranchStanding, StandingOptions, TrackedComparison};
 use grit_lib::repo::Repository;
+use grit_lib::state::resolve_head_for_repository;
 use tempfile::TempDir;
 
 fn git(root: &Path, args: &[&str]) -> String {
@@ -102,6 +106,73 @@ fn detects_workspace_and_names_each_merged_head() {
         workspace.head_commits(),
         [rev(root, "one"), rev(root, "two")]
     );
+}
+
+/// `HEAD`'s comparison with `main`, the way `grit status` computes it.
+fn target_comparison(repo: &Repository, counts: bool) -> TrackedComparison {
+    BranchStanding::compute(
+        repo,
+        &resolve_head_for_repository(repo).expect("HEAD"),
+        StandingOptions {
+            newest_ahead_limit: 10,
+            counts,
+        },
+    )
+    .expect("standing")
+    .target
+    .expect("main is the target")
+}
+
+#[test]
+fn standing_leaves_out_the_workspace_commit_and_compares_each_head() {
+    let dir = two_branches();
+    let root = dir.path();
+    git(root, &["switch", "-q", "one"]);
+    std::fs::write(root.join("more.txt"), "more").unwrap();
+    git(root, &["add", "."]);
+    git(root, &["commit", "-q", "-m", "one more"]);
+    let commit = workspace_commit(root, &["one", "two", "main"], WORKSPACE_COMMIT_MARKER);
+    let repo = open(root);
+    let workspace = GitButlerWorkspace::detect(&repo)
+        .expect("detect")
+        .expect("a workspace");
+    let target = target_comparison(&repo, true);
+    assert_eq!(
+        target.ahead,
+        Some(4),
+        "three branch commits and the workspace commit"
+    );
+    assert_eq!(target.newest_ahead.first(), Some(&commit));
+
+    let standing = workspace.standing(&repo, &target).expect("standing");
+    assert_eq!(standing.ahead, Some(3));
+    assert!(!standing.newest_ahead.contains(&commit));
+    assert_eq!(standing.newest_ahead.len(), 3);
+    assert_eq!(standing.heads_ahead, [Some(2), Some(1), Some(0)]);
+}
+
+#[test]
+fn standing_without_counts_compares_nothing() {
+    let dir = two_branches();
+    let root = dir.path();
+    let commit = workspace_commit(root, &["one", "two"], WORKSPACE_COMMIT_MARKER);
+    let repo = open(root);
+    let workspace = GitButlerWorkspace::detect(&repo)
+        .expect("detect")
+        .expect("a workspace");
+    let target = target_comparison(&repo, false);
+    assert_eq!(target.ahead, None);
+
+    let standing = workspace.standing(&repo, &target).expect("standing");
+    assert_eq!(
+        standing,
+        WorkspaceStanding {
+            ahead: None,
+            newest_ahead: Vec::new(),
+            heads_ahead: vec![None, None],
+        }
+    );
+    assert_eq!(workspace.commit, commit);
 }
 
 #[test]

@@ -6774,6 +6774,7 @@ pub grit_lib::gitbutler::GitButlerWorkspace::heads: alloc::vec::Vec<grit_lib::gi
 impl grit_lib::gitbutler::GitButlerWorkspace
 pub fn grit_lib::gitbutler::GitButlerWorkspace::detect(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<Self>>
 pub fn grit_lib::gitbutler::GitButlerWorkspace::head_commits(&self) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub fn grit_lib::gitbutler::GitButlerWorkspace::standing(&self, &grit_lib::repo::Repository, &grit_lib::refs::branch_tracking::TrackedComparison) -> grit_lib::error::Result<grit_lib::gitbutler::WorkspaceStanding>
 impl core::clone::Clone for grit_lib::gitbutler::GitButlerWorkspace
 pub fn grit_lib::gitbutler::GitButlerWorkspace::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::gitbutler::GitButlerWorkspace
@@ -6807,6 +6808,25 @@ impl core::marker::Unpin for grit_lib::gitbutler::WorkspaceHead
 impl core::marker::UnsafeUnpin for grit_lib::gitbutler::WorkspaceHead
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::gitbutler::WorkspaceHead
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::gitbutler::WorkspaceHead
+pub struct grit_lib::gitbutler::WorkspaceStanding
+pub grit_lib::gitbutler::WorkspaceStanding::ahead: core::option::Option<usize>
+pub grit_lib::gitbutler::WorkspaceStanding::heads_ahead: alloc::vec::Vec<core::option::Option<usize>>
+pub grit_lib::gitbutler::WorkspaceStanding::newest_ahead: alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl core::clone::Clone for grit_lib::gitbutler::WorkspaceStanding
+pub fn grit_lib::gitbutler::WorkspaceStanding::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::gitbutler::WorkspaceStanding
+impl core::cmp::PartialEq for grit_lib::gitbutler::WorkspaceStanding
+pub fn grit_lib::gitbutler::WorkspaceStanding::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::gitbutler::WorkspaceStanding
+pub fn grit_lib::gitbutler::WorkspaceStanding::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::gitbutler::WorkspaceStanding
+impl core::marker::Freeze for grit_lib::gitbutler::WorkspaceStanding
+impl core::marker::Send for grit_lib::gitbutler::WorkspaceStanding
+impl core::marker::Sync for grit_lib::gitbutler::WorkspaceStanding
+impl core::marker::Unpin for grit_lib::gitbutler::WorkspaceStanding
+impl core::marker::UnsafeUnpin for grit_lib::gitbutler::WorkspaceStanding
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::gitbutler::WorkspaceStanding
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::gitbutler::WorkspaceStanding
 pub const grit_lib::gitbutler::WORKSPACE_BRANCH: &str
 pub const grit_lib::gitbutler::WORKSPACE_COMMIT_MARKER: &str
 pub mod grit_lib::ident
