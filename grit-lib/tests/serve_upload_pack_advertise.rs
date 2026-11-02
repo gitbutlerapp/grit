@@ -3,11 +3,16 @@
 use std::io::Cursor;
 use std::process::Command;
 
+use std::sync::Arc;
+
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::refs::ref_storage::RefStorageFormat;
+use grit_lib::refs::store::{
+    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeError, ServeOptions};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 
 #[test]
 fn upload_pack_v0_and_v2_advertise_refs_only() -> grit_lib::remote::serve::Result<()> {
@@ -220,5 +225,108 @@ fn lying_sorted_packed_refs_v0_advertisement_matches_system_git(
             "duplicate {name} in grit advertisement: {grit_names:?}"
         );
     }
+    Ok(())
+}
+
+fn pkt_line(line: &str) -> Vec<u8> {
+    let payload = format!("{line}\n");
+    format!("{:04x}{payload}", payload.len() + 4).into_bytes()
+}
+
+fn memory_serve_repo(
+    dir: &std::path::Path,
+) -> grit_lib::remote::serve::Result<(Repository, Arc<MemoryRefStore>, grit_lib::objects::ObjectId)>
+{
+    Repository::init(
+        dir,
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("master"),
+    )
+    .map_err(ServeError::Repository)?;
+    let store = Arc::new(MemoryRefStore::new());
+    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
+        .ref_store(store.clone())
+        .initial_branch("master")
+        .open(dir, None)
+        .map_err(ServeError::Repository)?;
+    let tree = repo.odb().write(ObjectKind::Tree, b"")?;
+    let commit_body =
+        format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n");
+    let commit = repo
+        .odb()
+        .write(ObjectKind::Commit, commit_body.as_bytes())?;
+    store
+        .prepare(
+            RefTransaction::new()
+                .update(RefUpdate {
+                    name: "refs/heads/master".into(),
+                    new_value: Some(RawRef::Direct(commit)),
+                    expected: Expected::Missing,
+                    reflog: None,
+                    flags: Default::default(),
+                })
+                .expect("txn"),
+        )
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+    Ok((repo, store, commit))
+}
+
+#[test]
+fn injected_ref_store_v0_advertises_head_with_symref() -> grit_lib::remote::serve::Result<()> {
+    let dir = tempfile::tempdir().map_err(ServeError::Io)?;
+    let (repo, _store, commit) = memory_serve_repo(dir.path())?;
+    let out = grit_v0_advertisement(&repo);
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains(&format!("{} HEAD", commit.to_hex())),
+        "missing HEAD line: {text}"
+    );
+    assert!(
+        text.contains("symref=HEAD:refs/heads/master"),
+        "missing symref capability: {text}"
+    );
+    let names = v0_advertised_ref_names(&out);
+    assert!(names.iter().any(|n| n == "HEAD"));
+    Ok(())
+}
+
+#[test]
+fn injected_ref_store_v2_ls_refs_advertises_head_symref() -> grit_lib::remote::serve::Result<()> {
+    let dir = tempfile::tempdir().map_err(ServeError::Io)?;
+    let (repo, _store, commit) = memory_serve_repo(dir.path())?;
+    let mut input = Vec::new();
+    input.extend_from_slice(&pkt_line("command=ls-refs"));
+    input.extend_from_slice(b"0001");
+    input.extend_from_slice(&pkt_line("symrefs"));
+    input.extend_from_slice(&pkt_line("ref-prefix HEAD"));
+    input.extend_from_slice(&pkt_line("ref-prefix refs/"));
+    input.extend_from_slice(b"0000");
+
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        stateless_rpc: false,
+        advertise_refs: false,
+        agent: "grit-test".to_owned(),
+        hidden_refs: Vec::new(),
+        ..ServeOptions::default()
+    };
+    let mut out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(input.as_slice()),
+        &mut out,
+        &mut opts,
+    )?;
+    let body = String::from_utf8_lossy(&out);
+    assert!(
+        body.contains(&format!(
+            "{} HEAD symref-target:refs/heads/master",
+            commit.to_hex()
+        )),
+        "missing v2 HEAD symref line: {body}"
+    );
     Ok(())
 }
