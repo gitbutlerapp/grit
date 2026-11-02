@@ -279,21 +279,27 @@ impl<'repo> References<'repo> {
         };
 
         let old_tip = self.resolve_if_exists(refname)?;
-        let mut updates = vec![RefUpdate {
-            name: refname.to_owned(),
-            new_value: Some(RawRef::Direct(*oid)),
-            expected,
-            reflog: reflog_for(refname)?,
-            flags,
-        }];
+        let mut updates = Vec::with_capacity(2);
 
-        let mirror_head = !flags.no_deref
-            && refname.starts_with("refs/heads/")
-            && matches!(
-                store.read_raw("HEAD")?,
-                Some(RawRef::Symbolic(branch)) if branch == refname
-            );
-        if mirror_head {
+        // Peeling `HEAD` must not attach one reflog decision to both `HEAD` and the target
+        // branch: Git evaluates existing logs independently when log-all-ref-updates is off.
+        let peeled_head_target = if !flags.no_deref && refname == "HEAD" {
+            match store.read_raw("HEAD")? {
+                Some(RawRef::Symbolic(target)) => Some(target),
+                _ => None,
+            }
+        } else {
+            None
+        };
+
+        if let Some(branch) = peeled_head_target {
+            updates.push(RefUpdate {
+                name: branch.clone(),
+                new_value: Some(RawRef::Direct(*oid)),
+                expected,
+                reflog: reflog_for(branch.as_str())?,
+                flags: RefUpdateFlags::default(),
+            });
             if let Some(mut head_reflog) = reflog_for("HEAD")? {
                 head_reflog.old_oid = old_tip;
                 head_reflog.new_oid = Some(*oid);
@@ -308,6 +314,38 @@ impl<'repo> References<'repo> {
                         ..RefUpdateFlags::default()
                     },
                 });
+            }
+        } else {
+            updates.push(RefUpdate {
+                name: refname.to_owned(),
+                new_value: Some(RawRef::Direct(*oid)),
+                expected,
+                reflog: reflog_for(refname)?,
+                flags,
+            });
+
+            let mirror_head = !flags.no_deref
+                && refname.starts_with("refs/heads/")
+                && matches!(
+                    store.read_raw("HEAD")?,
+                    Some(RawRef::Symbolic(head_branch)) if head_branch == refname
+                );
+            if mirror_head {
+                if let Some(mut head_reflog) = reflog_for("HEAD")? {
+                    head_reflog.old_oid = old_tip;
+                    head_reflog.new_oid = Some(*oid);
+                    updates.push(RefUpdate {
+                        name: "HEAD".to_owned(),
+                        new_value: Some(RawRef::Direct(*oid)),
+                        expected: Expected::Any,
+                        reflog: Some(head_reflog),
+                        flags: RefUpdateFlags {
+                            log_only: true,
+                            no_deref: true,
+                            ..RefUpdateFlags::default()
+                        },
+                    });
+                }
             }
         }
 
