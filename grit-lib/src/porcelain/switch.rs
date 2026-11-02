@@ -454,6 +454,7 @@ pub fn switch_repository(
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<SwitchOutcome> {
+    crate::progress::poll_cancel(progress, cancel)?;
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
         return Err(Error::OperationInProgress(op));
     }
@@ -580,6 +581,8 @@ fn switch_without_hooks(
         .with_path_collisions(collisions));
     }
 
+    crate::progress::poll_cancel(progress, cancel)?;
+
     // A real switch reads the index under `index.lock`, so a held lock refuses it before any
     // work-tree change; a dry run never locks.
     let mut lock = (!opts.dry_run).then(|| repo.lock_index()).transpose()?;
@@ -668,7 +671,14 @@ fn switch_to_target(
     }
     let snapshot = WorktreeSnapshot { index, head_tree };
 
-    let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
+    let cancel_signal = crate::progress::CancelSignal::new(cancel);
+    cancel_signal.poll()?;
+    let prepared = prepare_tree_switch_allow_local_with_snapshot(
+        repo,
+        &target_tree,
+        snapshot,
+        &cancel_signal,
+    )?;
     let changed_paths = count_unique_tree_change_paths(&prepared.plan.tree_changes);
     let stranded = stranded_by_leaving_detached_head(repo, &head_before, target_oid)?;
     let dry_run_collisions = switch_path_collisions(repo, &prepared.index)?;
@@ -684,6 +694,7 @@ fn switch_to_target(
         .with_stranded(stranded)
         .with_path_collisions(dry_run_collisions));
     }
+    cancel_signal.poll()?;
     checkout_prepared_tree_transition(repo, prepared, index_lock, progress, cancel)?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
@@ -758,6 +769,7 @@ fn prepare_tree_switch_allow_local_with_snapshot(
     repo: &Repository,
     to_tree: &ObjectId,
     snapshot: WorktreeSnapshot,
+    cancel: &crate::progress::CancelSignal<'_>,
 ) -> Result<PreparedSwitch> {
     let prepared = prepare_tree_transition_allow_local_with_snapshot(
         repo,
@@ -765,6 +777,7 @@ fn prepare_tree_switch_allow_local_with_snapshot(
         to_tree,
         snapshot,
         &HashSet::new(),
+        Some(cancel),
     )
     .map_err(map_switch_tree_transition_prepare_error)?;
     verify_prepared_switch_no_untracked_overwrite(&prepared.plan)?;
@@ -832,6 +845,7 @@ pub(crate) fn prepare_tree_transition_allow_local(
         to_tree,
         snapshot,
         force_preserve_worktree,
+        None,
     )
 }
 
@@ -865,7 +879,9 @@ fn plan_allow_local_tree_transition_core(
     to_tree: &ObjectId,
     mut snapshot: WorktreeSnapshot,
     force_preserve_worktree: &HashSet<String>,
+    cancel: Option<&crate::progress::CancelSignal<'_>>,
 ) -> std::result::Result<AllowLocalTreeTransitionCore, TreeTransitionPrepareError> {
+    let cancel_watch = cancel.map(|signal| signal.watch_arc());
     let from_tree_oid = from_tree.copied().or(snapshot.head_tree);
     snapshot.head_tree = from_tree_oid;
     let trust_index_for_old_tree =
@@ -886,6 +902,7 @@ fn plan_allow_local_tree_transition_core(
             Some(to_tree),
             sparse.as_ref(),
             index_sparse,
+            cancel_watch.clone(),
         )?
     } else if trust_index_for_old_tree {
         crate::diff::diff_trees_with_index(
@@ -895,10 +912,18 @@ fn plan_allow_local_tree_transition_core(
             Some(to_tree),
             "",
             true,
+            cancel_watch.clone(),
         )?
     } else {
-        crate::diff::diff_trees(repo.odb(), from_tree_ref, Some(to_tree), "")?
+        crate::diff::diff_trees_with_cancel(
+            repo.odb(),
+            from_tree_ref,
+            Some(to_tree),
+            "",
+            cancel_watch.clone(),
+        )?
     };
+    cancel.as_ref().map(|signal| signal.poll()).transpose()?;
     let (staged, unstaged, _index_changed) =
         crate::porcelain::worktree_guard::local_change_diffs_for_tree_changes(
             repo,
@@ -907,6 +932,7 @@ fn plan_allow_local_tree_transition_core(
             &tree_changes,
             None,
         )?;
+    cancel.as_ref().map(|signal| signal.poll()).transpose()?;
     let work_tree = repo
         .work_tree()
         .ok_or(TreeTransitionPrepareError::Failed(Error::RequiresWorkTree))?;
@@ -936,6 +962,7 @@ fn plan_allow_local_tree_transition_core(
             &tree_changes,
             Some(&delete_paths_set),
         )?;
+    cancel.as_ref().map(|signal| signal.poll()).transpose()?;
     let delete_paths: Vec<String> = delete_paths_set.into_iter().collect();
     let gitlink_deletes: HashSet<String> = tree_changes
         .iter()
@@ -980,6 +1007,7 @@ fn plan_allow_local_tree_transition_core(
             true,
         )
     };
+    cancel.as_ref().map(|signal| signal.poll()).transpose()?;
     Ok(AllowLocalTreeTransitionCore {
         tree_changes,
         untracked,
@@ -998,6 +1026,7 @@ pub(crate) fn prepare_tree_transition_allow_local_with_snapshot(
     to_tree: &ObjectId,
     snapshot: WorktreeSnapshot,
     force_preserve_worktree: &HashSet<String>,
+    cancel: Option<&crate::progress::CancelSignal<'_>>,
 ) -> std::result::Result<PreparedSwitch, TreeTransitionPrepareError> {
     let core = plan_allow_local_tree_transition_core(
         repo,
@@ -1005,6 +1034,7 @@ pub(crate) fn prepare_tree_transition_allow_local_with_snapshot(
         to_tree,
         snapshot,
         force_preserve_worktree,
+        cancel,
     )?;
     if !core.local_blocked_paths.is_empty() {
         return Err(TreeTransitionPrepareError::OverwritePaths(
@@ -1032,14 +1062,20 @@ pub(crate) fn keep_style_transition_would_block_paths_for_preview(
     to_tree: &ObjectId,
 ) -> Result<Vec<String>> {
     let snapshot = load_worktree_snapshot(repo)?;
-    let core =
-        plan_allow_local_tree_transition_core(repo, from_tree, to_tree, snapshot, &HashSet::new())
-            .map_err(|err| match err {
-                TreeTransitionPrepareError::Failed(err) => err,
-                TreeTransitionPrepareError::OverwritePaths(_) => {
-                    Error::Message("keep preview planning should not fail on local paths".into())
-                }
-            })?;
+    let core = plan_allow_local_tree_transition_core(
+        repo,
+        from_tree,
+        to_tree,
+        snapshot,
+        &HashSet::new(),
+        None,
+    )
+    .map_err(|err| match err {
+        TreeTransitionPrepareError::Failed(err) => err,
+        TreeTransitionPrepareError::OverwritePaths(_) => {
+            Error::Message("keep preview planning should not fail on local paths".into())
+        }
+    })?;
     Ok(merge_keep_style_block_paths(&core))
 }
 

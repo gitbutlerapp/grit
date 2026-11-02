@@ -800,3 +800,123 @@ fn cancelled_hard_reset_keeps_same_size_edits_behind_racy_stat_matches() {
         );
     }
 }
+
+fn wholesale_rename_fixture(file_count: usize) -> (tempfile::TempDir, PathBuf, ObjectId, ObjectId) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path().to_path_buf();
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["config", "user.email", "t@example.com"]);
+    git(&root, &["config", "user.name", "Test"]);
+    for dir_name in ["olda", "oldb"] {
+        for i in 0..file_count {
+            write(
+                &root,
+                &format!("{dir_name}/f{i:03}.txt"),
+                &format!("{dir_name} {i}\n"),
+            );
+        }
+    }
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "main"]);
+    let main_oid = ObjectId::from_hex(git(&root, &["rev-parse", "HEAD"]).trim()).expect("main");
+    git(&root, &["branch", "ren"]);
+    git(&root, &["checkout", "-q", "ren"]);
+    for dir_name in ["olda", "oldb"] {
+        for i in 0..file_count {
+            let path = root.join(format!("{dir_name}/f{i:03}.txt"));
+            fs::remove_file(&path).expect("remove");
+        }
+        fs::remove_dir(root.join(dir_name)).expect("rmdir");
+    }
+    for dir_name in ["newa", "newb"] {
+        for i in 0..file_count {
+            write(
+                &root,
+                &format!("{dir_name}/f{i:03}.txt"),
+                &format!("{dir_name} {i}\n"),
+            );
+        }
+    }
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "ren"]);
+    let ren_oid =
+        ObjectId::from_hex(git(&root, &["rev-parse", "refs/heads/ren"]).trim()).expect("ren");
+    git(&root, &["checkout", "-q", "main"]);
+    assert!(root.join("olda").is_dir(), "fixture: main should have olda");
+    assert!(root.join("oldb").is_dir(), "fixture: main should have oldb");
+    (dir, root, main_oid, ren_oid)
+}
+
+#[test]
+fn preset_cancel_switch_returns_before_wholesale_delete() {
+    use std::time::{Duration, Instant};
+
+    let (_dir, root, _main, ren) = wholesale_rename_fixture(40);
+    let before = repository_state(&root);
+    let cancel = FlagCancel::new();
+    cancel.cancel();
+    let start = Instant::now();
+    let err = switch_repository(
+        &open(&root),
+        &SwitchOptions {
+            mode: SwitchMode::Detached {
+                commit: ren,
+                reflog_to_label: "ren".into(),
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Skip,
+        },
+        &mut NullProgress,
+        &cancel,
+    )
+    .expect_err("pre-set cancel");
+    let elapsed = start.elapsed();
+    assert!(matches!(err, Error::Cancelled), "{err:?}");
+    assert!(
+        elapsed < Duration::from_millis(800),
+        "pre-set cancel took {elapsed:?}"
+    );
+    assert_eq!(repository_state(&root), before);
+    assert!(root.join("olda").is_dir(), "olda removed");
+    assert!(root.join("oldb").is_dir(), "oldb removed");
+    assert!(!root.join("newa").exists(), "partial apply");
+    assert!(!root.join(".git/index.lock").exists(), "index.lock left");
+}
+
+#[test]
+fn delayed_cancel_switch_during_wholesale_delete_leaves_some_dirs() {
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    let (_dir, root, _main, ren) = wholesale_rename_fixture(120);
+    let before = repository_state(&root);
+    let cancel = Arc::new(FlagCancel::new());
+    let flip = cancel.clone();
+    let sleeper = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(2));
+        flip.cancel();
+    });
+    let err = switch_repository(
+        &open(&root),
+        &SwitchOptions {
+            mode: SwitchMode::Detached {
+                commit: ren,
+                reflog_to_label: "ren".into(),
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Skip,
+        },
+        &mut NullProgress,
+        cancel.as_ref(),
+    )
+    .expect_err("delayed cancel");
+    sleeper.join().expect("join");
+    assert!(matches!(err, Error::Cancelled), "{err:?}");
+    assert_eq!(repository_state(&root), before);
+    assert!(
+        root.join("olda").is_dir() || root.join("oldb").is_dir(),
+        "both wholesale dirs removed before cancel"
+    );
+    assert!(!root.join(".git/index.lock").exists());
+}

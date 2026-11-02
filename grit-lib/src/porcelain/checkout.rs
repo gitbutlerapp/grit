@@ -54,8 +54,9 @@ use checkout_journal::SharedCheckoutDeleteRollback;
 pub use checkout_journal::{checkout_spool_probe_count, reset_checkout_spool_probe};
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
-    cancellable_chunks, execute_write_jobs, execute_write_jobs_unrecorded,
-    paths_needing_serial_checkout_str, CheckoutPlanSlot, CheckoutWriteJob, WriteJobOutcome,
+    cancellable_chunks, cancellable_chunks_cancel_friendly, execute_write_jobs,
+    execute_write_jobs_unrecorded, paths_needing_serial_checkout_str, CheckoutPlanSlot,
+    CheckoutWriteJob, WriteJobOutcome,
 };
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
@@ -509,7 +510,7 @@ fn remove_wholesale_dirs_parallel_cancellable(
         return Ok(removed);
     }
     let wt = work_tree.to_path_buf();
-    let (chunks, options) = cancellable_chunks(dirs, options);
+    let (chunks, options) = cancellable_chunks_cancel_friendly(dirs, options);
     for chunk in chunks {
         crate::progress::poll_cancel(progress, cancel)?;
         for dir in chunk {
@@ -3276,44 +3277,25 @@ fn remove_wholesale_dir(abs: &Path) -> bool {
     }
 }
 
-fn remove_wholesale_directories_on_disk(
+fn remove_wholesale_directories_cancellable(
     repo: &Repository,
     work_tree: &Path,
     wholesale_index_prefixes: &BTreeSet<String>,
     config: &std::sync::Arc<ConfigSet>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
     journal: &mut CheckoutJournal,
 ) -> Result<BTreeSet<String>> {
-    let mut wholesale_dirs_removed = BTreeSet::new();
     if wholesale_index_prefixes.is_empty() {
-        return Ok(wholesale_dirs_removed);
+        return Ok(BTreeSet::new());
     }
-    for dir in wholesale_index_prefixes {
-        journal.record_removed_dir(dir);
-    }
-    if wholesale_index_prefixes.len() >= 2 {
-        let policy = repo.thread_policy();
-        let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
-        let wt = work_tree.to_path_buf();
-        let dirs: Vec<String> = wholesale_index_prefixes.iter().cloned().collect();
-        let removed = try_par_map(&dirs, options, 0, |dir| {
-            let abs = wt.join(dir);
-            Ok(remove_wholesale_dir(&abs).then_some(dir.clone()))
-        })
-        .map_err(|e: ParallelHashError<()>| match e {
-            ParallelHashError::Task(()) => {
-                Error::PathError("parallel wholesale directory removal failed".into())
-            }
-        })?;
-        wholesale_dirs_removed.extend(removed.into_iter().flatten());
-    } else {
-        for dir in wholesale_index_prefixes {
-            let abs = work_tree.join(dir);
-            if remove_wholesale_dir(&abs) {
-                wholesale_dirs_removed.insert(dir.clone());
-            }
-        }
-    }
-    Ok(wholesale_dirs_removed)
+    let policy = repo.thread_policy();
+    let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
+    let dirs: Vec<String> = wholesale_index_prefixes.iter().cloned().collect();
+    let removed = remove_wholesale_dirs_parallel_cancellable(
+        work_tree, &dirs, options, progress, cancel, journal,
+    )?;
+    Ok(removed.into_iter().map(|(dir, _)| dir).collect())
 }
 
 /// Merge one checkout pass into `index_mut` and, unless the caller defers it, write the index
@@ -3864,11 +3846,13 @@ fn checkout_bulk_added_tree_changes(
         &wholesale_blocked,
     );
     if apply.wholesale_safety_precomputed {
-        let _ = remove_wholesale_directories_on_disk(
+        let _ = remove_wholesale_directories_cancellable(
             repo,
             work_tree,
             &wholesale_dirs,
             config,
+            progress,
+            cancel,
             journal,
         )?;
     }
@@ -3947,11 +3931,13 @@ fn checkout_bulk_mod_delete_tree_changes(
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let smudge_context = None;
 
-    let wholesale_dirs_removed = remove_wholesale_directories_on_disk(
+    let wholesale_dirs_removed = remove_wholesale_directories_cancellable(
         repo,
         work_tree,
         &wholesale_index_prefixes,
         config,
+        progress,
+        cancel,
         journal,
     )?;
     let mut deleted_abs_paths: Vec<PathBuf> = wholesale_dirs_removed

@@ -2909,7 +2909,29 @@ pub fn diff_trees(
     prefix: &str,
 ) -> Result<Vec<DiffEntry>> {
     crate::trace::trace_span!("grit.diff.tree");
-    diff_trees_opts(odb, old_tree_oid, new_tree_oid, prefix, false, None)
+    diff_trees_with_cancel(odb, old_tree_oid, new_tree_oid, prefix, None)
+}
+
+pub(crate) fn diff_trees_with_cancel(
+    odb: &Odb,
+    old_tree_oid: Option<&ObjectId>,
+    new_tree_oid: Option<&ObjectId>,
+    prefix: &str,
+    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<Vec<DiffEntry>> {
+    crate::trace::trace_span!("grit.diff.tree");
+    let hint = cancel_watch.map(|watch| DiffTreesWalkHint {
+        cancel_watch: Some(watch),
+        ..DiffTreesWalkHint::default()
+    });
+    diff_trees_opts(
+        odb,
+        old_tree_oid,
+        new_tree_oid,
+        prefix,
+        false,
+        hint.as_ref(),
+    )
 }
 
 /// Like [`diff_trees`], but when `index` matches `old_tree_oid` deleted subtrees are expanded
@@ -2921,6 +2943,7 @@ pub(crate) fn diff_trees_with_index(
     new_tree_oid: Option<&ObjectId>,
     prefix: &str,
     trust_index_for_old_tree: bool,
+    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<Vec<DiffEntry>> {
     let hint = (trust_index_for_old_tree
         && old_tree_oid.is_some()
@@ -2929,6 +2952,7 @@ pub(crate) fn diff_trees_with_index(
     .then_some(DiffTreesWalkHint {
         index: Some(index),
         old_tree_matches: true,
+        cancel_watch,
         ..DiffTreesWalkHint::default()
     });
     diff_trees_opts(
@@ -2951,6 +2975,7 @@ pub(crate) fn diff_trees_outside_sparse_directories(
     new_tree_oid: Option<&ObjectId>,
     sparse: Option<&SparseCheckout>,
     index_sparse: bool,
+    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<Vec<DiffEntry>> {
     crate::trace::trace_span!("grit.diff.tree");
     let hint = index
@@ -2960,6 +2985,7 @@ pub(crate) fn diff_trees_outside_sparse_directories(
             skip_sparse_directories: true,
             sparse,
             index_sparse,
+            cancel_watch,
             ..DiffTreesWalkHint::default()
         });
     diff_trees_opts(odb, old_tree_oid, new_tree_oid, "", false, hint.as_ref())
@@ -3049,7 +3075,7 @@ pub(crate) fn diff_trees_for_pathspecs(
 }
 
 /// Directories a tree diff may skip, and an index that can stand in for the old tree.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct DiffTreesWalkHint<'a> {
     index: Option<&'a Index>,
     /// `index` holds exactly the old tree's entries, so deleted subtrees may be listed from it.
@@ -3063,6 +3089,8 @@ struct DiffTreesWalkHint<'a> {
     /// When non-empty, do not descend into directories these pathspecs cannot match inside.
     pathspecs: &'a [String],
     pathspec_matcher: Option<&'a crate::pathspec::PathspecMatcher<'a>>,
+    /// When set, long walks poll this flag every [`crate::progress::CANCEL_POLL_STRIDE`] entries.
+    cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl DiffTreesWalkHint<'_> {
@@ -3641,6 +3669,20 @@ fn emit_added_count(
 }
 
 /// Compare two sorted streams of tree entries, recursing into subtrees.
+fn poll_tree_diff_cancel(
+    index_hint: Option<&DiffTreesWalkHint<'_>>,
+    stride: &mut usize,
+) -> Result<()> {
+    use crate::progress::{poll_watch, CANCEL_POLL_STRIDE};
+    *stride = stride.wrapping_add(1);
+    if stride.is_multiple_of(CANCEL_POLL_STRIDE) {
+        if let Some(watch) = index_hint.and_then(|hint| hint.cancel_watch.as_ref()) {
+            poll_watch(watch)?;
+        }
+    }
+    Ok(())
+}
+
 fn diff_tree_entries_opts(
     odb: &Odb,
     mut old: WalkEntries<'_>,
@@ -3652,8 +3694,10 @@ fn diff_tree_entries_opts(
 ) -> Result<()> {
     let mut old_entry = old.next_entry()?;
     let mut new_entry = new.next_entry()?;
+    let mut cancel_stride = 0usize;
 
     loop {
+        poll_tree_diff_cancel(index_hint, &mut cancel_stride)?;
         match (&old_entry, &new_entry) {
             (Some(o), Some(n)) => {
                 let cmp = crate::objects::tree_entry_cmp(
@@ -3743,12 +3787,18 @@ fn diff_tree_entries_opts(
     Ok(())
 }
 
-fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Vec<DiffEntry>) {
+fn emit_deleted_tree_from_index(
+    index: &Index,
+    dir_prefix: &str,
+    index_hint: Option<&DiffTreesWalkHint<'_>>,
+    result: &mut Vec<DiffEntry>,
+) -> Result<()> {
     let scan_prefix: Vec<u8> = if dir_prefix.is_empty() {
         Vec::new()
     } else {
         format!("{dir_prefix}/").into_bytes()
     };
+    let mut cancel_stride = 0usize;
     if index.entries_sorted {
         let start = if scan_prefix.is_empty() {
             0
@@ -3758,6 +3808,7 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
                 .partition_point(|e| e.path.as_slice() < scan_prefix.as_slice())
         };
         for ie in index.entries[start..].iter() {
+            poll_tree_diff_cancel(index_hint, &mut cancel_stride)?;
             if ie.stage() != 0 {
                 continue;
             }
@@ -3779,9 +3830,10 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
                 score: None,
             });
         }
-        return;
+        return Ok(());
     }
     for ie in &index.entries {
+        poll_tree_diff_cancel(index_hint, &mut cancel_stride)?;
         if ie.stage() != 0 {
             continue;
         }
@@ -3810,6 +3862,7 @@ fn emit_deleted_tree_from_index(index: &Index, dir_prefix: &str, result: &mut Ve
             score: None,
         });
     }
+    Ok(())
 }
 
 fn emit_deleted_opts(
@@ -3845,7 +3898,7 @@ fn emit_deleted_opts(
             .and_then(|hint| hint.index)
             .filter(|index| !index.has_sparse_directory_placeholders())
         {
-            emit_deleted_tree_from_index(index, &path, result);
+            emit_deleted_tree_from_index(index, &path, index_hint, result)?;
             return Ok(());
         }
         diff_subtrees_in_place(

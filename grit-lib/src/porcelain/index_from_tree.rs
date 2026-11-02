@@ -1661,6 +1661,7 @@ mod tests {
             Some(&t1),
             None,
             false,
+            None,
         )
         .expect("pruned diff");
         assert!(pruned.is_empty(), "only c/z changed, inside c/: {pruned:?}");
@@ -1677,6 +1678,7 @@ mod tests {
             Some(&t1),
             None,
             false,
+            None,
         )
         .expect("unpruned");
         assert_eq!(unpruned, full);
@@ -1694,6 +1696,7 @@ mod tests {
             Some(&t1),
             None,
             false,
+            None,
         )
         .expect("no subtree reads")
         .is_empty());

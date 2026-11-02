@@ -48,6 +48,7 @@ fn tree_changes_for_clean_merge_with_snapshot(
             Some(&to_tree),
             "",
             true,
+            None,
         )
     } else {
         diff_trees(repo.odb(), Some(from_tree), Some(&to_tree), "")

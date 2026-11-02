@@ -251,11 +251,25 @@ pub(crate) fn cancellable_chunks<T>(
     items: &[T],
     options: ParallelOptions,
 ) -> (impl Iterator<Item = &[T]>, ParallelOptions) {
+    cancellable_chunks_with_sizes(items, options, ChunkSizes::new())
+}
+
+pub(crate) fn cancellable_chunks_cancel_friendly<T>(
+    items: &[T],
+    options: ParallelOptions,
+) -> (impl Iterator<Item = &[T]>, ParallelOptions) {
+    cancellable_chunks_with_sizes(items, options, ChunkSizes::cancel_friendly())
+}
+
+fn cancellable_chunks_with_sizes<T>(
+    items: &[T],
+    options: ParallelOptions,
+    mut sizes: ChunkSizes,
+) -> (impl Iterator<Item = &[T]>, ParallelOptions) {
     let chunk_options = chunk_pool_options(options, items.len()).unwrap_or(ParallelOptions {
         threads: std::num::NonZeroUsize::MIN,
         ..options
     });
-    let mut sizes = ChunkSizes::new();
     let mut rest = items;
     let chunks = std::iter::from_fn(move || {
         if rest.is_empty() {
@@ -280,6 +294,11 @@ impl ChunkSizes {
         Self {
             current: PARALLEL_WRITE_FIRST_CHUNK,
         }
+    }
+
+    /// One item per chunk first, so cancellation can stop before a large parallel batch.
+    fn cancel_friendly() -> Self {
+        Self { current: 1 }
     }
 
     /// Sizes that start at the cap, for callers that do not need a quick first stop.
