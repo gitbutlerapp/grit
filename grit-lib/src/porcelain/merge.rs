@@ -1499,6 +1499,18 @@ pub struct ContinueOutcome {
     pub oid: ObjectId,
     /// Stored `change-id` on the merge commit when present.
     pub change_id: Option<ChangeId>,
+    /// Rerere postimage events from concluding the merge commit.
+    pub rerere: Vec<crate::rerere::RerereEvent>,
+}
+
+/// Squash merge stopped on conflicts (`SQUASH_MSG` and conflict `MERGE_MSG`, no `MERGE_HEAD`).
+#[must_use]
+pub fn squash_conflict_merge_in_progress(git_dir: &Path) -> bool {
+    read_merge_heads(git_dir)
+        .map(|h| h.is_empty())
+        .unwrap_or(true)
+        && git_dir.join("SQUASH_MSG").is_file()
+        && git_dir.join("MERGE_MSG").is_file()
 }
 
 /// Failure modes for [`continue_merge`].
@@ -1583,6 +1595,7 @@ pub fn continue_merge(
     Ok(ContinueOutcome {
         oid: outcome.oid,
         change_id: outcome.change_id,
+        rerere: outcome.rerere,
     })
 }
 

@@ -5,8 +5,10 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::rerere::{repo_rerere, rerere_enabled, RerereAutoupdate, RerereEventKind};
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::merge::{
-    continue_merge, integrate_branch, ContinueOptions, IntegrateBranchOutcome,
+    continue_merge, integrate_branch, integrate_branch_with, ContinueOptions,
+    IntegrateBranchOutcome, MergeCommitMode, MergeOptions,
 };
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
@@ -63,6 +65,20 @@ fn head_oid(repo: &Repository) -> ObjectId {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
         HeadState::Branch { oid: None, .. } | HeadState::Invalid => panic!("invalid head"),
     }
+}
+
+fn merge_rr_len(dir: &TempDir) -> usize {
+    std::fs::metadata(dir.path().join(".git/MERGE_RR"))
+        .map(|m| m.len() as usize)
+        .unwrap_or(0)
+}
+
+fn rr_cache_has_postimage(dir: &TempDir) -> bool {
+    let cache = dir.path().join(".git/rr-cache");
+    std::fs::read_dir(cache).ok().is_some_and(|rd| {
+        rd.filter_map(Result::ok)
+            .any(|ent| ent.path().is_dir() && ent.path().join("postimage").is_file())
+    })
 }
 
 fn rr_cache_entries(dir: &TempDir) -> usize {
@@ -329,5 +345,88 @@ fn issue_2468_rebase_replays_git_rr_cache() {
             .iter()
             .any(|e| e.kind == RerereEventKind::ResolvedFromPrevious),
         "rebase should replay rerere"
+    );
+}
+
+#[test]
+fn issue_2468_squash_conflict_commit_records_rerere_postimage() {
+    let dir = init_repo();
+    let side = setup_diverged_branches(&dir);
+
+    let repo = open_grit(&dir);
+    let head = head_oid(&repo);
+    let outcome = integrate_branch_with(
+        &repo,
+        "main",
+        head,
+        side,
+        "side",
+        &MergeOptions {
+            commit: MergeCommitMode::Squash,
+            ..MergeOptions::default()
+        },
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("squash merge");
+
+    let IntegrateBranchOutcome::Conflicts { .. } = outcome else {
+        panic!("expected squash merge conflicts");
+    };
+    assert!(
+        !repo.git_dir().join("MERGE_HEAD").exists(),
+        "squash conflict must not write MERGE_HEAD"
+    );
+    assert!(repo.git_dir().join("SQUASH_MSG").is_file());
+
+    std::fs::write(dir.path().join("f"), b"l1\nRESOLVED\nl3\n").unwrap();
+    git_cmd(dir.path(), &["add", "f"]);
+
+    let mut req = CommitRequest::new("squashed side");
+    req.author = Some(ident());
+    req.committer = Some(ident());
+    let outcome = create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+    assert!(
+        outcome
+            .rerere
+            .iter()
+            .any(|e| e.path == "f" && e.kind == RerereEventKind::RecordedResolution),
+        "squash conflict commit should record rerere postimage"
+    );
+    assert_eq!(merge_rr_len(&dir), 0, "MERGE_RR should be cleared");
+    assert!(
+        rr_cache_has_postimage(&dir),
+        "rr-cache should hold postimage"
+    );
+    assert_eq!(rr_cache_entries(&dir), 1);
+}
+
+#[test]
+fn issue_2468_merge_continue_returns_recorded_resolution() {
+    let dir = init_repo();
+    let side = setup_diverged_branches(&dir);
+
+    let repo = open_grit(&dir);
+    let head = head_oid(&repo);
+    integrate_branch(
+        &repo,
+        "main",
+        head,
+        side,
+        "side",
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("merge");
+
+    std::fs::write(dir.path().join("f"), b"l1\nRESOLVED\nl3\n").unwrap();
+    git_cmd(dir.path(), &["add", "f"]);
+    let cont = continue_merge(&repo, &continue_opts(), &mut NullProgress, &NeverCancel)
+        .expect("continue merge");
+    assert!(
+        cont.rerere
+            .iter()
+            .any(|e| e.kind == RerereEventKind::RecordedResolution),
+        "merge continue should return recorded_resolution events"
     );
 }

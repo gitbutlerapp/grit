@@ -551,6 +551,7 @@ impl HumanRender for RebaseCliOutcome {
                     exec: self.exec.clone(),
                 }
                 .render_human(w, ctx)?;
+                crate::operation_output::render_rerere_human(&self.rerere);
             }
         }
         Ok(())
@@ -1517,14 +1518,19 @@ fn omit_identity_rewrite_rows(outcome: &mut HistoryRewriteOutcome) {
 fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
     match outcome {
         RebaseOutcome::Done {
-            plan, head_change, ..
+            plan,
+            head_change,
+            rerere,
+            ..
         } => {
             let mut outcome = HistoryRewriteOutcome::new("rebase", &plan, false);
             outcome.head = head_change.map(|(old, new)| HeadPair {
                 old: old.to_hex(),
                 new: new.to_hex(),
             });
-            Ok(RebaseCliOutcome::from_rewrite(outcome))
+            let mut cli = RebaseCliOutcome::from_rewrite(outcome);
+            cli.rerere = crate::operation_output::rerere_events_json(&rerere);
+            Ok(cli)
         }
         RebaseOutcome::ExecDone { plan, exec, .. } => {
             let mut outcome =

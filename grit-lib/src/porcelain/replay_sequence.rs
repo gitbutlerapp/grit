@@ -194,6 +194,8 @@ pub enum SequenceOutcome {
         created: Vec<ReplayCreated>,
         /// Source commits skipped as empty/redundant.
         dropped: Vec<ObjectId>,
+        /// Rerere postimage events from concluding a conflicted step in this call.
+        rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// The current step stopped on merge conflicts.
     Conflicts {
@@ -291,6 +293,7 @@ pub fn start_replay_sequence(
         return Ok(SequenceOutcome::Completed {
             created: Vec::new(),
             dropped: Vec::new(),
+            rerere: Vec::new(),
         });
     }
     if req.commits.len() > 1 && req.options.message_override.is_some() {
@@ -342,7 +345,7 @@ pub fn continue_replay_sequence(
     if index.has_unmerged_entries() {
         return Err(Error::ReplayContinueUnmerged);
     }
-    let _ = crate::rerere::finish_merge_rerere(repo)?;
+    let rerere = crate::rerere::finish_merge_rerere(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     let git_dir = repo.git_dir();
     let step_head_present =
@@ -369,6 +372,7 @@ pub fn continue_replay_sequence(
             return Ok(SequenceOutcome::Completed {
                 created: created_records,
                 dropped: Vec::new(),
+                rerere,
             });
         }
         let sequence_start = read_sequencer_head(git_dir).unwrap_or(active.abort_safety);
@@ -382,22 +386,25 @@ pub fn continue_replay_sequence(
             &committer,
             &created_records,
         )?;
-        return run_sequence(
-            repo,
-            &refname,
-            head_oid,
-            head_oid,
-            sequence_start,
-            active.direction,
-            &committer,
-            &active.opts,
-            &mut todo,
-            created_records.iter().map(|r| r.new_oid).collect(),
-            Vec::new(),
-            &mut created_records,
-            None,
-            progress,
-            cancel,
+        return attach_continue_rerere(
+            run_sequence(
+                repo,
+                &refname,
+                head_oid,
+                head_oid,
+                sequence_start,
+                active.direction,
+                &committer,
+                &active.opts,
+                &mut todo,
+                created_records.iter().map(|r| r.new_oid).collect(),
+                Vec::new(),
+                &mut created_records,
+                None,
+                progress,
+                cancel,
+            )?,
+            rerere,
         );
     }
     let source = active.current_source()?.ok_or(Error::NoReplayInProgress)?;
@@ -459,6 +466,7 @@ pub fn continue_replay_sequence(
         return Ok(SequenceOutcome::Completed {
             created: created_records,
             dropped: Vec::new(),
+            rerere,
         });
     }
     let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
@@ -473,23 +481,43 @@ pub fn continue_replay_sequence(
         &committer,
         &created_records,
     )?;
-    run_sequence(
-        repo,
-        &refname,
-        head_after,
-        head_after,
-        sequence_start,
-        active.direction,
-        &committer,
-        &active.opts,
-        &mut todo,
-        created_so_far,
-        Vec::new(),
-        &mut created_records,
-        None,
-        progress,
-        cancel,
+    attach_continue_rerere(
+        run_sequence(
+            repo,
+            &refname,
+            head_after,
+            head_after,
+            sequence_start,
+            active.direction,
+            &committer,
+            &active.opts,
+            &mut todo,
+            created_so_far,
+            Vec::new(),
+            &mut created_records,
+            None,
+            progress,
+            cancel,
+        )?,
+        rerere,
     )
+}
+
+fn attach_continue_rerere(
+    mut outcome: SequenceOutcome,
+    rerere: Vec<crate::rerere::RerereEvent>,
+) -> Result<SequenceOutcome> {
+    if rerere.is_empty() {
+        return Ok(outcome);
+    }
+    if let SequenceOutcome::Completed {
+        rerere: ref mut events,
+        ..
+    } = &mut outcome
+    {
+        events.extend(rerere);
+    }
+    Ok(outcome)
 }
 
 /// Skip the current todo step and apply later entries.
@@ -530,6 +558,7 @@ pub fn skip_replay_step(
         return Ok(SequenceOutcome::Completed {
             created: created_records,
             dropped: dropped.into_iter().collect(),
+            rerere: Vec::new(),
         });
     }
     let dropped: Vec<ObjectId> = dropped.into_iter().collect();
@@ -551,9 +580,15 @@ pub fn skip_replay_step(
         progress,
         cancel,
     )? {
-        SequenceOutcome::Completed { created, dropped } => {
-            Ok(SequenceOutcome::Completed { created, dropped })
-        }
+        SequenceOutcome::Completed {
+            created,
+            dropped,
+            rerere,
+        } => Ok(SequenceOutcome::Completed {
+            created,
+            dropped,
+            rerere,
+        }),
         other => Ok(other),
     }
 }
@@ -573,7 +608,6 @@ pub enum ReplayAbortOutcome {
 ///
 /// Propagates I/O, object read, and sequencer record failures.
 pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -> Result<()> {
-    let _ = crate::rerere::finish_merge_rerere(repo)?;
     let git_dir = repo.git_dir();
     let cherry = read_cherry_pick_head(git_dir)?;
     let revert = read_revert_head(git_dir)?;
@@ -796,6 +830,7 @@ fn run_sequence(
                     return Ok(SequenceOutcome::Completed {
                         created: created_records.clone(),
                         dropped,
+                        rerere: Vec::new(),
                     });
                 }
                 persist_sequence_checkpoint(
@@ -818,6 +853,7 @@ fn run_sequence(
                     return Ok(SequenceOutcome::Completed {
                         created: created_records.clone(),
                         dropped,
+                        rerere: Vec::new(),
                     });
                 }
                 persist_sequence_checkpoint(
@@ -902,6 +938,7 @@ fn run_sequence(
     Ok(SequenceOutcome::Completed {
         created: created_records.clone(),
         dropped,
+        rerere: Vec::new(),
     })
 }
 

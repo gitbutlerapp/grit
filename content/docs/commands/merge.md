@@ -277,7 +277,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `parents` | array or null | For `--dry-run` with `result: merged`, the two parent commit ids of the merge commit that would be recorded. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
 | `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, a [conflict `kind`](../status/#conflict-kinds) (the same names `grit status` uses, plus `rename_rename` and the `directory_rename_*` kinds), and optional `summary` text for `deleted_by_us`, `deleted_by_them`, `rename_rename` and directory rename conflicts. A `rename_rename` conflict lists all three paths (the old name and both new names); the `summary` is on the old name's item. |
-| `rerere` | array | When `result` is `conflicts` and rerere is active, each item has `path` and `kind`: `resolved_from_previous`, `staged_from_previous`, `recorded_preimage`, or `recorded_resolution`. Omitted when empty. |
+| `rerere` | array | When rerere is active on `conflicts` or after a successful `merged` from `--continue`, each item has `path` and `kind`: `resolved_from_previous`, `staged_from_previous`, `recorded_preimage`, or `recorded_resolution`. Omitted when empty. |
 | `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts` (for example `grit diff`, `grit add .`), or suggested commands when `result` is `squashed` or `stopped`. |
 | `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort` (not part of the ordered sequence). |
 

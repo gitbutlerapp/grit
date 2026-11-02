@@ -131,6 +131,7 @@ impl HumanRender for PickOutcome {
                 if !self.dropped.is_empty() {
                     outln!(w, "Dropped {} empty commit(s)", self.dropped.len());
                 }
+                crate::operation_output::render_rerere_human(&self.rerere);
             }
             PickResult::Clean => {
                 if let Some(oid) = &self.oid {
@@ -324,9 +325,14 @@ fn source_record(source: ObjectId, subject: &str) -> PickCommitRecord {
 
 fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> PickOutcome {
     match outcome {
-        SequenceOutcome::Completed { created, dropped } => PickOutcome {
+        SequenceOutcome::Completed {
+            created,
+            dropped,
+            rerere,
+        } => PickOutcome {
             commits: created.iter().map(PickCommitRecord::from).collect(),
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+            rerere: crate::operation_output::rerere_events_json(&rerere),
             ..PickOutcome::new(ok_result)
         },
         SequenceOutcome::Conflicts {

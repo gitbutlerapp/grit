@@ -197,6 +197,7 @@ impl HumanRender for RevertOutcome {
                     let src_short = short_hex(&entry.source);
                     outln!(w, "Reverted {src_short} → {new_short} {}", entry.subject);
                 }
+                crate::operation_output::render_rerere_human(&self.rerere);
             }
         }
         Ok(())
@@ -327,7 +328,11 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> RevertOutcome {
 
 fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
     match outcome {
-        SequenceOutcome::Completed { created, dropped } => {
+        SequenceOutcome::Completed {
+            created,
+            dropped,
+            rerere,
+        } => {
             let commits: Vec<RevertCommitEntry> =
                 created.iter().map(RevertCommitEntry::from).collect();
             let last = commits.last().cloned();
@@ -338,6 +343,7 @@ fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
                 change_id: last.and_then(|e| e.change_id),
                 commits,
                 dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+                rerere: crate::operation_output::rerere_events_json(&rerere),
                 ..RevertOutcome::new(RevertResult::Completed)
             }
         }

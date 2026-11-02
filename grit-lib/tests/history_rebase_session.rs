@@ -243,6 +243,7 @@ fn rebase_session_conflict_stop_continue_and_abort() {
             applied,
             head_change,
             plan,
+            ..
         } => {
             let after = git_oid(wt, "HEAD");
             assert_eq!(before, onto);
@@ -2624,6 +2625,7 @@ fn multiple_conflict_stops_report_the_last_invocation_head_change() {
         applied,
         head_change,
         plan,
+        ..
     } = continue_rebase(
         &grit,
         &opts,
@@ -2785,6 +2787,7 @@ fn skip_with_remaining_replay_reports_head_change() {
         applied,
         head_change,
         plan,
+        ..
     } = skip_rebase(
         &grit,
         &opts,

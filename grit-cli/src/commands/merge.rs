@@ -478,13 +478,17 @@ impl HumanRender for MergeOutcome {
                 }
             }
             MergeResult::Merged if self.detached_head => {
-                outln!(w, "Merged {} into HEAD ({short})", self.branch)
+                outln!(w, "Merged {} into HEAD ({short})", self.branch);
+                crate::operation_output::render_rerere_human(&self.rerere);
             }
-            MergeResult::Merged => outln!(
-                w,
-                "Merged {} into the current branch ({short})",
-                self.branch
-            ),
+            MergeResult::Merged => {
+                outln!(
+                    w,
+                    "Merged {} into the current branch ({short})",
+                    self.branch
+                );
+                crate::operation_output::render_rerere_human(&self.rerere);
+            }
             MergeResult::Squashed => {
                 outln!(
                     w,
@@ -715,6 +719,7 @@ fn run_continue(
     match continue_merge(repo, &options, progress, cancel) {
         Ok(outcome) => {
             let mut merged = MergeOutcome::merged(&label, outcome.oid, outcome.change_id);
+            merged.rerere = crate::operation_output::rerere_events_json(&outcome.rerere);
             if detached {
                 merged = merged.for_detached_head();
             }

@@ -1231,23 +1231,31 @@ pub fn merge_completion_sentinels() -> &'static [&'static str] {
     ]
 }
 
+/// Side effects of [`finish_merge_state`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FinishMergeStateResult {
+    /// Applying the merge autostash left conflicts (the autostash entry is kept).
+    pub autostash_left_conflicts: bool,
+    /// Rerere postimage events recorded while concluding the merge commit.
+    pub rerere: Vec<crate::rerere::RerereEvent>,
+}
+
 /// Complete merge auxiliary state after a successful merge commit.
 ///
 /// Applies `MERGE_AUTOSTASH` (when present), clears rerere merge records, then removes merge
 /// sentinel files via [`clear_merge_state`].
 ///
-/// # Returns
-///
-/// `true` when applying the merge autostash left conflicts (the autostash entry is kept).
-///
 /// # Errors
 ///
 /// Propagates autostash apply, rerere, and I/O failures.
-pub fn finish_merge_state(repo: &Repository) -> Result<bool> {
+pub fn finish_merge_state(repo: &Repository) -> Result<FinishMergeStateResult> {
     let autostash_conflicts = crate::porcelain::stash::apply_merge_autostash(repo)?;
-    let _ = crate::rerere::finish_merge_rerere(repo)?;
+    let rerere = crate::rerere::finish_merge_rerere(repo)?;
     clear_merge_state(repo.git_dir())?;
-    Ok(autostash_conflicts)
+    Ok(FinishMergeStateResult {
+        autostash_left_conflicts: autostash_conflicts,
+        rerere,
+    })
 }
 
 /// Read CHERRY_PICK_HEAD when it contains a valid 40-hex OID; `None` if missing, empty, or invalid

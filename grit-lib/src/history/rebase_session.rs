@@ -94,6 +94,8 @@ pub enum RebaseOutcome {
         /// reattachment. `None` means the OID is unchanged, including when only reattaching
         /// `HEAD`. Unlike [`RewritePlan::head_change`], this covers the entire session call.
         head_change: Option<(ObjectId, ObjectId)>,
+        /// Rerere postimage events from concluding a conflicted step in this call.
+        rerere: Vec<crate::rerere::RerereEvent>,
     },
     /// `--exec` commands ran at every replayed commit (from [`start_rebase_with_exec`], or a
     /// resumed exec stop) and the atomic plan was applied.
@@ -293,6 +295,7 @@ pub fn start_rebase(
                 head_change: (orig_head != applied.head).then_some((orig_head, applied.head)),
                 applied,
                 plan,
+                rerere: Vec::new(),
             })
         }
         Ok(ResumablePlanOutcome::Partial(partial)) => {
@@ -481,6 +484,7 @@ fn up_to_date_outcome(head: ObjectId) -> RebaseOutcome {
             ref_updates: Vec::new(),
             head: super::types::HeadEffect::default(),
         }),
+        rerere: Vec::new(),
     }
 }
 
@@ -574,12 +578,14 @@ fn run_exec_after_resolution(
     Ok(tip)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn advance_after_user_resolution_commit(
     repo: &Repository,
     state: &LoadedState,
     opts: &StartRebaseOptions,
     current: ObjectId,
     head_oid: ObjectId,
+    rerere: Vec<crate::rerere::RerereEvent>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
@@ -619,6 +625,7 @@ fn advance_after_user_resolution_commit(
         &opts.apply,
         outcome,
         head_oid,
+        rerere,
         progress,
         cancel,
     )
@@ -657,7 +664,7 @@ pub fn continue_rebase(
     if repo.load_index()?.has_unmerged_entries() {
         return Err(RebaseSessionError::UnmergedPaths);
     }
-    let _ = crate::rerere::finish_merge_rerere(repo).map_err(map_lib)?;
+    let rerere = crate::rerere::finish_merge_rerere(repo).map_err(map_lib)?;
     let current = state
         .stopped_commit
         .or_else(|| state.remaining.first().copied())
@@ -677,7 +684,7 @@ pub fn continue_rebase(
         if is_first_parent_descendant_of(repo, stopped_head, head_oid)? {
             ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
             return advance_after_user_resolution_commit(
-                repo, &state, opts, current, head_oid, progress, cancel,
+                repo, &state, opts, current, head_oid, rerere, progress, cancel,
             );
         }
         return Err(RebaseSessionError::ResolutionHeadChanged {
@@ -716,7 +723,7 @@ pub fn continue_rebase(
             .map_err(map_lib)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
         return advance_after_user_resolution_commit(
-            repo, &state, opts, current, resolved, progress, cancel,
+            repo, &state, opts, current, resolved, rerere, progress, cancel,
         );
     }
 
@@ -735,7 +742,7 @@ pub fn continue_rebase(
             .map_err(map_lib)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
         return advance_after_user_resolution_commit(
-            repo, &state, opts, current, resolved, progress, cancel,
+            repo, &state, opts, current, resolved, rerere, progress, cancel,
         );
     }
 
@@ -770,6 +777,7 @@ pub fn continue_rebase(
         &opts.apply,
         outcome,
         head_oid,
+        rerere,
         progress,
         cancel,
     )
@@ -843,6 +851,7 @@ pub fn skip_rebase(
         &opts.apply,
         outcome,
         head_oid,
+        Vec::new(),
         progress,
         cancel,
     )
@@ -1412,6 +1421,7 @@ fn advance_after_plan(
     apply: &ApplyOptions,
     outcome: ResumablePlanOutcome,
     head_before: ObjectId,
+    rerere: Vec<crate::rerere::RerereEvent>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
@@ -1485,6 +1495,7 @@ fn advance_after_plan(
                 head_change: (head_before != applied.head).then_some((head_before, applied.head)),
                 applied,
                 plan,
+                rerere,
             })
         }
         ResumablePlanOutcome::Partial(partial) => {
