@@ -3,7 +3,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::repo::Repository;
+use grit_lib::ident::Signature;
+use grit_lib::objects::{serialize_tag, ObjectId, ObjectKind, TagData};
+use grit_lib::refs::store::RefName;
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::DescribeOptions;
 
 mod support;
@@ -49,4 +52,67 @@ fn describe_distance_matches_git_rev_list_count() {
         .parse::<usize>()
         .expect("count");
     assert_eq!(described.distance, git_count);
+}
+
+#[test]
+fn describe_clock_skew_fixture_matches_git_rev_list_count() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    let wt = dir.path();
+    let repo = Repository::init(wt, &InitOptions::default()).expect("init");
+    let odb = repo.odb();
+    let base = write_commit_at(odb, &[], "base", 3129).expect("base");
+    let tagged = write_commit_at(odb, &[base], "tagged", 2598).expect("tagged");
+    let side = write_commit_at(odb, &[tagged], "side", 4411).expect("side");
+    let merge = write_commit_at(odb, &[base, side], "merge", 5000).expect("merge");
+    grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/main", &merge).expect("ref");
+    tag_annotated(&repo, "t20", tagged, "m");
+
+    let described = repo
+        .rev_walk()
+        .describe("main", &DescribeOptions::default())
+        .expect("describe")
+        .expect("tag");
+    let git_count = git(wt, &["rev-list", "--count", "refs/tags/t20..main"])
+        .trim()
+        .parse::<usize>()
+        .expect("count");
+    assert_eq!(described.distance, git_count);
+    assert_eq!(described.distance, 2);
+}
+
+fn write_commit_at(
+    odb: &grit_lib::objects::odb::Odb,
+    parents: &[ObjectId],
+    msg: &str,
+    time: i64,
+) -> grit_lib::error::Result<ObjectId> {
+    let tree = odb.write_loose_materialize(ObjectKind::Tree, b"")?;
+    let mut body = format!("tree {tree}\n");
+    for p in parents {
+        body.push_str(&format!("parent {p}\n"));
+    }
+    body.push_str(&format!(
+        "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\n{msg}\n"
+    ));
+    odb.write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+}
+
+fn tag_annotated(repo: &Repository, name: &str, target: ObjectId, msg: &str) {
+    let tagger = Signature::new("T", "t@e.com", repo.identity_now()).expect("tagger");
+    let data = TagData {
+        object: target,
+        object_type: "commit".into(),
+        tag: name.to_owned(),
+        tagger: Some(tagger.header_line()),
+        extra_headers: Vec::new(),
+        message: format!("{msg}\n"),
+    };
+    let bytes = serialize_tag(&data);
+    let oid = repo.odb().write(ObjectKind::Tag, &bytes).expect("write");
+    let full = format!("refs/tags/{name}");
+    let name = RefName::try_from(full.as_str()).expect("name");
+    repo.references().update(&name, &oid).expect("update");
 }
