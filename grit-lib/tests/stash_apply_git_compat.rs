@@ -517,3 +517,235 @@ mod raw_stash_paths {
         }
     }
 }
+
+#[cfg(unix)]
+mod grit_stash_push_non_utf8 {
+    use super::*;
+    use grit_lib::stash::{StashApplyOptions, StashPushOptions};
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+
+    fn path_bytes(bytes: &[u8]) -> std::path::PathBuf {
+        PathBuf::from(OsStr::from_bytes(bytes))
+    }
+
+    fn stash_push_opts(include_untracked: bool) -> StashPushOptions {
+        StashPushOptions {
+            message: None,
+            include_untracked,
+            identity: identity(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
+            mode: Default::default(),
+        }
+    }
+
+    fn identity() -> grit_lib::ident::Signature {
+        grit_lib::ident::Signature::from_header_lossy("Test <t@example.com> 1000000000 +0000")
+    }
+
+    fn open(root: &Path) -> Repository {
+        Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .expect("open")
+    }
+
+    fn tree_paths(repo: &Path, rev: &str) -> Vec<Vec<u8>> {
+        let mut cmd = std::process::Command::new("git");
+        grit_test_support::configure_git_env(&mut cmd);
+        let out = cmd
+            .current_dir(repo)
+            .args(["ls-tree", "-r", "--name-only", "-z", rev])
+            .output()
+            .expect("ls-tree");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        out.stdout
+            .split(|&b| b == 0)
+            .filter(|p| !p.is_empty())
+            .map(|p| p.to_vec())
+            .collect()
+    }
+
+    fn assert_no_pathhex_tree_names(paths: &[Vec<u8>]) {
+        for p in paths {
+            let s = String::from_utf8_lossy(p);
+            assert!(
+                !s.starts_with("grit+pathhex:"),
+                "stash tree must not contain encoded path names, got {s:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn push_tracked_non_utf8_round_trips_with_git() {
+        let root = tempfile::tempdir().expect("tempdir");
+        init_repo(root.path());
+        let non_utf8 = path_bytes(b"base\xff.txt");
+        std::fs::write(root.path().join(&non_utf8), b"a").expect("write");
+        std::fs::write(root.path().join("plain.txt"), b"x").expect("write");
+        git_cmd(root.path(), &["add", "-A"]);
+        git_cmd(root.path(), &["commit", "-qm", "one"]);
+        std::fs::write(root.path().join(&non_utf8), b"ab").expect("modify");
+        std::fs::write(root.path().join("plain.txt"), b"xy\n").expect("modify");
+
+        let repo = open(root.path());
+        repo.stash()
+            .push(
+                &stash_push_opts(false),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("push")
+            .expect("stash oid");
+
+        assert!(
+            git_cmd(root.path(), &["status", "--porcelain"])
+                .trim()
+                .is_empty(),
+            "worktree must be clean after grit stash"
+        );
+
+        let w_tree_paths = tree_paths(root.path(), "stash@{0}");
+        assert_eq!(w_tree_paths.len(), 2);
+        assert_no_pathhex_tree_names(&w_tree_paths);
+        assert!(w_tree_paths
+            .iter()
+            .any(|p| p == non_utf8.as_os_str().as_bytes()));
+
+        let show = git_cmd(root.path(), &["stash", "show", "--name-only"]);
+        assert!(
+            !show.contains("grit+pathhex:"),
+            "git stash show must not list pathhex names:\n{show}"
+        );
+        git_cmd(root.path(), &["fsck", "--strict"]);
+
+        repo.stash()
+            .pop(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("pop");
+
+        let porcelain = git_cmd(root.path(), &["status", "--porcelain"]);
+        assert!(porcelain.contains("plain.txt"));
+        assert!(
+            !porcelain.contains("grit+pathhex:"),
+            "must not create stray pathhex file:\n{porcelain}"
+        );
+        assert_eq!(std::fs::read(root.path().join(&non_utf8)).unwrap(), b"ab");
+        assert_eq!(
+            std::fs::read(root.path().join("plain.txt")).unwrap(),
+            b"xy\n"
+        );
+        git_cmd(root.path(), &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn push_untracked_non_utf8_removes_and_restores() {
+        let root = tempfile::tempdir().expect("tempdir");
+        init_repo(root.path());
+        let non_utf8 = path_bytes(b"un\xff");
+        std::fs::write(root.path().join("tracked.txt"), b"a").expect("write");
+        git_cmd(root.path(), &["add", "tracked.txt"]);
+        git_cmd(root.path(), &["commit", "-qm", "one"]);
+        std::fs::write(root.path().join(&non_utf8), b"u").expect("untracked");
+
+        let repo = open(root.path());
+        repo.stash()
+            .push(
+                &stash_push_opts(true),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("push")
+            .expect("stash");
+
+        assert!(!root.path().join(&non_utf8).exists());
+        assert!(git_cmd(root.path(), &["status", "--porcelain"])
+            .trim()
+            .is_empty());
+
+        let ut_commit = git_cmd(root.path(), &["rev-parse", "stash@{0}^3"])
+            .trim()
+            .to_owned();
+        let ut_paths = tree_paths(root.path(), &format!("{ut_commit}"));
+        assert_eq!(ut_paths.len(), 1);
+        assert_eq!(ut_paths[0], non_utf8.as_os_str().as_bytes());
+
+        repo.stash()
+            .pop(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("pop");
+
+        assert_eq!(std::fs::read(root.path().join(&non_utf8)).unwrap(), b"u");
+        git_cmd(root.path(), &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn push_literal_grit_pathhex_filename_stays_distinct() {
+        let root = tempfile::tempdir().expect("tempdir");
+        init_repo(root.path());
+        let literal = path_bytes(b"grit+pathhex:plain.txt");
+        std::fs::write(root.path().join(&literal), b"a").expect("write");
+        git_cmd(root.path(), &["add", "-A"]);
+        git_cmd(root.path(), &["commit", "-qm", "one"]);
+        std::fs::write(root.path().join(&literal), b"ab").expect("modify");
+
+        let repo = open(root.path());
+        repo.stash()
+            .push(
+                &stash_push_opts(false),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("push")
+            .expect("stash");
+
+        let w_paths = tree_paths(root.path(), "stash@{0}");
+        assert_eq!(w_paths.len(), 1);
+        assert_eq!(w_paths[0], literal.as_os_str().as_bytes());
+
+        repo.stash()
+            .pop(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("pop");
+        assert_eq!(std::fs::read(root.path().join(&literal)).unwrap(), b"ab");
+    }
+
+    #[test]
+    fn git_created_stash_of_non_utf8_still_pops_in_grit() {
+        let root = tempfile::tempdir().expect("tempdir");
+        init_repo(root.path());
+        let non_utf8 = path_bytes(b"base\xff.txt");
+        std::fs::write(root.path().join(&non_utf8), b"a").expect("write");
+        git_cmd(root.path(), &["add", "-A"]);
+        git_cmd(root.path(), &["commit", "-qm", "one"]);
+        std::fs::write(root.path().join(&non_utf8), b"ab").expect("modify");
+        git_cmd(root.path(), &["stash", "push", "-qm", "git"]);
+
+        let repo = open(root.path());
+        repo.stash()
+            .pop(
+                0,
+                &StashApplyOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .expect("grit pop of git stash");
+        assert_eq!(std::fs::read(root.path().join(&non_utf8)).unwrap(), b"ab");
+    }
+}
