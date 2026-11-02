@@ -1561,7 +1561,13 @@ fn stage_untracked_paths_parallel(
         scope.sink().inc(1);
         if dry_run_list_only {
             outcome.added.push(path.clone());
-            outcome.embedded_gitlinks.push(path);
+            let abs = crate::repo_relpath::worktree_abs(work_tree, &path);
+            if matches!(
+                classify_embedded_git_repo_for_stage(index, &path, &abs)?,
+                EmbeddedGitRepoStage::Gitlink(_)
+            ) {
+                outcome.embedded_gitlinks.push(path);
+            }
             continue;
         }
         icase_map.remove_alias_of(index, &storage_bytes(&path));
@@ -1576,7 +1582,12 @@ fn stage_untracked_paths_parallel(
             matches,
         )?;
         outcome.added.push(path.clone());
-        outcome.embedded_gitlinks.push(path);
+        if index
+            .get(storage_bytes(&path).as_ref(), 0)
+            .is_some_and(|e| e.mode == MODE_GITLINK)
+        {
+            outcome.embedded_gitlinks.push(path);
+        }
     }
 
     Ok(())

@@ -106,3 +106,138 @@ fn add_and_commit_report_new_embedded_gitlink() {
     let ls = git(root, &["ls-files", "-s"]);
     assert!(ls.contains("160000") && ls.contains("vendor-hello"));
 }
+
+#[cfg(unix)]
+#[test]
+fn symlink_to_repo_root_is_not_embedded_repository() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let repo = init_grit_repo(root);
+    fs::write(root.join("a"), b"a\n").expect("top");
+    std::os::unix::fs::symlink(".", root.join("loop")).expect("symlink");
+
+    let model = status(
+        &repo,
+        &StatusOptions {
+            untracked: UntrackedMode::Normal,
+            ignored: IgnoredMode::No,
+            ..StatusOptions::default()
+        },
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model.embedded_repositories.is_empty(),
+        "symlink must not appear as embedded repo: {:?}",
+        model.embedded_repositories
+    );
+
+    let stage_outcome = stage(
+        &repo,
+        &StageOptions {
+            pathspecs: vec![".".to_owned()],
+            pathspec_sources: vec![".".to_owned()],
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stage");
+    assert!(stage_outcome.embedded_gitlinks.is_empty());
+
+    let index = repo.index_handle().load().expect("index");
+    let entry = index.get(b"loop", 0).expect("symlink indexed");
+    assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
+
+    let ls = git(root, &["ls-files", "-s"]);
+    assert!(ls.contains("120000") && ls.contains("loop"));
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_to_other_repository_directory_is_not_embedded() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let repo = init_grit_repo(root);
+    let outer = tempfile::tempdir().expect("outer");
+    let outside = outer.path().join("repo");
+    fs::create_dir_all(&outside).expect("mkdir");
+    init_nested_git_repo(&outside);
+    std::os::unix::fs::symlink(&outside, root.join("ext")).expect("symlink");
+
+    let model = status(
+        &repo,
+        &StatusOptions {
+            untracked: UntrackedMode::Normal,
+            ignored: IgnoredMode::No,
+            ..StatusOptions::default()
+        },
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("status");
+    assert!(model.embedded_repositories.is_empty());
+
+    let stage_outcome = stage(
+        &repo,
+        &StageOptions {
+            pathspecs: vec!["ext".to_owned()],
+            pathspec_sources: vec!["ext".to_owned()],
+            mode: StageMode::All,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("stage");
+    assert!(stage_outcome.embedded_gitlinks.is_empty());
+
+    let index = repo.index_handle().load().expect("index");
+    let entry = index.get(b"ext", 0).expect("symlink indexed");
+    assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
+}
+
+#[cfg(unix)]
+#[test]
+fn real_directory_with_gitdir_symlink_still_counts_as_embedded() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let repo = init_grit_repo(root);
+    let bare_git = root.join("bare.git");
+    fs::create_dir_all(bare_git.join("objects")).expect("objects");
+    fs::create_dir_all(bare_git.join("refs/heads")).expect("refs");
+    fs::write(bare_git.join("HEAD"), "ref: refs/heads/main\n").expect("head");
+    let vendor = root.join("vendor");
+    fs::create_dir_all(&vendor).expect("mkdir");
+    std::os::unix::fs::symlink(&bare_git, vendor.join(".git")).expect("gitdir symlink");
+
+    let model = status(
+        &repo,
+        &StatusOptions {
+            untracked: UntrackedMode::Normal,
+            ignored: IgnoredMode::No,
+            ..StatusOptions::default()
+        },
+        &mut NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model
+            .embedded_repositories
+            .iter()
+            .any(|p| p.starts_with("vendor")),
+        "real dir with .git symlink should warn: {:?}",
+        model.embedded_repositories
+    );
+}
