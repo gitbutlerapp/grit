@@ -46,7 +46,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use crate::error::{BadNumericSource, ConfigError, ConfigValueError, Error, Result};
+use crate::error::{
+    BadNumericSource, ConfigError, ConfigValueError, Error, InvalidKeyReason, Result,
+};
 
 /// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
 #[cfg(test)]
@@ -347,24 +349,22 @@ pub fn config_entry_origin_line(entry: &ConfigEntry) -> Option<usize> {
 /// - `Section.SubSection.Key` → `section.SubSection.key`
 /// - `CORE.BARE` → `core.bare`
 pub fn canonical_key(raw: &str) -> Result<String> {
-    // Reject keys containing newlines
+    let invalid = |reason| {
+        Error::Config(ConfigError::InvalidKey {
+            key: raw.to_owned(),
+            reason,
+        })
+    };
     if raw.contains('\n') || raw.contains('\r') {
-        return Err(Error::Config(
-            format!("invalid key: '{}'", raw.replace('\n', "\\n")).into(),
-        ));
+        return Err(invalid(InvalidKeyReason::LineBreak));
     }
 
-    let first_dot = raw
-        .find('.')
-        .ok_or_else(|| Error::Config(format!("key does not contain a section: '{raw}'").into()))?;
-    let last_dot = raw
-        .rfind('.')
-        .ok_or_else(|| Error::Config(format!("key does not contain a section: '{raw}'").into()))?;
+    let (Some(first_dot), Some(last_dot)) = (raw.find('.'), raw.rfind('.')) else {
+        return Err(invalid(InvalidKeyReason::MissingSection));
+    };
 
     if last_dot == raw.len() - 1 {
-        return Err(Error::Config(
-            format!("key does not contain variable name: '{raw}'").into(),
-        ));
+        return Err(invalid(InvalidKeyReason::MissingVariable));
     }
 
     let section = &raw[..first_dot];
@@ -372,18 +372,14 @@ pub fn canonical_key(raw: &str) -> Result<String> {
 
     // Validate section name: must be alphanumeric or hyphen
     if section.is_empty() || !section.chars().all(|c| c.is_alphanumeric() || c == '-') {
-        return Err(Error::Config(
-            format!("invalid key (bad section): '{raw}'").into(),
-        ));
+        return Err(invalid(InvalidKeyReason::InvalidSection));
     }
 
     // Validate variable name: must start with alpha, rest alphanumeric or hyphen
     if !name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
         || !name.chars().all(|c| c.is_alphanumeric() || c == '-')
     {
-        return Err(Error::Config(
-            format!("invalid key (bad variable name): '{raw}'").into(),
-        ));
+        return Err(invalid(InvalidKeyReason::InvalidVariable));
     }
 
     let mut key = String::with_capacity(raw.len());
@@ -855,8 +851,12 @@ fn compile_config_value_pattern(pat: &str) -> std::result::Result<(regex::Regex,
     } else {
         (false, pat)
     };
-    let re = regex::Regex::new(actual_pat)
-        .map_err(|e| Error::Config(format!("invalid value-pattern regex: {e}").into()))?;
+    let re = regex::Regex::new(actual_pat).map_err(|e| {
+        Error::Config(ConfigError::InvalidValuePattern {
+            pattern: pat.to_owned(),
+            reason: e.to_string(),
+        })
+    })?;
     Ok((re, negated))
 }
 
@@ -1338,16 +1338,13 @@ impl ConfigFile {
             .map(|(i, _)| i)
             .collect();
 
-        if matching_indices.is_empty() {
+        let Some(&target_idx) = matching_indices.last() else {
             // No matching entries — add a new one at the end of the section
             return self.add_value_with_comment(key, value, comment);
-        }
+        };
 
         let raw_var = raw_variable_name(key);
 
-        let target_idx = *matching_indices
-            .last()
-            .ok_or_else(|| Error::Config("missing config match".to_owned().into()))?;
         let target_line_idx = self.entries[target_idx].line - 1;
         let raw_line = &self.raw_lines[target_line_idx];
         if is_section_header_with_inline_entry(raw_line) {
@@ -1583,7 +1580,7 @@ impl ConfigFile {
     pub fn rename_section(&mut self, old_name: &str, new_name: &str) -> Result<bool> {
         let (old_sec, old_sub) = parse_section_name(old_name);
         let (new_sec, new_sub) = parse_section_name(new_name);
-        validate_section_name(new_sec, new_sub)?;
+        validate_section_name(new_name, new_sec, new_sub)?;
         let old_lower = old_sec.to_lowercase();
 
         let mut found = false;
@@ -2316,20 +2313,23 @@ impl ConfigSet {
     ///
     /// `-1` selects zlib's default (level 6). Valid values are `-1` or `0..=9`; anything else
     /// is a configuration error.
-    fn parse_zlib_compression_level(raw: &str) -> Result<i32> {
+    fn parse_zlib_compression_level(key: &str, raw: &str) -> Result<i32> {
         const Z_DEFAULT_COMPRESSION: i32 = 6;
         const Z_BEST_COMPRESSION: i32 = 9;
 
-        let v = parse_git_config_int_strict(raw.trim()).map_err(|_| {
-            Error::Config(format!("bad numeric config value '{raw}' for compression").into())
-        })?;
+        let bad = |reason| {
+            Error::Config(ConfigError::BadNumericValue {
+                key: key.to_owned(),
+                value: raw.to_owned(),
+                reason,
+            })
+        };
+        let v = parse_git_config_int_strict(raw.trim()).map_err(|e| bad(e.into()))?;
         if v == -1 {
             return Ok(Z_DEFAULT_COMPRESSION);
         }
         if v < 0 || v > i64::from(Z_BEST_COMPRESSION) {
-            return Err(Error::Config(
-                format!("bad zlib compression level {v}").into(),
-            ));
+            return Err(bad(BadNumericSource::OutOfRange));
         }
         Ok(v as i32)
     }
@@ -2347,31 +2347,24 @@ impl ConfigSet {
     pub fn loose_objects_zlib_level(&self) -> Result<i32> {
         let mut loose_level = Self::LOOSE_OBJECTS_ZLIB_DEFAULT;
         let mut loose_compression_seen = false;
+        let missing_value = |key: &str| {
+            Error::Config(ConfigError::MissingValue {
+                key: key.to_owned(),
+            })
+        };
 
         for e in self.entries() {
             match e.key.as_str() {
                 "core.compression" => {
-                    let val = e.value.as_deref().ok_or_else(|| {
-                        Error::Config(
-                            "bad numeric config value '' for compression"
-                                .to_owned()
-                                .into(),
-                        )
-                    })?;
-                    let level = Self::parse_zlib_compression_level(val)?;
+                    let val = e.value.as_deref().ok_or_else(|| missing_value(&e.key))?;
+                    let level = Self::parse_zlib_compression_level(&e.key, val)?;
                     if !loose_compression_seen {
                         loose_level = level;
                     }
                 }
                 "core.loosecompression" => {
-                    let val = e.value.as_deref().ok_or_else(|| {
-                        Error::Config(
-                            "bad numeric config value '' for compression"
-                                .to_owned()
-                                .into(),
-                        )
-                    })?;
-                    let level = Self::parse_zlib_compression_level(val)?;
+                    let val = e.value.as_deref().ok_or_else(|| missing_value(&e.key))?;
+                    let level = Self::parse_zlib_compression_level(&e.key, val)?;
                     loose_level = level;
                     loose_compression_seen = true;
                 }
@@ -2412,12 +2405,7 @@ impl ConfigSet {
                 reason,
             })
         };
-        let value = parse_git_config_int_strict(raw.trim()).map_err(|e| {
-            bad(match e {
-                GitConfigIntStrictError::InvalidUnit => BadNumericSource::InvalidUnit,
-                GitConfigIntStrictError::OutOfRange => BadNumericSource::OutOfRange,
-            })
-        })?;
+        let value = parse_git_config_int_strict(raw.trim()).map_err(|e| bad(e.into()))?;
         u64::try_from(value).map_err(|_| bad(BadNumericSource::OutOfRange))
     }
 
@@ -2431,9 +2419,6 @@ impl ConfigSet {
     pub fn pack_objects_zlib_level(&self) -> Result<i32> {
         const Z_DEFAULT_COMPRESSION: i32 = 6;
 
-        let parse_compression =
-            |raw: &str| -> Result<i32> { Self::parse_zlib_compression_level(raw) };
-
         // `core.loosecompression` affects loose objects only (Git `zlib_compression_level`), not pack.
         let mut pack_level = Z_DEFAULT_COMPRESSION;
         let mut pack_compression_seen = false;
@@ -2444,7 +2429,7 @@ impl ConfigSet {
                     let Some(val) = e.value.as_deref() else {
                         continue;
                     };
-                    let level = parse_compression(val)?;
+                    let level = Self::parse_zlib_compression_level(&e.key, val)?;
                     if !pack_compression_seen {
                         pack_level = level;
                     }
@@ -2453,7 +2438,7 @@ impl ConfigSet {
                     let Some(val) = e.value.as_deref() else {
                         continue;
                     };
-                    pack_level = parse_compression(val)?;
+                    pack_level = Self::parse_zlib_compression_level(&e.key, val)?;
                     pack_compression_seen = true;
                 }
                 _ => {}
@@ -3015,10 +3000,8 @@ fn open_include_target(
     ctx: &IncludeContext,
     included_files: &mut Vec<PathBuf>,
 ) -> Result<Option<ConfigFile>> {
-    let resolved = match resolve_include_file_path(inc_path, file, ctx) {
-        Ok(p) => p,
-        Err(Error::Config(ConfigError::Other(msg))) if msg.is_empty() => return Ok(None),
-        Err(e) => return Err(e),
+    let Some(resolved) = resolve_include_file_path(inc_path, file, ctx)? else {
+        return Ok(None);
     };
     included_files.push(resolved.clone());
     ConfigFile::from_path(&resolved, file.scope)
@@ -3218,18 +3201,19 @@ fn environment_config_pair_entries(env: &Environment) -> Result<Vec<ConfigEntry>
 
     let count = count_str
         .parse::<usize>()
-        .map_err(|_| Error::Config("bogus count in GIT_CONFIG_COUNT".to_owned().into()))?;
-    if count > i32::MAX as usize {
-        return Err(Error::Config(
-            "too many entries in GIT_CONFIG_COUNT".to_owned().into(),
-        ));
-    }
+        .ok()
+        .filter(|&n| n <= i32::MAX as usize)
+        .ok_or_else(|| {
+            Error::Config(ConfigError::InvalidEnvironmentCount {
+                value: count_str.to_owned(),
+            })
+        })?;
 
     let mut set = ConfigSet::new();
     for i in 0..count {
-        let (key, value) = env.git_config_pairs.get(i).ok_or_else(|| {
-            Error::Config(format!("missing config key GIT_CONFIG_KEY_{i}").into())
-        })?;
+        let (key, value) = env.git_config_pairs.get(i).ok_or(Error::Config(
+            ConfigError::MissingEnvironmentKey { index: i },
+        ))?;
         set.add_command_override(key, value)?;
     }
     Ok(set.entries)
@@ -4215,9 +4199,7 @@ fn parse_config_parameters_strict(raw: &str) -> Result<Vec<ConfigParameter>> {
         }
 
         if chars[next_idx] != '=' {
-            return Err(Error::Config(
-                "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
-            ));
+            return Err(Error::Config(ConfigError::MalformedConfigParameters));
         }
 
         let value_start = next_idx + 1;
@@ -4228,16 +4210,12 @@ fn parse_config_parameters_strict(raw: &str) -> Result<Vec<ConfigParameter>> {
         }
 
         if chars[value_start] != '\'' {
-            return Err(Error::Config(
-                "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
-            ));
+            return Err(Error::Config(ConfigError::MalformedConfigParameters));
         }
         let (value, value_next) = sq_dequote_step_chars(&chars, value_start)?;
         if let Some(value_next) = value_next {
             if !chars[value_next].is_whitespace() {
-                return Err(Error::Config(
-                    "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
-                ));
+                return Err(Error::Config(ConfigError::MalformedConfigParameters));
             }
             idx = skip_config_parameter_spaces(&chars, value_next);
         } else {
@@ -4261,18 +4239,14 @@ fn skip_config_parameter_spaces(chars: &[char], mut idx: usize) -> usize {
 
 fn sq_dequote_step_chars(chars: &[char], start: usize) -> Result<(String, Option<usize>)> {
     if chars.get(start) != Some(&'\'') {
-        return Err(Error::Config(
-            "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
-        ));
+        return Err(Error::Config(ConfigError::MalformedConfigParameters));
     }
 
     let mut out = String::new();
     let mut idx = start + 1;
     loop {
         let Some(&ch) = chars.get(idx) else {
-            return Err(Error::Config(
-                "bogus format in GIT_CONFIG_PARAMETERS".to_owned().into(),
-            ));
+            return Err(Error::Config(ConfigError::MalformedConfigParameters));
         };
         if ch != '\'' {
             out.push(ch);
@@ -4414,38 +4388,31 @@ fn include_source_is_disk_file(file: &ConfigFile) -> bool {
 /// Resolve an include file path (Git `handle_path_include` semantics).
 ///
 /// Relative paths are only allowed when the including config came from a real on-disk file.
+/// Returns `None` for a relative include from command-line config when the context allows
+/// skipping it.
 fn resolve_include_file_path(
     path: &str,
     file: &ConfigFile,
     ctx: &IncludeContext,
-) -> Result<PathBuf> {
+) -> Result<Option<PathBuf>> {
     let expanded = parse_path(ctx.env.as_ref(), path);
     let p = Path::new(&expanded);
     if p.is_absolute() {
-        return Ok(p.to_path_buf());
+        return Ok(Some(p.to_path_buf()));
     }
     if !include_source_is_disk_file(file) {
-        if file.include_origin == ConfigIncludeOrigin::CommandLine {
-            if ctx.command_line_relative_include_is_error {
-                return Err(Error::Config(
-                    "relative config includes must come from files"
-                        .to_owned()
-                        .into(),
-                ));
-            }
-            return Err(Error::Config(String::new().into()));
+        if file.include_origin == ConfigIncludeOrigin::CommandLine
+            && !ctx.command_line_relative_include_is_error
+        {
+            return Ok(None);
         }
-        return Err(Error::Config(
-            "relative config includes must come from files"
-                .to_owned()
-                .into(),
-        ));
+        return Err(Error::Config(ConfigError::RelativeIncludeOutsideFile));
     }
     let base = match file.path.parent() {
         Some(p) if !p.as_os_str().is_empty() => p,
         Some(_) | None => Path::new("."),
     };
-    Ok(base.join(p))
+    Ok(Some(base.join(p)))
 }
 
 fn is_dir_sep(b: u8) -> bool {
@@ -4460,29 +4427,22 @@ fn add_trailing_starstar_for_dir(pat: &mut String) {
 }
 
 /// Prepare a `gitdir:` / `gitdir/i:` pattern (Git `prepare_include_condition_pattern`).
+///
+/// Returns `None` when a relative (`./`) pattern cannot be anchored: the config did not come
+/// from a file on disk, or its directory cannot be resolved.
 fn prepare_gitdir_pattern(
     condition: &str,
     file: &ConfigFile,
     ctx: &IncludeContext,
-) -> Result<(String, usize)> {
+) -> Option<(String, usize)> {
     // Git `interpolate_path`: expand `~/` in the condition before pattern rules.
     let mut pat = parse_path(ctx.env.as_ref(), condition);
     if pat.starts_with("./") || pat.starts_with(".\\") {
-        if !include_source_is_disk_file(file) {
-            return Err(Error::Config(
-                "relative config include conditionals must come from files"
-                    .to_owned()
-                    .into(),
-            ));
-        }
-        let parent = file.path.parent().ok_or_else(|| {
-            Error::Config(
-                "relative config include conditionals must come from files"
-                    .to_owned()
-                    .into(),
-            )
-        })?;
-        let real = parent.canonicalize_simplified().map_err(Error::Io)?;
+        let parent = file
+            .path
+            .parent()
+            .filter(|_| include_source_is_disk_file(file))?;
+        let real = parent.canonicalize_simplified().ok()?;
         let mut dir = real.to_string_lossy().into_owned();
         if !dir.ends_with('/') && !dir.ends_with('\\') {
             dir.push('/');
@@ -4491,14 +4451,14 @@ fn prepare_gitdir_pattern(
         pat = format!("{dir}{rest}");
         let prefix_len = dir.len();
         add_trailing_starstar_for_dir(&mut pat);
-        return Ok((pat, prefix_len));
+        return Some((pat, prefix_len));
     }
     let p = Path::new(&pat);
     if !p.is_absolute() {
         pat.insert_str(0, "**/");
     }
     add_trailing_starstar_for_dir(&mut pat);
-    Ok((pat, 0))
+    Some((pat, 0))
 }
 
 /// Git `include_by_gitdir` tries `strbuf_realpath` first, then `strbuf_add_absolute_path` if no match.
@@ -4543,9 +4503,8 @@ fn include_by_gitdir(
     let Some(git_dir) = ctx.git_dir.as_ref() else {
         return false;
     };
-    let (pattern, prefix) = match prepare_gitdir_pattern(condition, file, ctx) {
-        Ok(x) => x,
-        Err(_) => return false,
+    let Some((pattern, prefix)) = prepare_gitdir_pattern(condition, file, ctx) else {
+        return false;
     };
     let flags = WM_PATHNAME | if icase { WM_CASEFOLD } else { 0 };
     let (text_real, text_abs) = git_dir_match_texts(ctx, git_dir);
@@ -4625,12 +4584,12 @@ fn evaluate_include_condition(condition: &str, file: &ConfigFile, ctx: &IncludeC
 
 /// Split a canonical key into (section, subsection, variable).
 fn split_key(key: &str) -> Result<(String, Option<String>, String)> {
-    let first_dot = key
-        .find('.')
-        .ok_or_else(|| Error::Config(format!("invalid key: '{key}'").into()))?;
-    let last_dot = key
-        .rfind('.')
-        .ok_or_else(|| Error::Config(format!("invalid key: '{key}'").into()))?;
+    let (Some(first_dot), Some(last_dot)) = (key.find('.'), key.rfind('.')) else {
+        return Err(Error::Config(ConfigError::InvalidKey {
+            key: key.to_owned(),
+            reason: InvalidKeyReason::MissingSection,
+        }));
+    };
 
     let section = key[..first_dot].to_owned();
     let variable = key[last_dot + 1..].to_owned();
@@ -4676,16 +4635,18 @@ pub fn config_lock_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{file_name}.lock"))
 }
 
-fn validate_section_name(section: &str, subsection: Option<&str>) -> Result<()> {
+/// Reject a section name whose section part is not ASCII letters, digits and `-`, or whose
+/// subsection is present but empty. `name` is the caller's full input, kept for the error.
+fn validate_section_name(name: &str, section: &str, subsection: Option<&str>) -> Result<()> {
     if section.is_empty()
         || !section
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
         || subsection.is_some_and(str::is_empty)
     {
-        return Err(Error::Config(
-            format!("invalid section name: {section}").into(),
-        ));
+        return Err(Error::Config(ConfigError::InvalidSectionName {
+            section: name.to_owned(),
+        }));
     }
     Ok(())
 }

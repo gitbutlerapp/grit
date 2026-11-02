@@ -2857,6 +2857,8 @@ pub fn grit_lib::config::GitConfigIntStrictError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::config::GitConfigIntStrictError
 impl core::cmp::PartialEq for grit_lib::config::GitConfigIntStrictError
 pub fn grit_lib::config::GitConfigIntStrictError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::config::GitConfigIntStrictError> for grit_lib::error::BadNumericSource
+pub fn grit_lib::error::BadNumericSource::from(grit_lib::config::GitConfigIntStrictError) -> Self
 impl core::fmt::Debug for grit_lib::config::GitConfigIntStrictError
 pub fn grit_lib::config::GitConfigIntStrictError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for grit_lib::config::GitConfigIntStrictError
@@ -5757,6 +5759,8 @@ pub fn grit_lib::error::BadNumericSource::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::error::BadNumericSource
 impl core::cmp::PartialEq for grit_lib::error::BadNumericSource
 pub fn grit_lib::error::BadNumericSource::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::config::GitConfigIntStrictError> for grit_lib::error::BadNumericSource
+pub fn grit_lib::error::BadNumericSource::from(grit_lib::config::GitConfigIntStrictError) -> Self
 impl core::fmt::Debug for grit_lib::error::BadNumericSource
 pub fn grit_lib::error::BadNumericSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::error::BadNumericSource
@@ -5804,24 +5808,47 @@ pub grit_lib::error::ConfigError::InvalidDate::key: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidDate::value: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidDirectoryRenames
 pub grit_lib::error::ConfigError::InvalidDirectoryRenames::value: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidEnvironmentCount
+pub grit_lib::error::ConfigError::InvalidEnvironmentCount::value: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidKey
+pub grit_lib::error::ConfigError::InvalidKey::key: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidKey::reason: grit_lib::error::InvalidKeyReason
+pub grit_lib::error::ConfigError::InvalidListPrefix
+pub grit_lib::error::ConfigError::InvalidListPrefix::prefix: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidSectionName
+pub grit_lib::error::ConfigError::InvalidSectionName::section: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidThreadCount
+pub grit_lib::error::ConfigError::InvalidThreadCount::key: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidThreadCount::value: i64
 pub grit_lib::error::ConfigError::InvalidUntrackedFilesMode
 pub grit_lib::error::ConfigError::InvalidUntrackedFilesMode::value: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidValue
 pub grit_lib::error::ConfigError::InvalidValue::key: alloc::string::String
 pub grit_lib::error::ConfigError::InvalidValue::source: grit_lib::error::ConfigValueError
+pub grit_lib::error::ConfigError::InvalidValuePattern
+pub grit_lib::error::ConfigError::InvalidValuePattern::pattern: alloc::string::String
+pub grit_lib::error::ConfigError::InvalidValuePattern::reason: alloc::string::String
 pub grit_lib::error::ConfigError::KeyNotSet
 pub grit_lib::error::ConfigError::KeyNotSet::key: alloc::string::String
+pub grit_lib::error::ConfigError::MalformedConfigParameters
+pub grit_lib::error::ConfigError::MissingEnvironmentKey
+pub grit_lib::error::ConfigError::MissingEnvironmentKey::index: usize
 pub grit_lib::error::ConfigError::MissingValue
 pub grit_lib::error::ConfigError::MissingValue::key: alloc::string::String
 pub grit_lib::error::ConfigError::MultilineCommentNotAllowed
 pub grit_lib::error::ConfigError::MultipleValues
 pub grit_lib::error::ConfigError::MultipleValues::key: alloc::string::String
-pub grit_lib::error::ConfigError::Other(alloc::string::String)
+pub grit_lib::error::ConfigError::NoGlobalConfigPath
+pub grit_lib::error::ConfigError::RelativeIncludeOutsideFile
 pub grit_lib::error::ConfigError::RemoteUrlInHasconfigInclude
+pub grit_lib::error::ConfigError::RepositoryRequired
 pub grit_lib::error::ConfigError::SectionNotFound
 pub grit_lib::error::ConfigError::SectionNotFound::section: alloc::string::String
 pub grit_lib::error::ConfigError::UnableToParseFromCommandLine
 pub grit_lib::error::ConfigError::UnableToParseFromCommandLine::key: alloc::string::String
+pub grit_lib::error::ConfigError::UnknownValue
+pub grit_lib::error::ConfigError::UnknownValue::key: alloc::string::String
+pub grit_lib::error::ConfigError::UnknownValue::value: alloc::string::String
 pub grit_lib::error::ConfigError::WorktreeConfigNotEnabled
 impl grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::message_body(&self) -> alloc::string::String
@@ -5830,10 +5857,6 @@ pub fn grit_lib::error::ConfigError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::error::ConfigError
 impl core::cmp::PartialEq for grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::eq(&self, &Self) -> bool
-impl core::convert::From<&str> for grit_lib::error::ConfigError
-pub fn grit_lib::error::ConfigError::from(&str) -> Self
-impl core::convert::From<alloc::string::String> for grit_lib::error::ConfigError
-pub fn grit_lib::error::ConfigError::from(alloc::string::String) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::error::Error for grit_lib::error::ConfigError
@@ -6151,6 +6174,7 @@ pub grit_lib::error::Error::StashOptionConflict(alloc::string::String)
 pub grit_lib::error::Error::StashSymlinkNotUtf8
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
+pub grit_lib::error::Error::Submodule(grit_lib::error::SubmoduleError)
 pub grit_lib::error::Error::Tag(grit_lib::porcelain::tag::TagError)
 pub grit_lib::error::Error::TagVerifyDuplicateTreeSha256Header
 pub grit_lib::error::Error::TagVerifyMissingObjectHeader
@@ -6262,6 +6286,8 @@ impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_l
 pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::error::SubmoduleError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::SubmoduleError) -> Self
 impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error
@@ -6397,6 +6423,28 @@ impl core::marker::Unpin for grit_lib::error::GitDirPathOperation
 impl core::marker::UnsafeUnpin for grit_lib::error::GitDirPathOperation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::GitDirPathOperation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::GitDirPathOperation
+#[non_exhaustive] pub enum grit_lib::error::InvalidKeyReason
+pub grit_lib::error::InvalidKeyReason::InvalidSection
+pub grit_lib::error::InvalidKeyReason::InvalidVariable
+pub grit_lib::error::InvalidKeyReason::LineBreak
+pub grit_lib::error::InvalidKeyReason::MissingSection
+pub grit_lib::error::InvalidKeyReason::MissingVariable
+impl core::clone::Clone for grit_lib::error::InvalidKeyReason
+pub fn grit_lib::error::InvalidKeyReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::InvalidKeyReason
+impl core::cmp::PartialEq for grit_lib::error::InvalidKeyReason
+pub fn grit_lib::error::InvalidKeyReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::error::InvalidKeyReason
+pub fn grit_lib::error::InvalidKeyReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::error::InvalidKeyReason
+impl core::marker::StructuralPartialEq for grit_lib::error::InvalidKeyReason
+impl core::marker::Freeze for grit_lib::error::InvalidKeyReason
+impl core::marker::Send for grit_lib::error::InvalidKeyReason
+impl core::marker::Sync for grit_lib::error::InvalidKeyReason
+impl core::marker::Unpin for grit_lib::error::InvalidKeyReason
+impl core::marker::UnsafeUnpin for grit_lib::error::InvalidKeyReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::InvalidKeyReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::InvalidKeyReason
 #[non_exhaustive] pub enum grit_lib::error::MidxError
 pub grit_lib::error::MidxError::BitmapWriteFailed
 pub grit_lib::error::MidxError::BitmapWriteFailed::detail: alloc::string::String
@@ -6674,6 +6722,54 @@ impl core::marker::Unpin for grit_lib::error::SparseCheckoutWarning
 impl core::marker::UnsafeUnpin for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::SparseCheckoutWarning
+#[non_exhaustive] pub enum grit_lib::error::SubmoduleError
+pub grit_lib::error::SubmoduleError::EmptyPath
+pub grit_lib::error::SubmoduleError::GitDirCaseConflict
+pub grit_lib::error::SubmoduleError::GitDirCaseConflict::git_dir: std::path::PathBuf
+pub grit_lib::error::SubmoduleError::GitDirCaseConflict::name: alloc::string::String
+pub grit_lib::error::SubmoduleError::GitDirInUse
+pub grit_lib::error::SubmoduleError::GitDirInUse::git_dir: std::path::PathBuf
+pub grit_lib::error::SubmoduleError::GitDirInUse::name: alloc::string::String
+pub grit_lib::error::SubmoduleError::GitDirNameMismatch
+pub grit_lib::error::SubmoduleError::GitDirNameMismatch::git_dir: std::path::PathBuf
+pub grit_lib::error::SubmoduleError::GitDirNameMismatch::name: alloc::string::String
+pub grit_lib::error::SubmoduleError::GitDirNested
+pub grit_lib::error::SubmoduleError::GitDirNested::name: alloc::string::String
+pub grit_lib::error::SubmoduleError::GitDirNotConfigured
+pub grit_lib::error::SubmoduleError::GitDirNotConfigured::name: alloc::string::String
+pub grit_lib::error::SubmoduleError::GitDirOutsideModules
+pub grit_lib::error::SubmoduleError::GitDirOutsideModules::git_dir: std::path::PathBuf
+pub grit_lib::error::SubmoduleError::GitDirSegmentHasSlash
+pub grit_lib::error::SubmoduleError::GitDirSegmentHasSlash::git_dir: std::path::PathBuf
+pub grit_lib::error::SubmoduleError::GitDirUnavailable
+pub grit_lib::error::SubmoduleError::GitDirUnavailable::name: alloc::string::String
+pub grit_lib::error::SubmoduleError::HeadCommitMissing
+pub grit_lib::error::SubmoduleError::HeadCommitMissing::path: alloc::string::String
+pub grit_lib::error::SubmoduleError::HeadUnreadable
+pub grit_lib::error::SubmoduleError::HeadUnreadable::path: alloc::string::String
+pub grit_lib::error::SubmoduleError::SymlinkInPath
+pub grit_lib::error::SubmoduleError::SymlinkInPath::component: alloc::string::String
+pub grit_lib::error::SubmoduleError::SymlinkInPath::path: alloc::string::String
+impl core::clone::Clone for grit_lib::error::SubmoduleError
+pub fn grit_lib::error::SubmoduleError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::SubmoduleError
+impl core::cmp::PartialEq for grit_lib::error::SubmoduleError
+pub fn grit_lib::error::SubmoduleError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::SubmoduleError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::SubmoduleError) -> Self
+impl core::error::Error for grit_lib::error::SubmoduleError
+impl core::fmt::Debug for grit_lib::error::SubmoduleError
+pub fn grit_lib::error::SubmoduleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::SubmoduleError
+pub fn grit_lib::error::SubmoduleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::SubmoduleError
+impl core::marker::Freeze for grit_lib::error::SubmoduleError
+impl core::marker::Send for grit_lib::error::SubmoduleError
+impl core::marker::Sync for grit_lib::error::SubmoduleError
+impl core::marker::Unpin for grit_lib::error::SubmoduleError
+impl core::marker::UnsafeUnpin for grit_lib::error::SubmoduleError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::SubmoduleError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::SubmoduleError
 #[non_exhaustive] pub enum grit_lib::error::WorktreeOperation
 pub grit_lib::error::WorktreeOperation::Merge
 pub grit_lib::error::WorktreeOperation::Pick
@@ -17723,6 +17819,7 @@ pub grit_lib::prelude::Error::StashOptionConflict(alloc::string::String)
 pub grit_lib::prelude::Error::StashSymlinkNotUtf8
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
+pub grit_lib::prelude::Error::Submodule(grit_lib::error::SubmoduleError)
 pub grit_lib::prelude::Error::Tag(grit_lib::porcelain::tag::TagError)
 pub grit_lib::prelude::Error::TagVerifyDuplicateTreeSha256Header
 pub grit_lib::prelude::Error::TagVerifyMissingObjectHeader
@@ -17834,6 +17931,8 @@ impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_l
 pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::error::SubmoduleError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::SubmoduleError) -> Self
 impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error

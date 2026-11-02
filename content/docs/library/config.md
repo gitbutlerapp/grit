@@ -15,6 +15,10 @@ Configuration in grit-lib follows Git’s cascade (system, global, local, worktr
 
 Most boolean settings fall back to Git's default when the key is unset or not a boolean. [`ConfigSet::bool_or`](rustdoc:grit_lib::config::ConfigSet::bool_or) reads them in one call: `config.bool_or("commit.autoStage", true)`. The `core` booleans that many operations consult have accessors carrying Git's default: [`ignore_case`](rustdoc:grit_lib::config::ConfigSet::ignore_case) and [`precompose_unicode`](rustdoc:grit_lib::config::ConfigSet::precompose_unicode) (both `false`), and [`preload_index`](rustdoc:grit_lib::config::ConfigSet::preload_index) and [`file_mode`](rustdoc:grit_lib::config::ConfigSet::file_mode) (both `true`).
 
+## Errors
+
+Every config failure is a specific [`ConfigError`](rustdoc:grit_lib::error::ConfigError) variant with the offending key or value in its fields, so callers match on the variant instead of the message. For example, [`canonical_key`](rustdoc:grit_lib::config::canonical_key) returns `ConfigError::InvalidKey` with an [`InvalidKeyReason`](rustdoc:grit_lib::error::InvalidKeyReason) naming the malformed part. Bad `GIT_CONFIG_COUNT` or `GIT_CONFIG_PARAMETERS` input is `InvalidEnvironmentCount`, `MissingEnvironmentKey` or `MalformedConfigParameters`. A value outside a key's fixed word list (`protocol.version`, `gpg.format`) is `UnknownValue`, and a `--local` or `--worktree` location without a repository is `RepositoryRequired`. Submodule git-dir layout problems are not config errors. They are reported as `Error::Submodule` with a [`SubmoduleError`](rustdoc:grit_lib::error::SubmoduleError).
+
 ## Local writes
 
 `ConfigHandle::set_local` writes one key to the repository-local config (or `commondir/config` for linked worktrees without a per-worktree config file), then reloads the in-memory snapshot on the open `Repository`.

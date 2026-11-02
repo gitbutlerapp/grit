@@ -348,9 +348,88 @@ pub enum ConfigError {
         limit: usize,
     },
 
-    /// Generic config error with free-form detail (legacy call sites).
-    #[error("{0}")]
-    Other(String),
+    /// A config key is not `section[.subsection].variable` with a valid section and
+    /// variable name.
+    #[error("{}", invalid_key_message(key, *reason))]
+    InvalidKey {
+        /// Key as the caller spelled it.
+        key: String,
+        /// Which part of the key is malformed.
+        reason: InvalidKeyReason,
+    },
+
+    /// A section name passed to a section-level edit is not a valid section name.
+    #[error("invalid section name: {section}")]
+    InvalidSectionName {
+        /// Section name as the caller spelled it.
+        section: String,
+    },
+
+    /// A value pattern (`regex` or `!regex`) is not a valid regular expression.
+    #[error("invalid value-pattern regex '{pattern}': {reason}")]
+    InvalidValuePattern {
+        /// Pattern as given, including any leading `!`.
+        pattern: String,
+        /// Why the regular expression engine rejected it.
+        reason: String,
+    },
+
+    /// A list prefix is empty or is not `section.` / `section.subsection.`.
+    #[error("invalid list prefix '{prefix}'")]
+    InvalidListPrefix {
+        /// Prefix as the caller spelled it.
+        prefix: String,
+    },
+
+    /// A value is not one of the words the key accepts (for example `protocol.version` or
+    /// `gpg.format`).
+    #[error("unknown value '{value}' for '{key}'")]
+    UnknownValue {
+        /// Config key whose value was rejected.
+        key: String,
+        /// Raw config value.
+        value: String,
+    },
+
+    /// A thread-count key (for example `pack.threads`) holds a negative number.
+    #[error("invalid number of threads ({value}) for '{key}'")]
+    InvalidThreadCount {
+        /// Config key whose value was rejected.
+        key: String,
+        /// The negative value.
+        value: i64,
+    },
+
+    /// `GIT_CONFIG_COUNT` is not a non-negative integer no larger than `i32::MAX`.
+    #[error("bogus count in GIT_CONFIG_COUNT: '{value}'")]
+    InvalidEnvironmentCount {
+        /// Raw `GIT_CONFIG_COUNT` value.
+        value: String,
+    },
+
+    /// `GIT_CONFIG_COUNT` names more entries than there are `GIT_CONFIG_KEY_<n>` variables.
+    #[error("missing config key GIT_CONFIG_KEY_{index}")]
+    MissingEnvironmentKey {
+        /// Zero-based index of the first missing `GIT_CONFIG_KEY_<n>`.
+        index: usize,
+    },
+
+    /// `GIT_CONFIG_PARAMETERS` is not a whitespace-separated list of single-quoted entries.
+    #[error("bogus format in GIT_CONFIG_PARAMETERS")]
+    MalformedConfigParameters,
+
+    /// A relative `include.path` / `includeIf.<cond>.path` appeared in config that did not
+    /// come from a file on disk, so there is no directory to resolve it against.
+    #[error("relative config includes must come from files")]
+    RelativeIncludeOutsideFile,
+
+    /// The config location (`--local` or `--worktree`) needs a repository, but none was given.
+    #[error("not in a git repository")]
+    RepositoryRequired,
+
+    /// No home directory or `GIT_CONFIG_GLOBAL` is available to place the global config file.
+    #[error("could not determine global config path")]
+    NoGlobalConfigPath,
 
     /// A config value that must be a date (an approxidate such as `2.weeks.ago`) is
     /// not one.
@@ -484,16 +563,143 @@ impl ConfigValueError {
     }
 }
 
-impl From<String> for ConfigError {
-    fn from(value: String) -> Self {
-        Self::Other(value)
+/// Which part of a config key [`ConfigError::InvalidKey`] rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InvalidKeyReason {
+    /// The key contains a newline or carriage return.
+    LineBreak,
+    /// The key has no `.`, so there is no section.
+    MissingSection,
+    /// The key ends with `.`, so there is no variable name.
+    MissingVariable,
+    /// The section is empty or has characters other than alphanumerics (Unicode
+    /// [`char::is_alphanumeric`]) and `-`.
+    InvalidSection,
+    /// The variable name does not start with an ASCII letter, or has characters other than
+    /// alphanumerics (Unicode [`char::is_alphanumeric`]) and `-`.
+    InvalidVariable,
+}
+
+fn invalid_key_message(key: &str, reason: InvalidKeyReason) -> String {
+    match reason {
+        InvalidKeyReason::LineBreak => format!(
+            "invalid key: '{}'",
+            key.replace('\n', "\\n").replace('\r', "\\r")
+        ),
+        InvalidKeyReason::MissingSection => format!("key does not contain a section: '{key}'"),
+        InvalidKeyReason::MissingVariable => {
+            format!("key does not contain variable name: '{key}'")
+        }
+        InvalidKeyReason::InvalidSection => format!("invalid key (bad section): '{key}'"),
+        InvalidKeyReason::InvalidVariable => format!("invalid key (bad variable name): '{key}'"),
     }
 }
 
-impl From<&str> for ConfigError {
-    fn from(value: &str) -> Self {
-        Self::Other(value.to_owned())
+impl From<crate::config::GitConfigIntStrictError> for BadNumericSource {
+    fn from(value: crate::config::GitConfigIntStrictError) -> Self {
+        match value {
+            crate::config::GitConfigIntStrictError::InvalidUnit => Self::InvalidUnit,
+            crate::config::GitConfigIntStrictError::OutOfRange => Self::OutOfRange,
+        }
     }
+}
+
+/// Submodule layout and state failures: where a submodule's git directory lives and whether
+/// its checkout can be inspected.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SubmoduleError {
+    /// The submodule path is empty.
+    #[error("submodule path is empty")]
+    EmptyPath,
+
+    /// A component of the submodule path is a symbolic link, so the path could escape the
+    /// work tree.
+    #[error("submodule path '{path}' passes through symbolic link '{component}'")]
+    SymlinkInPath {
+        /// Submodule path relative to the work tree.
+        path: String,
+        /// The component that is a symbolic link.
+        component: String,
+    },
+
+    /// A legacy submodule git dir (`modules/<name>`) does not end with `/<name>`.
+    #[error("git dir {} of submodule '{name}' does not end with its name", .git_dir.display())]
+    GitDirNameMismatch {
+        /// Submodule name.
+        name: String,
+        /// Git directory that was checked.
+        git_dir: std::path::PathBuf,
+    },
+
+    /// A submodule git dir lies inside another submodule's git dir.
+    #[error("git dir of submodule '{name}' lies inside another submodule's git dir")]
+    GitDirNested {
+        /// Submodule name.
+        name: String,
+    },
+
+    /// An encoded submodule git dir has no `modules/` path segment.
+    #[error("submodule git dir {} has no modules/ segment", .git_dir.display())]
+    GitDirOutsideModules {
+        /// Git directory that was checked.
+        git_dir: std::path::PathBuf,
+    },
+
+    /// The segment after `modules/` in an encoded submodule git dir contains `/`.
+    #[error("encoded submodule git dir {} has '/' after modules/", .git_dir.display())]
+    GitDirSegmentHasSlash {
+        /// Git directory that was checked.
+        git_dir: std::path::PathBuf,
+    },
+
+    /// Another submodule already uses this git dir.
+    #[error("git dir {} of submodule '{name}' is already used by another submodule", .git_dir.display())]
+    GitDirInUse {
+        /// Submodule name.
+        name: String,
+        /// Git directory that was checked.
+        git_dir: std::path::PathBuf,
+    },
+
+    /// This git dir differs from another submodule's only by case, on a case-insensitive
+    /// file system.
+    #[error("git dir {} of submodule '{name}' differs only in case from another submodule's", .git_dir.display())]
+    GitDirCaseConflict {
+        /// Submodule name.
+        name: String,
+        /// Git directory that was checked.
+        git_dir: std::path::PathBuf,
+    },
+
+    /// Every candidate git dir for a new submodule was invalid or already taken.
+    #[error("could not choose a git dir for submodule '{name}'")]
+    GitDirUnavailable {
+        /// Submodule name.
+        name: String,
+    },
+
+    /// `submodulePathConfig` is enabled but `submodule.<name>.gitdir` is not set.
+    #[error("submodule.{name}.gitdir is not set (submodulePathConfig is enabled)")]
+    GitDirNotConfigured {
+        /// Submodule name.
+        name: String,
+    },
+
+    /// The submodule has an embedded git dir but its `HEAD` could not be read.
+    #[error("could not read HEAD of submodule '{path}'")]
+    HeadUnreadable {
+        /// Submodule path relative to the superproject work tree.
+        path: String,
+    },
+
+    /// The submodule's `HEAD` names an object that is missing or is not a commit.
+    #[error("HEAD of submodule '{path}' does not point to a readable commit")]
+    HeadCommitMissing {
+        /// Submodule path relative to the superproject work tree.
+        path: String,
+    },
 }
 
 impl ConfigError {
@@ -1286,6 +1492,10 @@ pub enum Error {
     /// A configuration file parsing or access error.
     #[error(transparent)]
     Config(#[from] ConfigError),
+
+    /// Submodule git dir layout or submodule state failure.
+    #[error(transparent)]
+    Submodule(#[from] SubmoduleError),
 
     /// Branch create, delete, or upstream configuration failure.
     #[error(transparent)]
@@ -2181,6 +2391,7 @@ impl Error {
             Self::InvalidPath(..) => "invalid_path",
             Self::InvalidPathComponent { .. } => "invalid_path_component",
             Self::Config(..) => "config",
+            Self::Submodule(..) => "submodule",
             Self::Branch(..) => "branch",
             Self::RefLock(..) => "ref_lock",
             Self::RefStore(..) => "ref_store",
@@ -2476,7 +2687,11 @@ impl Error {
     pub fn wants_fatal_prefix(&self) -> bool {
         matches!(
             self,
-            Error::Config(_) | Error::RefLock(_) | Error::Filter(_) | Error::PathOutsideRepo(_)
+            Error::Config(_)
+                | Error::Submodule(_)
+                | Error::RefLock(_)
+                | Error::Filter(_)
+                | Error::PathOutsideRepo(_)
         )
     }
 

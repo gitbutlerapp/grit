@@ -41,7 +41,7 @@ use crate::config::{
 };
 use crate::diagnostics::{self, DiagnosticsHandle};
 use crate::environment::{Environment, RepositoryOptions};
-use crate::error::{Error, NotARepositoryReason, Result};
+use crate::error::{ConfigError, Error, NotARepositoryReason, Result};
 use crate::git_dir::io_error::{map_git_dir_io, map_index_write_error, GitDirPathOperation};
 use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
@@ -3335,7 +3335,7 @@ pub(crate) fn parse_repository_format(
     let mut ref_storage: Option<String> = None;
     let mut object_format: Option<String> = None;
 
-    for raw_line in content.lines() {
+    for (line_idx, raw_line) in content.lines().enumerate() {
         let mut line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
             continue;
@@ -3343,9 +3343,10 @@ pub(crate) fn parse_repository_format(
 
         if line.starts_with('[') {
             let Some(end_idx) = line.find(']') else {
-                return Err(Error::Config(
-                    format!("invalid config in {}", config_path.display()).into(),
-                ));
+                return Err(Error::Config(ConfigError::BadConfigLineInFile {
+                    file: config_path.display().to_string(),
+                    line: line_idx + 1,
+                }));
             };
 
             let section = line[1..end_idx].trim();

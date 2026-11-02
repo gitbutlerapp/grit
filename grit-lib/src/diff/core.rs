@@ -34,7 +34,7 @@ use crate::diff_rename_parallel::{
     diff_rename_parallel_options, inexact_matrix_exceeds_limit, parallel_load_optional_blobs,
     parallel_map_indices, parse_rename_limit,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, SubmoduleError};
 use crate::index::{CacheTreeNode, Index, IndexEntry, MODE_SYMLINK, MODE_TREE};
 use crate::objects::{
     parse_commit, CommitData, FileMode, ObjectId, ObjectKind, TreeEntry, TreeEntryRef, TreeRefIter,
@@ -6151,9 +6151,9 @@ fn worktree_diff_pass1_index_entry(
             oid == ie.oid
         } else {
             if error_on_broken_gitlinks && submodule_embedded_git_dir(&sub_dir).is_some() {
-                return Err(Error::Config(
-                    format!("could not read submodule HEAD for '{path_str_ref}'").into(),
-                ));
+                return Err(Error::Submodule(SubmoduleError::HeadUnreadable {
+                    path: path_str_ref.to_owned(),
+                }));
             }
             uninitialized_gitlink_worktree_matches_index(&sub_dir)
         };
@@ -6175,9 +6175,9 @@ fn worktree_diff_pass1_index_entry(
             return Ok(());
         }
         if sub_head_oid.is_some() && submodule_head_object_broken(&sub_dir) {
-            return Err(Error::Config(
-                format!("'git status --porcelain=2' failed in submodule {path_str_ref}").into(),
-            ));
+            return Err(Error::Submodule(SubmoduleError::HeadCommitMissing {
+                path: path_str_ref.to_owned(),
+            }));
         }
         let mut flags = submodule_porcelain_flags(work_tree, path_str_ref, ie.oid);
         if ignore_submodule_untracked {

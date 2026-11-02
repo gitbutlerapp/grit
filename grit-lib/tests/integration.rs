@@ -2099,6 +2099,9 @@ mod tree_sha256_verify_coverage;
 #[path = "tree_sha256_verify_git_compat.rs"]
 mod tree_sha256_verify_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "typed_config_errors.rs"]
+mod typed_config_errors;
+#[cfg(feature = "full-tests")]
 #[path = "typed_errors_config_refs_filter.rs"]
 mod typed_errors_config_refs_filter;
 #[cfg(feature = "full-tests")]

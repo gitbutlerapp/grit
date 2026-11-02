@@ -9,7 +9,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use crate::config::{ConfigFile, ConfigScope};
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, SubmoduleError};
 use crate::hash;
 use crate::index::Index;
 use crate::objects::{ObjectId, ObjectKind};
@@ -170,7 +170,7 @@ fn git_head_ref_valid(head_path: &Path) -> bool {
 /// and `\` do. A carriage return in a single segment (e.g. `sub\r`) must not be split.
 pub fn validate_submodule_path(work_tree: &Path, rel: &str) -> Result<()> {
     if rel.is_empty() {
-        return Err(Error::Config("empty submodule path".into()));
+        return Err(Error::Submodule(SubmoduleError::EmptyPath));
     }
     let mut cur = work_tree.to_path_buf();
     #[cfg(windows)]
@@ -184,10 +184,10 @@ pub fn validate_submodule_path(work_tree: &Path, rel: &str) -> Result<()> {
             Err(_) => continue,
         };
         if meta.file_type().is_symlink() {
-            return Err(Error::Config(
-                format!("expected '{comp}' in submodule path '{rel}' not to be a symbolic link")
-                    .into(),
-            ));
+            return Err(Error::Submodule(SubmoduleError::SymlinkInPath {
+                path: rel.to_owned(),
+                component: comp.to_owned(),
+            }));
         }
     }
     Ok(())
@@ -333,31 +333,19 @@ fn check_casefolding_conflict(
 /// Validates a legacy submodule gitdir path (extension disabled): name suffix and no nesting clash.
 pub fn validate_legacy_submodule_git_dir(git_dir: &Path, submodule_name: &str) -> Result<()> {
     let gd = git_dir.to_string_lossy();
-    let suffix = submodule_name;
-    if gd.len() <= suffix.len() {
-        return Err(Error::Config(
-            "submodule name not a suffix of git dir".into(),
-        ));
-    }
-    let cut = gd.len() - suffix.len();
-    if gd
-        .as_bytes()
-        .get(cut.wrapping_sub(1))
-        .is_none_or(|&b| b != b'/')
-    {
-        return Err(Error::Config(
-            "submodule name not a suffix of git dir".into(),
-        ));
-    }
-    if &gd[cut..] != suffix {
-        return Err(Error::Config(
-            "submodule name not a suffix of git dir".into(),
-        ));
+    let ends_with_name = gd
+        .strip_suffix(submodule_name)
+        .is_some_and(|head| head.ends_with('/'));
+    if !ends_with_name {
+        return Err(Error::Submodule(SubmoduleError::GitDirNameMismatch {
+            name: submodule_name.to_owned(),
+            git_dir: git_dir.to_path_buf(),
+        }));
     }
     if path_inside_other_gitdir(git_dir, submodule_name) {
-        return Err(Error::Config(
-            "submodule git dir inside another submodule git dir".into(),
-        ));
+        return Err(Error::Submodule(SubmoduleError::GitDirNested {
+            name: submodule_name.to_owned(),
+        }));
     }
     Ok(())
 }
@@ -370,19 +358,23 @@ pub fn validate_encoded_submodule_git_dir(
     submodule_name: &str,
     super_git_dir: &Path,
 ) -> Result<()> {
-    let last = last_modules_segment(git_dir)
-        .ok_or_else(|| Error::Config("submodule gitdir missing /modules/ segment".into()))?;
+    let last = last_modules_segment(git_dir).ok_or_else(|| {
+        Error::Submodule(SubmoduleError::GitDirOutsideModules {
+            git_dir: git_dir.to_path_buf(),
+        })
+    })?;
     if last.contains('/') {
-        return Err(Error::Config(
-            "encoded submodule gitdir must not contain '/' in module segment".into(),
-        ));
+        return Err(Error::Submodule(SubmoduleError::GitDirSegmentHasSlash {
+            git_dir: git_dir.to_path_buf(),
+        }));
     }
     if is_git_directory(git_dir)
         && gitdir_conflicts_with_existing(work_tree, cfg, git_dir, submodule_name)?
     {
-        return Err(Error::Config(
-            "submodule gitdir conflicts with existing".into(),
-        ));
+        return Err(Error::Submodule(SubmoduleError::GitDirInUse {
+            name: submodule_name.to_owned(),
+            git_dir: git_dir.to_path_buf(),
+        }));
     }
     if cfg!(unix) && ignore_case_from_config(super_git_dir) {
         let mut taken: HashSet<String> = HashSet::new();
@@ -404,9 +396,10 @@ pub fn validate_encoded_submodule_git_dir(
         }
         let suffixes_match = last == submodule_name;
         if check_casefolding_conflict(git_dir, submodule_name, suffixes_match, &taken) {
-            return Err(Error::Config(
-                "case-folding conflict for submodule gitdir".into(),
-            ));
+            return Err(Error::Submodule(SubmoduleError::GitDirCaseConflict {
+                name: submodule_name.to_owned(),
+                git_dir: git_dir.to_path_buf(),
+            }));
         }
     }
     Ok(())
@@ -490,9 +483,9 @@ pub fn compute_default_submodule_gitdir(
         return Ok(v);
     }
 
-    Err(Error::Config(
-        "failed to allocate submodule gitdir path".into(),
-    ))
+    Err(Error::Submodule(SubmoduleError::GitDirUnavailable {
+        name: submodule_name.to_owned(),
+    }))
 }
 
 /// Ensures `submodule.<name>.gitdir` exists, writing it via [`compute_default_submodule_gitdir`] if needed.
@@ -529,12 +522,9 @@ pub fn submodule_gitdir_filesystem_path(
             .find(|e| e.key == key)
             .and_then(|e| e.value.clone())
             .ok_or_else(|| {
-                Error::Config(
-                    format!(
-                    "submodule.{submodule_name}.gitdir is not set (submodulePathConfig enabled)"
-                )
-                    .into(),
-                )
+                Error::Submodule(SubmoduleError::GitDirNotConfigured {
+                    name: submodule_name.to_owned(),
+                })
             })?;
         Ok(resolve_gitdir_value(work_tree, &value))
     } else {

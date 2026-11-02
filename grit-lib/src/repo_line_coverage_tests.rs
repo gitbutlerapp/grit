@@ -355,3 +355,22 @@ fn discover_bare_layout_and_relative_git_dir() -> crate::error::Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn repository_format_reports_the_line_of_an_unclosed_section_header() {
+    let path = std::path::Path::new("/tmp/repo/.git/config");
+    let Err(err) = crate::repo::parse_repository_format(
+        "[core]\n\trepositoryformatversion = 0\n\n[extensions\n",
+        path,
+    ) else {
+        panic!("unclosed section header must be rejected");
+    };
+    assert!(
+        matches!(
+            &err,
+            crate::error::Error::Config(crate::error::ConfigError::BadConfigLineInFile { file, line: 4 })
+                if file == "/tmp/repo/.git/config"
+        ),
+        "{err:?}"
+    );
+}
