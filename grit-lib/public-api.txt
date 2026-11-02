@@ -20428,6 +20428,7 @@ pub fn grit_lib::refs::store::backend::partition_updates_allowing_failures(&grit
 pub fn grit_lib::refs::store::backend::resolve_symbolic(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &str) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::validate_storable_refname(&str) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::validate_transaction(&grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::verify_create_casefold_against_existing(bool, &alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::verify_create_casefold_conflicts(bool, &alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::backend::verify_create_conflicts(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub mod grit_lib::refs::store::paths
@@ -20511,6 +20512,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefStorageF
 #[non_exhaustive] pub enum grit_lib::refs::store::RefStoreError
 pub grit_lib::refs::store::RefStoreError::Backend(grit_lib::refs::store::BackendError)
 pub grit_lib::refs::store::RefStoreError::Corrupt(alloc::string::String)
+pub grit_lib::refs::store::RefStoreError::CaseConflict
+pub grit_lib::refs::store::RefStoreError::CaseConflict::name: alloc::string::String
+pub grit_lib::refs::store::RefStoreError::CaseConflict::other: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::CreateExists
 pub grit_lib::refs::store::RefStoreError::CreateExists::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::DuplicateUpdate

@@ -284,6 +284,8 @@ mod clone_empty_remote_git_daemon_v2;
 #[cfg(feature = "full-tests")]
 #[path = "clone_eol_crlf_git_compat.rs"]
 mod clone_eol_crlf_git_compat;
+#[path = "clone_fetch_ignorecase_refs_2490.rs"]
+mod clone_fetch_ignorecase_refs_2490;
 #[cfg(feature = "full-tests")]
 #[path = "clone_index_cache_tree_git_compat.rs"]
 mod clone_index_cache_tree_git_compat;
@@ -517,6 +519,7 @@ mod deep_tree_untracked_autocrlf_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "describe_git_compat.rs"]
 mod describe_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "describe_seed6593_skew_git_compat.rs"]
 mod describe_seed6593_skew_git_compat;
 #[path = "detect_copies_hash_collision.rs"]
@@ -1813,7 +1816,6 @@ mod serve_upload_pack_promisor;
 #[cfg(feature = "full-tests")]
 #[path = "serve_upload_pack_v2_fetch.rs"]
 mod serve_upload_pack_v2_fetch;
-#[cfg(feature = "full-tests")]
 #[path = "session_cancel.rs"]
 mod session_cancel;
 #[cfg(feature = "full-tests")]

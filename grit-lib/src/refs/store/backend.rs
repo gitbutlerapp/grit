@@ -37,7 +37,10 @@ type PartitionUpdatesResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
 
 pub use super::apply::RefBatchState;
 pub use super::transaction::expected_matches;
-pub use super::validation::{verify_create_casefold_conflicts, verify_create_conflicts};
+pub use super::validation::{
+    verify_create_casefold_against_existing, verify_create_casefold_conflicts,
+    verify_create_conflicts,
+};
 
 /// Reject `name` when Git refuses to store it (path traversal, illegal components, a
 /// `.lock` suffix, an empty `refs/` name, …).
@@ -212,6 +215,7 @@ pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
         RefStoreError::ExpectedMismatch { .. }
             | RefStoreError::NameUnavailable { .. }
             | RefStoreError::CreateExists { .. }
+            | RefStoreError::CaseConflict { .. }
             | RefStoreError::MissingObject { .. }
             | RefStoreError::NotACommit { .. }
     )

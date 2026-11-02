@@ -152,15 +152,15 @@ pub fn verify_create_conflicts(
     Ok(())
 }
 
-/// When `ignore_case`, reject each create whose name matches an existing ref or another
-/// create in `updates` under ASCII case folding (`core.ignorecase` on macOS/Windows).
+/// When `ignore_case`, reject each create whose name matches an existing ref under ASCII
+/// case folding (`core.ignorecase` on macOS/Windows).
 ///
-/// Case-sensitive repositories pass `ignore_case: false` and this returns immediately.
+/// Same-batch ASCII case variants are allowed (initial clone stores them in `packed-refs`).
 ///
 /// # Errors
 ///
-/// [`RefStoreError::CreateExists`] when a conflicting name is found.
-pub fn verify_create_casefold_conflicts(
+/// [`RefStoreError::CreateExists`] when a conflicting stored name is found.
+pub fn verify_create_casefold_against_existing(
     ignore_case: bool,
     existing: &BTreeMap<String, RawRef>,
     updates: &[RefUpdate],
@@ -168,7 +168,6 @@ pub fn verify_create_casefold_conflicts(
     if !ignore_case {
         return Ok(());
     }
-    let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
     for update in updates {
         if update.new_value.is_none() || update.flags.log_only {
             continue;
@@ -185,13 +184,42 @@ pub fn verify_create_casefold_conflicts(
                 name: update.name.clone(),
             });
         }
-        if extras
+    }
+    Ok(())
+}
+
+/// When `ignore_case`, reject each create whose name matches an existing ref or another
+/// create in `updates` under ASCII case folding (`core.ignorecase` on macOS/Windows).
+///
+/// Case-sensitive repositories pass `ignore_case: false` and this returns immediately.
+///
+/// # Errors
+///
+/// [`RefStoreError::CreateExists`] when a conflicting stored name is found.
+/// [`RefStoreError::CaseConflict`] when two creates in `updates` differ only by case.
+pub fn verify_create_casefold_conflicts(
+    ignore_case: bool,
+    existing: &BTreeMap<String, RawRef>,
+    updates: &[RefUpdate],
+) -> Result<(), RefStoreError> {
+    if !ignore_case {
+        return Ok(());
+    }
+    verify_create_casefold_against_existing(ignore_case, existing, updates)?;
+    let extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
+    for update in updates {
+        if update.new_value.is_none() || update.flags.log_only {
+            continue;
+        }
+        let name = update.name.as_str();
+        if let Some(other) = extras
             .iter()
             .copied()
-            .any(|other| other != name && other.eq_ignore_ascii_case(name))
+            .find(|other| *other != name && other.eq_ignore_ascii_case(name))
         {
-            return Err(RefStoreError::CreateExists {
+            return Err(RefStoreError::CaseConflict {
                 name: update.name.clone(),
+                other: other.to_owned(),
             });
         }
     }
@@ -400,6 +428,30 @@ mod tests {
             })
         );
         verify_create_conflicts(&existing, &[create("refs/heads/q!")]).expect("no conflict");
+    }
+
+    #[test]
+    fn ignorecase_same_batch_case_variants_conflict() {
+        let existing: BTreeMap<String, RawRef> = BTreeMap::new();
+        let err = verify_create_casefold_conflicts(
+            true,
+            &existing,
+            &[create("refs/heads/Foo"), create("refs/heads/foo")],
+        )
+        .expect_err("same-batch case pair");
+        assert_eq!(
+            err,
+            RefStoreError::CaseConflict {
+                name: "refs/heads/Foo".to_owned(),
+                other: "refs/heads/foo".to_owned(),
+            }
+        );
+        verify_create_casefold_against_existing(
+            true,
+            &existing,
+            &[create("refs/heads/Foo"), create("refs/heads/foo")],
+        )
+        .expect("initial packed clone allows both spellings");
     }
 
     #[test]
