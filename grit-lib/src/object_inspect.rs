@@ -573,9 +573,57 @@ mod tree_entry_cat_file_type_tests {
 /// Abbreviate `oid` for human output using repository uniqueness rules.
 pub fn abbreviate_for_display(repo: &Repository, oid: ObjectId, short: bool) -> Result<String> {
     if short {
-        abbreviate_object_id(repo, oid, 7)
+        let config = repo.config()?.clone();
+        let min_len = crate::commit_pretty::resolve_core_abbrev_len(&config, repo.odb())?;
+        abbreviate_object_id(repo, oid, min_len)
     } else {
         Ok(oid.to_hex())
+    }
+}
+
+#[cfg(test)]
+mod abbreviate_for_display_tests {
+    use std::collections::HashMap;
+
+    use crate::hash::hash_object;
+    use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+    use crate::rev_parse::resolve_revision;
+
+    use super::abbreviate_for_display;
+
+    fn two_blobs_sharing_seven_hex_prefix() -> (ObjectId, ObjectId, Vec<u8>, Vec<u8>) {
+        let mut first_by_prefix: HashMap<String, (ObjectId, Vec<u8>)> = HashMap::new();
+        for n in 0_u64..2_000_000 {
+            let data = n.to_string().into_bytes();
+            let oid = hash_object(HashAlgo::Sha1, ObjectKind::Blob, &data).expect("hash");
+            let prefix = oid.to_hex()[..7].to_string();
+            if let Some((other, _)) = first_by_prefix.get(&prefix) {
+                if *other != oid {
+                    let (first_oid, first_data) = first_by_prefix.remove(&prefix).expect("prefix");
+                    return (first_oid, oid, first_data, data);
+                }
+            } else {
+                first_by_prefix.insert(prefix, (oid, data));
+            }
+        }
+        panic!("failed to find two blobs sharing a 7-hex prefix");
+    }
+
+    #[test]
+    fn display_abbrev_extends_on_collision_and_rev_parse_round_trips() -> crate::error::Result<()> {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (a, b, data_a, data_b) = two_blobs_sharing_seven_hex_prefix();
+        assert_eq!(&a.to_hex()[..7], &b.to_hex()[..7]);
+        repo.odb().write(ObjectKind::Blob, &data_a)?;
+        repo.odb().write(ObjectKind::Blob, &data_b)?;
+        for oid in [a, b] {
+            let abbrev = abbreviate_for_display(&repo, oid, true)?;
+            assert!(abbrev.len() > 7);
+            assert_eq!(resolve_revision(&repo, &abbrev)?, oid);
+        }
+        Ok(())
     }
 }
 

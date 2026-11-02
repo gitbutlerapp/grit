@@ -24,7 +24,6 @@ impl fmt::Display for BlameUsageError {
 }
 
 impl std::error::Error for BlameUsageError {}
-use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -91,7 +90,7 @@ pub struct BlameCommitJson {
 
 #[derive(Clone)]
 struct BlameDisplayLine {
-    commit: ObjectId,
+    commit_short: String,
     original_line: usize,
     final_line: usize,
     content: String,
@@ -103,7 +102,7 @@ struct BlameDisplayLine {
 impl HumanRender for BlameOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for line in &self.display_lines {
-            let short = line.commit.to_short_hex();
+            let short = &line.commit_short;
             let prefix = if line.marker == ' ' {
                 String::new()
             } else {
@@ -136,7 +135,7 @@ impl MarkdownRender for BlameOutcome {
         );
         outln!(w, "| ---: | :---: | --- | --- | --- | ---: | --- |");
         for line in &self.display_lines {
-            let short = line.commit.to_short_hex();
+            let short = &line.commit_short;
             let content = markdown::escape_table_cell(&line.content);
             let mark = match line.marker {
                 ' ' => String::new(),
@@ -263,22 +262,29 @@ pub fn run(
     options.move_detection = move_detection || copy_detection.count() > 0;
     let result = blame_file(&repo, &blame_path, &options)?;
 
-    Ok(outcome_from_result(
+    outcome_from_result(
+        &repo,
         blame_path,
         start.to_hex(),
         &result,
         group,
         now.unix_timestamp(),
-    ))
+    )
 }
 
 fn outcome_from_result(
+    repo: &grit_lib::repo::Repository,
     file: String,
     rev: String,
     result: &BlameResult,
     group: bool,
     now: i64,
-) -> BlameOutcome {
+) -> Result<BlameOutcome> {
+    let mut abbrev_batch = crate::log_display::display_abbrev_batch(repo)?;
+    let mut commit_short = std::collections::HashMap::new();
+    for oid in result.commits.keys() {
+        commit_short.insert(*oid, abbrev_batch.abbrev_known(repo, *oid)?);
+    }
     let mut commits_json = BTreeMap::new();
     for (oid, info) in &result.commits {
         commits_json.insert(
@@ -316,8 +322,12 @@ fn outcome_from_result(
             unblamable: line.unblamable.then_some(true),
             not_committed: line.not_committed.then_some(true),
         });
+        let commit_short = commit_short
+            .get(&line.commit)
+            .cloned()
+            .unwrap_or_else(|| line.commit.to_short_hex());
         display_lines.push(BlameDisplayLine {
-            commit: line.commit,
+            commit_short,
             original_line: line.original_line,
             final_line: line.final_line,
             content,
@@ -359,14 +369,14 @@ fn outcome_from_result(
         (Some(lines_json), None)
     };
 
-    BlameOutcome {
+    Ok(BlameOutcome {
         file,
         rev,
         lines,
         hunks,
         commits: commits_json,
         display_lines,
-    }
+    })
 }
 
 #[cfg(test)]

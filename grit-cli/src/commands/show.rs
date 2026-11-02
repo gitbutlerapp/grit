@@ -16,10 +16,10 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::diff::DiffMerges;
 use grit_lib::object_inspect::{
-    format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
-    RevisionLabel,
+    abbreviate_for_display, format_tree_entries_cat_file_p, tree_entry_cat_file_type,
+    tree_entry_mode_cat_file_p, RevisionLabel,
 };
-use grit_lib::objects::{short_hex, ObjectKind};
+use grit_lib::objects::{ObjectId, ObjectKind};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -599,7 +599,13 @@ impl MarkdownRender for ShowOutcome {
             }
         }
 
-        let short = short_hex(&self.commit.oid);
+        let repo = context::discover()?;
+        let commit_oid: ObjectId = self
+            .commit
+            .oid
+            .parse()
+            .context("invalid commit oid in show outcome")?;
+        let short = abbreviate_for_display(&repo, commit_oid, true)?;
         outln!(w, "# Commit `{short}`");
         outln!(w);
         outln!(w, "**Oid:** `{}`", self.commit.oid);
@@ -608,8 +614,11 @@ impl MarkdownRender for ShowOutcome {
                 .commit
                 .parents
                 .iter()
-                .map(|p| format!("`{}`", short_hex(p)))
-                .collect();
+                .map(|p| {
+                    let oid: ObjectId = p.parse().context("invalid parent oid in show outcome")?;
+                    Ok(format!("`{}`", abbreviate_for_display(&repo, oid, true)?))
+                })
+                .collect::<Result<_>>()?;
             outln!(w, "**Merge parents:** {}", parents.join(", "));
         }
         outln!(
@@ -669,12 +678,16 @@ impl HumanRender for ShowOutcome {
             paint(color, "33", &format!("commit {}", self.commit.oid))
         );
         if self.commit.parents.len() > 1 {
+            let repo = context::discover()?;
             let abbrev: Vec<String> = self
                 .commit
                 .parents
                 .iter()
-                .map(|p| short_hex(p).to_owned())
-                .collect();
+                .map(|p| -> Result<String> {
+                    let oid: ObjectId = p.parse().context("invalid parent oid in show outcome")?;
+                    abbreviate_for_display(&repo, oid, true).map_err(Into::into)
+                })
+                .collect::<Result<_>>()?;
             outln!(w, "Merge:  {}", abbrev.join(" "));
         }
         outln!(

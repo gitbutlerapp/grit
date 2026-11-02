@@ -29,6 +29,8 @@ use time::OffsetDateTime;
 
 use crate::git_date::parse::{parse_date, DateParseError};
 
+pub use crate::commit_pretty::resolve_core_abbrev_len;
+
 /// Normalise a date string into Git's stored `<epoch> <offset>` timestamp.
 ///
 /// Accepts the forms Git's `commit`/`--date` path understands: RFC 3339 / ISO

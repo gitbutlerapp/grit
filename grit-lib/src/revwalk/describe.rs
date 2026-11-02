@@ -3,6 +3,7 @@
 //! Chooses a reachable tag with minimum exact range count (`tag..commit`), not Git
 //! `describe`'s lazy depth estimate.
 
+use crate::commit_pretty::resolve_core_abbrev_len;
 use crate::error::Result;
 use crate::merge_base::{
     branch_tips_merged_into, count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
@@ -30,7 +31,7 @@ pub struct DescribeOptions {
     pub match_glob: Option<String>,
     /// Count distance along first-parent chains only.
     pub first_parent: bool,
-    /// Minimum abbreviated oid length; `None` uses 7.
+    /// Minimum abbreviated oid length; `None` uses `core.abbrev` (auto from object count).
     pub abbrev: Option<usize>,
 }
 
@@ -119,7 +120,11 @@ impl<'repo> RevWalk<'repo> {
         let Some((distance, winner)) = best else {
             return Ok(None);
         };
-        let abbrev_len = opts.abbrev.unwrap_or(7);
+        let config = repo.config()?.clone();
+        let abbrev_len = match opts.abbrev {
+            Some(n) => n,
+            None => resolve_core_abbrev_len(&config, repo.odb())?,
+        };
         let mut abbrev_batch = OidAbbrevBatch::new(abbrev_len);
         let abbrev = abbrev_batch.abbrev_known(repo, commit)?;
         let tag = RefName::try_from(winner.listing.full_name.as_str())

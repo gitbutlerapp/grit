@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use grit_lib::commit::resolve_core_abbrev_len;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::Repository;
@@ -72,7 +73,9 @@ PY"#;
         .expect("walk");
     commits.sort_by_key(|o| o.to_hex());
 
-    let mut batch = OidAbbrevBatch::new(7);
+    let min_len = resolve_core_abbrev_len(&repo.config().expect("config").clone(), repo.odb())
+        .expect("abbrev len");
+    let mut batch = OidAbbrevBatch::new(min_len);
     let mut git_lines: Vec<String> = git(dir, &["log", "--format=%h %s"])
         .lines()
         .map(str::to_owned)

@@ -3,12 +3,37 @@
 use std::io::Write;
 
 use anyhow::Result;
+use grit_lib::commit::resolve_core_abbrev_len;
 use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::OidAbbrevBatch;
 
 use crate::context::CommitSummary;
+
+/// Collision-aware abbrev batch using this repository's `core.abbrev` minimum length.
+pub fn display_abbrev_batch(repo: &Repository) -> anyhow::Result<OidAbbrevBatch> {
+    let config = repo.config()?.clone();
+    let min_len = resolve_core_abbrev_len(&config, repo.odb())?;
+    Ok(OidAbbrevBatch::new(min_len))
+}
+
+/// Abbreviate commit oids for default log/status rows (same rules as `--oneline`).
+pub fn abbrev_commit_summaries(
+    repo: &Repository,
+    commits: &[CommitSummary],
+) -> anyhow::Result<Vec<String>> {
+    let mut batch = display_abbrev_batch(repo)?;
+    commits
+        .iter()
+        .map(|c| {
+            batch
+                .abbrev_known(repo, c.oid)
+                .map_err(|e| anyhow::anyhow!("{e}"))
+        })
+        .collect()
+}
+
 use crate::output::{outln, CommitJson, CommitRefJson, CommitRefKind};
 
 /// Format ref decorations for `--oneline` / `--decorate` (Git `%d` / `%h %d %s`).
