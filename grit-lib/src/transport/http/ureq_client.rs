@@ -1466,9 +1466,7 @@ fn map_ureq_transport_error(
     if timeouts.low_speed.is_some()
         && matches!(
             err,
-            ureq::Error::Timeout(
-                ureq::Timeout::PerRead | ureq::Timeout::RecvResponse
-            )
+            ureq::Error::Timeout(ureq::Timeout::PerRead | ureq::Timeout::RecvResponse)
         )
     {
         return low_speed_transport_error(url);
