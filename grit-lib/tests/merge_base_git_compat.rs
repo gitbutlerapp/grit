@@ -417,41 +417,52 @@ fn fork_point_reflog_matches_git_t6010_fixture() {
     );
 }
 
-fn setup_t6099_criss_cross(wt: &std::path::Path) {
-    git(wt, &["commit", "--allow-empty", "-m", "C"]);
-    git(wt, &["tag", "C"]);
-    git(wt, &["branch", "d-chain"]);
-    git(wt, &["commit", "--allow-empty", "-m", "d1"]);
-    git(wt, &["commit", "--allow-empty", "-m", "B"]);
-    git(wt, &["tag", "B"]);
-    git(wt, &["checkout", "-b", "e-path", "C"]);
-    git(wt, &["commit", "--allow-empty", "-m", "e1"]);
-    git(wt, &["commit", "--allow-empty", "-m", "e2"]);
-    git(wt, &["checkout", "-b", "f-path", "C"]);
-    git(wt, &["commit", "--allow-empty", "-m", "f1"]);
-    git(wt, &["commit", "--allow-empty", "-m", "f2"]);
-    git(wt, &["checkout", "-b", "branch-A", "e-path"]);
-    git(wt, &["merge", "--no-edit", "B"]);
-    git(wt, &["checkout", "-b", "branch-X", "f-path"]);
-    git(wt, &["merge", "--no-edit", "B"]);
-    git(wt, &["tag", "A", "branch-A"]);
-    git(wt, &["tag", "X", "branch-X"]);
+/// Unrelated tips `a` and `b`, merge commit at `HEAD`, upstream reflog records both `a` and `b`.
+fn setup_two_base_fork_point_fixture(wt: &std::path::Path) -> (ObjectId, ObjectId, ObjectId) {
+    git(wt, &["commit", "--allow-empty", "-m", "root-a"]);
+    let a = git_rev_parse_verify(wt, "HEAD").expect("a");
+    git(wt, &["checkout", "--orphan", "other"]);
+    git(wt, &["commit", "--allow-empty", "-m", "root-b"]);
+    let b = git_rev_parse_verify(wt, "HEAD").expect("b");
+    git(wt, &["checkout", "main"]);
+    git(
+        wt,
+        &[
+            "merge",
+            "--no-edit",
+            "--allow-unrelated-histories",
+            &b.to_hex(),
+        ],
+    );
+    let head = git_rev_parse_verify(wt, "HEAD").expect("merge head");
+    git(wt, &["branch", "-f", "upstream", &a.to_hex()]);
+    git(wt, &["update-ref", "refs/heads/upstream", &b.to_hex(), &a.to_hex()]);
+    (a, b, head)
 }
 
 #[test]
 fn try_reflog_fork_point_none_when_git_has_no_fork_point() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();
-    setup_t6099_criss_cross(wt);
-    git(wt, &["checkout", "branch-X"]);
-    git(wt, &["branch", "-f", "upstream", "branch-A"]);
+    let (a, b, head) = setup_two_base_fork_point_fixture(wt);
+    let git_bases = git_merge_base(wt, &["--all", &head.to_hex(), &a.to_hex(), &b.to_hex()]);
+    assert_eq!(
+        git_bases.len(),
+        2,
+        "fixture must have two merge bases for HEAD, a, and b (truncating APIs hide the bug)"
+    );
     let repo = open_grit(wt);
-    let head = git_rev_parse_verify(wt, "HEAD").expect("HEAD");
     let upstream = git_rev_parse_verify(wt, "upstream").expect("upstream");
+    assert_eq!(upstream, b, "upstream tip is b after force-move from a");
     let git_fp = git_fork_point_optional(wt, "upstream", None);
-    let grit_fp = try_reflog_fork_point(&repo, "refs/heads/upstream", upstream, head).expect("try");
+    assert!(
+        git_fp.is_none(),
+        "system git must not resolve a fork point with two merge bases"
+    );
+    let grit_fp =
+        try_reflog_fork_point(&repo, "refs/heads/upstream", upstream, head).expect("try");
     assert_eq!(
         grit_fp, git_fp,
-        "grit must agree with git when fork-point is ambiguous or missing"
+        "try_reflog_fork_point must not truncate multiple merge bases to one"
     );
 }
