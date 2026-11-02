@@ -67,8 +67,10 @@ impl GitmodulesFile {
 
     fn field_value(&self, name: &str, field: &str) -> Option<String> {
         let key = format!("submodule.{name}.{field}");
+        // Git config uses last value wins for duplicate keys in one file.
         self.entries
             .iter()
+            .rev()
             .find(|e| e.key == key)
             .and_then(|e| e.value.clone())
     }
@@ -258,6 +260,21 @@ mod tests {
         assert_eq!(
             submodule_ignore_for_path(&cfg, dir.path(), "b"),
             SubmoduleIgnoreMode::All
+        );
+    }
+
+    #[test]
+    fn gitmodules_duplicate_ignore_uses_last_value() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(
+            dir.path().join(".gitmodules"),
+            "[submodule \"logical\"]\n\tpath = vendor/lib\n\tignore = all\n\tignore = none\n",
+        )
+        .expect("gitmodules");
+        let cfg = ConfigSet::new();
+        assert_eq!(
+            submodule_ignore_for_path(&cfg, dir.path(), "vendor/lib"),
+            SubmoduleIgnoreMode::None
         );
     }
 }

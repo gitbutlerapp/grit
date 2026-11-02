@@ -336,6 +336,42 @@ fn setup_submodule_logical_name_ignore_all() -> tempfile::TempDir {
 }
 
 #[test]
+fn gitmodules_duplicate_ignore_last_value_wins() {
+    let root = setup_submodule_logical_name_ignore_all();
+    let main = root.path().join("main");
+    let gitmodules = std::fs::read_to_string(main.join(".gitmodules")).expect("gitmodules");
+    let gitmodules = format!("{gitmodules}\tignore = none\n");
+    std::fs::write(main.join(".gitmodules"), gitmodules).expect("gitmodules second ignore");
+
+    let git_short = git_status_short(main.as_path(), "none");
+    assert!(
+        git_short.contains("vendor/lib"),
+        "git uses last ignore=none and reports dirty submodule: {git_short:?}"
+    );
+
+    let repo = grit_repo(&main);
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
+    assert!(
+        model.unstaged.iter().any(|e| e.path() == "vendor/lib"),
+        "grit should list dirty gitlink when last .gitmodules ignore is none"
+    );
+
+    let index = repo.index_handle().load().expect("index");
+    let diff = diff_tree_to_worktree(repo.odb(), model.head_tree.as_ref(), &main, &index)
+        .expect("tree diff");
+    assert!(
+        !diff.is_empty(),
+        "grit diff should report gitlink when last ignore is none"
+    );
+}
+
+#[test]
 fn gitmodules_logical_name_ignore_all_hides_dirty_submodule() {
     let root = setup_submodule_logical_name_ignore_all();
     let main = root.path().join("main");
