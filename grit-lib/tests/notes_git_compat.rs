@@ -372,6 +372,19 @@ fn root_has_fanout_bucket(repo: &Repository, notes_ref: &str, prefix: &[u8; 2]) 
         .any(|(name, _)| tree_name_eq_two_hex(name, prefix))
 }
 
+fn count_full_hex_note_blobs_at_root(repo: &Repository, notes_ref: &str) -> usize {
+    notes_root_tree_oids(repo, notes_ref)
+        .iter()
+        .filter(|(name, _)| name.len() == 40)
+        .count()
+}
+
+fn notes_root_uses_fanout(repo: &Repository, notes_ref: &str) -> bool {
+    notes_root_tree_oids(repo, notes_ref)
+        .iter()
+        .any(|(name, _)| name.len() == 2)
+}
+
 /// Pick an annotated object whose 2-hex fanout bucket holds exactly one note.
 fn find_noted_object_in_singleton_bucket(
     repo: &Repository,
@@ -562,6 +575,69 @@ fn fanout_add_force_splice_updates_one_subtree() {
         git_note_show(dir.path(), &head).trim(),
         "replaced",
         "git must read grit splice replace"
+    );
+}
+
+#[test]
+fn flat_tree_256th_insert_via_add_refans_out() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    let repo = open_grit(dir.path());
+
+    let mut object_ids = Vec::with_capacity(256);
+    for i in 0..256 {
+        object_ids.push(seed_commit(
+            dir.path(),
+            &format!("f{i}"),
+            &format!("{i}\n"),
+            &format!("c{i}"),
+        ));
+    }
+
+    let mut entries = Vec::new();
+    for (i, object) in object_ids.iter().take(255).enumerate() {
+        let blob = repo
+            .odb()
+            .write(ObjectKind::Blob, format!("note-{i}\n").as_bytes())
+            .expect("blob");
+        upsert_note_entry(&mut entries, &object.to_hex(), blob);
+    }
+    write_notes_commit(&repo, "refs/notes/commits", &entries, "255 flat notes").expect("write");
+    assert_fsck_strict(dir.path());
+
+    assert_eq!(
+        count_full_hex_note_blobs_at_root(&repo, "refs/notes/commits"),
+        255,
+        "255-note tree must stay flat at the root"
+    );
+    assert!(
+        !notes_root_uses_fanout(&repo, "refs/notes/commits"),
+        "255 notes must not fan out yet"
+    );
+
+    let head = object_ids[255];
+    repo.notes()
+        .add(
+            &NotesRef::commits(),
+            &head,
+            b"256th note\n",
+            &notes_write_options("256th"),
+            false,
+        )
+        .expect("256th add");
+
+    assert_fsck_strict(dir.path());
+    assert!(
+        notes_root_uses_fanout(&repo, "refs/notes/commits"),
+        "256th note must fan out the notes root"
+    );
+    assert!(
+        count_full_hex_note_blobs_at_root(&repo, "refs/notes/commits") <= 0xff,
+        "notes root must not hold more than 255 flat blob entries after fanout"
+    );
+    assert_eq!(
+        grit_note_blob(&repo, "refs/notes/commits", &head).as_deref(),
+        Some("256th note\n")
     );
 }
 

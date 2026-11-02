@@ -470,7 +470,7 @@ pub(crate) fn splice_note_upsert(
                     replace_blob_in_entries(&mut entries, hex, mode, blob_oid);
                     Ok(NotesSpliceResult::Tree(store_tree_entries(repo, &entries)?))
                 }
-            } else if count_flat_note_entries(&root_entries) > 0xff {
+            } else if count_flat_note_entries(&root_entries) >= 0xff {
                 Ok(NotesSpliceResult::Fallback)
             } else {
                 let mut entries = root_entries;
