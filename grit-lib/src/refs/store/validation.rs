@@ -152,6 +152,32 @@ pub fn verify_create_conflicts(
     Ok(())
 }
 
+/// Whether two ref names cannot coexist when `core.ignorecase` is enabled: they share a path
+/// component slot that matches under ASCII case folding but is spelled differently (including
+/// parallel trees such as `refs/heads/Foo/bar` vs `refs/heads/foo/baz`).
+#[must_use]
+pub(crate) fn ascii_casefold_ref_paths_collide(a: &str, b: &str) -> bool {
+    if a == b {
+        return false;
+    }
+    let mut a_parts = a.split('/').filter(|s| !s.is_empty());
+    let mut b_parts = b.split('/').filter(|s| !s.is_empty());
+    loop {
+        match (a_parts.next(), b_parts.next()) {
+            (Some(x), Some(y)) => {
+                if !x.eq_ignore_ascii_case(y) {
+                    return false;
+                }
+                if x != y {
+                    return true;
+                }
+            }
+            (Some(_), None) | (None, Some(_)) => return false,
+            (None, None) => return false,
+        }
+    }
+}
+
 /// When `ignore_case`, reject each create whose name matches an existing ref under ASCII
 /// case folding (`core.ignorecase` on macOS/Windows).
 ///
@@ -496,6 +522,21 @@ mod tests {
     }
 
     #[test]
+    fn ascii_casefold_ref_paths_collide_detects_nested_parallel_trees() {
+        assert!(ascii_casefold_ref_paths_collide(
+            "refs/heads/Foo/bar",
+            "refs/heads/foo/baz"
+        ));
+        assert!(ascii_casefold_ref_paths_collide(
+            "refs/heads/foo/baz",
+            "refs/heads/Foo/bar"
+        ));
+        assert!(!ascii_casefold_ref_paths_collide(
+            "refs/heads/main",
+            "refs/heads/other"
+        ));
+    }
+
     fn ignorecase_rejects_casefold_duplicate_create() {
         let existing: BTreeMap<String, RawRef> =
             [("refs/heads/Foo".to_owned(), RawRef::Direct(oid(2)))].into();

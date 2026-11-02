@@ -35,18 +35,16 @@ use super::apply::{
     apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_change_target,
     ref_lock_names_for_updates, simulate_batch_apply, RefBatchState,
 };
-use super::backend::{
-    is_per_ref_rejectable, partition_updates_allowing_failures, CasefoldLookup,
-};
+use super::backend::{is_per_ref_rejectable, partition_updates_allowing_failures, CasefoldLookup};
 use super::error::RefStoreError;
 use super::routing::{resolve_common_dir, route_ref_storage_in_common, RefStorageRoute};
 use super::transaction::expected_matches;
 use super::transaction::RefTransaction;
 use super::types::Expected;
 use super::validation::{
-    validate_storable_refname, verify_create_casefold_against_existing,
-    verify_create_casefold_conflicts, verify_create_casefold_with_lookup, verify_create_conflicts,
-    verify_name_available_for_create,
+    ascii_casefold_ref_paths_collide, validate_storable_refname,
+    verify_create_casefold_against_existing, verify_create_casefold_conflicts,
+    verify_create_casefold_with_lookup, verify_create_conflicts, verify_name_available_for_create,
 };
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 use crate::refs::RefnameUnavailable;
@@ -207,10 +205,10 @@ impl FilesRefStore {
         Ok(())
     }
 
-    /// When `core.ignorecase` is enabled, return a stored ref whose name matches `name` under
-    /// ASCII case folding but is not identical. Packed names are scanned without reading loose
-    /// ref files; loose collisions are detected by listing the parent directory of the leaf
-    /// component only.
+    /// When `core.ignorecase` is enabled, return a stored ref whose name collides with `name`
+    /// under ASCII case folding (full name, nested path slots, or parallel trees). Packed names
+    /// are scanned without reading loose ref files; loose collisions walk each parent directory
+    /// and compare path components case-insensitively without opening ref bodies.
     fn ascii_casefold_existing_name(&self, name: &str) -> Result<Option<String>> {
         if !self.refs_ignore_ascii_case() {
             return Ok(None);
@@ -230,7 +228,7 @@ impl FilesRefStore {
         let mut hit = None;
         let _ = view.for_each_record(&path, None, None, |storage, _, _| {
             let logical = self.logical_name(storage);
-            if logical.as_str() != name && logical.eq_ignore_ascii_case(name) {
+            if ascii_casefold_ref_paths_collide(&logical, name) {
                 hit = Some(logical);
                 return ControlFlow::Break(());
             }
@@ -240,39 +238,46 @@ impl FilesRefStore {
     }
 
     fn loose_ascii_casefold_existing_name(&self, name: &str) -> Result<Option<String>> {
-        let route = self.route(name);
-        let storage = route.storage_name;
-        let Some((parent_storage, leaf)) = storage.rsplit_once('/') else {
-            return self.loose_ascii_casefold_leaf_component(name, "", &storage);
-        };
-        self.loose_ascii_casefold_leaf_component(name, parent_storage, leaf)
-    }
-
-    fn loose_ascii_casefold_leaf_component(
-        &self,
-        _logical_name: &str,
-        parent_storage: &str,
-        leaf: &str,
-    ) -> Result<Option<String>> {
+        let storage = self.route(name).storage_name;
+        let parts: Vec<&str> = storage.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.is_empty() {
+            return Ok(None);
+        }
         for base in self.store_bases() {
-            let parent = base.join(parent_storage);
-            let Ok(read_dir) = fs::read_dir(&parent) else {
-                continue;
-            };
-            for entry in read_dir.flatten() {
-                let comp_os = entry.file_name();
-                let comp = comp_os.to_string_lossy();
-                if comp.as_ref() == leaf || !comp.eq_ignore_ascii_case(leaf) {
-                    continue;
-                }
-                let storage_name = if parent_storage.is_empty() {
-                    comp.into_owned()
-                } else {
-                    format!("{parent_storage}/{comp}")
+            let mut cur = base.to_path_buf();
+            for part in &parts {
+                let Ok(read_dir) = fs::read_dir(&cur) else {
+                    break;
                 };
-                if base.join(&storage_name).is_file() {
-                    return Ok(Some(self.logical_name(&storage_name)));
+                let mut descend_exact: Option<PathBuf> = None;
+                for entry in read_dir.flatten() {
+                    let comp_os = entry.file_name();
+                    let comp = comp_os.to_string_lossy();
+                    let path = entry.path();
+                    if comp.as_ref() == *part {
+                        if path.is_dir() {
+                            descend_exact = Some(path);
+                        }
+                        continue;
+                    }
+                    if !comp.eq_ignore_ascii_case(part) {
+                        continue;
+                    }
+                    if path.is_file() {
+                        let storage_name = loose_storage_path_to_refname(base, &path);
+                        return Ok(Some(self.logical_name(&storage_name)));
+                    }
+                    if path.is_dir() {
+                        if let Some(blocking) = first_loose_ref_file_under(&path) {
+                            let storage_name = loose_storage_path_to_refname(base, &blocking);
+                            return Ok(Some(self.logical_name(&storage_name)));
+                        }
+                    }
                 }
+                cur = match descend_exact {
+                    Some(next) => next,
+                    None => break,
+                };
             }
         }
         Ok(None)
