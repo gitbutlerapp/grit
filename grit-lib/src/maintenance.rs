@@ -24,8 +24,8 @@ use crate::alternate_boundary::AlternateSources;
 use crate::commit_graph_file::CommitGraphChain;
 use crate::commit_graph_write::{
     atomic_replace_commit_graph, build_commit_graph_bytes_from_oid_maps,
-    collect_reachable_commit_oids_for_repository, load_commit_graph_commit_info,
-    remove_commit_graph_chain_dir, remove_commit_graph_files, BloomWriteStats,
+    collect_reachable_commit_infos_for_repository, remove_commit_graph_chain_dir,
+    remove_commit_graph_files, BloomWriteStats, CommitGraphCommitInfo,
 };
 use crate::config::{canonical_key, parse_bool, ConfigSet};
 use crate::diff::bloom::BloomFilterSettings;
@@ -44,8 +44,8 @@ use crate::midx::{
     WriteMultiPackIndexResult,
 };
 use crate::objects::{
-    oid_hash_map, tag_object_line_oid, CommitRef, FileMode, ObjectId, ObjectKind, OidHashSet,
-    TreeRefIter,
+    oid_hash_map, tag_object_line_oid, CommitRef, FileMode, ObjectId, ObjectKind, OidHashMap,
+    OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::odb::UnreachablePackRetention;
@@ -622,10 +622,10 @@ pub fn build_commit_graph(
     }
     let odb = repo.odb();
     let existing = odb.commit_graph_chain();
-    let commits = collect_reachable_commit_oids_for_repository(repo)?;
+    let commits = collect_reachable_commit_infos_for_repository(repo)?;
     build_commit_graph_for_commits(
         odb,
-        commits,
+        &commits,
         &*repo.config()?,
         opts.changed_paths,
         existing.as_deref(),
@@ -633,27 +633,23 @@ pub fn build_commit_graph(
     .map(CommitGraphBuild::Built)
 }
 
-/// Encode a commit-graph of `commits`, read through `odb`.
+/// Encode a commit-graph of the commits in `infos` (as collected by
+/// [`collect_reachable_commit_infos_for_repository`]); `odb` serves the trees Bloom filters diff.
 ///
 /// Bloom filters and generation data follow `config` (`commitGraph.changedPathsVersion`,
 /// `commitGraph.generationVersion`); with `changed_paths`, filters already in `existing` are
 /// reused where their settings match.
 pub(crate) fn build_commit_graph_for_commits(
     odb: &Odb,
-    commits: impl IntoIterator<Item = ObjectId>,
+    infos: &OidHashMap<CommitGraphCommitInfo>,
     config: &ConfigSet,
     changed_paths: bool,
     existing: Option<&CommitGraphChain>,
 ) -> Result<BuiltCommitGraph> {
     let bloom = bloom_settings_for_commit_graph_write(config, changed_paths);
     let write_generation = commit_graph_writes_generation_data(config);
-    let mut sorted: Vec<ObjectId> = commits.into_iter().collect();
+    let mut sorted: Vec<ObjectId> = infos.keys().copied().collect();
     sorted.sort_unstable();
-
-    let mut infos = oid_hash_map();
-    for oid in &sorted {
-        infos.insert(*oid, load_commit_graph_commit_info(odb, *oid)?);
-    }
 
     let mut existing_filters = oid_hash_map();
     let mut upgraded_filters = oid_hash_map();
@@ -669,7 +665,7 @@ pub(crate) fn build_commit_graph_for_commits(
 
     let (bytes, bloom_stats) = build_commit_graph_bytes_from_oid_maps(
         &sorted,
-        &infos,
+        infos,
         odb,
         changed_paths,
         &bloom,
@@ -738,7 +734,7 @@ pub fn write_commit_graph(
         });
     }
 
-    let commits = collect_reachable_commit_oids_for_repository(repo)?;
+    let commits = collect_reachable_commit_infos_for_repository(repo)?;
     if opts.dry_run {
         return Ok(CommitGraphWriteReport {
             path,
@@ -761,7 +757,7 @@ pub fn write_commit_graph(
     let existing = CommitGraphChain::try_load(objects_dir).ok().flatten();
     let built = build_commit_graph_for_commits(
         odb,
-        commits,
+        &commits,
         &*repo.config()?,
         opts.changed_paths,
         existing.as_ref(),

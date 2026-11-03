@@ -3027,7 +3027,13 @@ impl Odb {
         }
     }
 
-    fn try_read_into_once(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
+    /// [`Self::try_read_once`] into `buf`, reusing its capacity: missing objects are `None`
+    /// without consulting the promisor fetcher, and corrupt storage is an error.
+    pub(crate) fn try_read_into_once(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<Option<ObjectKind>> {
         if oid.is_well_known_empty_tree() {
             buf.clear();
             return Ok(Some(ObjectKind::Tree));

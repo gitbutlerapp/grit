@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::commit_graph_file::CommitGraphChain;
-use crate::commit_graph_write::collect_reachable_commit_oids;
+use crate::commit_graph_write::collect_reachable_commit_infos;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::fsck::reachability_roots;
@@ -282,14 +282,14 @@ impl Odb {
             crate::commit_graph_write::remove_commit_graph_files(objects_dir)?;
             return Ok(());
         }
-        let commits = collect_reachable_commit_oids(git_dir, self)?;
+        let commits = collect_reachable_commit_infos(git_dir, self)?;
         if commits.is_empty() {
             return Ok(());
         }
         let existing = CommitGraphChain::try_load(objects_dir).ok().flatten();
         let built = crate::maintenance::build_commit_graph_for_commits(
             self,
-            commits,
+            &commits,
             &config,
             true,
             existing.as_ref(),

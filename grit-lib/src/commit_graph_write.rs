@@ -9,8 +9,8 @@ use crate::commit_graph_file::CommitGraphChain;
 use crate::fs_readonly::clear_readonly_attribute;
 use crate::fs_readonly::clear_readonly_tree;
 use crate::objects::{
-    oid_hash_map_from, oid_hash_set, parse_commit, tag_object_line_oid, HashAlgo, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet,
+    oid_hash_map, oid_hash_map_from, oid_hash_set, tag_object_line_oid, CommitRef, HashAlgo,
+    ObjectId, ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::odb::Odb;
 
@@ -51,12 +51,24 @@ fn hash_file_body(body: &[u8], algo: HashAlgo) -> Vec<u8> {
     algo.checksum_digest(body)
 }
 
-fn parse_commit_time(committer: &str) -> u64 {
-    let parts: Vec<&str> = committer.rsplitn(3, ' ').collect();
-    if parts.len() >= 2 {
-        parts[1].parse::<u64>().unwrap_or(0)
-    } else {
-        0
+/// Committer timestamp from a `committer` header payload (`Name <email> <time> <tz>`); `0` when
+/// the second-to-last field is not an unsigned integer.
+fn parse_commit_time(committer: &[u8]) -> u64 {
+    let mut fields = committer.rsplitn(3, |&b| b == b' ');
+    let (Some(_), Some(time)) = (fields.next(), fields.next()) else {
+        return 0;
+    };
+    std::str::from_utf8(time)
+        .ok()
+        .and_then(|t| t.parse::<u64>().ok())
+        .unwrap_or(0)
+}
+
+fn commit_info_from_ref(commit: &CommitRef<'_>) -> CommitGraphCommitInfo {
+    CommitGraphCommitInfo {
+        tree: commit.tree(),
+        parents: commit.parents().to_vec(),
+        commit_time: parse_commit_time(commit.committer_raw()),
     }
 }
 
@@ -79,7 +91,7 @@ pub fn load_commit_graph_commit_info(
     Ok(CommitGraphCommitInfo {
         tree: c.tree,
         parents: c.parents.clone(),
-        commit_time: parse_commit_time(&c.committer),
+        commit_time: parse_commit_time(c.committer.as_bytes()),
     })
 }
 
@@ -505,32 +517,58 @@ pub(crate) fn build_commit_graph_bytes_from_oid_maps(
     Ok((out, bloom_stats))
 }
 
-fn walk_reachable_commits_from_tip_stack(
+/// Commits reachable from `stack`, each with the graph data [`load_commit_graph_commit_info`]
+/// would load for it, reading every commit once.
+///
+/// Each object is read whole, so a commit only enters the graph once its full stored form
+/// (zlib stream and checksum included) has been read; a header-only read would accept a commit
+/// whose body is damaged. Missing objects are skipped, as for a ref whose target is absent, but
+/// an object that exists and cannot be read or parsed fails the walk, as it fails Git's writer.
+fn walk_reachable_commit_infos(
     odb: &Odb,
     mut stack: Vec<ObjectId>,
-) -> crate::error::Result<OidHashSet> {
-    let mut commits: OidHashSet = oid_hash_set();
-    while let Some(oid) = stack.pop() {
-        if commits.contains(&oid) {
-            continue;
-        }
-        let obj = match odb.try_read_once(&oid) {
-            Ok(Some(o)) => o,
-            Ok(None) | Err(_) => continue,
-        };
-        if obj.kind != ObjectKind::Commit {
-            if obj.kind == ObjectKind::Tag {
-                stack.extend(tag_object_line_oid(&obj.data));
+) -> crate::error::Result<OidHashMap<CommitGraphCommitInfo>> {
+    odb.with_pack_read_context(|| {
+        let mut commits: OidHashMap<CommitGraphCommitInfo> = oid_hash_map();
+        let mut buf = Vec::new();
+        // One reader for the whole walk instead of one per read; anything it does not serve
+        // (other packs, loose objects, read errors) goes through the object database.
+        let mut pack = odb.open_session_pack_reader().ok().flatten();
+        while let Some(oid) = stack.pop() {
+            if commits.contains_key(&oid) {
+                continue;
             }
-            continue;
+            let from_pack = pack
+                .as_mut()
+                .and_then(|reader| reader.read_object_into(&oid, &mut buf).ok());
+            let kind = match from_pack {
+                Some(kind) => Some(kind),
+                None => odb.try_read_into_once(&oid, &mut buf)?,
+            };
+            match kind {
+                Some(ObjectKind::Commit) => {
+                    let info = commit_info_from_ref(&CommitRef::parse(&buf)?);
+                    stack.extend_from_slice(&info.parents);
+                    commits.insert(oid, info);
+                }
+                Some(ObjectKind::Tag) => stack.extend(tag_object_line_oid(&buf)),
+                Some(_) | None => {}
+            }
         }
-        let commit = parse_commit(&obj.data)?;
-        for parent in &commit.parents {
-            stack.push(*parent);
-        }
-        commits.insert(oid);
+        Ok(commits)
+    })
+}
+
+/// `HEAD` and every ref under `refs/`, through the repository's ref store.
+fn ref_tips_for_repository(repo: &crate::repo::Repository) -> crate::error::Result<Vec<ObjectId>> {
+    let mut stack: Vec<ObjectId> = Vec::new();
+    if let Ok(oid) = repo.refs().resolve("HEAD") {
+        stack.push(oid);
     }
-    Ok(commits)
+    for (_, oid) in crate::refs::list_refs_for_repository(repo, "refs/")? {
+        stack.push(oid);
+    }
+    Ok(stack)
 }
 
 /// Collect reachable commit OIDs from ref tips via the repository [`RefStore`](crate::refs::store::RefStore).
@@ -546,18 +584,17 @@ fn walk_reachable_commits_from_tip_stack(
 pub fn collect_reachable_commit_oids_for_repository(
     repo: &crate::repo::Repository,
 ) -> crate::error::Result<HashSet<ObjectId>> {
-    use crate::refs;
-    let odb = repo.odb();
-    let mut stack: Vec<ObjectId> = Vec::new();
-    if let Ok(oid) = repo.refs().resolve("HEAD") {
-        stack.push(oid);
-    }
-    for (_, oid) in refs::list_refs_for_repository(repo, "refs/")? {
-        stack.push(oid);
-    }
-    Ok(walk_reachable_commits_from_tip_stack(odb, stack)?
-        .into_iter()
+    Ok(collect_reachable_commit_infos_for_repository(repo)?
+        .into_keys()
         .collect())
+}
+
+/// [`collect_reachable_commit_oids_for_repository`], keeping the graph data of each commit read
+/// during the walk so the writer does not read every commit a second time.
+pub(crate) fn collect_reachable_commit_infos_for_repository(
+    repo: &crate::repo::Repository,
+) -> crate::error::Result<OidHashMap<CommitGraphCommitInfo>> {
+    walk_reachable_commit_infos(repo.odb(), ref_tips_for_repository(repo)?)
 }
 
 /// Collect reachable commit OIDs from on-disk ref tips under `git_dir`.
@@ -568,6 +605,21 @@ pub fn collect_reachable_commit_oids(
     git_dir: &std::path::Path,
     odb: &Odb,
 ) -> crate::error::Result<HashSet<ObjectId>> {
+    Ok(collect_reachable_commit_infos(git_dir, odb)?
+        .into_keys()
+        .collect())
+}
+
+/// [`collect_reachable_commit_oids`], keeping the graph data of each commit read during the walk.
+pub(crate) fn collect_reachable_commit_infos(
+    git_dir: &std::path::Path,
+    odb: &Odb,
+) -> crate::error::Result<OidHashMap<CommitGraphCommitInfo>> {
+    walk_reachable_commit_infos(odb, ref_tips_under_git_dir(git_dir)?)
+}
+
+/// Loose refs, `packed-refs` and `HEAD` read straight from `git_dir`.
+fn ref_tips_under_git_dir(git_dir: &std::path::Path) -> crate::error::Result<Vec<ObjectId>> {
     use std::fs;
     let mut stack: Vec<ObjectId> = Vec::new();
 
@@ -629,9 +681,7 @@ pub fn collect_reachable_commit_oids(
         }
     }
 
-    Ok(walk_reachable_commits_from_tip_stack(odb, stack)?
-        .into_iter()
-        .collect())
+    Ok(stack)
 }
 
 /// Directory in the repository tree, not a symlink/junction entry.

@@ -621,3 +621,243 @@ fn bloom_precheck_for_paths_on_git_graph() {
         grit_lib::objects::commit_graph::BloomPrecheck::Inapplicable
     );
 }
+
+fn git_stdin(dir: &Path, args: &[&str], input: &[u8]) -> String {
+    use std::io::Write as _;
+    let mut child = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn git");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(input)
+        .expect("write stdin");
+    let out = child.wait_with_output().expect("wait git");
+    assert!(out.status.success(), "git {args:?} failed");
+    String::from_utf8(out.stdout).expect("utf8 stdout")
+}
+
+/// `(chunk id, bytes)` of every chunk in a commit-graph file.
+fn graph_chunks(bytes: &[u8]) -> Vec<([u8; 4], Vec<u8>)> {
+    let count = usize::from(bytes[6]);
+    let entry = |i: usize| {
+        let at = 8 + i * 12;
+        let id: [u8; 4] = bytes[at..at + 4].try_into().expect("chunk id");
+        let offset = u64::from_be_bytes(bytes[at + 4..at + 12].try_into().expect("offset"));
+        (id, usize::try_from(offset).expect("offset fits"))
+    };
+    (0..count)
+        .map(|i| {
+            let (id, start) = entry(i);
+            let (_, end) = entry(i + 1);
+            (id, bytes[start..end].to_vec())
+        })
+        .collect()
+}
+
+/// History whose commits reach the writer every way it reads them: packed commits, loose
+/// commits, annotated tags (one tagging another tag), an octopus merge, and a packed commit
+/// whose signature makes its headers too long for a header-only read.
+fn setup_mixed_storage_repo(root: &Path) {
+    setup_t5318_merge_repo(root);
+    git_cmd(root, &["tag", "-a", "v1", "-m", "v1", "commits/3"]);
+    git_cmd(root, &["tag", "-a", "v1-outer", "-m", "outer", "v1"]);
+
+    let tree = git_cmd(root, &["rev-parse", "commits/8^{tree}"]);
+    let parent = git_cmd(root, &["rev-parse", "commits/8"]);
+    let mut raw = format!(
+        "tree {}\nparent {}\nauthor T <t@example.com> 1700000000 +0000\n\
+         committer T <t@example.com> 1700000100 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n",
+        tree.trim(),
+        parent.trim()
+    );
+    for i in 0..60 {
+        raw.push_str(&format!(" {i:02}{}\n", "x".repeat(60)));
+    }
+    raw.push_str(" -----END PGP SIGNATURE-----\n\nsigned\n\nlong body\n");
+    let signed = git_stdin(
+        root,
+        &["hash-object", "-t", "commit", "-w", "--stdin"],
+        raw.as_bytes(),
+    );
+    git_cmd(root, &["update-ref", "refs/heads/signed", signed.trim()]);
+    git_cmd(root, &["repack", "-ad"]);
+
+    for i in 9..=10 {
+        std::fs::write(root.join(format!("f{i}.txt")), format!("loose {i}\n")).unwrap();
+        git_cmd(root, &["add", &format!("f{i}.txt")]);
+        git_cmd(root, &["commit", "-q", "-m", &format!("c{i}")]);
+    }
+}
+
+#[test]
+fn write_commit_graph_matches_git_for_packed_loose_and_tagged_commits() {
+    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    setup_mixed_storage_repo(dir.path());
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+
+    let mut expected: Vec<ObjectId> = git_cmd(dir.path(), &["rev-list", "--all"])
+        .lines()
+        .map(|l| ObjectId::from_hex(l.trim()).expect("oid"))
+        .collect();
+    expected.sort();
+    assert_eq!(sorted_commit_set(&repo), expected);
+
+    let report =
+        write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("write");
+    assert_eq!(report.commit_count, expected.len());
+    git_cmd(dir.path(), &["commit-graph", "verify"]);
+    let graph_path = repo.git_dir().join("objects/info/commit-graph");
+    let grit_bytes = std::fs::read(&graph_path).expect("grit graph");
+
+    std::fs::remove_file(&graph_path).expect("remove grit graph");
+    git_cmd(
+        dir.path(),
+        &["commit-graph", "write", "--reachable", "--changed-paths"],
+    );
+    let git_bytes = std::fs::read(&graph_path).expect("git graph");
+
+    // GDA2 holds corrected commit date offsets, which grit records one higher than Git; both
+    // are valid generation data, so only that chunk is left out.
+    let comparable = |bytes: &[u8]| -> Vec<([u8; 4], Vec<u8>)> {
+        graph_chunks(bytes)
+            .into_iter()
+            .filter(|(id, _)| id != b"GDA2")
+            .collect()
+    };
+    let grit_chunks = comparable(&grit_bytes);
+    let git_chunks = comparable(&git_bytes);
+    assert_eq!(
+        grit_chunks.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+        git_chunks.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+    );
+    for ((id, grit), (_, git)) in grit_chunks.iter().zip(&git_chunks) {
+        assert!(
+            grit == git,
+            "chunk {} differs from git's",
+            String::from_utf8_lossy(id)
+        );
+    }
+
+    let rewritten =
+        write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true)).expect("rewrite");
+    let stats = rewritten.bloom_stats.expect("bloom stats");
+    assert_eq!(stats.filter_computed, 0, "git's filters are reused");
+    assert_eq!(stats.filter_not_computed as usize, expected.len());
+    git_cmd(dir.path(), &["commit-graph", "verify"]);
+}
+
+/// Flip a byte of the packed entry of `commit`, `from_end` bytes before the entry ends (1 is the
+/// last byte of its zlib checksum). Its headers still inflate; the object as a whole does not.
+fn corrupt_packed_commit_tail(root: &Path, commit: &ObjectId, from_end: usize) -> Vec<u8> {
+    let pack_dir = root.join(".git/objects/pack");
+    let idx = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .map(|e| e.expect("entry").path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("one pack index");
+    let listing = git_stdin(
+        root,
+        &["show-index"],
+        &std::fs::read(&idx).expect("read idx"),
+    );
+    let mut offsets: Vec<(u64, String)> = listing
+        .lines()
+        .map(|l| {
+            let mut f = l.split_whitespace();
+            let off = f.next().expect("offset").parse().expect("offset number");
+            (off, f.next().expect("oid").to_owned())
+        })
+        .collect();
+    offsets.sort();
+    let pack = idx.with_extension("pack");
+    let mut bytes = std::fs::read(&pack).expect("read pack");
+    let at = offsets
+        .iter()
+        .position(|(_, oid)| *oid == commit.to_hex())
+        .expect("commit in pack");
+    let end = offsets.get(at + 1).map_or(bytes.len() - 20, |(off, _)| {
+        usize::try_from(*off).expect("offset")
+    });
+    bytes[end - from_end] ^= 0xff;
+    let mut perms = std::fs::metadata(&pack).expect("meta").permissions();
+    perms.set_readonly(false);
+    std::fs::set_permissions(&pack, perms).expect("chmod pack");
+    std::fs::write(&pack, &bytes).expect("write pack");
+    let start = usize::try_from(offsets[at].0).expect("offset");
+    bytes[start..end].to_vec()
+}
+
+/// Inflate as much of a whole (non-delta) pack entry as decodes before the stream fails.
+fn inflatable_prefix(entry: &[u8]) -> Vec<u8> {
+    use std::io::Read as _;
+    let header_len = entry
+        .iter()
+        .position(|b| b & 0x80 == 0)
+        .expect("entry header")
+        + 1;
+    let mut decoder = flate2::read::ZlibDecoder::new(&entry[header_len..]);
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 16];
+    while let Ok(n) = decoder.read(&mut chunk) {
+        if n == 0 {
+            break;
+        }
+        out.extend_from_slice(&chunk[..n]);
+    }
+    out
+}
+
+#[test]
+fn write_commit_graph_rejects_packed_commit_with_corrupt_body() {
+    use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    // The checksum itself, and the compressed message body well past the headers.
+    for from_end in [1, 40] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git_cmd(root, &["init", "-q", "-b", "main"]);
+        std::fs::write(root.join("a.txt"), b"a\n").unwrap();
+        git_cmd(root, &["add", "a.txt"]);
+        let body: String = (0..40)
+            .map(|i| format!("message body line {i}\n"))
+            .collect();
+        git_cmd(root, &["commit", "-q", "-m", &format!("subject\n\n{body}")]);
+        git_cmd(root, &["repack", "-ad"]);
+        let commit = ObjectId::from_hex(git_cmd(root, &["rev-parse", "HEAD"]).trim()).expect("oid");
+        let entry = corrupt_packed_commit_tail(root, &commit, from_end);
+        let prefix = inflatable_prefix(&entry);
+        assert!(
+            prefix.windows(2).any(|w| w == b"\n\n"),
+            "the headers still inflate ({from_end} bytes from the end)"
+        );
+        assert!(
+            !git_ok(root, &["commit-graph", "write", "--reachable"]),
+            "git rejects the damaged commit ({from_end} bytes from the end)"
+        );
+
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+        assert!(repo.odb().read(&commit).is_err(), "a whole read fails");
+        let result = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true));
+        assert!(
+            result.is_err(),
+            "wrote a graph over a corrupt commit ({from_end} bytes from the end): {result:?}"
+        );
+        assert!(!root.join(".git/objects/info/commit-graph").exists());
+    }
+}
