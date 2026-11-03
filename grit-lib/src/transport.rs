@@ -223,7 +223,7 @@ pub trait Connection {
         false
     }
 
-    /// True when the v0/v1 ref advertisement ended with a flush pkt-line on connect.
+    /// True when the v0/v1 ref advertisement ended with a flush pkt-line (`0000`) on connect.
     fn saw_ref_advertisement_flush(&self) -> bool {
         false
     }
@@ -366,14 +366,11 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
     loop {
         match pkt_line::read_packet(&mut reader)? {
             None => break,
-            Some(pkt_line::Packet::Flush) | Some(pkt_line::Packet::Delim) => {
+            Some(pkt_line::Packet::Flush) => {
                 adv.saw_ref_advertisement_flush = true;
                 break;
             }
-            Some(pkt_line::Packet::ResponseEnd) => {
-                adv.saw_ref_advertisement_flush = true;
-                break;
-            }
+            Some(pkt_line::Packet::Delim) | Some(pkt_line::Packet::ResponseEnd) => break,
             Some(pkt_line::Packet::Data(line)) => {
                 let line = line.trim_end_matches('\n');
                 if let Some(ver) = line.strip_prefix("version ") {
@@ -1907,6 +1904,22 @@ mod tests {
     fn read_advertisement_immediate_eof_is_not_handshake() {
         let mut cur = std::io::Cursor::new([]);
         let adv = read_advertisement(&mut cur).expect("empty read");
+        assert!(!adv.saw_ref_advertisement_flush);
+        assert!(!remote_handshake_complete(&adv));
+    }
+
+    #[test]
+    fn read_advertisement_delim_only_is_not_handshake() {
+        let mut cur = std::io::Cursor::new(b"0001");
+        let adv = read_advertisement(&mut cur).expect("delim-only advertisement");
+        assert!(!adv.saw_ref_advertisement_flush);
+        assert!(!remote_handshake_complete(&adv));
+    }
+
+    #[test]
+    fn read_advertisement_response_end_only_is_not_handshake() {
+        let mut cur = std::io::Cursor::new(b"0002");
+        let adv = read_advertisement(&mut cur).expect("response-end-only advertisement");
         assert!(!adv.saw_ref_advertisement_flush);
         assert!(!remote_handshake_complete(&adv));
     }
