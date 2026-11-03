@@ -42,8 +42,8 @@ use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::rev_parse::{resolve_revision_as_commit, try_parse_double_dot_log_range};
 use crate::state::clear_replay_state;
 use crate::state::{
-    read_cherry_pick_head, read_merge_msg, read_orig_head_for_repository, read_revert_head,
-    resolve_head_for_repository, write_orig_head, HeadState,
+    read_cherry_pick_head, read_merge_msg, read_revert_head, resolve_head_for_repository,
+    write_orig_head, HeadState,
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -646,7 +646,12 @@ pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -
     Ok(())
 }
 
-/// Cancel an in-progress replay, restoring branch, index, and worktree to the saved head.
+/// Cancel an in-progress replay, restoring branch, index, and worktree.
+///
+/// Restore target is [`sequencer/head`](https://git-scm.com/docs/gitglossary#Documentation/gitglossary.txt-aidabortabortion)
+/// when grit wrote a sequencer directory; otherwise the current branch tip (for example a
+/// single-commit pick or revert started by Git, which leaves only `CHERRY_PICK_HEAD` or
+/// `REVERT_HEAD`). A pre-existing `ORIG_HEAD` from an earlier operation is not used.
 ///
 /// When `HEAD` no longer matches `sequencer/abort-safety` (for example after `grit commit`
 /// finished the step), replay metadata is cleared without moving the branch.
@@ -663,9 +668,7 @@ pub fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
         return Ok(ReplayAbortOutcome::ClearedInPlace);
     }
     crate::rerere::rerere_clear(repo.git_dir())?;
-    let restore_oid = read_sequencer_head(repo.git_dir())
-        .or(read_orig_head_for_repository(repo).ok().flatten())
-        .unwrap_or(active.abort_safety);
+    let restore_oid = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
     hard_reset_branch(repo, &refname, restore_oid)?;
     clear_replay_state(repo.git_dir())?;
     Ok(ReplayAbortOutcome::Rewound)
@@ -1679,7 +1682,6 @@ fn load_active_replay(repo: &Repository) -> Result<ActiveReplay> {
         return Err(Error::NoReplayInProgress);
     };
     let abort_safety = read_sequencer_abort_safety(git_dir)
-        .or_else(|| read_orig_head_for_repository(repo).ok().flatten())
         .or_else(|| {
             resolve_head_for_repository(repo)
                 .ok()

@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
@@ -51,12 +52,79 @@ fn assert_no_replay_state(root: &Path) {
         !git_dir.join("sequencer").exists(),
         "sequencer directory must not remain after a failed start with no progress"
     );
-    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"] {
+    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG", "AUTO_MERGE"] {
         assert!(
             !git_dir.join(name).exists(),
             "{name} must not remain after a failed start with no progress"
         );
     }
+}
+
+fn git_expect_failure(root: &Path, args: &[&str]) {
+    let home = root.join(".git-home");
+    let _ = fs::create_dir_all(&home);
+    let out = Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .env("HOME", &home)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git spawn");
+    assert!(
+        !out.status.success(),
+        "git {:?} should fail: {}",
+        args,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn assert_git_clean_worktree(root: &Path) {
+    assert!(
+        git(root, &["status", "--porcelain"]).trim().is_empty(),
+        "worktree must be clean"
+    );
+    assert!(
+        git(root, &["ls-files", "-u"]).trim().is_empty(),
+        "index must have no unmerged entries"
+    );
+}
+
+fn setup_git_cherry_pick_conflict_with_stale_orig_head(root: &Path) -> ObjectId {
+    for i in 1..=3 {
+        fs::write(root.join("f"), format!("b{i}\n")).unwrap();
+        git(root, &["add", "f"]);
+        git(root, &["commit", "-qm", &format!("b{i}")]);
+    }
+    git(root, &["switch", "-c", "topic", "main~2"]);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(root.join("f"))
+        .unwrap()
+        .write_all(b"topic\n")
+        .unwrap();
+    git(root, &["commit", "-qam", "t1"]);
+    let topic = oid_from_rev(root, "HEAD");
+    git(root, &["switch", "main"]);
+    fs::OpenOptions::new()
+        .append(true)
+        .open(root.join("f"))
+        .unwrap()
+        .write_all(b"main\n")
+        .unwrap();
+    git(root, &["commit", "-qam", "m4"]);
+    git(root, &["reset", "-q", "--hard", "HEAD~1"]);
+    git(root, &["reset", "-q", "--hard", "main@{1}"]);
+    assert!(
+        root.join(".git/ORIG_HEAD").is_file(),
+        "ORIG_HEAD must differ from HEAD after the double reset"
+    );
+    git_expect_failure(root, &["cherry-pick", &topic.to_hex()]);
+    assert!(
+        !root.join(".git/sequencer").exists(),
+        "git single cherry-pick must not write sequencer/"
+    );
+    oid_from_rev(root, "HEAD")
 }
 
 fn init_repo(root: &Path) {
@@ -1650,5 +1718,130 @@ fn wide_divergence_no_commit_stages_like_git() {
     let grit_index_tree = git(root.path(), &["write-tree"]);
     let git_index_tree = git(git_wt.path(), &["write-tree"]);
     assert_eq!(grit_index_tree.trim(), git_index_tree.trim());
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn abort_git_cherry_pick_with_stale_orig_head_rewinds_like_git() {
+    let grit_root = tempfile::tempdir().expect("tempdir");
+    let git_root = tempfile::tempdir().expect("tempdir");
+    init_repo(grit_root.path());
+    init_repo(git_root.path());
+    let head_before = setup_git_cherry_pick_conflict_with_stale_orig_head(grit_root.path());
+    let _ = setup_git_cherry_pick_conflict_with_stale_orig_head(git_root.path());
+
+    let grit_repo = open_repo(grit_root.path());
+    let outcome = abort_replay_sequence(&grit_repo).expect("abort");
+    assert_eq!(outcome, ReplayAbortOutcome::Rewound);
+    assert_eq!(oid_from_rev(grit_root.path(), "HEAD"), head_before);
+    assert_git_clean_worktree(grit_root.path());
+    assert_no_replay_state(grit_root.path());
+
+    git(git_root.path(), &["cherry-pick", "--abort"]);
+    assert_eq!(
+        git(grit_root.path(), &["status", "--porcelain"]),
+        git(git_root.path(), &["status", "--porcelain"])
+    );
+    assert_eq!(
+        git(grit_root.path(), &["ls-files", "-u"]),
+        git(git_root.path(), &["ls-files", "-u"])
+    );
+    git_fsck_strict(grit_root.path());
+}
+
+#[test]
+fn abort_git_revert_with_stale_orig_head_rewinds_like_git() {
+    let grit_root = tempfile::tempdir().expect("tempdir");
+    let git_root = tempfile::tempdir().expect("tempdir");
+    init_repo(grit_root.path());
+    init_repo(git_root.path());
+    for root in [grit_root.path(), git_root.path()] {
+        for i in 1..=3 {
+            fs::write(root.join("f"), format!("b{i}\n")).unwrap();
+            git(root, &["add", "f"]);
+            git(root, &["commit", "-qm", &format!("b{i}")]);
+        }
+        git(root, &["switch", "-c", "topic", "main~2"]);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join("f"))
+            .unwrap()
+            .write_all(b"topic\n")
+            .unwrap();
+        git(root, &["commit", "-qam", "t1"]);
+        git(root, &["switch", "main"]);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join("f"))
+            .unwrap()
+            .write_all(b"main\n")
+            .unwrap();
+        git(root, &["commit", "-qam", "m4"]);
+        git(root, &["reset", "-q", "--hard", "HEAD~1"]);
+        git(root, &["reset", "-q", "--hard", "main@{1}"]);
+    }
+    let revert_target = oid_from_rev(grit_root.path(), "HEAD~1");
+    git_expect_failure(
+        grit_root.path(),
+        &["revert", "--no-edit", &revert_target.to_hex()],
+    );
+    git_expect_failure(
+        git_root.path(),
+        &["revert", "--no-edit", &revert_target.to_hex()],
+    );
+    let head_before = oid_from_rev(grit_root.path(), "HEAD");
+
+    let grit_repo = open_repo(grit_root.path());
+    let outcome = abort_replay_sequence(&grit_repo).expect("abort");
+    assert_eq!(outcome, ReplayAbortOutcome::Rewound);
+    assert_eq!(oid_from_rev(grit_root.path(), "HEAD"), head_before);
+    assert_git_clean_worktree(grit_root.path());
+    assert_no_replay_state(grit_root.path());
+
+    git(git_root.path(), &["revert", "--abort"]);
+    assert_eq!(
+        git(grit_root.path(), &["status", "--porcelain"]),
+        git(git_root.path(), &["status", "--porcelain"])
+    );
+    git_fsck_strict(grit_root.path());
+}
+
+#[test]
+fn abort_grit_pick_with_stale_orig_head_rewinds_to_sequencer_head() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    fs::write(root.path().join("f"), "topic\n").unwrap();
+    git(root.path(), &["commit", "-qam", "topic-f"]);
+    let pick = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("f"), "main\n").unwrap();
+    git(root.path(), &["commit", "-qam", "main"]);
+    let start = oid_from_rev(root.path(), "HEAD");
+    let stale = oid_from_rev(root.path(), "main~1");
+    fs::write(
+        root.path().join(".git/ORIG_HEAD"),
+        format!("{}\n", stale.to_hex()),
+    )
+    .expect("write ORIG_HEAD");
+
+    let repo = open_repo(root.path());
+    start_replay_sequence(
+        &repo,
+        &pick_req(vec![pick], ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick");
+    let outcome = abort_replay_sequence(&repo).expect("abort");
+    assert_eq!(outcome, ReplayAbortOutcome::Rewound);
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    assert_ne!(
+        stale, start,
+        "stale ORIG_HEAD must not be the rewind target"
+    );
+    assert_git_clean_worktree(root.path());
+    assert_no_replay_state(root.path());
     git_fsck_strict(root.path());
 }

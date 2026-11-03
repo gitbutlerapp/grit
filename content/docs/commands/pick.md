@@ -39,7 +39,7 @@ Pick either completes a step, stops for conflicts or an empty commit, or changes
 | --- | --- |
 | `<commit>`… | Commits or ranges to replay (oldest first). |
 | `--continue` | Finish the paused pick after conflicts are resolved and staged. |
-| `--abort` | Cancel the in-progress pick and restore the saved branch tip and worktree (conflict-only files from the other side are removed). |
+| `--abort` | Cancel the in-progress pick and restore the branch tip and worktree (conflict-only files from the other side are removed). Uses `sequencer/head` when grit wrote a sequencer directory; otherwise resets the index and worktree to the current tip (including after a conflicting `git cherry-pick`). A stale `ORIG_HEAD` from an earlier operation is ignored. |
 | `--skip` | Skip the current todo step and continue with the rest; the worktree is reset to the saved tip, including removing conflict-only paths. |
 | `-x`, `--record-origin` | Append `(cherry picked from commit …)` to each new message. |
 | `--no-commit` | Apply the patch to the index and worktree without committing. |

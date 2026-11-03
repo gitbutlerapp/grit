@@ -1204,7 +1204,7 @@ pub fn clear_merge_state(git_dir: &Path) -> Result<()> {
 ///
 /// Returns [`Error::Io`] if a sentinel file or the sequencer directory cannot be removed.
 pub fn clear_replay_state(git_dir: &Path) -> Result<()> {
-    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"] {
+    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG", "AUTO_MERGE"] {
         let path = git_dir.join(name);
         if path.exists() {
             fs::remove_file(&path).map_err(Error::Io)?;
