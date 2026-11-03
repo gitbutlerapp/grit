@@ -2589,7 +2589,6 @@ fn untracked_on_disk_matches_stash(
     if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
         return Ok(false);
     }
-    let stored = storage_string(&entry.path);
     let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
     let meta = match fs::symlink_metadata(&abs) {
         Ok(m) => m,
@@ -2603,7 +2602,7 @@ fn untracked_on_disk_matches_stash(
     let worktree_bytes = smudge_bytes_for_worktree_path(
         repo,
         &rules,
-        &stored,
+        path,
         entry.mode,
         &stash_blob.data,
         &entry.oid,
