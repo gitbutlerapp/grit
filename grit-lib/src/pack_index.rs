@@ -356,6 +356,20 @@ impl PackIndex {
         })
     }
 
+    /// Run `f` over the `(pack offset, index row)` pair of every object, sorted by
+    /// offset, for scans that visit a pack's entries in storage order.
+    ///
+    /// `f` must not call this index's offset lookups
+    /// ([`Self::find_position_by_offset_sorted`], [`Self::next_pack_offset_after`],
+    /// [`Self::crc32_for_pack_offset`]): they share the table's lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the index has a malformed large-offset entry.
+    pub(crate) fn with_offset_order<R>(&self, f: impl FnOnce(&[(u64, u32)]) -> R) -> Result<R> {
+        self.with_sorted_offsets(f)
+    }
+
     /// Run `f` over `(pack offset, index row)` pairs sorted by offset, building and
     /// caching the table on first use.
     ///

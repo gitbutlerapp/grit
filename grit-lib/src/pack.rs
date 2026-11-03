@@ -6110,6 +6110,36 @@ fn parse_in_pack_delta_reuse_zlib(
     entry_offset: u64,
     reusable_base: &dyn Fn(&ObjectId) -> bool,
 ) -> Result<Option<(ObjectId, u64, usize, usize)>> {
+    parse_delta_reuse_zlib_at(
+        idx,
+        pack_bytes,
+        entry_offset,
+        reusable_base,
+        DeltaReuseLookups {
+            row_at_offset: &|offset| idx.find_position_by_offset_sorted(offset),
+            entry_end: &|| pack_entry_raw_end(idx, pack_bytes, entry_offset),
+            entry_crc: &|| idx.crc32_for_pack_offset(entry_offset),
+        },
+    )
+}
+
+/// How [`parse_delta_reuse_zlib_at`] finds what the pack index records about an entry:
+/// the index row of the object at a pack offset (an `OFS_DELTA` base), and the end and
+/// CRC of the entry itself.
+struct DeltaReuseLookups<'a> {
+    row_at_offset: &'a dyn Fn(u64) -> Result<Option<usize>>,
+    entry_end: &'a dyn Fn() -> Result<Option<usize>>,
+    entry_crc: &'a dyn Fn() -> Result<Option<u32>>,
+}
+
+/// [`parse_in_pack_delta_reuse_zlib`] with the index lookups supplied by the caller.
+fn parse_delta_reuse_zlib_at(
+    idx: &PackIndex,
+    pack_bytes: &[u8],
+    entry_offset: u64,
+    reusable_base: &dyn Fn(&ObjectId) -> bool,
+    lookups: DeltaReuseLookups<'_>,
+) -> Result<Option<(ObjectId, u64, usize, usize)>> {
     let start = entry_offset as usize;
     let hb = idx.hash_bytes();
     let mut p = start;
@@ -6127,7 +6157,7 @@ fn parse_in_pack_delta_reuse_zlib(
         }
         PackedType::OfsDelta => {
             let base_off = parse_ofs_delta_base(pack_bytes, &mut p, entry_offset)?;
-            let Some(pos) = idx.find_position_by_offset_sorted(base_off)? else {
+            let Some(pos) = (lookups.row_at_offset)(base_off)? else {
                 return Ok(None);
             };
             let base_oid_bytes = idx.oid_at(pos);
@@ -6142,14 +6172,14 @@ fn parse_in_pack_delta_reuse_zlib(
         return Ok(None);
     }
     let zlib_start = p;
-    let Some(end_pos) = pack_entry_raw_end(idx, pack_bytes, entry_offset)? else {
+    let Some(end_pos) = (lookups.entry_end)()? else {
         return Ok(None);
     };
     if zlib_start >= end_pos {
         return Ok(None);
     }
     let entry_bytes = &pack_bytes[start..end_pos];
-    if let Some(crc) = idx.crc32_for_pack_offset(entry_offset)? {
+    if let Some(crc) = (lookups.entry_crc)()? {
         if crc32fast::hash(entry_bytes) != crc {
             return Ok(None);
         }
@@ -6178,16 +6208,20 @@ fn reuse_delta_matches_pack_resolution(
 ///
 /// A set much smaller than the index is looked up id by id, so packing a few objects
 /// from a large pack does not visit every index entry; larger sets scan the index once.
+/// Whether visiting every entry of `idx` costs less than looking up `wanted` objects:
+/// a lookup costs about log2(entries) comparisons, a scan one set probe per entry.
+fn index_scan_is_cheaper(idx: &PackIndex, wanted: usize) -> bool {
+    let lookup_cost =
+        wanted.saturating_mul(usize::BITS.saturating_sub(idx.len().leading_zeros()) as usize);
+    lookup_cost >= idx.len()
+}
+
 fn wanted_index_entries<'a>(
     idx: &PackIndex,
     wanted: impl ExactSizeIterator<Item = &'a ObjectId>,
     contains: impl Fn(&ObjectId) -> bool,
 ) -> Result<Vec<(ObjectId, u64)>> {
-    // A lookup costs about log2(entries) comparisons; a scan one set probe per entry.
-    let lookup_cost = wanted
-        .len()
-        .saturating_mul(usize::BITS.saturating_sub(idx.len().leading_zeros()) as usize);
-    if lookup_cost < idx.len() {
+    if !index_scan_is_cheaper(idx, wanted.len()) {
         let mut out = Vec::new();
         for oid in wanted {
             if let Some(offset) = idx.find_offset(oid)? {
@@ -6282,6 +6316,10 @@ pub(crate) fn collect_packed_delta_reuse_for_send(
     let mut found: HashMap<ObjectId, OnDiskReuseZlibEntry> = HashMap::new();
     for idx in indexes.iter().filter(|idx| idx.hash_bytes() == 20) {
         let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+        if index_scan_is_cheaper(idx, send.len()) {
+            scan_packed_delta_reuse(idx, &pack_bytes, send, reusable_base, &mut found)?;
+            continue;
+        }
         for (oid, offset) in wanted_index_entries(idx, send.iter(), |oid| send.contains(oid))? {
             if found.contains_key(&oid) || !reusable_base(&oid) {
                 continue;
@@ -6309,6 +6347,62 @@ pub(crate) fn collect_packed_delta_reuse_for_send(
         found.remove(&target);
     }
     Ok(found)
+}
+
+/// The part of [`collect_packed_delta_reuse_for_send`] for one pack holding much of
+/// `send`: visit the pack's entries in storage order, where each entry's end and CRC
+/// come from its neighbour in the offset table instead of a search per entry, and the
+/// pack is read front to back.
+fn scan_packed_delta_reuse(
+    idx: &PackIndex,
+    pack_bytes: &Arc<PackData>,
+    send: &HashSet<ObjectId>,
+    reusable_base: &dyn Fn(&ObjectId) -> bool,
+    found: &mut HashMap<ObjectId, OnDiskReuseZlibEntry>,
+) -> Result<()> {
+    let pack_end = pack_bytes.len().checked_sub(idx.hash_bytes());
+    idx.with_offset_order(|pairs| -> Result<()> {
+        found.reserve(pairs.len().min(send.len()));
+        let row_at_offset = |offset: u64| {
+            Ok(pairs
+                .binary_search_by_key(&offset, |p| p.0)
+                .ok()
+                .map(|i| pairs[i].1 as usize))
+        };
+        for (i, &(offset, row)) in pairs.iter().enumerate() {
+            let Ok(oid) = ObjectId::from_bytes(idx.oid_at(row as usize)) else {
+                continue;
+            };
+            if !send.contains(&oid) || found.contains_key(&oid) || !reusable_base(&oid) {
+                continue;
+            }
+            let entry_end = pack_end.filter(|&end| (offset as usize) < end).map(|end| {
+                pairs[i + 1..]
+                    .iter()
+                    .find(|p| p.0 > offset)
+                    .map_or(end, |p| (p.0 as usize).min(end))
+            });
+            let Some((base, size, zlib_start, zlib_end)) = parse_delta_reuse_zlib_at(
+                idx,
+                pack_bytes,
+                offset,
+                reusable_base,
+                DeltaReuseLookups {
+                    row_at_offset: &row_at_offset,
+                    entry_end: &|| Ok(entry_end),
+                    entry_crc: &|| Ok(idx.crc32_at(row as usize)),
+                },
+            )?
+            else {
+                continue;
+            };
+            found.insert(
+                oid,
+                (base, size, Arc::clone(pack_bytes), zlib_start, zlib_end),
+            );
+        }
+        Ok(())
+    })?
 }
 
 /// If `oid` is stored as `REF_DELTA` or `OFS_DELTA` in a local pack and its base OID is in
@@ -9860,6 +9954,43 @@ mod cached_lookup_tests {
             .expect("slice");
         let good_pack = fs::read(&primary_pack).expect("primary pack");
         assert_eq!(&slice, &good_pack[start..end]);
+    }
+
+    #[test]
+    fn delta_reuse_scan_in_storage_order_matches_per_object_lookups() {
+        let tmp = TempDir::new().unwrap();
+        let bare = grit_test_support::git_packed_history(tmp.path(), 40);
+        let objects = bare.join("objects");
+        let indexes = read_local_pack_indexes_cached(&objects).unwrap();
+        let idx = &indexes[0];
+        let pack_bytes = read_pack_bytes_cached(&idx.pack_path).unwrap();
+        let all: Vec<(ObjectId, u64)> = idx
+            .iter()
+            .map(|e| (ObjectId::from_bytes(e.oid()).unwrap(), e.offset().unwrap()))
+            .collect();
+        let send: HashSet<ObjectId> = all.iter().map(|(oid, _)| *oid).collect();
+        let reusable = |oid: &ObjectId| send.contains(oid);
+
+        let mut looked_up = HashMap::new();
+        for &(oid, offset) in &all {
+            if let Some((base, size, start, end)) =
+                parse_in_pack_delta_reuse_zlib(idx, &pack_bytes, offset, &reusable).unwrap()
+            {
+                looked_up.insert(oid, (base, size, start, end));
+            }
+        }
+        assert!(looked_up.len() > 20, "the fixture pack stores deltas");
+
+        let mut scanned = HashMap::new();
+        scan_packed_delta_reuse(idx, &pack_bytes, &send, &reusable, &mut scanned).unwrap();
+        let scanned: HashMap<ObjectId, (ObjectId, u64, usize, usize)> = scanned
+            .into_iter()
+            .map(|(oid, (base, size, _, start, end))| (oid, (base, size, start, end)))
+            .collect();
+        assert_eq!(scanned, looked_up);
+        assert!(index_scan_is_cheaper(idx, send.len()));
+        let found = collect_packed_delta_reuse_for_send(&objects, &send, &reusable).unwrap();
+        assert_eq!(found.len(), looked_up.len());
     }
 
     #[test]
