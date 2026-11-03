@@ -126,6 +126,11 @@ impl TryFrom<u8> for HashAlgo {
 /// Maximum raw digest length across supported hash algorithms (SHA-256).
 const MAX_OID_LEN: usize = 32;
 
+#[cold]
+fn invalid_oid_bytes(bytes: &[u8]) -> Error {
+    Error::InvalidObjectId(hex::encode(bytes))
+}
+
 /// Number of hex digits in the fixed-width short form of an object id.
 pub const SHORT_HEX_LEN: usize = 7;
 
@@ -226,12 +231,15 @@ impl ObjectId {
     ///
     /// Returns [`Error::InvalidObjectId`] when `bytes` is not a recognised
     /// digest length.
+    #[inline]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        if HashAlgo::from_len(bytes.len()).is_none() {
-            return Err(Error::InvalidObjectId(hex::encode(bytes)));
-        }
         let mut buf = [0u8; MAX_OID_LEN];
-        buf[..bytes.len()].copy_from_slice(bytes);
+        // Fixed-size copies, so tree and index parsers get no `memcpy` call per id.
+        match HashAlgo::from_len(bytes.len()) {
+            Some(HashAlgo::Sha1) => buf[..20].copy_from_slice(bytes),
+            Some(HashAlgo::Sha256) => buf.copy_from_slice(bytes),
+            None => return Err(invalid_oid_bytes(bytes)),
+        }
         Ok(Self {
             bytes: buf,
             len: bytes.len() as u8,
@@ -1031,9 +1039,56 @@ impl<'a> TreeRefIter<'a> {
         }
     }
 
+    /// Iterate `data` from byte offset `pos`, which must be where an entry starts.
+    pub(crate) fn with_oid_len_at(data: &'a [u8], oid_len: usize, pos: usize) -> Self {
+        Self {
+            data,
+            pos,
+            oid_len,
+            failed: false,
+        }
+    }
+
+    /// Byte offset of the next entry (`data.len()` once every entry was read).
+    pub(crate) fn position(&self) -> usize {
+        self.pos
+    }
+
     fn next_entry(&mut self) -> Result<Option<TreeEntryRef<'a>>> {
         parse_tree_entry_at(self.data, &mut self.pos, self.oid_len)
     }
+}
+
+/// Where one tree entry lies in a tree payload, found without building its object id.
+pub(crate) struct TreeEntrySpan {
+    /// The entry's mode.
+    pub(crate) mode: u32,
+    /// Byte range of the entry's name.
+    pub(crate) name: std::ops::Range<usize>,
+    /// Offset just past the entry; its object id is the `oid_len` bytes before it.
+    pub(crate) end: usize,
+}
+
+/// The entry starting at `pos` in tree payload `data`, for walks that skip most entries
+/// unread.
+///
+/// Accepts exactly the entries [`TreeRefIter`] parses, with the same mode and name.
+/// `None` at the end of `data`, for a malformed entry and for an id width that is no
+/// digest length; [`TreeRefIter`] reports the error for those.
+#[inline]
+pub(crate) fn tree_entry_span(data: &[u8], pos: usize, oid_len: usize) -> Option<TreeEntrySpan> {
+    HashAlgo::from_len(oid_len)?;
+    let rest = data.get(pos..)?;
+    let space = memchr::memchr(b' ', rest)?;
+    let mode = parse_tree_mode(&rest[..space])?;
+    let name_start = pos + space + 1;
+    let name_end = name_start + memchr::memchr(0, &data[name_start..])?;
+    let end = name_end + 1 + oid_len;
+    (end <= data.len()).then_some(TreeEntrySpan {
+        mode,
+        name: name_start..name_end,
+        end,
+    })
 }
 
 /// Parse a tree entry's octal mode, accepting exactly what `u32::from_str_radix(_, 8)` does.
@@ -2469,6 +2524,68 @@ mod commit_parse_tests {
         assert_eq!(found.oid, oid);
         assert_eq!(found.mode, 0o100644);
         Ok(())
+    }
+
+    #[test]
+    fn tree_entry_span_matches_tree_ref_iter_and_defers_malformed_entries() {
+        let mut data = Vec::new();
+        for (mode, name) in [
+            (&b"100644"[..], &b"a.txt"[..]),
+            (b"40000", b"dir"),
+            (b"+644", b"odd"),
+        ] {
+            data.extend_from_slice(mode);
+            data.push(b' ');
+            data.extend_from_slice(name);
+            data.push(0);
+            data.extend_from_slice(&[name[0]; 20]);
+        }
+        let mut iter = TreeRefIter::with_oid_len(&data, 20);
+        let mut pos = 0;
+        while let Some(entry) = iter.next() {
+            let entry = entry.unwrap();
+            let span = tree_entry_span(&data, pos, 20).expect("well-formed entry");
+            assert_eq!(span.mode, entry.mode);
+            assert_eq!(&data[span.name], entry.name);
+            assert_eq!(span.end, iter.position());
+            assert_eq!(&data[span.end - 20..span.end], entry.oid.as_bytes());
+            assert_eq!(
+                TreeRefIter::with_oid_len_at(&data, 20, pos)
+                    .next()
+                    .unwrap()
+                    .unwrap(),
+                entry
+            );
+            pos = iter.position();
+        }
+        assert_eq!(pos, data.len());
+        assert!(tree_entry_span(&data, pos, 20).is_none());
+        let (first, second) = (6 + 1 + 5 + 1 + 20, 5 + 1 + 3 + 1 + 20);
+        // A truncated id, a bad mode, a missing NUL and a non-digest id width.
+        assert!(tree_entry_span(&data[..first + second - 1], first, 20).is_none());
+        assert!(tree_entry_span(b"10064x f\0aaaaaaaaaaaaaaaaaaaa", 0, 20).is_none());
+        assert!(tree_entry_span(b"100644 f", 0, 20).is_none());
+        assert!(tree_entry_span(&data, 0, 19).is_none());
+        for bad in [
+            &data[..first + second - 1],
+            b"10064x f\0aaaaaaaaaaaaaaaaaaaa",
+        ] {
+            assert!(TreeRefIter::with_oid_len(bad, 20).any(|entry| entry.is_err()));
+        }
+    }
+
+    #[test]
+    fn object_id_from_bytes_accepts_only_digest_lengths() {
+        let sha1 = ObjectId::from_bytes(&[0xab; 20]).unwrap();
+        assert_eq!(sha1.as_bytes(), &[0xab; 20]);
+        assert_eq!(sha1.algo(), HashAlgo::Sha1);
+        let sha256 = ObjectId::from_bytes(&[0xcd; 32]).unwrap();
+        assert_eq!(sha256.as_bytes(), &[0xcd; 32]);
+        assert_eq!(sha256.algo(), HashAlgo::Sha256);
+        assert!(matches!(
+            ObjectId::from_bytes(&[1; 19]),
+            Err(Error::InvalidObjectId(hex)) if hex == "01".repeat(19)
+        ));
     }
 
     #[test]
