@@ -21,6 +21,7 @@ pub struct HotPathTestMetrics {
     blob_read_threads: Mutex<HashSet<ThreadId>>,
     pack_signature_stats: AtomicUsize,
     midx_stamp_stats: AtomicUsize,
+    pack_dir_stats: AtomicUsize,
     loose_path_open_attempts: AtomicUsize,
     loose_objects_root_metadata: AtomicUsize,
     loose_fanout_metadata: AtomicUsize,
@@ -165,6 +166,10 @@ impl HotPathTestMetrics {
         self.midx_stamp_stats.store(0, Ordering::SeqCst);
     }
 
+    pub fn reset_pack_dir_stats(&self) {
+        self.pack_dir_stats.store(0, Ordering::SeqCst);
+    }
+
     /// Clear loose-object `open` attempt count.
     pub fn reset_loose_path_open_attempts(&self) {
         self.loose_path_open_attempts.store(0, Ordering::SeqCst);
@@ -293,6 +298,18 @@ impl HotPathTestMetrics {
         }
     }
 
+    /// `stat` calls on a `pack/` directory to check whether its listing changed.
+    #[must_use]
+    pub fn pack_dir_stat_calls(&self) -> usize {
+        self.pack_dir_stats.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_pack_dir_stat(&self) {
+        if self.stamp_counting.load(Ordering::Relaxed) {
+            self.pack_dir_stats.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     pub(crate) fn record_midx_stamp_stat(&self) {
         if self.stamp_counting.load(Ordering::Relaxed) {
             self.midx_stamp_stats.fetch_add(1, Ordering::Relaxed);
@@ -334,6 +351,14 @@ pub(crate) fn record_midx_stamp_stat_for_active_scope() {
     with_active(|active| {
         if let Some(m) = active {
             m.record_midx_stamp_stat();
+        }
+    });
+}
+
+pub(crate) fn record_pack_dir_stat_for_active_scope() {
+    with_active(|active| {
+        if let Some(m) = active {
+            m.record_pack_dir_stat();
         }
     });
 }

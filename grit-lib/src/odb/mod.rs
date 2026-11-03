@@ -6152,6 +6152,55 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
+    fn packed_reads_after_first_pack_load_do_not_stat_pack_dir() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+        use crate::pack::{clear_pack_cache, pack_cache_test_guard};
+
+        let _guard = pack_cache_test_guard();
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        for i in 0..32 {
+            fs::write(dir.path().join("f.txt"), format!("body {i}")).unwrap();
+            git_in(dir.path(), &["add", "f.txt"]);
+            git_in(dir.path(), &["commit", "-q", "-m", &format!("c{i}")]);
+        }
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let objects = dir.path().join(".git/objects");
+        let commits: Vec<ObjectId> = (0..32)
+            .map(|n| git_rev_parse_oid(dir.path(), &format!("HEAD~{n}")))
+            .collect();
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        let _scope = HotPathMetricsScope::install(odb.hot_path_metrics_arc());
+        odb.with_pack_read_context(|| {
+            // The first read lists the pack directory and maps the pack for the first time.
+            let first = odb.read(&commits[0]).expect("first packed read");
+            assert_eq!(first.kind, ObjectKind::Commit);
+
+            odb.hot_path_metrics().reset_pack_dir_stats();
+            odb.hot_path_metrics().set_stamp_counting(true);
+            for oid in &commits[1..] {
+                let obj = odb.read(oid).expect("packed read");
+                assert_eq!(obj.kind, ObjectKind::Commit);
+                odb.read_info(oid).expect("packed read_info");
+            }
+            odb.hot_path_metrics().set_stamp_counting(false);
+        });
+        assert_eq!(
+            odb.hot_path_metrics().pack_dir_stat_calls(),
+            0,
+            "loading a pack for the first time must keep the trusted pack listing"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
     fn alternate_packed_reads_do_not_rescan_local_pack_dir() {
         use crate::hot_path_test_metrics::HotPathMetricsScope;
         use crate::pack::{clear_pack_cache, pack_cache};

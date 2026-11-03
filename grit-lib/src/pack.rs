@@ -1267,6 +1267,8 @@ pub(crate) mod pack_cache {
 
     fn dir_mtime(path: &Path) -> SystemTime {
         #[cfg(test)]
+        crate::hot_path_test_metrics::record_pack_dir_stat_for_active_scope();
+        #[cfg(test)]
         {
             if let Some(store) = alternate_read_store() {
                 if path.starts_with(store.objects_dir()) {
@@ -1838,8 +1840,15 @@ pub(crate) mod pack_cache {
         mtime: SystemTime,
         size: u64,
     ) -> Result<Arc<PackData>> {
-        invalidate_thread_local_for_pack_path_change(pack_path);
         let store = crate::pack_store::PackStore::active_for_reads();
+        // A first load replaces nothing, so the thread's trusted pack listing and the
+        // parsed index stay valid; dropping them would make every later object read
+        // re-stat the pack directory.
+        let replaces_cached = store.with_catalog_read(|g| g.by_pack.contains_key(pack_path))
+            || PACK_BYTES.with(|cell| cell.borrow().contains_key(pack_path));
+        if replaces_cached {
+            invalidate_thread_local_for_pack_path_change(pack_path);
+        }
         let bytes = if store.bounded_reads() {
             PackData::open_random_access(pack_path)?
         } else {
@@ -1847,8 +1856,10 @@ pub(crate) mod pack_cache {
         };
         store.with_catalog(|g| {
             drop_delta_entries_locked(g, pack_path, store.delta_bases());
-            g.by_idx.remove(&pack_path.with_extension("idx"));
-            g.validated_pack_counts.remove(pack_path);
+            if replaces_cached {
+                g.by_idx.remove(&pack_path.with_extension("idx"));
+                g.validated_pack_counts.remove(pack_path);
+            }
             if store.bounded_reads() {
                 g.retain_bounded_pack(pack_path);
             }
