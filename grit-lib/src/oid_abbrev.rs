@@ -163,14 +163,24 @@ pub(crate) fn abbreviate_object_id_known(
 fn non_promisor_pack_count(repo: &Repository) -> Result<usize> {
     Ok(repo
         .odb()
-        .local_pack_indexes()?
+        .pack_indexes_for_display()?
         .iter()
         .filter(|idx| !idx.is_promisor)
         .count())
 }
 
 fn needs_whole_odb_disambiguation(repo: &Repository) -> Result<bool> {
-    Ok(non_promisor_pack_count(repo)? > 1 || repo.odb().has_secondary_object_stores())
+    let odb = repo.odb();
+    if non_promisor_pack_count(repo)? > 1 {
+        return Ok(true);
+    }
+    if odb.has_secondary_object_stores() {
+        // Borrow-only shared clones keep an empty primary and a single alternate pack;
+        // pack-index neighbors are enough and prefix scans would hit every alternate.
+        let local = odb.local_pack_indexes()?;
+        return Ok(!local.is_empty());
+    }
+    Ok(false)
 }
 
 fn disambiguation_len_from_packs(
@@ -181,7 +191,7 @@ fn disambiguation_len_from_packs(
 ) -> Result<Option<usize>> {
     let odb = repo.odb();
     let mut len = min_len;
-    let indexes = odb.local_pack_indexes()?;
+    let indexes = odb.pack_indexes_for_display()?;
     if indexes.is_empty() {
         return Ok(None);
     }

@@ -1892,6 +1892,30 @@ impl Odb {
         self.with_primary_read_context(|| pack::read_local_pack_indexes_cached(&self.objects_dir))
     }
 
+    /// Pack indexes for collision-aware abbreviation (`log --oneline`, status rows).
+    ///
+    /// Empty-primary shared clones store objects only under alternates; abbreviation must
+    /// consult those pack indexes instead of returning early and falling back to prefix scans.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack directory listing and index parse failures.
+    pub(crate) fn pack_indexes_for_display(&self) -> Result<Vec<Arc<pack::PackIndex>>> {
+        let local = self.local_pack_indexes()?;
+        if !local.is_empty() || !self.alternate_object_lookup_needed() {
+            return Ok(local);
+        }
+        let alts = self.file_alternate_dirs_snapshot();
+        let Some(alt) = alts.first() else {
+            return Ok(local);
+        };
+        let dir = alt.as_path();
+        if crate::pack_store::PackStore::read_context_matches_objects_dir(dir) {
+            return pack::read_local_pack_indexes_cached(dir);
+        }
+        self.with_objects_dir_pack_read_access(dir, || pack::read_local_pack_indexes_cached(dir))
+    }
+
     /// Whether `oid` is stored in a non-promisor pack under any alternate object directory.
     ///
     /// Loose objects in alternates do not count (Git `has_object_pack` / `prune-packed`).
@@ -2306,13 +2330,31 @@ impl Odb {
         }
     }
 
+    /// Pack store whose read context batch walks should install.
+    ///
+    /// Shared clones with a verified-empty primary borrow objects from the first file
+    /// alternate; reading through the overlay on an empty primary store is slower than
+    /// using that alternate as the active context for the walk.
+    fn pack_read_context_store(&self) -> std::sync::Arc<crate::pack_store::PackStore> {
+        if self.skip_primary_for_alternate_backed_reads() {
+            if let Some(alt) = self.file_alternate_dirs_snapshot().first() {
+                return self.pack_store_for(alt);
+            }
+        }
+        self.pack_store_for(&self.objects_dir)
+    }
+
     /// Run `f` with pack read caches for this database's primary `objects/` directory.
     ///
     /// Use for batch workloads (for example `cat-file --batch`) so each object read does not
     /// reinstall thread-local pack context.
     pub fn with_pack_read_context<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.with_pack_store_for(&self.objects_dir, || {
-            self.pin_shared_alternate_pack_store_if_needed();
+        let store = self.pack_read_context_store();
+        let on_primary = store.objects_dir() == self.objects_dir.as_path();
+        crate::pack_store::PackStore::with_context(store, || {
+            if on_primary {
+                self.pin_shared_alternate_pack_store_if_needed();
+            }
             f()
         })
     }
@@ -2332,7 +2374,13 @@ impl Odb {
     /// Install the pack read context of [`Self::with_pack_read_context`] on the current
     /// thread until the returned guard drops (for long-lived worker threads).
     pub(crate) fn pack_read_context_guard(&self) -> crate::pack_store::PackReadContextGuard {
-        crate::pack_store::PackReadContextGuard::install(self.pack_store_for(&self.objects_dir))
+        let store = self.pack_read_context_store();
+        let on_primary = store.objects_dir() == self.objects_dir.as_path();
+        let guard = crate::pack_store::PackReadContextGuard::install(store);
+        if on_primary {
+            self.pin_shared_alternate_pack_store_if_needed();
+        }
+        guard
     }
 
     /// Open a reader over the single local pack for a long object walk.

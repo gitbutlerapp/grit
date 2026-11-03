@@ -79,6 +79,17 @@ impl Odb {
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit_through_subject(&self, oid: &ObjectId) -> Result<Vec<u8>> {
         if self.custom_primary.is_none() {
+            if crate::pack_store::PackStore::has_context() {
+                let active = crate::pack_store::PackStore::active_for_reads();
+                let active_dir = active.objects_dir();
+                if active_dir != self.objects_dir.as_path() {
+                    if let Some(data) =
+                        self.try_read_commit_through_subject_in_dir(active_dir, oid)?
+                    {
+                        return Ok(data);
+                    }
+                }
+            }
             let primary_empty = crate::pack::pack_cache::primary_has_verified_empty_listing(
                 self.objects_dir.as_path(),
             );

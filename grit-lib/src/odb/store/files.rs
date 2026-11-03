@@ -476,12 +476,9 @@ impl FilesSource {
         oids: &[ObjectId],
         found: impl FnMut(usize, &[u8]),
     ) -> Result<()> {
-        let read = || pack::read_packed_commit_header_blocks(&self.objects_dir, oids, found);
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            read()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), read)
-        }
+        self.with_pack_access(|| {
+            pack::read_packed_commit_header_blocks(&self.objects_dir, oids, found)
+        })
     }
 }
 

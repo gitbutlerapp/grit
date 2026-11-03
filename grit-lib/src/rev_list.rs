@@ -6254,6 +6254,10 @@ impl Iterator for CommitStream<'_> {
             }
             self.emitted += 1;
             let commit_bytes = if self.retain_commit_bytes {
+                if let Err(err) = self.graph.ensure_unreleased_commit_bytes(oid) {
+                    self.errored = Some(err);
+                    return None;
+                }
                 self.graph
                     .unreleased_bytes
                     .as_mut()
@@ -7743,6 +7747,25 @@ impl<'r> CommitGraph<'r> {
     }
 
     /// Read commit `oid` for traversal and keep its bytes until it is released.
+    /// When [`Self::keep_unreleased_commit_bytes`] is active, ensure `oid`'s bytes are cached.
+    ///
+    /// Commit-graph parent loading can populate a commit without reading its object; listing
+    /// walks still need the payload once for output reuse.
+    fn ensure_unreleased_commit_bytes(&mut self, oid: ObjectId) -> Result<()> {
+        if self.unreleased_bytes.is_none() {
+            return Ok(());
+        }
+        if self
+            .unreleased_bytes
+            .as_ref()
+            .is_some_and(|m| m.contains_key(&oid))
+        {
+            return Ok(());
+        }
+        let _ = self.read_and_keep_commit_bytes(oid)?;
+        Ok(())
+    }
+
     fn read_and_keep_commit_bytes(&mut self, oid: ObjectId) -> Result<&[u8]> {
         let repo = self.repo;
         let extent = self.unreleased_extent;
