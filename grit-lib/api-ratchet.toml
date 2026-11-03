@@ -1,0 +1,17 @@
+# grit-lib public API quality counts — ratchet baseline
+# Regenerate with: make api-ratchet
+
+[meta]
+updated = "2026-11-03"
+
+[counts]
+public_api_lines = 32609
+pub_fn_with_in_name = 157
+pub_fn_too_many_arguments_allow = 34
+pub_fn_two_plus_bare_bool = 31
+pub_fn_result_string_err = 14
+pub_free_fn_repository_first = 468
+pub_free_fn_git_dir_path_first = 153
+pub_items_multiple_paths = 93
+pub_libc_types = 2
+pub_unsafe_fn = 2

@@ -33,6 +33,13 @@ run_stage "fmt" cargo fmt --all --check
 run_stage "clippy" cargo clippy --workspace -- -D warnings
 run_stage "rustdoc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 run_stage "public module doctests" cargo test -p grit-lib --test public_module_doctests
+PUBLIC_API_NIGHTLY_DATE="$(grep 'PUBLIC_API_NIGHTLY_DATE=' scripts/public-api.sh | cut -d'"' -f2)"
+if rustup toolchain list | grep -q "^nightly-${PUBLIC_API_NIGHTLY_DATE}"; then
+	run_stage "api-ratchet" make api-ratchet-check
+else
+	echo ""
+	echo "==> api-ratchet skipped (pinned nightly-${PUBLIC_API_NIGHTLY_DATE} not installed)"
+fi
 if cargo nextest --version >/dev/null 2>&1; then
 	run_stage "test" cargo nextest run --workspace
 	run_stage "doctests" cargo test --workspace --doc
