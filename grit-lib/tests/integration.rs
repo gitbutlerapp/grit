@@ -1364,6 +1364,8 @@ mod promisor_remote_handshake;
 mod promisor_remote_local;
 #[path = "pruned_modules.rs"]
 mod pruned_modules;
+#[path = "public_api_test_items.rs"]
+mod public_api_test_items;
 #[path = "published_crates_declare_rust_version.rs"]
 mod published_crates_declare_rust_version;
 #[cfg(feature = "full-tests")]

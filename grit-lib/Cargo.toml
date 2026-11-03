@@ -381,10 +381,6 @@ name = "public_module_doctests"
 path = "tests/public_module_doctests.rs"
 
 [[test]]
-name = "public_api_test_items"
-path = "tests/public_api_test_items.rs"
-
-[[test]]
 name = "ref_storage_format"
 path = "tests/ref_storage_format.rs"
 

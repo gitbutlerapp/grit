@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_API_SCRIPT = Path(__file__).resolve().parent / "public-api.sh"
 SNAPSHOT_PATH = ROOT / "grit-lib" / "public-api.txt"
 ALLOWLIST_PATH = ROOT / "grit-lib" / "public-api-test-items.allow"
+HIDDEN_OFFENDERS_PATH = ROOT / "grit-lib" / "public-api-test-items.hidden-offenders"
 DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
 
 TEST_ITEM_FORBIDDEN_WORDS = frozenset(
@@ -107,7 +108,7 @@ def item_paths_from_snapshot_line(line: str) -> list[str]:
     if not line:
         return []
     paths: list[str] = []
-    for match in re.finditer(r"grit_lib::[^\s(,>-]+", line):
+    for match in re.finditer(r"grit_lib::[^\s(,)>-]+", line):
         paths.append(normalize_grit_lib_path(match.group(0)))
     return paths
 
@@ -193,13 +194,15 @@ def ensure_rustdoc_json_with_hidden_items(*, nightly: str, output: Path) -> None
 def check_test_items_allowlist() -> tuple[bool, str]:
     """Verify allowlist matches snapshot + hidden rustdoc offenders; list is shrink-only."""
     snapshot_text = SNAPSHOT_PATH.read_text(encoding="utf-8")
-    offenders = offending_paths_from_snapshot_text(snapshot_text)
+    snapshot_offenders = offending_paths_from_snapshot_text(snapshot_text)
     pins = parse_pins()
     ensure_rustdoc_json_with_hidden_items(
         nightly=pins["nightly_date"],
         output=DEFAULT_RUSTDOC_JSON,
     )
+    offenders = set(snapshot_offenders)
     offenders |= offending_paths_from_rustdoc_json(DEFAULT_RUSTDOC_JSON)
+    hidden_expected = sorted(offenders - snapshot_offenders)
 
     allow_raw = ALLOWLIST_PATH.read_text(encoding="utf-8")
     allow = {
@@ -215,6 +218,21 @@ def check_test_items_allowlist() -> tuple[bool, str]:
     ]
     if file_lines != allow_sorted:
         return False, "public-api-test-items.allow must be sorted (one path per line)"
+
+    if HIDDEN_OFFENDERS_PATH.is_file():
+        hidden_file = [
+            line.strip()
+            for line in HIDDEN_OFFENDERS_PATH.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if hidden_file != hidden_expected:
+            return (
+                False,
+                "public-api-test-items.hidden-offenders is out of date "
+                "(regenerate from allowlist minus snapshot offenders)",
+            )
+    elif hidden_expected:
+        return False, "missing grit-lib/public-api-test-items.hidden-offenders"
 
     missing = sorted(offenders - allow)
     stale = sorted(allow - offenders)

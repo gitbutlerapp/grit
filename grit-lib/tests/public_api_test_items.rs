@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 const SNAPSHOT: &str = include_str!("../public-api.txt");
 const ALLOWLIST: &str = include_str!("../public-api-test-items.allow");
+const HIDDEN_OFFENDERS: &str = include_str!("../public-api-test-items.hidden-offenders");
 
 const FORBIDDEN: &[&str] = &[
     "test", "tests", "probe", "probes", "fixture", "fixtures", "bench", "benches",
@@ -95,7 +96,7 @@ fn offending_paths_from_snapshot(text: &str) -> BTreeSet<String> {
     out
 }
 
-fn parse_allowlist(text: &str) -> BTreeSet<String> {
+fn parse_path_lines(text: &str) -> BTreeSet<String> {
     text.lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
@@ -103,16 +104,20 @@ fn parse_allowlist(text: &str) -> BTreeSet<String> {
         .collect()
 }
 
-fn appears_in_snapshot(path: &str) -> bool {
-    offending_paths_from_snapshot(SNAPSHOT).contains(path)
+fn all_offenders(snapshot_offenders: &BTreeSet<String>) -> BTreeSet<String> {
+    snapshot_offenders
+        .union(&parse_path_lines(HIDDEN_OFFENDERS))
+        .cloned()
+        .collect()
 }
 
 #[test]
 fn public_api_test_items_ratchet() {
     let snapshot_offenders = offending_paths_from_snapshot(SNAPSHOT);
-    let allow = parse_allowlist(ALLOWLIST);
+    let offenders = all_offenders(&snapshot_offenders);
+    let allow = parse_path_lines(ALLOWLIST);
 
-    let missing: Vec<_> = snapshot_offenders.difference(&allow).collect();
+    let missing: Vec<_> = offenders.difference(&allow).collect();
     assert!(
         missing.is_empty(),
         "public API test-like paths missing from public-api-test-items.allow (remove hooks or \
@@ -124,14 +129,10 @@ fn public_api_test_items_ratchet() {
             .join("\n")
     );
 
-    let stale: Vec<_> = allow
-        .iter()
-        .filter(|path| appears_in_snapshot(path) && !snapshot_offenders.contains(*path))
-        .collect();
+    let stale: Vec<_> = allow.difference(&offenders).collect();
     assert!(
         stale.is_empty(),
-        "stale allowlist entries for paths still listed in public-api.txt (drop the hook or \
-         remove the allowlist line):\n{}",
+        "stale allowlist entries (hook removed from the API listing; drop the allowlist line):\n{}",
         stale
             .iter()
             .map(|p| format!("  {p}"))

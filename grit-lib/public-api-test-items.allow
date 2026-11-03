@@ -117,7 +117,6 @@ grit_lib::objects::bench_fixture::synth::SynthReport::ref_count
 grit_lib::objects::bench_fixture::synth::SynthReport::repo_path
 grit_lib::objects::bench_fixture::synth::SynthReport::tier
 grit_lib::objects::bench_fixture::synth::SynthTier
-grit_lib::objects::bench_fixture::synth::SynthTier)
 grit_lib::objects::bench_fixture::synth::SynthTier::L
 grit_lib::objects::bench_fixture::synth::SynthTier::M
 grit_lib::objects::bench_fixture::synth::SynthTier::S
@@ -126,7 +125,6 @@ grit_lib::objects::bench_fixture::synth::SynthTier::eq
 grit_lib::objects::bench_fixture::synth::SynthTier::fmt
 grit_lib::objects::bench_fixture::synth::SynthTier::spec
 grit_lib::objects::bench_fixture::synth::TierSpec
-grit_lib::objects::bench_fixture::synth::TierSpec)
 grit_lib::objects::bench_fixture::synth::TierSpec::blob_body_bytes
 grit_lib::objects::bench_fixture::synth::TierSpec::clone
 grit_lib::objects::bench_fixture::synth::TierSpec::commit_count
