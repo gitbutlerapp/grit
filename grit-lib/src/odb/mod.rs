@@ -1916,6 +1916,35 @@ impl Odb {
         self.with_objects_dir_pack_read_access(dir, || pack::read_local_pack_indexes_cached(dir))
     }
 
+    /// Whether any configured alternate object directory currently holds loose objects.
+    ///
+    /// Abbreviation can use pack-index neighbors alone only when every store that could
+    /// collide is pack-only (borrow-only shared clones with no alternate loose).
+    #[must_use]
+    pub(crate) fn alternates_may_hold_loose_objects(&self) -> bool {
+        if !self.alternates_enabled {
+            return false;
+        }
+        for alt_dir in self.file_alternate_dirs_snapshot().iter() {
+            if pack::objects_dir_has_loose_objects(alt_dir) {
+                return true;
+            }
+        }
+        for alt_dir in self.env_alternate_dirs_snapshot().iter() {
+            if pack::objects_dir_has_loose_objects(alt_dir) {
+                return true;
+            }
+        }
+        if let Ok(guard) = self.submodule_alternate_dirs.lock() {
+            for alt_dir in guard.iter() {
+                if pack::objects_dir_has_loose_objects(alt_dir) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Whether `oid` is stored in a non-promisor pack under any alternate object directory.
     ///
     /// Loose objects in alternates do not count (Git `has_object_pack` / `prune-packed`).

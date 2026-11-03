@@ -179,6 +179,9 @@ pub(crate) mod pack_cache {
         static ALTERNATE_PACK_READ_STORE: std::cell::RefCell<
             Option<std::sync::Arc<crate::pack_store::PackStore>>,
         > = const { std::cell::RefCell::new(None) };
+        /// Cached per-thread: primary `objects/` has a trusted verified-empty pack listing.
+        static PRIMARY_EMPTY: std::cell::Cell<Option<bool>> =
+            const { std::cell::Cell::new(None) };
     }
 
     struct AlternatePackReadStoreGuard {
@@ -262,10 +265,6 @@ pub(crate) mod pack_cache {
     pub(crate) fn primary_has_verified_empty_listing(objects_dir: &Path) -> bool {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
             return false;
-        }
-        thread_local! {
-            static PRIMARY_EMPTY: std::cell::Cell<Option<bool>> =
-                const { std::cell::Cell::new(None) };
         }
         PRIMARY_EMPTY.with(|cell| {
             if let Some(hit) = cell.get() {
@@ -4957,7 +4956,7 @@ pub struct SingleLocalPackReader {
     commit_header_buf: Vec<u8>,
 }
 
-fn objects_dir_has_loose_objects(objects_dir: &Path) -> bool {
+pub(crate) fn objects_dir_has_loose_objects(objects_dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(objects_dir) else {
         return false;
     };
