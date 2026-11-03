@@ -97,6 +97,45 @@ The rows under 5 ms moved within noise (±0.1 ms between rounds).
   --min-runs 10 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-revs-count-6954-after.json
 ```
 
+## Bundling every ref without a bitmap (2026-11-03)
+
+`bundle/create-all@git-git` runs `grit bundle create <file> --all` on a fully packed git.git clone that has no reachability bitmap and no commit-graph, so every object has to be found by walking history. The daily census had grit at 7.8 s against Git's 4.4 s. Most of that cost was in the object walk and delta planning that bundles share with fetch serving, push and repack, so this change made that shared path faster:
+
+- **No needless commit walks.** `--all` with no exclusions has no boundary commits, but grit still ran a full `rev-list --boundary` over all 75,000 commits before building the pack. The have-side pre-walk that bounds a push also read every commit when there were no haves at all, only to return nothing. Both are now skipped.
+- **Cheaper tree entries.** The object walk now carries each directory's pack name hash instead of building a path string for every subtree and new blob. It skips tree entries it has already visited, reads trees without a separate kind lookup, and parses entry modes without UTF-8 validation.
+- **Parallel tree reads.** One pack reader is held for the whole walk instead of being reopened per object, and objects are no longer copied into the session read cache. Worker threads (`pack.threads` minus the walk's own) inflate the next runs of queued trees while the walk parses the current ones. Results are consumed in queue order, so the bundle is byte-for-byte the same as with one thread.
+- **Linear delta planning.** Capping delta chains at `pack.depth` used to walk the whole chain from every tip. It now visits each object once, and a randomized test checks it against the old walk. Reusable on-disk deltas are scanned in pack order, which takes each entry's end and CRC from the offset table instead of searching for them.
+
+The object walk took about 6 s of the base's 9.2 s and now takes 2.8 s. Delta planning takes 1.0 s instead of 1.4 s. Peak live heap drops from about 300 MB to 200 MB. Peak RSS is unchanged at about 720 MB against Git's 530 MB. That memory is the mapped pack (about 260 MB) plus allocator retention: with `pack.threads=1`, both builds still peak at 660 to 690 MB.
+
+Rows from one `grit-bench daily` sitting on two `release` builds (base `aa19aba66`, after `05349d540`), against the system `git` 2.43.0 on a four-vCPU Intel Xeon VM. Times are medians of 5 runs after one warm-up. Values are **milliseconds / MB**. Reports: `daily-bundle-create-all-6895-before.json` → `daily-bundle-create-all-6895-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | after vs git |
+| --- | ---: | ---: | ---: | ---: |
+| `bundle/create-all@git-git` | 4387.9 / 529 | 9152.4 / 719 | **3929.5** / 724 | 0.90 |
+| `bundle/create@synth-10k` | 255.9 / 44 | 279.1 / 55 | **131.4** / 58 | 0.51 |
+| `bundle/verify@synth-10k` | 1.4 / 7 | 2.7 / 9 | 2.6 / 9 | 1.88 |
+| `repack/full@git-git` | 4509.5 / 475 | 6650.1 / 565 | **3871.2** / 573 | 0.86 |
+| `gc/default@synth-10k` | 335.2 / 49 | 288.2 / 55 | **142.4** / 58 | 0.42 |
+| `clone/full@git-git` | 14775.2 / 120 | 8075.3 / 156 | 7914.3 / 157 | 0.54 |
+| `clone/blobless@git-git` | 8715.0 / 75 | 7377.3 / 71 | 7306.2 / 71 | 0.84 |
+| `clone/shallow@git-git` | 1602.6 / 40 | 1631.5 / 55 | 1631.7 / 57 | 1.02 |
+| `clone/bare@synth-10k` | 827.5 / 37 | 701.4 / 29 | 694.1 / 29 | 0.84 |
+| `clone/local@synth-10k` | 974.0 / 37 | 858.7 / 32 | 860.1 / 33 | 0.88 |
+| `clone/http@synth-10k` | 598.8 / 37 | 469.7 / 33 | 460.8 / 34 | 0.77 |
+| `fetch/incremental@git-git` | 103.8 / 71 | 57.7 / 49 | 56.4 / 50 | 0.54 |
+| `fetch/deepen@git-git` | 692.9 / 272 | 175.8 / 58 | 180.6 / 59 | 0.26 |
+| `push/incremental@git-git` | 2157.5 / 322 | 1754.1 / 91 | 1730.7 / 91 | 0.80 |
+| `push/refspec@git-git` | 1072.9 / 101 | 1176.2 / 78 | 1172.9 / 78 | 1.09 |
+
+The bundle, repack and gc rows gain from the shared path. The other rows move within noise, because their time goes elsewhere (receiving, indexing and checking out the pack) or they send few objects.
+
+```bash
+S=bundle/create-all@git-git,bundle/create@synth-10k,bundle/verify@synth-10k,clone/bare@synth-10k,clone/local@synth-10k,clone/http@synth-10k,clone/full@git-git,clone/blobless@git-git,clone/shallow@git-git,fetch/incremental@git-git,fetch/deepen@git-git,push/incremental@git-git,push/refspec@git-git,repack/full@git-git,gc/default@synth-10k
+./target/release/grit-bench daily --only "$S" --grit ./target/release/grit --http-server ./target/release/grit-http-server \
+  --warmup 1 --min-runs 5 --output grit-utils/baselines/daily-bundle-create-all-6895-after.json
+```
+
 ## Pick, revert and merge join the hot text layout (2026-11-02)
 
 `pick/one@synth-10k` cherry-picks a topic commit that rewrites 2,000 of 10,000 files onto `main`. Grit already took under half Git's time, but peaked at 18.8 MB on a `dist` build and 22.3 MB on `release`, against Git's 9.4 MB. Little of that was data: the heap peaks at 4.7 MB. On `release`, 12.5 MB of the binary was still resident when `grit pick` exited (8.6 MB on `dist`).
