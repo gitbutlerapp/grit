@@ -5703,8 +5703,8 @@ fn try_filtered_count_only(
 ///
 /// Counting needs only each commit's parent list. A commit-graph that lists a commit supplies
 /// it without a read (the graph count declines as soon as one tip is newer than the graph);
-/// commits the single local pack stores whole inflate just their leading headers, and anything
-/// else is read whole. Replacement refs rewrite commits behind the object ids this walk reads,
+/// commits the single local pack stores whole inflate into one reused buffer with their zlib
+/// checksum verified, and anything else is read through the object database. Replacement refs rewrite commits behind the object ids this walk reads,
 /// so their presence defers to the full walk.
 fn try_unfiltered_count_only(
     repo: &Repository,

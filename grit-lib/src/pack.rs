@@ -4626,6 +4626,10 @@ thread_local! {
 /// Max uncompressed bytes to inflate when only commit headers (e.g. author) are needed.
 pub(crate) const COMMIT_HEADER_READ_PREFIX: usize = 512;
 
+/// Largest declared commit size [`SingleLocalPackReader::read_commit_parents`] inflates into
+/// its reused buffer; bigger (or corrupt, huge) sizes take the ordinary object read.
+const COMMIT_PARENTS_WHOLE_READ_MAX: u64 = 1 << 20;
+
 /// Compressed bytes per inflate step when reading a commit only through its subject line.
 ///
 /// Commit text inflates to roughly three times this, so the step is small enough that most of
@@ -5547,14 +5551,13 @@ impl SingleLocalPackReader {
         Ok(inflated.is_ok().then_some(out))
     }
 
-    /// Parents of commit `oid`, inflating only the start of its entry when this pack stores
-    /// the commit whole.
+    /// Parents of commit `oid` when this pack stores the commit whole.
     ///
-    /// Only enough bytes for the `tree` line, two `parent` lines and the first byte of the
-    /// next header are inflated, and they are only trusted when they provably hold the
-    /// complete parent list (see
-    /// [`crate::objects::parse_commit_tree_and_parents_prefix`]), so the result matches a
-    /// parse of the whole object.
+    /// The entry is inflated in full into a buffer the reader reuses, so its declared size and
+    /// zlib checksum are verified exactly as for an ordinary read, and only the `tree` and
+    /// `parent` headers are parsed (see
+    /// [`crate::objects::parse_commit_tree_and_parents_lenient`]). Nothing is allocated per
+    /// commit beyond the returned parents.
     ///
     /// # Parameters
     ///
@@ -5564,9 +5567,9 @@ impl SingleLocalPackReader {
     /// # Returns
     ///
     /// The parents in header order, or `None` when the pack does not hold `oid` as a whole
-    /// commit entry (absent, a delta, or another kind), the entry does not inflate, or the
-    /// parent list runs past the prefix (a merge of more than two parents); read the whole
-    /// object then, which also reports any corruption.
+    /// commit entry (absent, a delta, or another kind), declares more than
+    /// [`COMMIT_PARENTS_WHOLE_READ_MAX`] bytes, does not inflate cleanly, or its headers do
+    /// not parse; read the whole object then, which reports any corruption.
     ///
     /// # Errors
     ///
@@ -5588,22 +5591,25 @@ impl SingleLocalPackReader {
         let Ok((PackedType::Commit, size)) = parse_pack_object_header(pack_bytes, &mut pos) else {
             return Ok(None);
         };
-        let Some(input) = pack_bytes.get(pos..) else {
+        if size > COMMIT_PARENTS_WHOLE_READ_MAX {
             return Ok(None);
-        };
-        // Each prefix byte costs a slow-path inflate step, and merges with more than two
-        // parents are rare enough to read whole.
-        let prefix = "tree \n".len() + hex_len + 2 * ("parent \n".len() + hex_len) + 1;
-        let want = usize::try_from(size).map_or(prefix, |size| size.min(prefix));
-        let inflated = self
+        }
+        let scratch = self
             .delta_scratch
-            .get_or_insert_with(ZlibInflateScratch::default)
-            .decompress_prefix_into(input, want, &mut self.commit_header_buf);
-        if inflated.is_err() {
+            .get_or_insert_with(ZlibInflateScratch::default);
+        if decompress_pack_data_into(
+            pack_bytes,
+            &mut pos,
+            size,
+            scratch,
+            &mut self.commit_header_buf,
+        )
+        .is_err()
+        {
             return Ok(None);
         }
         Ok(
-            crate::objects::parse_commit_tree_and_parents_prefix(&self.commit_header_buf, hex_len)
+            crate::objects::parse_commit_tree_and_parents_lenient(&self.commit_header_buf, hex_len)
                 .map(|(_, parents)| parents),
         )
     }
@@ -7023,7 +7029,7 @@ mod tests {
         ignore = "starts system git or is heavy; run with --features full-tests"
     )]
     #[test]
-    fn read_commit_parents_reads_up_to_two_parents_from_the_entry_prefix() {
+    fn read_commit_parents_reads_whole_commit_entries() {
         let _guard = pack_cache_test_guard();
         clear_pack_cache();
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -7076,8 +7082,7 @@ mod tests {
             );
             assert_eq!(
                 reader.read_commit_parents(&octopus, 40).expect("octopus"),
-                None,
-                "three parents run past the prefix"
+                Some(vec![merge, rev_parse("b"), rev_parse("c")])
             );
             let tree = rev_parse("HEAD^{tree}");
             assert_eq!(reader.read_commit_parents(&tree, 40).expect("tree"), None);
@@ -7086,6 +7091,74 @@ mod tests {
             assert_eq!(
                 reader.read_commit_parents(&absent, 40).expect("absent"),
                 None
+            );
+        });
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn read_commit_parents_rejects_a_bad_zlib_checksum_after_the_headers() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        git(wt, &["init", "-q", "-b", "main"]);
+        fs::write(wt.join("f"), "f").expect("write");
+        git(wt, &["add", "f"]);
+        git(wt, &["commit", "-qm", "only commit"]);
+        git(wt, &["repack", "-q", "-a", "-d", "-f"]);
+        let git_out = |args: &[&str]| {
+            let out = Command::new("git") // hygiene: git fixture comparison in cfg(test) module
+                .current_dir(wt)
+                .args(args)
+                .output()
+                .expect("git");
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        let head = ObjectId::from_hex(git_out(&["rev-parse", "HEAD"]).trim()).expect("oid");
+        let pack_dir = wt.join(".git/objects/pack");
+        let idx_path = fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().is_some_and(|x| x == "idx"))
+            .expect("pack index");
+        let listing = git_out(&["verify-pack", "-v", idx_path.to_str().expect("utf-8")]);
+        let (offset, in_pack) = listing
+            .lines()
+            .find_map(|line| {
+                let f: Vec<&str> = line.split_whitespace().collect();
+                (f.first() == Some(&head.to_hex().as_str())).then(|| {
+                    (
+                        f[4].parse::<usize>().expect("offset"),
+                        f[3].parse::<usize>().expect("size"),
+                    )
+                })
+            })
+            .expect("commit entry");
+        // The last byte of the entry belongs to the zlib stream's adler32 checksum, past every
+        // header a parents-only reader needs.
+        let pack_path = idx_path.with_extension("pack");
+        let mut bytes = fs::read(&pack_path).expect("read pack");
+        bytes[offset + in_pack - 1] ^= 0x01;
+        let mut perms = fs::metadata(&pack_path).expect("stat pack").permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        fs::set_permissions(&pack_path, perms).expect("make pack writable");
+        fs::write(&pack_path, &bytes).expect("write pack");
+
+        let objects = wt.join(".git/objects");
+        let store = crate::pack_store::PackStore::legacy_for_objects_dir(&objects);
+        crate::pack_store::PackStore::with_context(store, || {
+            let mut reader = SingleLocalPackReader::open_allow_loose(&objects)
+                .expect("open")
+                .expect("single pack");
+            assert_eq!(
+                reader.read_commit_parents(&head, 40).expect("lookup"),
+                None,
+                "a corrupt stream must not yield parents"
             );
         });
     }

@@ -1,10 +1,11 @@
 //! Unfiltered commit counts (`RevWalk::count`, `rev_list` with `count`) vs `git rev-list --count`
 //! on repositories without a commit-graph or bitmap.
 //!
-//! Those counts read only each commit's parent list: commits stored whole in the single local
-//! pack inflate just their leading headers, and everything else (deltified, loose, octopus
-//! merges, SHA-256 repositories) is read whole. Grafts, shallow boundaries and replacement refs
-//! must change the count exactly as they change Git's.
+//! Those counts parse only each commit's parent list: commits stored whole in the single local
+//! pack are inflated (and checksum-verified) into a reused buffer, and everything else
+//! (deltified, loose) goes through the object database. Grafts, shallow boundaries and
+//! replacement refs must change the count exactly as they change Git's, and a corrupt commit
+//! entry must fail the count as it fails Git's.
 
 use std::path::{Path, PathBuf};
 
@@ -243,4 +244,68 @@ fn count_follows_replacement_refs_like_git() {
         "the replacement should change the count"
     );
     assert_counts_match_git(&wt, &["HEAD"]);
+}
+
+#[test]
+fn count_fails_like_git_on_a_bad_zlib_checksum_after_the_headers() {
+    let wt = init("corrupt", "sha1");
+    commit(&wt, "f.txt", "f\n", "only commit");
+    git(&wt, &["repack", "-q", "-a", "-d", "-f"]);
+    let head = git(&wt, &["rev-parse", "HEAD"]).trim().to_owned();
+    let pack_dir = wt.join(".git/objects/pack");
+    let idx = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("pack index");
+    let listing = git(
+        &wt,
+        &["verify-pack", "-v", idx.to_str().expect("utf-8 path")],
+    );
+    let (offset, in_pack) = listing
+        .lines()
+        .find_map(|line| {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            (f.first() == Some(&head.as_str())).then(|| {
+                (
+                    f[4].parse::<usize>().expect("offset"),
+                    f[3].parse::<usize>().expect("size in pack"),
+                )
+            })
+        })
+        .expect("commit entry");
+    // The entry's last byte is part of the zlib adler32 checksum, after every commit header.
+    let pack = idx.with_extension("pack");
+    let mut bytes = std::fs::read(&pack).expect("read pack");
+    bytes[offset + in_pack - 1] ^= 0x01;
+    let mut perms = std::fs::metadata(&pack).expect("stat pack").permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&pack, perms).expect("make pack writable");
+    std::fs::write(&pack, &bytes).expect("write pack");
+
+    let git_status = grit_test_support::git_cmd(&["rev-list", "--count", "HEAD"])
+        .in_dir(&wt)
+        .exec();
+    assert!(!git_status.ok(), "git must reject the corrupt commit");
+    let repo = open(&wt);
+    assert!(
+        repo.rev_walk()
+            .count(&["HEAD"], &RevWalkListOptions::default())
+            .is_err(),
+        "RevWalk::count must reject the corrupt commit"
+    );
+    assert!(
+        rev_list(
+            &repo,
+            &["HEAD".to_owned()],
+            &[],
+            &RevListOptions {
+                count: true,
+                ..RevListOptions::default()
+            },
+        )
+        .is_err(),
+        "rev_list count must reject the corrupt commit"
+    );
 }
