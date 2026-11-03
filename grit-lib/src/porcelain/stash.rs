@@ -1045,8 +1045,12 @@ fn remove_stashed_untracked(repo: &Repository, work_tree: &Path, paths: &[String
         if path_in_nested_git_worktree(work_tree, path) {
             continue;
         }
-        let stored = path.trim_end_matches('/');
-        let file_path = crate::repo_relpath::worktree_abs(work_tree, stored);
+        let stored = if stored_path_is_directory_marker(path) {
+            stored_directory_marker_parent(path)
+        } else {
+            path.clone()
+        };
+        let file_path = worktree_abs(work_tree, &stored);
         if file_path.is_dir() {
             if is_nested_git_worktree(&file_path) {
                 continue;
