@@ -5701,10 +5701,11 @@ fn try_filtered_count_only(
 /// Count every commit reachable from `include` when nothing filters, limits, orders or hides
 /// the walk, and neither a bitmap nor the commit-graph answered it.
 ///
-/// Counting needs only each commit's parent list, so commits the single local pack stores
-/// whole inflate just their leading headers; anything else is read whole. Replacement refs
-/// rewrite commits behind the object ids this walk reads, so their presence defers to the
-/// full walk.
+/// Counting needs only each commit's parent list. A commit-graph that lists a commit supplies
+/// it without a read (the graph count declines as soon as one tip is newer than the graph);
+/// commits the single local pack stores whole inflate just their leading headers, and anything
+/// else is read whole. Replacement refs rewrite commits behind the object ids this walk reads,
+/// so their presence defers to the full walk.
 fn try_unfiltered_count_only(
     repo: &Repository,
     include: &[ObjectId],
@@ -5725,6 +5726,11 @@ fn try_unfiltered_count_only(
         .collect();
     let grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
     let hex_len = repo.odb().hash_algo().hex_len();
+    let graph_chain = if options.use_commit_graph {
+        repo.odb().commit_graph_chain()
+    } else {
+        None
+    };
     repo.odb().with_pack_read_context(|| {
         let objects_dir = repo.odb().objects_dir();
         let mut pack = if repo.odb().uses_files_primary()
@@ -5741,14 +5747,21 @@ fn try_unfiltered_count_only(
             if !visited.insert(oid) {
                 continue;
             }
-            let parents = match pack
-                .as_mut()
-                .map(|reader| reader.read_commit_parents(&oid, hex_len))
-                .transpose()?
-                .flatten()
-            {
+            let graph_parents = graph_chain
+                .as_ref()
+                .and_then(|chain| chain.graph_commit(&oid))
+                .map(|(parents, _)| parents);
+            let parents = match graph_parents {
                 Some(parents) => parents,
-                None => whole_commit_parents(repo, oid, hex_len, &mut buf)?,
+                None => match pack
+                    .as_mut()
+                    .map(|reader| reader.read_commit_parents(&oid, hex_len))
+                    .transpose()?
+                    .flatten()
+                {
+                    Some(parents) => parents,
+                    None => whole_commit_parents(repo, oid, hex_len, &mut buf)?,
+                },
             };
             if let Some(grafted) = grafts.get(&oid) {
                 stack.extend(grafted.iter().filter(|p| !visited.contains(*p)));

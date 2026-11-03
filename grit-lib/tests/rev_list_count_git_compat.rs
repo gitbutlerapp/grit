@@ -171,6 +171,26 @@ fn count_matches_git_across_merges_octopus_deltas_and_loose_commits() {
 }
 
 #[test]
+fn count_matches_git_when_commits_postdate_the_commit_graph() {
+    let wt = merge_heavy_repo("stale-graph", "sha1");
+    git(&wt, &["commit-graph", "write", "--reachable"]);
+    for i in 0..3 {
+        commit(
+            &wt,
+            "after-graph.txt",
+            &format!("{i}\n"),
+            &format!("after {i}"),
+        );
+    }
+    git(&wt, &["switch", "-qc", "after-side", "main~5"]);
+    commit(&wt, "after-side.txt", "1\n", "after side");
+    git(&wt, &["switch", "-q", "main"]);
+    git(&wt, &["merge", "-q", "--no-edit", "after-side"]);
+    assert_counts_match_git(&wt, &["HEAD"]);
+    assert_counts_match_git(&wt, &["HEAD~1", "after-side"]);
+}
+
+#[test]
 fn count_matches_git_in_sha256_repository() {
     let wt = merge_heavy_repo("sha256", "sha256");
     assert_no_commit_graph(&wt);
