@@ -86,6 +86,231 @@ class ApiRatchetMetricTests(unittest.TestCase):
         self.assertEqual(snap.metrics["pub_fn_two_plus_bare_bool"].count, 1)
         self.assertEqual(snap.metrics["pub_fn_result_string_err"].count, 1)
 
+    def test_result_string_through_type_alias(self) -> None:
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [1, 2, 3]}},
+                },
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "StrResult",
+                    "visibility": "public",
+                    "inner": {
+                        "type_alias": {
+                            "type": {
+                                "resolved_path": {
+                                    "path": "core::result::Result",
+                                    "args": {
+                                        "angle_bracketed": {
+                                            "args": [
+                                                {"type": {"primitive": "unit"}},
+                                                {"type": {"resolved_path": {"path": "String"}}},
+                                            ]
+                                        }
+                                    },
+                                }
+                            }
+                        }
+                    },
+                },
+                "2": {
+                    "id": 2,
+                    "crate_id": 0,
+                    "name": "OuterAlias",
+                    "visibility": "public",
+                    "inner": {
+                        "type_alias": {
+                            "type": {"resolved_path": {"path": "StrResult", "id": 1}}
+                        }
+                    },
+                },
+                "3": {
+                    "id": 3,
+                    "crate_id": 0,
+                    "name": "via_alias",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {
+                                "inputs": [],
+                                "output": {"resolved_path": {"path": "OuterAlias", "id": 2}},
+                            },
+                            "header": {},
+                        }
+                    },
+                },
+            },
+            "paths": {"0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_fn_result_string_err"].count, 1)
+
+    def test_free_fn_repository_excludes_assoc_and_near_types(self) -> None:
+        repo_ref = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {"resolved_path": {"path": "Repository"}},
+            }
+        }
+        opts_ref = {
+            "borrowed_ref": {
+                "is_mutable": False,
+                "type": {"resolved_path": {"path": "RepositoryOptions"}},
+            }
+        }
+        payload = {
+            "index": {
+                "0": {
+                    "id": 0,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [10, 12, 13]}},
+                },
+                "10": {
+                    "id": 10,
+                    "crate_id": 0,
+                    "visibility": "public",
+                    "inner": {"impl": {"items": [11], "for": {"resolved_path": {"path": "Repository"}}}},
+                },
+                "11": {
+                    "id": 11,
+                    "crate_id": 0,
+                    "name": "assoc_static",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["repo", repo_ref]], "output": None},
+                            "header": {},
+                        }
+                    },
+                },
+                "12": {
+                    "id": 12,
+                    "crate_id": 0,
+                    "name": "free_fn",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["repo", repo_ref]], "output": None},
+                            "header": {},
+                        }
+                    },
+                },
+                "13": {
+                    "id": 13,
+                    "crate_id": 0,
+                    "name": "opts_fn",
+                    "visibility": "public",
+                    "inner": {
+                        "function": {
+                            "sig": {"inputs": [["repo", opts_ref]], "output": None},
+                            "header": {},
+                        }
+                    },
+                },
+            },
+            "paths": {"0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
+        }
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_free_fn_repository_first"].count, 1)
+
+    def test_glob_reexport_multiple_paths(self) -> None:
+        payload = {
+            "index": {
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [2, 4]}},
+                },
+                "2": {
+                    "id": 2,
+                    "name": "inner",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [3]}},
+                },
+                "3": {
+                    "id": 3,
+                    "name": "Exported",
+                    "visibility": "public",
+                    "inner": {"struct": {"kind": "plain"}},
+                },
+                "4": {
+                    "id": 4,
+                    "visibility": "public",
+                    "inner": {
+                        "use": {
+                            "name": "inner",
+                            "id": 2,
+                            "is_glob": True,
+                            "source": "crate::inner",
+                        }
+                    },
+                },
+                "5": {
+                    "id": 5,
+                    "name": "mirror",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [6]}},
+                },
+                "6": {
+                    "id": 6,
+                    "visibility": "public",
+                    "inner": {
+                        "use": {
+                            "name": "Exported",
+                            "id": 3,
+                            "is_glob": False,
+                        }
+                    },
+                },
+            },
+            "paths": {"1": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
+        }
+        payload["index"]["1"]["inner"]["module"]["items"].append(5)
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertGreaterEqual(snap.metrics["pub_items_multiple_paths"].count, 1)
+
+        payload_glob_only = {
+            "index": {
+                "1": {
+                    "id": 1,
+                    "crate_id": 0,
+                    "name": "grit_lib",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [2, 4]}},
+                },
+                "2": {
+                    "id": 2,
+                    "name": "inner",
+                    "visibility": "public",
+                    "inner": {"module": {"items": [3]}},
+                },
+                "3": {
+                    "id": 3,
+                    "name": "Only",
+                    "visibility": "public",
+                    "inner": {"struct": {"kind": "plain"}},
+                },
+                "4": {
+                    "id": 4,
+                    "visibility": "public",
+                    "inner": {"use": {"name": "inner", "id": 2, "is_glob": True}},
+                },
+            },
+            "paths": {"1": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
+        }
+        paths = ar.collect_public_paths(payload_glob_only)
+        self.assertIn("grit_lib::Only", paths.get("3", []))
+
     def test_repository_first_and_git_dir_first(self) -> None:
         payload = _minimal_rustdoc(
             {

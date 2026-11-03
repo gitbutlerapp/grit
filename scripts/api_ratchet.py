@@ -48,6 +48,10 @@ TOO_MANY_ARGS_RE = re.compile(r"allow\s*\(\s*clippy::too_many_arguments\s*\)")
 
 STRING_RUST_TYPES = frozenset({"String", "alloc::string::String"})
 
+REPOSITORY_TYPE_SUFFIX = "::Repository"
+REPOSITORY_TYPE_PLAIN = "Repository"
+PATH_TYPE_PLAIN = "Path"
+
 
 @dataclass
 class MetricResult:
@@ -147,11 +151,61 @@ def _format_generic_args(args: Any) -> str:
     return ""
 
 
-def result_error_type(output: Any) -> str | None:
-    """If ``output`` is ``Result<_, E>``, return the display form of ``E``."""
-    if not isinstance(output, dict):
+def resolve_type_node(
+    type_node: Any,
+    index: dict[str, Any],
+    *,
+    seen_aliases: set[str] | None = None,
+) -> Any:
+    """Follow public type aliases to their underlying type (cycle-safe)."""
+    if seen_aliases is None:
+        seen_aliases = set()
+    if not isinstance(type_node, dict):
+        return type_node
+    if "resolved_path" in type_node:
+        rp = type_node["resolved_path"]
+        alias_id = rp.get("id")
+        if alias_id is not None:
+            sid = str(alias_id)
+            if sid not in seen_aliases:
+                item = index_entry(index, sid)
+                inner = (item or {}).get("inner") or {}
+                if item and item.get("visibility") == "public" and "type_alias" in inner:
+                    seen_aliases.add(sid)
+                    aliased = inner["type_alias"].get("type")
+                    return resolve_type_node(aliased, index, seen_aliases=seen_aliases)
+    if "borrowed_ref" in type_node:
+        br = type_node["borrowed_ref"]
+        resolved_inner = resolve_type_node(
+            br.get("type"),
+            index,
+            seen_aliases=seen_aliases,
+        )
+        if resolved_inner is not br.get("type"):
+            return {
+                "borrowed_ref": {
+                    **br,
+                    "type": resolved_inner,
+                }
+            }
+    if "type" in type_node:
+        inner = resolve_type_node(type_node["type"], index, seen_aliases=seen_aliases)
+        if inner is not type_node["type"]:
+            return {**type_node, "type": inner}
+    return type_node
+
+
+def result_error_type(
+    output: Any,
+    index: dict[str, Any],
+) -> str | None:
+    """If ``output`` is ``Result<_, E>`` (after alias resolution), return ``E``."""
+    if output is None:
         return None
-    rp = output.get("resolved_path")
+    resolved = resolve_type_node(output, index)
+    if not isinstance(resolved, dict):
+        return None
+    rp = resolved.get("resolved_path")
     if not isinstance(rp, dict):
         return None
     path = str(rp.get("path", ""))
@@ -169,6 +223,57 @@ def result_error_type(output: Any) -> str | None:
     if isinstance(args, list) and len(args) >= 2:
         return type_display(args[1])
     return None
+
+
+def _resolved_path_name(type_node: Any) -> str | None:
+    if not isinstance(type_node, dict):
+        return None
+    if "resolved_path" in type_node:
+        return str(type_node["resolved_path"].get("path", ""))
+    if "type" in type_node:
+        return _resolved_path_name(type_node["type"])
+    return None
+
+
+def is_exact_repository_ref(type_node: Any) -> bool:
+    """True only for ``&Repository`` or ``&mut Repository`` (not options or related types)."""
+    if not isinstance(type_node, dict) or "borrowed_ref" not in type_node:
+        return False
+    inner = type_node["borrowed_ref"].get("type")
+    path = _resolved_path_name(inner)
+    if not path:
+        return False
+    if path == REPOSITORY_TYPE_PLAIN or path.endswith(REPOSITORY_TYPE_SUFFIX):
+        return "Options" not in path
+    return False
+
+
+def is_exact_path_ref(type_node: Any) -> bool:
+    """True only for ``&Path`` / ``&mut Path`` (``std::path::Path`` or plain ``Path``)."""
+    if not isinstance(type_node, dict) or "borrowed_ref" not in type_node:
+        return False
+    inner = type_node["borrowed_ref"].get("type")
+    path = _resolved_path_name(inner)
+    if not path:
+        return False
+    return path == PATH_TYPE_PLAIN or path.endswith("::Path")
+
+
+def build_associated_function_ids(index: dict[str, Any]) -> frozenset[str]:
+    """Function ids declared inside public impl or trait blocks (incl. static fns)."""
+    associated: set[str] = set()
+    for item_id, item in index.items():
+        if item.get("crate_id") != 0:
+            continue
+        inner = item.get("inner") or {}
+        for key in ("impl", "trait"):
+            if key not in inner:
+                continue
+            for member_id in inner[key].get("items") or []:
+                member = index_entry(index, member_id)
+                if member and "function" in (member.get("inner") or {}):
+                    associated.add(str(member_id))
+    return frozenset(associated)
 
 
 def is_bare_bool(type_node: Any) -> bool:
@@ -277,7 +382,7 @@ def public_path_for_item(
 
 
 def collect_public_paths(payload: dict[str, Any]) -> dict[str, list[str]]:
-    """Map rustdoc item id -> every public path reaching it (module walk + reexports)."""
+    """Map rustdoc item id -> every public path reaching it (modules, reexports, globs)."""
     index = payload["index"]
     by_id: dict[str, list[str]] = defaultdict(list)
 
@@ -297,43 +402,91 @@ def collect_public_paths(payload: dict[str, Any]) -> dict[str, list[str]]:
         if path not in existing:
             existing.append(path)
 
-    def walk_module(module_id: str, prefix: tuple[str, ...]) -> None:
+    def export_module_contents(
+        module_id: str,
+        prefix: tuple[str, ...],
+        expanding: set[str],
+    ) -> None:
+        if module_id in expanding:
+            return
+        expanding.add(module_id)
+        try:
+            item = index_entry(index, module_id)
+            if item is None or item.get("visibility") != "public":
+                return
+            inner = item.get("inner") or {}
+            if "module" not in inner:
+                return
+            for child_id in inner["module"].get("items", []):
+                child = index_entry(index, child_id)
+                if child is None or child.get("visibility") != "public":
+                    continue
+                child_inner = child.get("inner") or {}
+                if "use" in child_inner:
+                    use = child_inner["use"]
+                    name = use.get("name") or child.get("name")
+                    target_id = use.get("id")
+                    if use.get("is_glob"):
+                        if target_id is not None:
+                            export_module_contents(str(target_id), prefix, expanding)
+                    elif name and target_id is not None:
+                        new_prefix = prefix + (name,)
+                        record(target_id, new_prefix)
+                        target = index_entry(index, target_id)
+                        if target and "module" in (target.get("inner") or {}):
+                            walk_module(str(target_id), new_prefix, expanding)
+                elif "module" in child_inner:
+                    name = child.get("name")
+                    if name:
+                        sub_prefix = prefix + (name,)
+                        record(child_id, sub_prefix)
+                        walk_module(str(child_id), sub_prefix, expanding)
+                else:
+                    name = child.get("name")
+                    if name:
+                        record(child_id, prefix + (name,))
+        finally:
+            expanding.discard(module_id)
+
+    def walk_module(
+        module_id: str,
+        prefix: tuple[str, ...],
+        expanding: set[str],
+    ) -> None:
         item = index_entry(index, module_id)
         if item is None or item.get("visibility") != "public":
             return
         inner = item.get("inner") or {}
         if "module" not in inner:
             return
-        mod = inner["module"]
-        for child_id in mod.get("items", []):
+        for child_id in inner["module"].get("items", []):
             child = index_entry(index, child_id)
             if child is None or child.get("visibility") != "public":
                 continue
             child_inner = child.get("inner") or {}
             if "use" in child_inner:
                 use = child_inner["use"]
-                if use.get("is_glob"):
-                    continue
                 name = use.get("name") or child.get("name")
                 target_id = use.get("id")
-                if not name or target_id is None:
-                    continue
-                new_prefix = prefix + (name,)
-                record(target_id, new_prefix)
-                target = index_entry(index, target_id)
-                if target and "module" in (target.get("inner") or {}):
-                    walk_module(str(target_id), new_prefix)
+                if use.get("is_glob"):
+                    if target_id is not None:
+                        export_module_contents(str(target_id), prefix, expanding)
+                elif name and target_id is not None:
+                    new_prefix = prefix + (name,)
+                    record(target_id, new_prefix)
+                    target = index_entry(index, target_id)
+                    if target and "module" in (target.get("inner") or {}):
+                        walk_module(str(target_id), new_prefix, expanding)
             elif "module" in child_inner:
                 name = child.get("name")
-                if not name:
-                    continue
-                walk_module(str(child_id), prefix + (name,))
+                if name:
+                    walk_module(str(child_id), prefix + (name,), expanding)
             else:
                 name = child.get("name")
                 if name:
                     record(child_id, prefix + (name,))
 
-    walk_module(root_id, ("grit_lib",))
+    walk_module(root_id, ("grit_lib",), set())
     return by_id
 
 
@@ -355,6 +508,7 @@ def compute_metrics(
     git_dir_first: list[str] = []
     unsafe_fns: list[str] = []
     libc_offenders: list[str] = []
+    associated_fn_ids = build_associated_function_ids(index)
 
     for item_id, item, fn in iter_public_functions(index):
         path = public_path_for_item(index, paths_map, item_id)
@@ -371,7 +525,7 @@ def compute_metrics(
         if bool_count >= 2:
             two_plus_bool.append(f"{path} :: {name}")
 
-        err_ty = result_error_type(fn.get("sig", {}).get("output"))
+        err_ty = result_error_type(fn.get("sig", {}).get("output"), index)
         if err_ty in STRING_RUST_TYPES:
             result_string.append(f"{path} :: {name}")
 
@@ -381,14 +535,15 @@ def compute_metrics(
         if mentions_libc(item):
             libc_offenders.append(f"{path} :: {name}")
 
-        if not is_method(fn) and inputs:
+        is_free_fn = item_id not in associated_fn_ids and not is_method(fn)
+        if is_free_fn and inputs:
             param_name, param_ty = inputs[0]
-            ty_str = type_display(param_ty)
-            if "Repository" in ty_str:
+            if is_exact_repository_ref(param_ty):
                 repo_first.append(f"{path} :: {name}")
-            if ty_str.startswith("&") and "Path" in ty_str:
-                if param_name in GIT_DIR_PARAM_NAMES or param_name.endswith("_git_dir"):
-                    git_dir_first.append(f"{path} :: {name}")
+            if is_exact_path_ref(param_ty) and (
+                param_name in GIT_DIR_PARAM_NAMES or param_name.endswith("_git_dir")
+            ):
+                git_dir_first.append(f"{path} :: {name}")
 
     # Also scan non-function public items for libc in signatures? Task says "public signatures"
     for item_id, item in index.items():
