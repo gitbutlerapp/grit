@@ -77,7 +77,9 @@ fn root_public_module_count_within_budget() {
                 return false;
             }
             if t.starts_with("pub mod ") && !t.starts_with("pub mod prelude") {
-                let name = t.strip_prefix("pub mod ").and_then(|rest| rest.split_whitespace().next());
+                let name = t
+                    .strip_prefix("pub mod ")
+                    .and_then(|rest| rest.split_whitespace().next());
                 let exempt = name.is_some_and(|n| ROOT_PUB_MOD_CFG_EXEMPT.contains(&n));
                 let count_this = !prev_cfg_gated && !exempt;
                 prev_cfg_gated = false;
