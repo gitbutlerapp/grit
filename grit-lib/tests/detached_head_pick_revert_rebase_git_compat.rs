@@ -12,8 +12,8 @@ use grit_lib::porcelain::replay_sequence::{ReplayOptions, ReplaySequenceRequest}
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    start_rebase, ApplyOptions, PreRebase, RebaseOntoOptions, RebaseRequest, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    continue_rebase, skip_rebase, start_rebase, ApplyOptions, PreRebase, RebaseOntoOptions,
+    RebaseOutcome, RebaseRequest, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::state::HeadState;
 
@@ -84,6 +84,32 @@ fn start_rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
         },
         pre_rebase: PreRebase::Skip,
     }
+}
+
+/// Conflicting rebase while `HEAD` is detached at `topic` tip (same layout as
+/// `history_rebase_session::conflict_rebase_fixture`).
+fn init_conflict_rebase_detached(root: &Path) -> (ObjectId, ObjectId, ObjectId, ObjectId) {
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "d@example.com"]);
+    git(root, &["config", "user.name", "Detached Pick"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    std::fs::write(root.join("f.txt"), b"base\n").unwrap();
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-q", "-m", "base"]);
+    let upstream = ObjectId::from_hex(&git(root, &["rev-parse", "HEAD"])).unwrap();
+    git(root, &["switch", "-c", "topic"]);
+    std::fs::write(root.join("f.txt"), b"topic change\n").unwrap();
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-q", "-m", "topic commit"]);
+    let tip = ObjectId::from_hex(&git(root, &["rev-parse", "HEAD"])).unwrap();
+    git(root, &["switch", "main"]);
+    std::fs::write(root.join("f.txt"), b"main change\n").unwrap();
+    git(root, &["add", "f.txt"]);
+    git(root, &["commit", "-q", "-m", "main commit"]);
+    let onto = ObjectId::from_hex(&git(root, &["rev-parse", "HEAD"])).unwrap();
+    let orig_tip = ObjectId::from_hex(&git(root, &["rev-parse", "topic"])).unwrap();
+    git(root, &["switch", "--detach", "topic"]);
+    (upstream, onto, tip, orig_tip)
 }
 
 fn init_linear_repo(root: &Path) -> (ObjectId, ObjectId) {
@@ -196,6 +222,45 @@ fn grit_rebase_upstream_on_detached_head_matches_git() {
         head_before.to_hex()
     );
     assert_eq!(git(root.path(), &["rev-parse", "main"]), main_tip.to_hex());
+    assert_git_fsck(root.path());
+}
+
+#[test]
+fn detached_rebase_continue_after_conflict() {
+    let root = tempfile::tempdir().expect("tmpdir");
+    let (upstream, onto, tip, orig_tip) = init_conflict_rebase_detached(root.path());
+    let repo = open_grit(root.path());
+    let mut opts = start_rebase_opts(upstream, tip);
+    opts.request.onto = Some(onto);
+    let out = start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("start");
+    assert!(matches!(out, RebaseOutcome::Stopped(_)));
+    assert_head_detached(root.path());
+    assert_eq!(
+        git(root.path(), &["rev-parse", "topic"]),
+        orig_tip.to_hex(),
+        "branch tip unchanged during stop"
+    );
+    std::fs::write(root.path().join("f.txt"), b"resolved\n").unwrap();
+    git(root.path(), &["add", "f.txt"]);
+    continue_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("continue");
+    assert_head_detached(root.path());
+    assert_ne!(git(root.path(), &["rev-parse", "HEAD"]), orig_tip.to_hex());
+    assert_git_fsck(root.path());
+}
+
+#[test]
+fn detached_rebase_skip_after_conflict() {
+    let root = tempfile::tempdir().expect("tmpdir");
+    let (upstream, onto, tip, orig_tip) = init_conflict_rebase_detached(root.path());
+    let repo = open_grit(root.path());
+    let mut opts = start_rebase_opts(upstream, tip);
+    opts.request.onto = Some(onto);
+    let _ = start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("start");
+    let head_at_stop = git(root.path(), &["rev-parse", "HEAD"]);
+    skip_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("skip");
+    assert_head_detached(root.path());
+    assert_eq!(git(root.path(), &["rev-parse", "HEAD"]), head_at_stop);
+    assert_eq!(git(root.path(), &["rev-parse", "topic"]), orig_tip.to_hex());
     assert_git_fsck(root.path());
 }
 

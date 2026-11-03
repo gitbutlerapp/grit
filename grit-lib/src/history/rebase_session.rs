@@ -1449,11 +1449,24 @@ fn advance_after_plan(
                     runner.as_ref(),
                 )?;
             }
+            let movable_head = rebase_movable_ref_name(&prev.head_ref);
+            let head_ref_old = if rebase_head_is_branch(&prev.head_ref) {
+                prev.orig_head
+            } else {
+                head_before
+            };
+            if !rebase_head_is_branch(&prev.head_ref) {
+                for update in &mut plan.ref_updates {
+                    if update.name == "HEAD" {
+                        update.old = head_before;
+                    }
+                }
+            }
             if let Some(new_tip) = plan.mapped_tip(prev.orig_head) {
-                if !plan.ref_updates.iter().any(|u| u.name == prev.head_ref) {
+                if !plan.ref_updates.iter().any(|u| u.name == movable_head) {
                     plan.ref_updates.push(PlannedRefUpdate {
-                        name: prev.head_ref.clone(),
-                        old: prev.orig_head,
+                        name: movable_head.to_owned(),
+                        old: head_ref_old,
                         new: new_tip,
                     });
                 }
@@ -1679,6 +1692,17 @@ const REBASE_DETACHED_HEAD_NAME: &str = "detached HEAD";
 
 fn rebase_head_is_branch(head_ref: &str) -> bool {
     head_ref.starts_with("refs/")
+}
+
+/// Ref name used in [`PlannedRefUpdate`] and live ref moves during a rebase session.
+///
+/// Persisted `head-name` stays `detached HEAD` for Git compatibility; only `HEAD` is storable.
+fn rebase_movable_ref_name(head_ref: &str) -> &str {
+    if rebase_head_is_branch(head_ref) {
+        head_ref
+    } else {
+        "HEAD"
+    }
 }
 
 fn branch_head(repo: &Repository) -> Result<(String, ObjectId), RebaseSessionError> {
