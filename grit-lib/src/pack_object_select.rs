@@ -579,6 +579,11 @@ fn send_pack_uninteresting_commits(
     shallow_grafts: &HashSet<ObjectId>,
     stop: &CancelSignal<'_>,
 ) -> Result<HashSet<ObjectId>> {
+    // Only a have makes a commit uninteresting; without one the walk below would read
+    // every commit reachable from the wants to find none.
+    if haves.is_empty() {
+        return Ok(HashSet::new());
+    }
     struct SendPackRevWalk<'a> {
         odb: &'a Odb,
         graph: Option<Arc<CommitGraphChain>>,
@@ -1774,6 +1779,41 @@ mod tests {
             commit_parent_lookups() <= 128,
             "send-pack hide must stay coupled to the want walk ({} parent lookups)",
             commit_parent_lookups()
+        );
+    }
+
+    #[test]
+    fn send_pack_walk_without_haves_reads_no_commits() {
+        use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let tree = write_tree(&repo, &[]);
+        let mut tip = write_commit(&repo, tree, &[], 1_300_000_000);
+        for i in 1..50 {
+            tip = write_commit(&repo, tree, &[tip], 1_300_000_000 + i);
+        }
+
+        reset_commit_reads();
+        let hidden = send_pack_uninteresting_commits(
+            repo.odb(),
+            &[tip],
+            &[],
+            &HashSet::new(),
+            &CancelSignal::never(),
+        )
+        .unwrap();
+        assert!(hidden.is_empty());
+        assert_eq!(
+            commit_reads(),
+            0,
+            "nothing can be uninteresting without a have"
+        );
+
+        let selection = walk(&repo, &[tip], NameTrees::No);
+        assert_eq!(
+            selection.send.len(),
+            51,
+            "every commit and the tree are still sent"
         );
     }
 
