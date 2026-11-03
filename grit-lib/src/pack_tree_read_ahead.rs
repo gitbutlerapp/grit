@@ -6,6 +6,10 @@
 //! parses the current ones. Results are handed back strictly in queue order, so the walk
 //! processes every object exactly as if it had read it itself: the object list, its
 //! order and the name hashes do not change.
+//!
+//! Workers only read what is stored locally and never fetch from a promisor remote. An
+//! object they cannot read is left to the walk, which reads it itself, fetching it
+//! lazily or reporting the error exactly as without read-ahead.
 
 use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
@@ -13,7 +17,6 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::Scope;
 
-use crate::error::Result;
 use crate::objects::{Object, ObjectId};
 use crate::odb::Odb;
 use crate::pack::SingleLocalPackReader;
@@ -29,8 +32,9 @@ const BATCHES_PER_WORKER: usize = 2;
 /// read (`None` for entries the walk reads itself).
 type Job = (u64, Vec<Option<ObjectId>>);
 
-/// A finished batch, or the panic payload of the worker that read it.
-type Done = (u64, std::thread::Result<Vec<Option<Result<Object>>>>);
+/// A finished batch (the objects the worker could read), or the panic payload of the
+/// worker that read it.
+type Done = (u64, std::thread::Result<Vec<Option<Object>>>);
 
 /// Something queued for the walk: the object id, and whether to read it ahead.
 pub(crate) trait ReadAheadEntry {
@@ -49,9 +53,9 @@ pub(crate) struct TreeReadAhead<'scope, 'env> {
     jobs: Option<Sender<Job>>,
     done: Option<Receiver<Done>>,
     /// Results for the front of the queue, in queue order.
-    ready: VecDeque<Option<Result<Object>>>,
+    ready: VecDeque<Option<Object>>,
     /// Batches that finished out of order, by sequence number.
-    arrived: HashMap<u64, Vec<Option<Result<Object>>>>,
+    arrived: HashMap<u64, Vec<Option<Object>>>,
     next_seq: u64,
     want_seq: u64,
     /// Front queue entries covered by `ready` and the batches in flight.
@@ -104,9 +108,10 @@ impl<'scope, 'env> TreeReadAhead<'scope, 'env> {
         }
     }
 
-    /// The result for the queue entry about to be popped: `Some` when a worker read it,
-    /// `None` when the walk must read it itself (not covered, or not read ahead).
-    pub(crate) fn take_front(&mut self) -> Option<Result<Object>> {
+    /// The object for the queue entry about to be popped: `Some` when a worker read it,
+    /// `None` when the walk must read it itself (not covered, not read ahead, or not
+    /// readable from local storage).
+    pub(crate) fn take_front(&mut self) -> Option<Object> {
         if self.covered == 0 {
             return None;
         }
@@ -182,7 +187,7 @@ fn read_ahead_worker(odb: &Odb, jobs: &Mutex<Receiver<Job>>, done: &Sender<Done>
         let objects = catch_unwind(AssertUnwindSafe(|| {
             batch
                 .iter()
-                .map(|oid| oid.map(|oid| read_object(odb, reader.as_mut(), &oid)))
+                .map(|oid| oid.and_then(|oid| read_local(odb, reader.as_mut(), &oid)))
                 .collect()
         }));
         if done.send((seq, objects)).is_err() {
@@ -191,14 +196,108 @@ fn read_ahead_worker(odb: &Odb, jobs: &Mutex<Receiver<Job>>, done: &Sender<Done>
     }
 }
 
-/// Read `oid` through `reader` when it has it, otherwise through `odb`.
-fn read_object(
+/// Read `oid` through `reader` when it has it, otherwise from `odb`'s local storage;
+/// `None` when neither can (the walk then reads it itself).
+fn read_local(
     odb: &Odb,
     reader: Option<&mut SingleLocalPackReader>,
     oid: &ObjectId,
-) -> Result<Object> {
+) -> Option<Object> {
     if let Some(Ok(obj)) = reader.map(|r| r.read_object(oid)) {
-        return Ok(obj);
+        return Some(obj);
     }
-    odb.read_once(oid)
+    odb.try_read_once(oid).ok().flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use crate::objects::ObjectKind;
+    use crate::repo::{InitOptions, Repository};
+    use tempfile::TempDir;
+
+    struct Entry(Option<ObjectId>);
+
+    impl ReadAheadEntry for Entry {
+        fn read_ahead_oid(&self) -> Option<ObjectId> {
+            self.0
+        }
+    }
+
+    /// Pop every entry the way the walk does, returning for each one whether a worker
+    /// read it and the payload the walk ends up with.
+    fn drain(
+        odb: &Odb,
+        mut queue: VecDeque<Entry>,
+        workers: usize,
+    ) -> Vec<(bool, Option<Vec<u8>>)> {
+        std::thread::scope(|scope| {
+            let mut read_ahead = TreeReadAhead::new(scope, odb, workers);
+            read_ahead.top_up(&queue);
+            let mut out = Vec::new();
+            while let Some(entry) = {
+                let front = read_ahead.take_front();
+                queue.pop_front().map(|entry| (entry, front))
+            } {
+                let (entry, front) = entry;
+                read_ahead.top_up(&queue);
+                let read_ahead_hit = front.is_some();
+                let data = front.map(|obj| obj.data).or_else(|| {
+                    entry
+                        .0
+                        .and_then(|oid| odb.read(&oid).ok().map(|obj| obj.data))
+                });
+                out.push((read_ahead_hit, data));
+            }
+            out
+        })
+    }
+
+    #[test]
+    fn objects_come_back_in_queue_order_and_misses_are_left_to_the_walk() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let odb = repo.odb();
+        let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let len = 3 * BATCH + 17;
+        let entries = || -> VecDeque<Entry> {
+            (0..len)
+                .map(|i| match i % 10 {
+                    3 => Entry(None),
+                    7 => Entry(Some(missing)),
+                    _ => Entry(Some(
+                        odb.write(ObjectKind::Blob, format!("object {i}").as_bytes())
+                            .unwrap(),
+                    )),
+                })
+                .collect()
+        };
+
+        let serial = drain(odb, entries(), 0);
+        assert!(
+            serial.iter().all(|(hit, _)| !hit),
+            "no workers, no read-ahead"
+        );
+        let parallel = drain(odb, entries(), 3);
+        assert_eq!(
+            parallel.iter().map(|(_, data)| data).collect::<Vec<_>>(),
+            serial.iter().map(|(_, data)| data).collect::<Vec<_>>()
+        );
+        for (i, (hit, data)) in parallel.iter().enumerate() {
+            match i % 10 {
+                3 => assert!(!hit && data.is_none(), "entry {i} is not read ahead"),
+                7 => assert!(
+                    !hit && data.is_none(),
+                    "missing entry {i} is left to the walk"
+                ),
+                _ if i < len - len % BATCH => {
+                    assert!(hit, "entry {i} lies in a full batch");
+                    assert_eq!(data.as_deref(), Some(format!("object {i}").as_bytes()));
+                }
+                _ => assert!(!hit, "the tail shorter than a batch is read by the walk"),
+            }
+        }
+    }
 }

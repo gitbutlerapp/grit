@@ -1122,7 +1122,7 @@ fn collect_reachable_excluding_with_name_hashes(
                 }
             }
             let read = match read_ahead_result {
-                Some(read) => read,
+                Some(obj) => Ok(obj),
                 None => walk.read_object(&oid),
             };
             let obj = match read {
@@ -1783,6 +1783,43 @@ mod tests {
             "send-pack hide must stay coupled to the want walk ({} parent lookups)",
             commit_parent_lookups()
         );
+    }
+
+    #[test]
+    fn tree_read_ahead_leaves_the_walk_output_unchanged() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
+        let mut tip: Option<ObjectId> = None;
+        // Two trees per commit, so the queue holds far more than one read-ahead batch.
+        for i in 0..400i64 {
+            let sub = write_tree(&repo, &[(0o100644, "f", blob(&format!("sub {i}")))]);
+            let tree = write_tree(
+                &repo,
+                &[
+                    (0o040000, "dir", sub),
+                    (0o100644, "top", blob(&format!("top {}", i / 3))),
+                ],
+            );
+            tip = Some(write_commit(&repo, tree, tip.as_slice(), 1_000 + i));
+        }
+        let tip = tip.unwrap();
+        let config_path = repo.git_dir().join("config");
+        let config = std::fs::read_to_string(&config_path).unwrap();
+        let walk_with_threads = |threads: u32| {
+            std::fs::write(
+                &config_path,
+                format!("{config}[pack]\n\tthreads = {threads}\n"),
+            )
+            .unwrap();
+            let repo = Repository::open(repo.git_dir(), &RepositoryOptions::empty()).unwrap();
+            walk(&repo, &[tip], NameTrees::Yes)
+        };
+        let serial = walk_with_threads(1);
+        let parallel = walk_with_threads(4);
+        assert_eq!(serial.send.len(), 400 * 3 + 400 + 134);
+        assert_eq!(parallel.send, serial.send);
+        assert_eq!(parallel.name_hashes, serial.name_hashes);
     }
 
     #[test]
