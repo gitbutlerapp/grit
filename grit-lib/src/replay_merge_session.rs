@@ -76,10 +76,14 @@ struct UpstreamDeltaCache {
     dir_rename_roots: HashSet<Vec<u8>>,
 }
 
+type FastTransplantOutcome = (ObjectId, HashSet<Vec<u8>>, Index);
+
+#[allow(clippy::large_enum_variant)]
 enum OverlapTransplant {
     AppliedPartial {
         tree: ObjectId,
         paths: HashSet<Vec<u8>>,
+        index: Index,
     },
     AppliedMerge(Box<TreeMergeOutput>),
     Conflict(Box<TreeMergeOutput>),
@@ -225,7 +229,7 @@ impl ReplayMergeSession {
         }
 
         if merge_favor == MergeFavor::default() {
-            if let Some((result, _paths)) =
+            if let Some((result, _paths, _index)) =
                 self.try_fast_transplant(repo, old_parent_tree, new_parent_tree, subject_tree)?
             {
                 self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
@@ -302,14 +306,14 @@ impl ReplayMergeSession {
         old_parent_tree: ObjectId,
         new_parent_tree: ObjectId,
         subject_tree: ObjectId,
-    ) -> crate::error::Result<Option<(ObjectId, HashSet<Vec<u8>>)>> {
+    ) -> crate::error::Result<Option<FastTransplantOutcome>> {
         let Some(upstream) = self.upstream.as_ref() else {
             return Ok(None);
         };
         let odb = repo.odb();
         let commit_diff = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")?;
         if commit_diff.is_empty() {
-            return Ok(Some((new_parent_tree, HashSet::new())));
+            return Ok(Some((new_parent_tree, HashSet::new(), Index::new())));
         }
         if !commit_diff.iter().all(commit_change_is_simple) {
             return Ok(None);
@@ -351,7 +355,7 @@ impl ReplayMergeSession {
         let index = index_from_commit_diff(repo, &commit_diff)?;
         let result =
             write_tree_partial_from_index(odb, &index, &new_parent_tree, &paths_from_index)?;
-        Ok(Some((result, paths_from_index)))
+        Ok(Some((result, paths_from_index, index)))
     }
 
     /// Three-way merge for cherry-pick/revert replay, reusing upstream fork→onto analysis.
@@ -373,7 +377,11 @@ impl ReplayMergeSession {
         let subject_tree = theirs_tree;
 
         if old_parent_tree == new_parent_tree {
-            return Ok(partial_tree_merge_output(subject_tree, HashSet::new()));
+            return Ok(partial_tree_merge_output(
+                subject_tree,
+                HashSet::new(),
+                Index::new(),
+            ));
         }
 
         if merge_favor == MergeFavor::default() && self.upstream.is_none() {
@@ -381,11 +389,11 @@ impl ReplayMergeSession {
         }
 
         if merge_favor == MergeFavor::default() {
-            if let Some((tree, paths)) =
+            if let Some((tree, paths, index)) =
                 self.try_fast_transplant(repo, old_parent_tree, new_parent_tree, subject_tree)?
             {
                 self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
-                return Ok(partial_tree_merge_output(tree, paths));
+                return Ok(partial_tree_merge_output(tree, paths, index));
             }
         }
 
@@ -400,9 +408,9 @@ impl ReplayMergeSession {
                     ws,
                     presentation,
                 )? {
-                    OverlapTransplant::AppliedPartial { tree, paths } => {
+                    OverlapTransplant::AppliedPartial { tree, paths, index } => {
                         self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
-                        return Ok(partial_tree_merge_output(tree, paths));
+                        return Ok(partial_tree_merge_output(tree, paths, index));
                     }
                     OverlapTransplant::AppliedMerge(merge) => {
                         self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
@@ -459,6 +467,7 @@ impl ReplayMergeSession {
             return Ok(OverlapTransplant::AppliedPartial {
                 tree: new_parent_tree,
                 paths: HashSet::new(),
+                index: Index::new(),
             });
         }
         if !commit_diff.iter().all(commit_change_is_simple) {
@@ -481,6 +490,7 @@ impl ReplayMergeSession {
             return Ok(OverlapTransplant::AppliedPartial {
                 tree: result,
                 paths: paths_from_index,
+                index,
             });
         }
 
@@ -512,9 +522,10 @@ impl ReplayMergeSession {
 fn partial_tree_merge_output(
     result_tree: ObjectId,
     touched_paths: HashSet<Vec<u8>>,
+    index: Index,
 ) -> TreeMergeOutput {
     TreeMergeOutput {
-        index: Index::new(),
+        index,
         conflict_content: BTreeMap::new(),
         result_tree,
         touched_paths,
