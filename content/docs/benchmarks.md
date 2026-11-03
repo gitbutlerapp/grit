@@ -97,6 +97,43 @@ The rows under 5 ms moved within noise (±0.1 ms between rounds).
   --min-runs 10 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-revs-count-6954-after.json
 ```
 
+## Repacking skips tree entries earlier versions repeat (2026-11-03)
+
+`repack/full@git-git` runs `grit gc repack` against `git repack -ad` on a git.git worktree with one pack, no bitmap and no commit-graph, so every object is found by walking history. The census had grit at 6.3 s against Git's 4.6 s. The object walk was single-threaded and took most of the time. Its 147,000 trees hold 2.2 GB of entries, and the root tree alone (about 535 entries) is expanded some 75,000 times. Almost all of those entries name objects the walk has already met.
+
+Without a filter, every entry of a tree the walk has expanded names an object that is visited from then on. The walk now keeps the last tree it expanded at each path, keyed by the path's name hash, and compares the next version there against it. Entries in the bytes both versions share at the start and the end are neither parsed nor looked up. Between those two ranges, a cursor steps through the earlier version in name order, and any entry it repeats byte for byte is skipped. Entry offsets carry over from the earlier version, so a skipped range is always whole entries. Which version is compared only decides how much is skipped, never what is listed. Entries are located by a small span parser that builds no object id for skipped entries and leaves anything unusual to `TreeRefIter`, with the same result and errors. The pack is byte-identical, and a randomized test over 300 edited tree versions and a `git rev-list --objects --all` round trip check the object list.
+
+Rows from one `grit-bench daily` sitting on `release` builds, against the system `git` 2.43.0 on a four-vCPU Intel Xeon VM. "base" is the tree read-ahead change from [the bundling section](#bundling-every-ref-without-a-bitmap-2026-11-03) that this builds on. On `main` in the same sitting, `repack/full@git-git` took 6249 ms / 565 MB. Times are medians of 10 runs (target rows) or 5 runs (the others) after one warm-up. Values are **milliseconds / MB**. Reports: `daily-repack-full-6961-before.json` → `daily-repack-full-6961-after.json` and `daily-repack-full-6961-related-before.json` → `daily-repack-full-6961-related-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | after vs git |
+| --- | ---: | ---: | ---: | ---: |
+| `repack/full@git-git` | 4484.3 / 475 | 3672.0 / 579 | **2374.2** / 569 | 0.53 |
+| `repack/commit-graph@git-git` | 635.6 / 109 | 1276.6 / 141 | 1253.4 / 141 | 1.97 |
+| `bundle/create-all@git-git` | 4347.5 / 563 | 3849.2 / 725 | **2616.2** / 711 | 0.60 |
+| `bundle/create@synth-10k` | 253.5 / 44 | 123.3 / 58 | 121.3 / 59 | 0.48 |
+| `gc/default@synth-10k` | 325.1 / 49 | 137.0 / 60 | 139.9 / 57 | 0.43 |
+| `clone/full@git-git` | 14690.6 / 125 | 7710.5 / 154 | 7783.2 / 155 | 0.53 |
+| `clone/blobless@git-git` | 8588.5 / 73 | 7005.7 / 71 | 7134.3 / 71 | 0.83 |
+| `clone/shallow@git-git` | 1570.7 / 40 | 1607.4 / 57 | 1607.2 / 58 | 1.02 |
+| `clone/bare@synth-10k` | 825.9 / 37 | 692.9 / 29 | 692.0 / 29 | 0.84 |
+| `clone/local@synth-10k` | 945.2 / 37 | 846.8 / 34 | 847.7 / 33 | 0.90 |
+| `fetch/incremental@git-git` | 104.3 / 71 | 55.0 / 49 | 55.6 / 49 | 0.53 |
+| `fetch/one-branch@git-git` | 103.7 / 71 | 55.3 / 50 | 55.4 / 49 | 0.53 |
+| `push/incremental@git-git` | 2117.0 / 334 | 1693.9 / 91 | 1710.4 / 91 | 0.81 |
+| `push/refspec@git-git` | 1064.0 / 100 | 1151.6 / 78 | 1163.5 / 78 | 1.09 |
+| `fsck/full@git-git` | 25901.7 / 669 | 12053.1 / 638 | 12379.4 / 638 | 0.48 |
+| `revs/count@git-git` | 500.4 / 97 | 696.6 / 156 | 711.7 / 156 | 1.42 |
+| `log/path@git-git` | 313.4 / 198 | 379.8 / 217 | 384.3 / 216 | 1.23 |
+| `diff/worktree@deep-tree` | 97.7 / 41 | 67.5 / 41 | 70.6 / 41 | 0.72 |
+| `status/clean@synth-100k` | 56.8 / 30 | 44.6 / 33 | 44.4 / 33 | 0.78 |
+
+Repack and bundling every ref gain about 1.3 s each. The other rows move within noise: they send few objects, filter the walk (a blobless clone, where the skipping is off), spend their time receiving and checking out the pack, or do not walk objects at all.
+
+```bash
+./target/release/grit-bench daily --only repack/full@git-git,repack/commit-graph@git-git \
+  --grit ./target/release/grit --warmup 1 --min-runs 10 --output grit-utils/baselines/daily-repack-full-6961-after.json
+```
+
 ## Bundling every ref without a bitmap (2026-11-03)
 
 `bundle/create-all@git-git` runs `grit bundle create <file> --all` on a fully packed git.git clone that has no reachability bitmap and no commit-graph, so every object has to be found by walking history. The daily census had grit at 7.8 s against Git's 4.4 s. Most of that cost was in the object walk and delta planning that bundles share with fetch serving, push and repack, so this change made that shared path faster:
