@@ -194,9 +194,9 @@ fn dedupe_candidates_by_peel(
 
 /// Picks the nearest tag and exact distance from `commit`.
 ///
-/// With commit-graph generations, uses Git's one-pass backward walk and early exit. Without a
-/// graph, the same walk uses hop distance from the target for heap ordering (not a rev-list
-/// count per tag).
+/// With commit-graph generations, uses Git's one-pass backward walk and early exit, then one
+/// exact range count for the chosen tag. Without a graph, a single fixpoint pass yields exact
+/// distances (not a rev-list count per tag).
 fn nearest_tag_by_walk(
     repo: &Repository,
     commit: ObjectId,
@@ -248,6 +248,8 @@ fn nearest_tag_heap_walk(
         }
         processed.insert(cur);
         seen_commits += 1;
+        #[cfg(test)]
+        describe_test_hooks::record_describe_heap_processed();
 
         let mut active_within = commit_flags
             .get(&cur)
@@ -418,6 +420,7 @@ fn collect_describe_reachable(
     Ok((reachable_order, parents_of))
 }
 
+/// Picks the nearest tag by walk depth, then one exact range count for the winner only.
 fn pick_winner_and_distance(
     repo: &Repository,
     commit: ObjectId,
@@ -425,25 +428,38 @@ fn pick_winner_and_distance(
     matches: &[ActiveMatch],
     first_parent: bool,
 ) -> Result<Option<(usize, usize)>> {
-    let mut best: Option<(usize, usize)> = None;
-    for m in matches {
-        let exact =
-            describe_distance_count(repo, commit, unique[m.candidate_index].peeled, first_parent)?;
+    let mut sorted: Vec<&ActiveMatch> = matches.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.depth
+            .cmp(&b.depth)
+            .then_with(|| a.found_order.cmp(&b.found_order))
+    });
+    let best_depth = sorted[0].depth;
+    let mut best_match: Option<&ActiveMatch> = None;
+    for m in sorted {
+        if m.depth != best_depth {
+            break;
+        }
         let cand = &unique[m.candidate_index];
-        match best {
-            None => best = Some((m.candidate_index, exact)),
-            Some((_best_idx, best_dist)) if exact < best_dist => {
-                best = Some((m.candidate_index, exact));
+        match best_match {
+            None => best_match = Some(m),
+            Some(prev) => {
+                if tie_break_tag(cand, &unique[prev.candidate_index]) {
+                    best_match = Some(m);
+                }
             }
-            Some((best_idx, best_dist)) if exact == best_dist
-                && tie_break_tag(cand, &unique[best_idx]) =>
-            {
-                best = Some((m.candidate_index, exact));
-            }
-            _ => {}
         }
     }
-    Ok(best)
+    let Some(winner) = best_match else {
+        return Ok(None);
+    };
+    let distance = describe_distance_count(
+        repo,
+        commit,
+        unique[winner.candidate_index].peeled,
+        first_parent,
+    )?;
+    Ok(Some((winner.candidate_index, distance)))
 }
 
 /// Exact `peeled..head` commit count (same as `git rev-list --count peeled..head`).
@@ -600,6 +616,7 @@ pub(crate) mod describe_test_hooks {
 
     thread_local! {
         static DESCRIBE_DISTANCE_COUNTS: Cell<usize> = const { Cell::new(0) };
+        static DESCRIBE_HEAP_PROCESSED: Cell<usize> = const { Cell::new(0) };
     }
 
     pub fn reset_describe_distance_counts() {
@@ -610,8 +627,20 @@ pub(crate) mod describe_test_hooks {
         DESCRIBE_DISTANCE_COUNTS.with(|c| c.get())
     }
 
+    pub fn reset_describe_heap_processed() {
+        DESCRIBE_HEAP_PROCESSED.with(|c| c.set(0));
+    }
+
+    pub fn describe_heap_processed() -> usize {
+        DESCRIBE_HEAP_PROCESSED.with(|c| c.get())
+    }
+
     pub(crate) fn record_describe_distance_count() {
         DESCRIBE_DISTANCE_COUNTS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+
+    pub(crate) fn record_describe_heap_processed() {
+        DESCRIBE_HEAP_PROCESSED.with(|c| c.set(c.get().saturating_add(1)));
     }
 }
 
@@ -1276,6 +1305,92 @@ mod tests {
             0,
             "no-graph describe must not run a full rev-list count per tag candidate"
         );
+        Ok(())
+    }
+
+    /// Many parallel branches with annotated tips merged into one head: incomparable tag cones
+    /// must not trigger a full rev-list count per discovered tag (issue #2461 wide merge).
+    #[test]
+    fn describe_wide_incomparable_tag_cones_no_per_tag_distance_walks() -> Result<()> {
+        use super::describe_test_hooks::{
+            describe_distance_counts, describe_heap_processed, reset_describe_distance_counts,
+            reset_describe_heap_processed,
+        };
+        use crate::maintenance::CommitGraphOptions;
+        use crate::merge_base::{
+            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
+        };
+        use crate::refs;
+
+        const BRANCHES: usize = 80;
+        const DEPTH: usize = 50;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let root = write_commit_at(odb, &[], "root", 1)?;
+        let mut tips: Vec<ObjectId> = Vec::with_capacity(BRANCHES);
+        for b in 0..BRANCHES {
+            let mut cur = root;
+            for step in 0..DEPTH {
+                cur = write_commit_at(
+                    odb,
+                    &[cur],
+                    &format!("b{b}-s{step}"),
+                    10 + b as i64 * 1_000 + step as i64,
+                )?;
+            }
+            tag_annotated(&repo, &format!("tag-{b:03}"), cur, "tip");
+            tips.push(cur);
+        }
+        while tips.len() > 1 {
+            let mut next = Vec::new();
+            let mut iter = tips.into_iter();
+            while let Some(left) = iter.next() {
+                match iter.next() {
+                    Some(right) => {
+                        let merge_time = 500_000 + next.len() as i64;
+                        next.push(write_commit_at(
+                            odb,
+                            &[left, right],
+                            &format!("merge-{}", next.len()),
+                            merge_time,
+                        )?);
+                    }
+                    None => next.push(left),
+                }
+            }
+            tips = next;
+        }
+        let head = tips.into_iter().next().expect("merge head");
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
+        repo.write_commit_graph(&CommitGraphOptions::default())?;
+
+        reset_describe_distance_counts();
+        reset_describe_heap_processed();
+        let described = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert!(
+            describe_distance_counts() <= 1,
+            "commit-graph describe must not rev-list count every discovered tag (got {})",
+            describe_distance_counts()
+        );
+        let branch_commits = BRANCHES * DEPTH;
+        let merge_commits = BRANCHES.saturating_sub(1);
+        let max_reasonable_processed = branch_commits + merge_commits + 64;
+        assert!(
+            describe_heap_processed() <= max_reasonable_processed,
+            "processed {} commits, expected at most about {max_reasonable_processed} (not tags × history)",
+            describe_heap_processed()
+        );
+        let expected = count_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[head],
+            &[described.peeled],
+            ReachableCountFilter::default(),
+        )?;
+        assert_eq!(described.distance, expected);
         Ok(())
     }
 

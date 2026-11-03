@@ -326,7 +326,13 @@ fn bench_describe_many_tags(c: &mut Criterion) {
                     black_box(
                         fx.repo
                             .rev_walk()
-                            .describe("HEAD", &DescribeOptions::default())
+                            .describe(
+                                "HEAD",
+                                &DescribeOptions {
+                                    tags: true,
+                                    ..Default::default()
+                                },
+                            )
                             .expect("describe"),
                     )
                 });

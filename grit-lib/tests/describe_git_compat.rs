@@ -83,14 +83,7 @@ fn describe_clock_skew_fixture_matches_git_rev_list_count() {
     assert_eq!(described.distance, 2);
 }
 
-/// Issue #6613: four no-ff feature merges, annotated tag on mainline, side-branch tag.
-#[test]
-fn describe_merge_ladder_matches_git() {
-    if !git_interop_available(Backend::Files) {
-        return;
-    }
-    let root = tempfile::tempdir().expect("tempdir");
-    let wt = root.path();
+fn init_merge_ladder_repo(wt: &std::path::Path) {
     git(wt, &["init", "-q", "-b", "main"]);
     git(wt, &["commit", "--allow-empty", "-q", "-m", "root"]);
     for i in 0..4 {
@@ -123,6 +116,41 @@ fn describe_merge_ladder_matches_git() {
     git(wt, &["commit", "--allow-empty", "-q", "-m", "side a"]);
     git(wt, &["commit", "--allow-empty", "-q", "-m", "side b"]);
     git(wt, &["tag", "-a", "ss", "-m", "ss", "HEAD~2"]);
+    git(wt, &["tag", "light-main", "main"]);
+}
+
+fn assert_describe_matches_git_rev_list(
+    wt: &std::path::Path,
+    repo: &Repository,
+    rev: &str,
+    opts: &DescribeOptions,
+) {
+    let described = repo
+        .rev_walk()
+        .describe(rev, opts)
+        .expect("describe")
+        .expect("tag expected");
+    let tag_short = described
+        .tag
+        .as_str()
+        .strip_prefix("refs/tags/")
+        .unwrap_or(described.tag.as_str());
+    let git_count = git(wt, &["rev-list", "--count", &format!("{tag_short}..{rev}")])
+        .trim()
+        .parse::<usize>()
+        .expect("count");
+    assert_eq!(described.distance, git_count, "rev {rev}");
+}
+
+/// Issue #6613: four no-ff feature merges, annotated tag on mainline, side-branch tag.
+#[test]
+fn describe_merge_ladder_matches_git() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_merge_ladder_repo(wt);
 
     let repo = Repository::open(
         &wt.join(".git"),
@@ -212,6 +240,43 @@ fn describe_merge_ladder_matches_git() {
             .distance,
         2
     );
+}
+
+#[test]
+fn describe_merge_ladder_commit_graph_and_tag_modes() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    use grit_lib::maintenance::CommitGraphOptions;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    init_merge_ladder_repo(wt);
+    let repo = Repository::open(
+        &wt.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(wt),
+    )
+    .expect("open");
+
+    let annotated = DescribeOptions::default();
+    assert_describe_matches_git_rev_list(wt, &repo, "main", &annotated);
+
+    repo.write_commit_graph(&CommitGraphOptions::default())
+        .expect("commit-graph");
+    assert_describe_matches_git_rev_list(wt, &repo, "main", &annotated);
+
+    let graph_path = wt.join(".git/objects/info/commit-graph");
+    if graph_path.exists() {
+        std::fs::remove_file(&graph_path).expect("remove commit-graph");
+    }
+    assert_describe_matches_git_rev_list(wt, &repo, "main", &annotated);
+
+    let with_light = DescribeOptions {
+        tags: true,
+        match_glob: Some("light-*".into()),
+        ..Default::default()
+    };
+    assert_describe_matches_git_rev_list(wt, &repo, "main", &with_light);
 }
 
 /// Issue #2479: tag peel is merge first parent and side-branch root (two path depths).
