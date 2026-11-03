@@ -2804,6 +2804,88 @@ pub fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth:
 /// The chain-length half of [`apply_delta_depth_limit`], for a map already known to
 /// be acyclic (a cycle is left as it is).
 pub(crate) fn cap_delta_chain_depth(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usize) {
+    match delta_chain_cuts(
+        map.keys().copied(),
+        map.len(),
+        |oid| map.get(oid).copied(),
+        max_depth,
+    ) {
+        Some(cuts) => {
+            for target in cuts {
+                map.remove(&target);
+            }
+        }
+        None => cap_delta_chain_depth_per_tip(map, max_depth),
+    }
+}
+
+/// The targets whose delta edge [`cap_delta_chain_depth`] removes from an acyclic
+/// target→base map with `len` targets; `None` when the map has a cycle.
+///
+/// Every target lies on the chain of some tip at its distance from the chain's end,
+/// whichever tip it is reached from, so the cut points are the targets at a positive
+/// multiple of `max_depth + 1` edges from the end (such a chain is always longer than
+/// `max_depth`).
+pub(crate) fn delta_chain_cuts(
+    targets: impl IntoIterator<Item = ObjectId>,
+    len: usize,
+    base_of: impl Fn(&ObjectId) -> Option<ObjectId>,
+    max_depth: usize,
+) -> Option<Vec<ObjectId>> {
+    let modulus = max_depth.saturating_add(1);
+    let ends = delta_chain_ends(targets, len, base_of)?;
+    Some(
+        ends.into_iter()
+            .filter(|(_, (_, depth))| (*depth as usize).is_multiple_of(modulus))
+            .map(|(target, _)| target)
+            .collect(),
+    )
+}
+
+/// For every target of a target→base map with `len` targets, the end of its chain (the
+/// first object that is not itself a target) and the number of delta edges to it.
+///
+/// Each object is visited once, however many chains share it. `None` when the map has
+/// a cycle.
+pub(crate) fn delta_chain_ends(
+    targets: impl IntoIterator<Item = ObjectId>,
+    len: usize,
+    base_of: impl Fn(&ObjectId) -> Option<ObjectId>,
+) -> Option<crate::objects::OidHashMap<(ObjectId, u32)>> {
+    let mut ends: crate::objects::OidHashMap<(ObjectId, u32)> =
+        crate::objects::oid_hash_map_with_capacity(len);
+    let mut path: Vec<ObjectId> = Vec::new();
+    for start in targets {
+        if ends.contains_key(&start) {
+            continue;
+        }
+        path.clear();
+        let mut cur = start;
+        let (end, mut depth) = loop {
+            if let Some(&known) = ends.get(&cur) {
+                break known;
+            }
+            let Some(base) = base_of(&cur) else {
+                break (cur, 0);
+            };
+            // An acyclic chain holds each target at most once.
+            if path.len() >= len {
+                return None;
+            }
+            path.push(cur);
+            cur = base;
+        };
+        for &target in path.iter().rev() {
+            depth += 1;
+            ends.insert(target, (end, depth));
+        }
+    }
+    Some(ends)
+}
+
+/// [`cap_delta_chain_depth`] by walking each tip's chain, which also defines what
+/// happens on a chain that runs into a cycle.
+fn cap_delta_chain_depth_per_tip(map: &mut HashMap<ObjectId, ObjectId>, max_depth: usize) {
     let keys: Vec<ObjectId> = map.keys().copied().collect();
     let value_set: HashSet<ObjectId> = map.values().copied().collect();
     let mut tips: Vec<ObjectId> = keys
@@ -9542,6 +9624,63 @@ mod cached_lookup_tests {
         apply_delta_depth_limit(&mut map, 50);
         assert_eq!(map, HashMap::from([(b, a), (c, b), (d, c)]));
         assert_eq!(max_delta_map_chain_edges(&map), 3);
+    }
+
+    #[test]
+    fn cap_delta_chain_depth_matches_per_tip_walk_on_random_forests() {
+        let oid = |i: u32| {
+            let mut bytes = [0u8; 20];
+            bytes[..4].copy_from_slice(&i.to_be_bytes());
+            ObjectId::from_bytes(&bytes).unwrap()
+        };
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |bound: u32| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % u64::from(bound)) as u32
+        };
+        for round in 0..200u32 {
+            let n = 2 + next(400);
+            let mut map: HashMap<ObjectId, ObjectId> = HashMap::new();
+            // Object `i` deltas against an earlier object, so the map is a forest; long
+            // runs of `i - 1` bases build chains well past the depth limit.
+            for i in 1..n {
+                if next(5) == 0 {
+                    continue;
+                }
+                let base = if next(3) == 0 { next(i) } else { i - 1 };
+                map.insert(oid(i), oid(base));
+            }
+            for max_depth in [0, 1, 3, 10, 50] {
+                let mut fast = map.clone();
+                let mut slow = map.clone();
+                cap_delta_chain_depth(&mut fast, max_depth);
+                cap_delta_chain_depth_per_tip(&mut slow, max_depth);
+                assert_eq!(fast, slow, "round {round}, max_depth {max_depth}");
+                assert!(max_delta_map_chain_edges(&fast) <= max_depth);
+            }
+        }
+    }
+
+    #[test]
+    fn delta_chain_ends_reports_cycles() {
+        let (a, b, c) = (test_oid(1), test_oid(2), test_oid(3));
+        let cyclic = HashMap::from([(a, b), (b, a), (c, a)]);
+        assert!(
+            delta_chain_ends(cyclic.keys().copied(), cyclic.len(), |o| cyclic
+                .get(o)
+                .copied())
+            .is_none()
+        );
+        let chain = HashMap::from([(c, b), (b, a)]);
+        let ends = delta_chain_ends(chain.keys().copied(), chain.len(), |o| {
+            chain.get(o).copied()
+        })
+        .unwrap();
+        assert_eq!(ends.get(&c), Some(&(a, 2)));
+        assert_eq!(ends.get(&b), Some(&(a, 1)));
+        assert_eq!(ends.get(&a), None);
     }
 
     #[test]

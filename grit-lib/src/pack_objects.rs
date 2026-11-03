@@ -1948,17 +1948,28 @@ pub(crate) fn plan_deltas(
     // no such bases it stays whole (or keeps its own on-disk delta).
     let reuse_dependents: OidHashMap<usize> = {
         let mut longest: OidHashMap<usize> = oid_hash_map();
+        let ends = crate::pack::delta_chain_ends(
+            delta_to_base.keys().copied(),
+            delta_to_base.len(),
+            |oid| delta_to_base.get(oid).copied(),
+        );
         for target in reused_zlib.keys() {
-            let mut cur = *target;
-            let mut depth = 0usize;
-            while let Some(base) = delta_to_base.get(&cur) {
-                depth += 1;
-                cur = *base;
-                if depth > delta_to_base.len() {
-                    break;
+            let (end, depth) = match ends.as_ref().and_then(|ends| ends.get(target)) {
+                Some(&(end, depth)) => (end, depth as usize),
+                None => {
+                    let mut cur = *target;
+                    let mut depth = 0usize;
+                    while let Some(base) = delta_to_base.get(&cur) {
+                        depth += 1;
+                        cur = *base;
+                        if depth > delta_to_base.len() {
+                            break;
+                        }
+                    }
+                    (cur, depth)
                 }
-            }
-            let entry = longest.entry(cur).or_insert(0);
+            };
+            let entry = longest.entry(end).or_insert(0);
             *entry = (*entry).max(depth);
         }
         longest
@@ -1996,9 +2007,24 @@ pub(crate) fn plan_deltas(
         // edges are acyclic: reused ones come without cycles, and the search neither
         // retargets a reused delta nor deltas the root of a reused chain against
         // anything in the pack.
-        let mut delta_std: HashMap<ObjectId, ObjectId> = delta_to_base.drain().collect();
-        crate::pack::cap_delta_chain_depth(&mut delta_std, opts.max_depth);
-        delta_to_base.extend(delta_std);
+        let cuts = crate::pack::delta_chain_cuts(
+            delta_to_base.keys().copied(),
+            delta_to_base.len(),
+            |oid| delta_to_base.get(oid).copied(),
+            opts.max_depth,
+        );
+        match cuts {
+            Some(cuts) => {
+                for target in cuts {
+                    delta_to_base.remove(&target);
+                }
+            }
+            None => {
+                let mut delta_std: HashMap<ObjectId, ObjectId> = delta_to_base.drain().collect();
+                crate::pack::cap_delta_chain_depth(&mut delta_std, opts.max_depth);
+                delta_to_base.extend(delta_std);
+            }
+        }
     }
 
     // Emit in discovery order (commits before their trees/blobs), pulling each in-pack
