@@ -84,6 +84,20 @@ pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> 
         return Err(Error::Message("at least one revision is required".into()));
     }
 
+    // With nothing excluded there is no boundary, so every ref is a tip and the pack
+    // writer's object walk is the only history walk needed.
+    if all_refs && positive_specs.is_empty() && negative_specs.is_empty() {
+        let include = refs_for_bundle_header(repo)?;
+        if include.is_empty() {
+            return Err(map_bundle_err(BundleError::EmptyRefs));
+        }
+        return Ok(BundleSpec {
+            include,
+            exclude: Vec::new(),
+            filter: None,
+        });
+    }
+
     let rev_opts = crate::rev_list::RevListOptions {
         boundary: true,
         all_refs,
