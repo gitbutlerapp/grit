@@ -250,6 +250,13 @@ The check fails if any count **increases**, or **decreases** without updating th
 
 Unit tests: `python3 -m unittest scripts/tests/test_api_ratchet.py` (also covered by the **scripts** CI job).
 
+### `test-support` and public API test hooks
+
+**`test-support`** is an empty-by-default, **unstable** `grit-lib` feature. It exposes [`grit_lib::test_support`](grit-lib/src/test_support/mod.rs) for workspace tests and internal crates only (via **`grit-test-support`** dev-dependencies). It is **outside semver**: omitted from **`public-api.txt`** and **`make semver-check`**, and may change in any release. Do not enable it from **`grit-cli`**, **`grit-protocol`**, or **`grit-http-server`** `[dependencies]`; **`make gate`** and CI also run **`cargo check -p grit-lib`** and **`cargo check -p grit-cli`** without the feature so the default embedder build stays clean.
+
+Test hooks belong in three tiers (roadmap API 0.6): **`test_support::fixtures`** for shared repo generators, **`test_support`** helpers for cross-crate wiring, and **`#[doc(hidden)]`** items documented only with **`--document-hidden-items`** (see below). New hooks should land in **`test_support`** when they are not **`#[doc(hidden)]`**.
+
+**Ratchet:** [`grit-lib/tests/public_api_test_items.rs`](grit-lib/tests/public_api_test_items.rs) parses [`grit-lib/public-api.txt`](grit-lib/public-api.txt) and fails when a path segment looks like a test, probe, fixture, or bench hook (`test`, `probe`, `fixture`, `bench`, …) unless the path is listed in [`grit-lib/public-api-test-items.allow`](grit-lib/public-api-test-items.allow). The allowlist **may only shrink**: stale entries and unlisted offenders both fail. [`scripts/public-api.sh check-test-items`](scripts/public-api.sh) applies the same rule to **hidden** public items via rustdoc JSON (`--document-hidden-items`; `cargo-public-api` 0.52 has no flag). That check runs in **`make public-api-check`** and the **public-api** CI job.
 ## Continuous integration
 
 GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It runs on push to **`main`**, on **pull requests**, nightly (**schedule**), and via **workflow_dispatch**. Superseded PR runs are cancelled via workflow **`concurrency`**.

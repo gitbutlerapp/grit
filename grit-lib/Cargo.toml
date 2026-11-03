@@ -38,6 +38,8 @@ http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls"]
 http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
 # Internal helpers for Criterion benches (EWAH); omitted from the public API snapshot.
 unstable-bench-helpers = []
+# Unstable test hooks for the workspace; outside semver — dev-dependencies and internal crates only.
+test-support = []
 # Forward `trace_span!` to the `tracing` crate (zero cost when disabled).
 tracing = ["dep:tracing"]
 # Derive or implement `serde::Serialize` on result models (`StatusModel`, `DiffEntry`,
@@ -377,6 +379,10 @@ required-features = ["full-tests"]
 [[test]]
 name = "public_module_doctests"
 path = "tests/public_module_doctests.rs"
+
+[[test]]
+name = "public_api_test_items"
+path = "tests/public_api_test_items.rs"
 
 [[test]]
 name = "ref_storage_format"

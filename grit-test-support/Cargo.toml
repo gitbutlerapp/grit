@@ -18,7 +18,7 @@ workspace = true
 [dependencies]
 # `serde-models` here turns the feature on for every workspace test and clippy
 # build, so `grit-lib/tests/serde_models.rs` runs in the default gate.
-grit-lib = { path = "../grit-lib", features = ["serde-models"] }
+grit-lib = { path = "../grit-lib", features = ["serde-models", "test-support"] }
 flate2.workspace = true
 hex.workspace = true
 insta = { version = "1.42", features = ["json", "filters"] }

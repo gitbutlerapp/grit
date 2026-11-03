@@ -15,10 +15,11 @@ SNAPSHOT="${REPO}/grit-lib/public-api.txt"
 
 usage() {
 	cat <<EOF
-Usage: $(basename "$0") <generate|check|ensure-deps>
+Usage: $(basename "$0") <generate|check|check-test-items|ensure-deps>
 
   generate     Write ${SNAPSHOT#"$REPO"/} from cargo public-api
   check        Regenerate to a temp file and diff against the committed snapshot
+  check-test-items  Ratchet test/bench/fixture/probe names in public + hidden API
   ensure-deps              Install pinned nightly + cargo-public-api (for tests)
   ensure-toolchain         Install pinned nightly only (rustdoc JSON / coverage gate)
   ensure-cargo-public-api  Install or replace cargo-public-api when version mismatches
@@ -112,6 +113,14 @@ check)
 		diff_text="$(python3 "${REPO}/scripts/public_api.py" diff "${SNAPSHOT}" "${tmp}")"
 		printf '%s\n' "${diff_text}"
 		write_step_summary "${diff_text}"
+		exit 1
+	fi
+	;;
+check-test-items)
+	ensure_toolchain
+	if python3 "${REPO}/scripts/public_api.py" check-test-items; then
+		echo "public-api test-item allowlist matches."
+	else
 		exit 1
 	fi
 	;;

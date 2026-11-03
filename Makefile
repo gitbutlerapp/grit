@@ -97,6 +97,7 @@ public-api:
 
 public-api-check:
 	./scripts/public-api.sh check
+	./scripts/public-api.sh check-test-items
 
 api-ratchet:
 	python3 scripts/api_ratchet.py update
@@ -119,7 +120,7 @@ docs-check: site/node_modules
 	$(CARGO) doc -p grit-lib --no-deps
 	cd site && GRIT_SITE_STRICT=1 npm run check && npm test && npm run typecheck && GRIT_SITE_STRICT=1 npm run build
 
-LLVM_COV_FEATURES ?= http-ureq,unstable-bench-helpers,full-tests
+LLVM_COV_FEATURES ?= http-ureq,unstable-bench-helpers,full-tests,test-support
 
 coverage:
 	@mkdir -p target/llvm-cov target/doc

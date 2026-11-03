@@ -30,6 +30,7 @@ run_stage() {
 echo "Pre-integration gate (CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS})"
 
 run_stage "fmt" cargo fmt --all --check
+run_stage "check (default features)" bash -c 'cargo check -p grit-lib && cargo check -p grit-cli'
 run_stage "clippy" cargo clippy --workspace -- -D warnings
 run_stage "rustdoc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 run_stage "public module doctests" cargo test -p grit-lib --test public_module_doctests
