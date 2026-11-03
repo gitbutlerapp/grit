@@ -4329,6 +4329,10 @@ const INFLATE_FAST_OUTPUT_SLACK: usize = 258;
 /// headers rarely reach this, so most reads copy a quarter of the full window.
 const COMMIT_HEADER_BLOCK_FIRST_READ: usize = 1024;
 
+/// Compressed bytes [`inflate_commit_header_block`] feeds the inflater before it looks for the
+/// end of the headers again. Ordinary headers compress to a single step.
+const COMMIT_HEADER_BLOCK_INPUT_STEP: usize = 256;
+
 /// Inflate the header block of commit `oid`, stored whole in a local pack, into `out`.
 ///
 /// On success `out` holds the headers through the blank line that ends them, so it parses as
@@ -4490,6 +4494,10 @@ fn read_commit_header_block_from(
 
 /// Inflate the zlib stream of a `size`-byte commit from `compressed` into `out` and keep its
 /// headers through the blank line that ends them, which must lie within its first `want` bytes.
+///
+/// Inflation stops at that blank line, so the message is never decoded: walks that read
+/// every commit of a history (a push whose new commits are dated before the peer's tips,
+/// say) spend most of their time inflating.
 fn inflate_commit_header_block(
     compressed: &[u8],
     size: u64,
@@ -4497,15 +4505,23 @@ fn inflate_commit_header_block(
     zlib: &mut ZlibInflateScratch,
     out: &mut Vec<u8>,
 ) -> bool {
-    let inflated = zlib.decompress_prefix_into(compressed, want + INFLATE_FAST_OUTPUT_SLACK, out);
-    if inflated.is_err() || out.len() < want || out.len() as u64 > size {
+    let inflated = zlib.decompress_prefix_until(
+        compressed,
+        size,
+        COMMIT_HEADER_BLOCK_INPUT_STEP,
+        out,
+        |so_far| memchr::memmem::find(so_far, b"\n\n").map(|blank| blank + 2),
+    );
+    if inflated.is_err() {
         return false;
     }
-    let Some(blank) = memchr::memmem::find(&out[..want], b"\n\n") else {
-        return false;
-    };
-    out.truncate(blank + 2);
-    true
+    match memchr::memmem::find(out, b"\n\n") {
+        Some(blank) if blank + 2 <= want => {
+            out.truncate(blank + 2);
+            true
+        }
+        _ => false,
+    }
 }
 
 fn read_object_info_from_pack_at_offset_with_bytes(
@@ -6808,6 +6824,84 @@ mod tests {
         object_start
     }
 
+    #[test]
+    fn commit_header_block_inflate_stops_at_the_headers() {
+        // Hex ids that do not compress, so the headers span several input steps.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            state
+        };
+        let parents: String = (0..12)
+            .map(|_| {
+                format!(
+                    "parent {:016x}{:016x}{:08x}\n",
+                    next(),
+                    next(),
+                    next() as u32
+                )
+            })
+            .collect();
+        let headers = format!(
+            "tree {:040x}\n{parents}author A <a@example.com> 1 +0000\n\
+             committer C <c@example.com> 2 +0000\n\n",
+            7
+        );
+        let mut zlib = ZlibInflateScratch::default();
+        let mut out = Vec::new();
+        for body in [String::new(), "subject\n".to_owned(), "x\n".repeat(5000)] {
+            let commit = format!("{headers}{body}");
+            let compressed = zlib_pack(commit.as_bytes());
+            assert!(
+                compressed.len() > COMMIT_HEADER_BLOCK_INPUT_STEP,
+                "the headers alone should take more than one input step"
+            );
+            assert!(inflate_commit_header_block(
+                &compressed,
+                commit.len() as u64,
+                COMMIT_HEADER_BLOCK_MAX,
+                &mut zlib,
+                &mut out,
+            ));
+            assert_eq!(out, headers.as_bytes(), "body of {} bytes", body.len());
+        }
+
+        let commit = format!("{headers}subject\n");
+        let compressed = zlib_pack(commit.as_bytes());
+        let size = commit.len() as u64;
+        assert!(
+            !inflate_commit_header_block(&compressed, size, headers.len() - 3, &mut zlib, &mut out),
+            "headers longer than the budget"
+        );
+        assert!(
+            !inflate_commit_header_block(&compressed[..40], size, 1024, &mut zlib, &mut out),
+            "a stream cut off before the end of the headers"
+        );
+        let no_blank = b"tree 0000000000000000000000000000000000000007\nauthor A";
+        assert!(
+            !inflate_commit_header_block(
+                &zlib_pack(no_blank),
+                no_blank.len() as u64,
+                1024,
+                &mut zlib,
+                &mut out,
+            ),
+            "a payload with no blank line"
+        );
+        assert!(
+            !inflate_commit_header_block(
+                &compressed,
+                headers.len() as u64 - 3,
+                1024,
+                &mut zlib,
+                &mut out,
+            ),
+            "a stream that inflates past its declared size"
+        );
+    }
+
     fn append_whole_blob(buf: &mut Vec<u8>, data: &[u8]) -> u64 {
         let off = buf.len() as u64;
         let compressed = zlib_pack(data);
@@ -8523,7 +8617,9 @@ mod tests {
 
     #[test]
     fn commit_header_block_read_takes_a_second_read_when_the_first_is_short() {
-        let (body, header_len) = commit_with_long_headers(800);
+        // Headers just inside the budget, which stored blocks push past the first read.
+        let (_, unpadded) = commit_with_long_headers(0);
+        let (body, header_len) = commit_with_long_headers(COMMIT_HEADER_BLOCK_MAX - 4 - unpadded);
         assert!(header_len < COMMIT_HEADER_BLOCK_MAX);
         let pack = stored_commit_entry(&body);
         let mut zlib = ZlibInflateScratch::default();
