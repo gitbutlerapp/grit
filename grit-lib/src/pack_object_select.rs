@@ -587,6 +587,7 @@ fn send_pack_uninteresting_commits(
         uninteresting: HashSet<ObjectId>,
         interesting_on_heap: usize,
         next_seq: u64,
+        header_buf: Vec<u8>,
     }
 
     impl<'a> SendPackRevWalk<'a> {
@@ -632,10 +633,24 @@ fn send_pack_uninteresting_commits(
             if self.queue_from_graph(oid) {
                 return Ok(());
             }
-            match self.odb.read(&oid) {
-                Ok(obj) => self.queue_commit(oid, &obj),
-                Err(_) => Ok(()),
-            }
+            // Only the headers matter here, and without a commit-graph this walk can read
+            // most of the history (new commits dated before the peer's tips), so skip
+            // inflating messages wherever the pack stores the commit whole.
+            let mut header = std::mem::take(&mut self.header_buf);
+            let queued = if matches!(
+                self.odb
+                    .read_packed_commit_header_block_into(&oid, &mut header),
+                Ok(true)
+            ) {
+                self.queue_commit_data(oid, &header)
+            } else {
+                match self.odb.read(&oid) {
+                    Ok(obj) => self.queue_commit(oid, &obj),
+                    Err(_) => Ok(()),
+                }
+            };
+            self.header_buf = header;
+            queued
         }
 
         /// Queue the commit a ref tip names, following annotated tags.
@@ -708,7 +723,12 @@ fn send_pack_uninteresting_commits(
             if obj.kind != ObjectKind::Commit {
                 return Ok(());
             }
-            let parsed = CommitRef::parse(&obj.data)?;
+            self.queue_commit_data(oid, &obj.data)
+        }
+
+        /// Queue commit `oid` from its payload, or from just its header block.
+        fn queue_commit_data(&mut self, oid: ObjectId, data: &[u8]) -> Result<()> {
+            let parsed = CommitRef::parse(data)?;
             #[cfg(test)]
             send_pack_walk_test_hooks::record_commit_read();
             self.push_queued(QueuedCommit {
@@ -753,6 +773,7 @@ fn send_pack_uninteresting_commits(
         uninteresting: HashSet::new(),
         interesting_on_heap: 0,
         next_seq: 0,
+        header_buf: Vec::new(),
     };
 
     for &want in wants {
@@ -1715,6 +1736,77 @@ mod tests {
             "the walk must stop at the frontier, not drain the remote's history ({} marked)",
             hidden.len()
         );
+    }
+
+    #[test]
+    fn push_dated_before_packed_history_reads_commit_headers() {
+        use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let tree = write_tree(&repo, &[]);
+        let body = "a long message line\n".repeat(100);
+        let write = |parents: &[ObjectId], time: i64| {
+            let mut text = format!("tree {tree}\n");
+            for parent in parents {
+                text.push_str(&format!("parent {parent}\n"));
+            }
+            text.push_str(&format!(
+                "author A <a@example.com> {time} +0000\n\
+                 committer A <a@example.com> {time} +0000\n\nc{time}\n\n{body}"
+            ));
+            repo.odb()
+                .write(ObjectKind::Commit, text.as_bytes())
+                .unwrap()
+        };
+        // The remote's history, packed and without a commit-graph, with a merge in it.
+        let root = write(&[], 1_300_000_000);
+        let mut history = vec![root];
+        let mut tip = root;
+        for i in 1..120 {
+            tip = write(&[tip], 1_300_000_000 + i);
+            history.push(tip);
+        }
+        let side = write(&[root], 1_300_000_500);
+        tip = write(&[tip, side], 1_300_000_600);
+        history.extend([side, tip]);
+        // New local work dated before all of that history, so the walk drains it.
+        let mut new_tip = tip;
+        let mut new_commits = Vec::new();
+        for i in 0..3 {
+            new_tip = write(&[new_tip], 1_000_000_000 + i);
+            new_commits.push(new_tip);
+        }
+        std::fs::write(
+            repo.git_dir().join("refs/heads/main"),
+            format!("{new_tip}\n"),
+        )
+        .unwrap();
+        crate::maintenance::repack_all(&repo, &crate::maintenance::RepackOptions::default())
+            .unwrap();
+        assert!(repo.odb().commit_graph_chain().is_none());
+        let mut header = Vec::new();
+        assert!(repo
+            .odb()
+            .read_packed_commit_header_block_into(&tip, &mut header)
+            .unwrap());
+
+        reset_commit_reads();
+        let hidden = repo
+            .odb()
+            .with_pack_read_context(|| {
+                send_pack_uninteresting_commits(
+                    repo.odb(),
+                    &[new_tip],
+                    &[tip],
+                    &HashSet::new(),
+                    &CancelSignal::never(),
+                )
+            })
+            .unwrap();
+        let expected: HashSet<ObjectId> = history.iter().copied().collect();
+        assert_eq!(hidden, expected, "the remote's whole history, nothing new");
+        assert!(new_commits.iter().all(|c| !hidden.contains(c)));
+        assert_eq!(commit_reads(), history.len() + new_commits.len());
     }
 
     #[test]
