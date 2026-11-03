@@ -83,6 +83,137 @@ fn describe_clock_skew_fixture_matches_git_rev_list_count() {
     assert_eq!(described.distance, 2);
 }
 
+/// Issue #6613: four no-ff feature merges, annotated tag on mainline, side-branch tag.
+#[test]
+fn describe_merge_ladder_matches_git() {
+    if !git_interop_available(Backend::Files) {
+        return;
+    }
+    let root = tempfile::tempdir().expect("tempdir");
+    let wt = root.path();
+    git(wt, &["init", "-q", "-b", "main"]);
+    git(wt, &["commit", "--allow-empty", "-q", "-m", "root"]);
+    for i in 0..4 {
+        git(wt, &["checkout", "-q", "-b", &format!("feat_{i}")]);
+        git(
+            wt,
+            &[
+                "commit",
+                "--allow-empty",
+                "-q",
+                "-m",
+                &format!("feat {i} work"),
+            ],
+        );
+        git(wt, &["checkout", "-q", "main"]);
+        git(
+            wt,
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                &format!("feat_{i}"),
+                "-m",
+                &format!("merge feat {i}"),
+            ],
+        );
+    }
+    git(wt, &["tag", "-a", "t1", "-m", "t1", "main~2"]);
+    git(wt, &["checkout", "-q", "feat_0"]);
+    git(wt, &["commit", "--allow-empty", "-q", "-m", "side a"]);
+    git(wt, &["commit", "--allow-empty", "-q", "-m", "side b"]);
+    git(wt, &["tag", "-a", "ss", "-m", "ss", "HEAD~2"]);
+
+    let repo = Repository::open(
+        &wt.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(wt),
+    )
+    .expect("open");
+
+    let cases: [(&str, &str, Option<&str>); 3] = [
+        ("main", "t1", Some("t1")),
+        ("main~1", "t1", Some("t1")),
+        ("feat_0", "ss", Some("ss")),
+    ];
+    for (rev, match_glob, expect_tag) in cases {
+        let opts = DescribeOptions {
+            match_glob: Some(format!("{match_glob}*")),
+            ..DescribeOptions::default()
+        };
+        let git_desc = git(wt, &["describe", &format!("--match={match_glob}*"), rev])
+            .trim()
+            .to_owned();
+        let described = repo
+            .rev_walk()
+            .describe(rev, &opts)
+            .expect("describe")
+            .expect("tag expected");
+        let tag_short = described
+            .tag
+            .as_str()
+            .strip_prefix("refs/tags/")
+            .unwrap_or(described.tag.as_str());
+        assert_eq!(expect_tag, Some(tag_short), "rev {rev}");
+        let git_count = git(wt, &["rev-list", "--count", &format!("{tag_short}..{rev}")])
+            .trim()
+            .parse::<usize>()
+            .expect("count");
+        assert_eq!(described.distance, git_count, "rev {rev}");
+        assert!(
+            git_desc.starts_with(&format!("{tag_short}-{}-", described.distance)),
+            "git {git_desc}, grit distance {}",
+            described.distance
+        );
+        assert!(
+            git_desc.ends_with(&described.abbrev),
+            "git abbrev in {git_desc}, grit {}",
+            described.abbrev
+        );
+    }
+    assert_eq!(
+        repo.rev_walk()
+            .describe(
+                "main",
+                &DescribeOptions {
+                    match_glob: Some("t1*".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("describe")
+            .expect("tag")
+            .distance,
+        4
+    );
+    assert_eq!(
+        repo.rev_walk()
+            .describe(
+                "main~1",
+                &DescribeOptions {
+                    match_glob: Some("t1*".into()),
+                    ..Default::default()
+                }
+            )
+            .expect("describe")
+            .expect("tag")
+            .distance,
+        2
+    );
+    assert_eq!(
+        repo.rev_walk()
+            .describe(
+                "feat_0",
+                &DescribeOptions {
+                    match_glob: Some("ss*".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("describe")
+            .expect("tag")
+            .distance,
+        2
+    );
+}
+
 /// Issue #2479: tag peel is merge first parent and side-branch root (two path depths).
 #[test]
 fn describe_diamond_merge_matches_git() {

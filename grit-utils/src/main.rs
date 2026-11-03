@@ -1090,6 +1090,9 @@ enum DriveCmd {
         repo: PathBuf,
         range: String,
     },
+    RevWalkDescribeHead {
+        repo: PathBuf,
+    },
     /// In-memory merge prediction for hot-path fixture oids (`predict_merge`).
     MergePredict {
         repo: PathBuf,
@@ -1297,6 +1300,10 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         DriveCmd::RevWalkLeftRightCount { repo, range } => {
             let repo = open_repo(repo)?;
             odb_driver::rev_walk_left_right_count(&repo, range)?;
+        }
+        DriveCmd::RevWalkDescribeHead { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_walk_describe_head(&repo)?;
         }
         DriveCmd::MergePredict { repo } => {
             odb_driver::merge_predict_hot_path(repo)?;

@@ -10,16 +10,17 @@ use std::hint::black_box;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use grit_lib::diff::{count_changes_with_algorithm, diff_trees};
 use grit_lib::refs::branch_tracking::TipComparison;
+use grit_lib::refs::write_ref;
 use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::revwalk::{
-    group_commits_by_author_from_rev, mailmap_for_grouping, GroupByAuthorOptions,
+    group_commits_by_author_from_rev, mailmap_for_grouping, DescribeOptions, GroupByAuthorOptions,
     RevWalkListOptions,
 };
 use similar::Algorithm;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use s7::HistoryBenchFixtures;
 
@@ -292,6 +293,49 @@ fn bench_revwalk_log_limit(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_describe_many_tags(c: &mut Criterion) {
+    static TAGGED: OnceLock<()> = OnceLock::new();
+    TAGGED.get_or_init(|| {
+        let fx = HistoryBenchFixtures::global();
+        let opts = RevListOptions {
+            use_commit_graph: false,
+            ..Default::default()
+        };
+        let commits = rev_list(&fx.repo, &[String::from("HEAD")], &[], &opts)
+            .expect("rev-list")
+            .commits;
+        for (i, oid) in commits.iter().enumerate().step_by(50) {
+            write_ref(fx.repo.git_dir(), &format!("refs/tags/describe-t{i}"), oid)
+                .expect("tag ref");
+        }
+    });
+
+    let fx = HistoryBenchFixtures::global();
+    let mut group = c.benchmark_group("revwalk/describe_many_tags");
+    for (graph_label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {
+        group.bench_with_input(
+            BenchmarkId::new("head", graph_label),
+            &use_graph,
+            |b, with_graph| {
+                if *with_graph {
+                    fx.ensure_commit_graph();
+                } else {
+                    fx.remove_commit_graph();
+                }
+                b.iter(|| {
+                    black_box(
+                        fx.repo
+                            .rev_walk()
+                            .describe("HEAD", &DescribeOptions::default())
+                            .expect("describe"),
+                    )
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group("revwalk/log_first_1000_gitgit_like");
@@ -487,6 +531,7 @@ criterion_group!(
     bench_log_group_by_author,
     bench_revwalk_filter,
     bench_revwalk_path_limited,
+    bench_describe_many_tags,
     bench_log_first_1000_gitgit_like,
     bench_revwalk_limit_near_full_history,
     bench_revwalk_log_limit,
