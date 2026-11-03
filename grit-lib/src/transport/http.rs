@@ -639,6 +639,7 @@ struct Discovery {
     caps: HashSet<String>,
     head_symref: Option<String>,
     object_format: String,
+    saw_ref_advertisement_flush: bool,
 }
 
 /// Parse a v0/v1 ref advertisement (after the service preamble is stripped).
@@ -653,14 +654,26 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
 
     // Peek the first packet to distinguish v2 from v0/v1.
     let first = match pkt_line::read_packet(&mut cur)? {
-        None | Some(pkt_line::Packet::Flush) => {
-            // Empty advertisement (empty repo on an older server): no refs.
+        None => {
+            // EOF before any pkt-line: not a completed handshake.
             return Ok(Discovery {
                 protocol_version: 0,
                 refs: Vec::new(),
                 caps: HashSet::new(),
                 head_symref: None,
                 object_format: "sha1".to_owned(),
+                saw_ref_advertisement_flush: false,
+            });
+        }
+        Some(pkt_line::Packet::Flush) => {
+            // Empty advertisement (empty repo on an older server): flush only, no refs.
+            return Ok(Discovery {
+                protocol_version: 0,
+                refs: Vec::new(),
+                caps: HashSet::new(),
+                head_symref: None,
+                object_format: "sha1".to_owned(),
+                saw_ref_advertisement_flush: true,
             });
         }
         Some(pkt_line::Packet::Data(s)) => s,
@@ -695,6 +708,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
             caps,
             head_symref: None,
             object_format,
+            saw_ref_advertisement_flush: false,
         });
     }
 
@@ -780,6 +794,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
         caps,
         head_symref,
         object_format,
+        saw_ref_advertisement_flush: false,
     })
 }
 
@@ -1159,6 +1174,7 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
             caps,
             disc.head_symref,
             disc.object_format,
+            disc.saw_ref_advertisement_flush,
             gp,
             opts.cancel.clone(),
             std::sync::Arc::clone(&opts.stack_watch),

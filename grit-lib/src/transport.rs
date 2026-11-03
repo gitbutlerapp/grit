@@ -222,6 +222,11 @@ pub trait Connection {
     fn stateless_rpc(&self) -> bool {
         false
     }
+
+    /// True when the v0/v1 ref advertisement ended with a flush pkt-line on connect.
+    fn saw_ref_advertisement_flush(&self) -> bool {
+        false
+    }
 }
 
 /// Write the v0/v1 client-side flush pkt-line (`0000`) after reading the ref
@@ -273,16 +278,23 @@ pub struct Advertisement {
     pub head_symref: Option<String>,
     /// Negotiated protocol version.
     pub protocol_version: u8,
+    /// Set when a v0/v1 ref advertisement ended with a flush pkt-line (`0000`).
+    pub(crate) saw_ref_advertisement_flush: bool,
 }
 
 /// True when the connect-time advertisement shows a completed Git protocol handshake.
 ///
 /// An empty repository still advertises server capabilities (v0/v1 zero-oid carrier or a v2
-/// capability block). A completely empty [`Advertisement`] means the transport never spoke Git.
+/// capability block). Some older servers (notably Apple Git on empty bare repos) send only a
+/// flush pkt-line with no refs or capabilities; [`Advertisement::saw_ref_advertisement_flush`]
+/// records that case. A completely empty [`Advertisement`] with no flush means the transport
+/// never spoke Git.
 #[must_use]
 pub(crate) fn remote_handshake_complete(adv: &Advertisement) -> bool {
     if adv.protocol_version >= 2 {
         !adv.capabilities.is_empty()
+    } else if adv.saw_ref_advertisement_flush {
+        true
     } else {
         !adv.capabilities.is_empty() || !adv.refs.is_empty() || adv.head_symref.is_some()
     }
@@ -292,6 +304,8 @@ pub(crate) fn remote_handshake_complete(adv: &Advertisement) -> bool {
 pub(crate) fn connection_handshake_complete(conn: &dyn Connection) -> bool {
     if conn.protocol_version() >= 2 {
         !conn.capabilities().is_empty()
+    } else if conn.saw_ref_advertisement_flush() {
+        true
     } else {
         !conn.capabilities().is_empty()
             || !conn.advertised_refs().is_empty()
@@ -352,8 +366,14 @@ pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
     loop {
         match pkt_line::read_packet(&mut reader)? {
             None => break,
-            Some(pkt_line::Packet::Flush) | Some(pkt_line::Packet::Delim) => break,
-            Some(pkt_line::Packet::ResponseEnd) => break,
+            Some(pkt_line::Packet::Flush) | Some(pkt_line::Packet::Delim) => {
+                adv.saw_ref_advertisement_flush = true;
+                break;
+            }
+            Some(pkt_line::Packet::ResponseEnd) => {
+                adv.saw_ref_advertisement_flush = true;
+                break;
+            }
             Some(pkt_line::Packet::Data(line)) => {
                 let line = line.trim_end_matches('\n');
                 if let Some(ver) = line.strip_prefix("version ") {
@@ -551,6 +571,10 @@ impl Connection for GitDaemonConnection {
 
     fn advertised_tag_peel(&self) -> Option<&std::collections::HashMap<String, ObjectId>> {
         Some(&self.adv.advertised_peel)
+    }
+
+    fn saw_ref_advertisement_flush(&self) -> bool {
+        self.adv.saw_ref_advertisement_flush
     }
 
     fn finish_send(&mut self) {
@@ -1164,6 +1188,10 @@ impl Connection for SshConnection {
         Some(&self.adv.advertised_peel)
     }
 
+    fn saw_ref_advertisement_flush(&self) -> bool {
+        self.adv.saw_ref_advertisement_flush
+    }
+
     fn finish_send(&mut self) {
         // Dropping the child's stdin closes the pipe, signalling EOF so the
         // remote `git-upload-pack` v2 `serve_loop` exits instead of blocking for
@@ -1352,6 +1380,10 @@ impl Connection for LocalUploadPackConnection {
 
     fn advertised_tag_peel(&self) -> Option<&std::collections::HashMap<String, ObjectId>> {
         Some(&self.adv.advertised_peel)
+    }
+
+    fn saw_ref_advertisement_flush(&self) -> bool {
+        self.adv.saw_ref_advertisement_flush
     }
 
     fn finish_send(&mut self) {
@@ -1862,9 +1894,31 @@ mod tests {
     }
 
     #[test]
+    fn read_advertisement_flush_only_empty_repo_completes_handshake() {
+        let mut cur = std::io::Cursor::new(b"0000");
+        let adv = read_advertisement(&mut cur).expect("flush-only advertisement");
+        assert!(adv.saw_ref_advertisement_flush);
+        assert!(adv.capabilities.is_empty());
+        assert!(adv.refs.is_empty());
+        assert!(remote_handshake_complete(&adv));
+    }
+
+    #[test]
+    fn read_advertisement_immediate_eof_is_not_handshake() {
+        let mut cur = std::io::Cursor::new([]);
+        let adv = read_advertisement(&mut cur).expect("empty read");
+        assert!(!adv.saw_ref_advertisement_flush);
+        assert!(!remote_handshake_complete(&adv));
+    }
+
+    #[test]
     fn remote_handshake_complete_empty_vs_capabilities_carrier() {
         let empty = Advertisement::default();
         assert!(!remote_handshake_complete(&empty));
+
+        let mut flush_only = Advertisement::default();
+        flush_only.saw_ref_advertisement_flush = true;
+        assert!(remote_handshake_complete(&flush_only));
 
         let mut empty_repo = Advertisement::default();
         empty_repo.capabilities = vec!["multi_ack".to_owned()];
