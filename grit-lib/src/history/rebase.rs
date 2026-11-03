@@ -1061,13 +1061,31 @@ fn collect_range_touched_paths(
     Ok(paths)
 }
 
+/// Repository paths from a replay range plus pathspec spellings safe for diff/Bloom APIs.
+struct ReplayPathFilters {
+    repo_paths: Vec<String>,
+    pathspecs: Vec<String>,
+}
+
+fn replay_path_filters(range_paths: &HashSet<String>) -> ReplayPathFilters {
+    let repo_paths: Vec<String> = range_paths.iter().cloned().collect();
+    let pathspecs: Vec<String> = repo_paths
+        .iter()
+        .map(|p| crate::pathspec::repository_path_as_literal_pathspec(p))
+        .collect();
+    ReplayPathFilters {
+        repo_paths,
+        pathspecs,
+    }
+}
+
 fn commit_touches_replay_paths(
     repo: &Repository,
     commit: ObjectId,
-    pathspecs: &[String],
+    filters: &ReplayPathFilters,
     bloom_chain: Option<&CommitGraphChain>,
 ) -> Result<bool, HistoryError> {
-    if pathspecs.is_empty() {
+    if filters.pathspecs.is_empty() {
         return Ok(true);
     }
     let obj = repo.odb().read(&commit)?;
@@ -1080,7 +1098,7 @@ fn commit_touches_replay_paths(
                 repo,
                 Some(&parent_tree),
                 Some(&parsed.tree),
-                pathspecs,
+                filters,
                 bloom_chain,
                 commit,
                 false,
@@ -1099,7 +1117,7 @@ fn commit_touches_replay_paths(
         repo,
         parent_tree.as_ref(),
         Some(&parsed.tree),
-        pathspecs,
+        filters,
         bloom_chain,
         commit,
         true,
@@ -1110,7 +1128,7 @@ fn trees_differ_on_pathspecs(
     repo: &Repository,
     old_tree: Option<&ObjectId>,
     new_tree: Option<&ObjectId>,
-    pathspecs: &[String],
+    filters: &ReplayPathFilters,
     bloom_chain: Option<&CommitGraphChain>,
     commit_oid: ObjectId,
     bloom_first_parent: bool,
@@ -1120,15 +1138,21 @@ fn trees_differ_on_pathspecs(
     }
     if bloom_first_parent {
         if let Some(chain) = bloom_chain {
-            if let Ok(BloomPrecheck::DefinitelyNot) =
-                chain.bloom_precheck_for_paths(repo.odb(), commit_oid, pathspecs, None, -1, true)
-            {
+            if let Ok(BloomPrecheck::DefinitelyNot) = chain.bloom_precheck_for_paths(
+                repo.odb(),
+                commit_oid,
+                &filters.pathspecs,
+                None,
+                -1,
+                true,
+            ) {
                 return Ok(false);
             }
         }
     }
-    let entries = diff_trees_for_pathspecs(repo.odb(), old_tree, new_tree, pathspecs, None)
-        .map_err(history_repo_err)?;
+    let entries =
+        diff_trees_for_pathspecs(repo.odb(), old_tree, new_tree, &filters.pathspecs, None)
+            .map_err(history_repo_err)?;
     Ok(!entries.is_empty())
 }
 
@@ -1136,21 +1160,18 @@ fn trees_differ_on_pathspecs(
 fn replay_paths_bloom_definitely_unchanged(
     chain: &CommitGraphChain,
     commit_oid: ObjectId,
-    pathspecs: &[String],
+    repo_paths: &[String],
 ) -> bool {
     use crate::bloom::bloom_keyvec_for_path;
     let Some(settings) = chain.bloom_settings_for_commit(&commit_oid) else {
         return false;
     };
     let mut checked_any = false;
-    for spec in pathspecs {
-        if spec.is_empty() || crate::pathspec::pathspec_is_exclude(spec) {
+    for path in repo_paths {
+        if path.is_empty() {
             continue;
         }
-        let Some(norm) = crate::pathspec::bloom_lookup_prefix_with_cwd(spec, None) else {
-            continue;
-        };
-        let keys = bloom_keyvec_for_path(norm.as_str(), &settings);
+        let keys = bloom_keyvec_for_path(path.as_str(), &settings);
         if keys.is_empty() {
             return false;
         }
@@ -1177,19 +1198,19 @@ fn patch_ids_in_fork_to_onto(
     commits.retain(|oid| *oid != fork);
     let mut commits = topo_order_commit_subset(repo, &commits, true)?;
     commits.reverse();
-    let pathspecs: Vec<String> = range_paths.iter().cloned().collect();
+    let filters = replay_path_filters(range_paths);
     let bloom_chain = repo.odb().commit_graph_chain();
     let bloom_ref = bloom_chain.as_deref();
     let algo = repo.odb().hash_algo();
     let mut by_patch: HashMap<ObjectId, ObjectId> = HashMap::new();
     for oid in commits {
-        if !pathspecs.is_empty() {
+        if !filters.pathspecs.is_empty() {
             if bloom_ref.is_some_and(|chain| {
-                replay_paths_bloom_definitely_unchanged(chain, oid, &pathspecs)
+                replay_paths_bloom_definitely_unchanged(chain, oid, &filters.repo_paths)
             }) {
                 continue;
             }
-            if !commit_touches_replay_paths(repo, oid, &pathspecs, bloom_ref)? {
+            if !commit_touches_replay_paths(repo, oid, &filters, bloom_ref)? {
                 continue;
             }
         }
@@ -1225,23 +1246,21 @@ fn applied_by_patch(
     let range_paths = collect_range_touched_paths(repo, range)?;
     let algo = repo.odb().hash_algo();
     let mut needed_pids = HashSet::new();
+    let mut range_patch_ids: HashMap<ObjectId, ObjectId> = HashMap::new();
     for &commit in range {
-        if let Some(pid) =
-            compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)?
-        {
-            needed_pids.insert(pid);
-        }
+        let Some(pid) = compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)?
+        else {
+            continue;
+        };
+        needed_pids.insert(pid);
+        range_patch_ids.insert(commit, pid);
     }
     if needed_pids.is_empty() {
         return Ok(HashMap::new());
     }
     let by_patch = patch_ids_in_fork_to_onto(repo, fork, onto, &range_paths, &needed_pids)?;
     let mut out = HashMap::new();
-    for &commit in range {
-        let Some(pid) = compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)?
-        else {
-            continue;
-        };
+    for (&commit, &pid) in &range_patch_ids {
         if let Some(&existing) = by_patch.get(&pid) {
             out.insert(commit, existing);
         }
@@ -1406,19 +1425,144 @@ mod tests {
         let mut parent = fork;
         for i in 0..120 {
             let noise = format!("noise/{i}.txt");
-            let tree = blob_tree(&repo, &noise, format!("n{i}\n").as_bytes()).expect("noise tree");
-            parent = write_commit(&repo, tree, &[parent], "noise", &id).expect("noise commit");
+            parent = commit_with_extra_file(
+                &repo,
+                parent,
+                &noise,
+                format!("n{i}\n").as_bytes(),
+                "noise",
+                &id,
+            )
+            .expect("noise commit");
         }
         let onto = parent;
-        let branch_tree = blob_tree(&repo, "f.txt", b"topic\n").expect("branch tree");
-        let tip = write_commit(&repo, branch_tree, &[fork], "topic", &id).expect("tip");
+        let tip =
+            commit_with_extra_file(&repo, fork, "f.txt", b"topic\n", "topic", &id).expect("tip");
         let range = commits_in_rebase_range(&repo, fork, &[tip]).expect("range");
         assert_eq!(range.len(), 1);
+        use crate::merge_base::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+        reset_commit_parent_lookups();
         let _map = applied_by_patch(&repo, fork, onto, &range).expect("applied");
         let calls = test_patch_id_compute_call_count();
         assert!(
             calls <= 4,
             "expected patch-id work proportional to fork..onto overlap, got {calls} calls"
+        );
+        let patch_lookups = commit_parent_lookups();
+        assert!(
+            patch_lookups <= 450,
+            "prefilter must not walk every onto commit parent, got {patch_lookups} lookups"
+        );
+    }
+
+    fn commit_with_extra_file(
+        repo: &Repository,
+        parent: ObjectId,
+        path: &str,
+        content: &[u8],
+        msg: &str,
+        id: &str,
+    ) -> Result<ObjectId, HistoryError> {
+        use crate::porcelain::index_from_tree::index_from_tree;
+        let parent_tree = repo.odb().commit_tree(&parent).map_err(history_repo_err)?;
+        let mut index = index_from_tree(repo, &parent_tree).map_err(history_repo_err)?;
+        let blob = repo
+            .odb()
+            .write(ObjectKind::Blob, content)
+            .map_err(history_repo_err)?;
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: content.len() as u32,
+            oid: blob,
+            flags: path.len().min(0xfff) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        });
+        let tree = write_tree_from_index(repo.odb(), &index, "").map_err(history_repo_err)?;
+        write_commit(repo, tree, &[parent], msg, id).map_err(history_repo_err)
+    }
+
+    fn colon_literal_skip_applied_fixture(
+        repo: &Repository,
+        id: &str,
+    ) -> (ObjectId, ObjectId, ObjectId, ObjectId) {
+        const MAGIC: &str = ":(literal)foo";
+        let base_tree = blob_tree(repo, "base", b"base\n").expect("base tree");
+        let fork = write_commit(repo, base_tree, &[], "fork", id).expect("fork");
+        let add_tree =
+            files_tree(repo, &[("base", b"base\n"), (MAGIC, b"topic\n")]).expect("add tree");
+        let add = write_commit(repo, add_tree, &[fork], "add topic", id).expect("add");
+        let revert_tree = blob_tree(repo, "base", b"base\n").expect("revert tree");
+        let onto = write_commit(repo, revert_tree, &[add], "revert", id).expect("onto");
+        let topic_tree =
+            files_tree(repo, &[("base", b"base\n"), (MAGIC, b"topic\n")]).expect("topic tree");
+        let tip = write_commit(repo, topic_tree, &[fork], "topic", id).expect("tip");
+        (fork, add, onto, tip)
+    }
+
+    #[test]
+    fn skip_applied_reuses_patch_for_colon_literal_filename_without_graph() {
+        skip_applied_reuses_patch_for_colon_literal_filename(false);
+    }
+
+    #[test]
+    fn skip_applied_reuses_patch_for_colon_literal_filename_with_commit_graph() {
+        skip_applied_reuses_patch_for_colon_literal_filename(true);
+    }
+
+    fn skip_applied_reuses_patch_for_colon_literal_filename(write_graph: bool) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repo(dir.path());
+        let id = ident(1);
+        let (fork, add, onto, tip) = colon_literal_skip_applied_fixture(&repo, &id);
+        if write_graph {
+            repo.odb().write_commit_graph().expect("commit-graph");
+        }
+        let range = commits_in_rebase_range(&repo, fork, &[tip]).expect("range");
+        let map = applied_by_patch(&repo, fork, onto, &range).expect("applied");
+        assert_eq!(
+            map.get(&tip),
+            Some(&add),
+            "identical patch on onto side must be found for colon-leading paths"
+        );
+        std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).expect("ref");
+        let opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: crate::revwalk::history::EmptyPolicy::Drop,
+            committer: id.parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        let plan = plan_rebase(
+            &repo,
+            &RebaseRequest {
+                upstream: fork,
+                onto: Some(onto),
+                branch_tip: tip,
+            },
+            &opts,
+        )
+        .expect("plan");
+        let RebasePlan::Plan(rewrite) = plan else {
+            panic!("expected a replay plan");
+        };
+        assert_eq!(rewrite.commits.len(), 1);
+        assert_eq!(rewrite.commits[0].old, tip);
+        assert_eq!(rewrite.commits[0].new, Some(add));
+        assert!(
+            rewrite.commits[0].reused,
+            "topic commit must reuse onto add"
         );
     }
 

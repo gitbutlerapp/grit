@@ -10,6 +10,7 @@ use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
+use grit_lib::porcelain::index_from_tree::index_from_tree;
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
@@ -93,8 +94,8 @@ fn build_rebase_plan_fixture(
             .odb()
             .write(ObjectKind::Blob, body.as_bytes())
             .expect("blob");
-        let mut idx = Index::new();
-        idx.hash_algo = repo.odb().hash_algo();
+        let parent_tree = repo.odb().commit_tree(&parent).expect("parent tree");
+        let mut idx = index_from_tree(&repo, &parent_tree).expect("index from parent");
         idx.add_or_replace(index_entry(
             format!("n/{i}.txt").as_bytes(),
             blob,
