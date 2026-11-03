@@ -229,6 +229,80 @@ fn compute_corrected_generations(
     gen_date
 }
 
+/// Bloom filters computed by [`compute_new_bloom_filters`], packed into one buffer.
+///
+/// Tens of thousands of separately allocated filters would stay live across every tree diff
+/// and fragment the heap those diffs churn through; one growing buffer does not.
+struct ComputedBloomFilters {
+    /// Filter bytes of every computed commit, in computation order.
+    data: Vec<u8>,
+    /// Per `sorted_oids` index: the commit's range in `data` and how its filter was built.
+    filters: Vec<Option<(std::ops::Range<usize>, BloomBuildOutcome)>>,
+}
+
+impl ComputedBloomFilters {
+    /// Filter bytes and outcome for `sorted_oids[i]`, when one was computed.
+    fn get(&self, i: usize) -> Option<(&[u8], BloomBuildOutcome)> {
+        let (range, outcome) = self.filters.get(i)?.as_ref()?;
+        Some((&self.data[range.clone()], *outcome))
+    }
+}
+
+/// Changed-path Bloom filters for the commits of `sorted_oids` that have no reusable filter.
+///
+/// Only the first `max_new` such commits in `sorted_oids` order get a filter, the commits
+/// Git's `--max-new-filters` budget selects. They are diffed in generation order (`topo`), so
+/// consecutive diffs share most of their trees and find them in the object database's tree
+/// cache; OID order would visit history at random. A first parent outside `infos` (a commit
+/// of a base layer) has its tree read from the object database.
+#[expect(clippy::too_many_arguments)]
+fn compute_new_bloom_filters(
+    sorted_oids: &[ObjectId],
+    infos: &OidHashMap<CommitGraphCommitInfo>,
+    odb: &Odb,
+    bloom_settings: &BloomFilterSettings,
+    existing_filters: &OidHashMap<Vec<u8>>,
+    upgraded_filters: &OidHashMap<Vec<u8>>,
+    max_new: u32,
+    topo: &[u32],
+) -> crate::error::Result<ComputedBloomFilters> {
+    let mut order: Vec<usize> = sorted_oids
+        .iter()
+        .enumerate()
+        .filter(|(_, oid)| {
+            !existing_filters.contains_key(*oid) && !upgraded_filters.contains_key(*oid)
+        })
+        .map(|(i, _)| i)
+        .take(max_new as usize)
+        .collect();
+    order.sort_unstable_by_key(|&i| (topo[i], i));
+
+    let mut computed = ComputedBloomFilters {
+        data: Vec::new(),
+        filters: vec![None; sorted_oids.len()],
+    };
+    for i in order {
+        let info = &infos[&sorted_oids[i]];
+        let parent_tree = match info.parents.first() {
+            Some(parent) => Some(match infos.get(parent) {
+                Some(parent_info) => parent_info.tree,
+                None => odb.commit_tree(parent)?,
+            }),
+            None => None,
+        };
+        let (bytes, outcome) = crate::commit_graph_file::bloom_filter_for_tree_diff(
+            odb,
+            parent_tree,
+            info.tree,
+            bloom_settings,
+        )?;
+        let start = computed.data.len();
+        computed.data.extend_from_slice(&bytes);
+        computed.filters[i] = Some((start..computed.data.len(), outcome));
+    }
+    Ok(computed)
+}
+
 fn resolve_parent_edge(
     commit: ObjectId,
     parent: ObjectId,
@@ -395,11 +469,20 @@ pub(crate) fn build_commit_graph_bytes_from_oid_maps(
     let mut bloom_stats = BloomWriteStats::default();
     let max_new = max_new_filters.unwrap_or(u32::MAX);
     let (bidx, bdat, bloom_total_payload) = if changed_paths {
+        let computed = compute_new_bloom_filters(
+            sorted_oids,
+            infos,
+            odb,
+            bloom_settings,
+            existing_filters,
+            upgraded_filters,
+            max_new,
+            &topo,
+        )?;
         let mut indexes: Vec<u32> = Vec::with_capacity(sorted_oids.len());
         let mut data_payload = Vec::new();
         let mut cur = 0u32;
-        for oid in sorted_oids {
-            let info = &infos[oid];
+        for (i, oid) in sorted_oids.iter().enumerate() {
             // Reuse a filter already present (in a compatible layer) for this commit
             // instead of recomputing it. Git counts these as `filter_not_computed`.
             if let Some(existing) = existing_filters.get(oid) {
@@ -419,17 +502,9 @@ pub(crate) fn build_commit_graph_bytes_from_oid_maps(
                 data_payload.extend_from_slice(upgraded);
                 continue;
             }
-            let compute = bloom_stats.filter_computed < max_new;
-            let (bytes, outcome) = if compute {
-                crate::commit_graph_file::bloom_filter_for_commit_write(
-                    odb,
-                    &info.parents,
-                    info.tree,
-                    bloom_settings,
-                )?
-            } else {
-                (Vec::new(), BloomBuildOutcome::Normal)
-            };
+            let filter = computed.get(i);
+            let compute = filter.is_some();
+            let (bytes, outcome) = filter.unwrap_or((&[], BloomBuildOutcome::Normal));
             if compute {
                 bloom_stats.filter_computed += 1;
                 match outcome {
@@ -442,7 +517,7 @@ pub(crate) fn build_commit_graph_bytes_from_oid_maps(
             }
             cur += bytes.len() as u32;
             indexes.push(cur);
-            data_payload.extend_from_slice(&bytes);
+            data_payload.extend_from_slice(bytes);
         }
         let mut bdat_chunk = Vec::with_capacity(12 + data_payload.len());
         bdat_chunk.extend_from_slice(&bloom_settings.hash_version.to_be_bytes());
@@ -1113,6 +1188,85 @@ mod tests {
         .expect("write");
         assert!(stats.filter_computed <= 1);
         assert!(stats.filter_not_computed >= 1);
+    }
+
+    #[test]
+    fn max_new_filters_budget_goes_to_first_unfiltered_commits_in_oid_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let odb = repo.odb();
+        let mut parents = Vec::new();
+        let mut infos = oid_hash_map();
+        for t in 1..=4i64 {
+            let blob = odb
+                .write(ObjectKind::Blob, format!("{t}\n").as_bytes())
+                .expect("blob");
+            let mut tree_raw = b"100644 a.txt\0".to_vec();
+            tree_raw.extend_from_slice(blob.as_bytes());
+            let tree = odb.write(ObjectKind::Tree, &tree_raw).expect("tree");
+            let ident = format!("T <t@example.com> {t} +0000");
+            let raw = serialize_commit(&CommitData {
+                tree,
+                parents: parents.clone(),
+                author: ident.clone(),
+                committer: ident,
+                author_raw: Vec::new(),
+                committer_raw: Vec::new(),
+                encoding: None,
+                message: "m\n".into(),
+                raw_message: None,
+                extra_headers: Vec::new(),
+            });
+            let c = odb.write(ObjectKind::Commit, &raw).expect("commit");
+            infos.insert(
+                c,
+                super::load_commit_graph_commit_info(odb, c).expect("info"),
+            );
+            parents = vec![c];
+        }
+        let mut sorted: Vec<ObjectId> = infos.keys().copied().collect();
+        sorted.sort_unstable();
+        let bloom = BloomFilterSettings::default();
+        let build = |existing: &crate::objects::OidHashMap<Vec<u8>>| {
+            let (bytes, stats) = super::build_commit_graph_bytes_from_oid_maps(
+                &sorted,
+                &infos,
+                odb,
+                true,
+                &bloom,
+                None,
+                &[],
+                Some(2),
+                existing,
+                &oid_hash_map(),
+                true,
+            )
+            .expect("build");
+            let chain =
+                crate::commit_graph_file::CommitGraphChain::from_bytes(bytes).expect("parse graph");
+            let filtered: Vec<bool> = sorted
+                .iter()
+                .map(|oid| chain.existing_filter_bytes(oid, &bloom).is_some())
+                .collect();
+            (filtered, stats)
+        };
+
+        let (filtered, stats) = build(&oid_hash_map());
+        assert_eq!(filtered, [true, true, false, false]);
+        assert_eq!((stats.filter_computed, stats.filter_not_computed), (2, 2));
+
+        let mut existing = oid_hash_map();
+        existing.insert(sorted[0], vec![0u8]);
+        let (filtered, stats) = build(&existing);
+        assert_eq!(filtered, [true, true, true, false]);
+        assert_eq!((stats.filter_computed, stats.filter_not_computed), (2, 2));
     }
 
     #[test]

@@ -1736,12 +1736,22 @@ pub fn bloom_filter_for_commit_write(
     // Git computes the changed-path filter against the *first* parent only,
     // regardless of how many parents a commit has (see bloom.c:
     // `diff_tree_oid(&c->parents->item->object.oid, ...)`).
-    let (changed_paths_vec, raw_count) = if let Some(first_parent) = parents.first() {
-        let p = odb.commit_tree(first_parent)?;
-        diff_changed_paths_for_bloom(odb, Some(p), tree_oid)?
-    } else {
-        diff_changed_paths_for_bloom(odb, None, tree_oid)?
-    };
+    let parent_tree = parents
+        .first()
+        .map(|first_parent| odb.commit_tree(first_parent))
+        .transpose()?;
+    bloom_filter_for_tree_diff(odb, parent_tree, tree_oid, settings)
+}
+
+/// [`bloom_filter_for_commit_write`] for a commit whose first parent's root tree is already
+/// known (`None` for a root commit).
+pub(crate) fn bloom_filter_for_tree_diff(
+    odb: &Odb,
+    parent_tree: Option<ObjectId>,
+    tree_oid: ObjectId,
+    settings: &BloomFilterSettings,
+) -> crate::error::Result<(Vec<u8>, BloomBuildOutcome)> {
+    let (changed_paths_vec, raw_count) = diff_changed_paths_for_bloom(odb, parent_tree, tree_oid)?;
     let set = collect_changed_paths_for_bloom(&changed_paths_vec);
     Ok(crate::bloom::build_bloom_filter_data(
         &set, raw_count, settings,
