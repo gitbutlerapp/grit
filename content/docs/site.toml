@@ -108,6 +108,8 @@ baseline = [
   "grit-utils/baselines/daily-push-refspec-6936-after.json",
   "grit-utils/baselines/daily-commit-graph-6930-before.json",
   "grit-utils/baselines/daily-commit-graph-6930-after.json",
+  "grit-utils/baselines/daily-revs-count-6954-before.json",
+  "grit-utils/baselines/daily-revs-count-6954-after.json",
   "grit-utils/baselines/daily-pick-one-6676-before.json",
   "grit-utils/baselines/daily-pick-one-6676-after.json",
   "grit-utils/baselines/daily-pick-one-6676-related-before.json",

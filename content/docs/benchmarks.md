@@ -59,6 +59,44 @@ GRIT_BENCH_REPORT_GRIT_COMMIT=<measured revision> ./target/release/grit-bench da
   --min-runs 10 --grit ./target/release/grit --format json --output grit-utils/baselines/daily-commit-graph-6930-after.json
 ```
 
+## Commit counts read only parent headers (2026-11-03)
+
+`revs/count@git-git` runs `grit revs --count HEAD` on git.git (v2.47.0, 75,031 commits in one pack, no commit-graph or bitmap) against `git rev-list --count HEAD`. Grit took 718 ms and peaked at 121 MB, against Git's 502 ms and 63 MB. Two costs made up the gap.
+
+- **Every object read stat'ed the pack directory.** The first time a pack's bytes were mapped, the pack cache treated it like a replaced pack and dropped the thread's trusted pack listing. Nothing restores that trust until the store's epoch changes, so each later read checked the `objects/pack` mtime (75,000 `statx` calls) and reopened the single-pack reader through its path-keyed caches instead of its memo. A first mapping now leaves the listing, the parsed index and the pack hint alone. Only a pack whose bytes were already cached is invalidated. Every command that reads many packed objects gains from this: `log/path`, `revs/count-path` and `revs/count-author` below.
+- **The count went through the general walk.** That walk parsed and kept every commit in full (date-order queue, owned commit data, message strings) for an answer that needs only parent links. An unfiltered count (no excludes, limits, ordering, path or commit filters, and no commit-graph or bitmap to answer it) now walks a visited set over parent lists. For a commit the single local pack stores whole, the reader inflates only the `tree` line, two `parent` lines and one more byte, about 143 of the average 720 bytes. It trusts that prefix only when it provably holds the whole parent list, which is the same canonical parse blame uses. Deltified, loose and octopus commits are read whole. Grafts and shallow boundaries apply as in the filtered count. Replacement refs fall back to the full walk. When a commit-graph exists but a tip is newer than it, the graph-only count declines, so the walk takes parents from the graph for every commit the graph lists and reads only the newer ones. On git.git with a reachable commit-graph and one commit on top (`hyperfine`, release builds, 15 runs), `grit revs --count HEAD` takes 28 ms, against 100 ms before and 45 ms for Git.
+
+Git inflates every commit in full, so grit now counts in half Git's time with slightly less memory. What remains is zlib: setting up each entry's Huffman tables and the short slow-path inflate are about 80% of the profile.
+
+Rows from `grit-bench daily` on `dist` builds of `grit-cli` with `grit-utils`, against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `8cb4162ac` with the stash build fix from `ab28c10a1`. Times are medians of all samples from two alternating rounds of 10 runs, and peak RSS is the median of the rounds' peaks. Values are **milliseconds / MB**. Reports (first round): `daily-revs-count-6954-before.json` → `daily-revs-count-6954-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git | RSS vs git |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `revs/count@git-git` | 502.1 / 62.9 | 718.0 / 121.4 | **249.1** / **56.0** | 1.43 → 0.50 | 1.93× → 0.89× |
+| `revs/count-path@git-git` | 391.6 / 251.8 | 449.6 / 275.8 | 384.4 / 275.6 | 1.15 → 0.98 | 1.10× → 1.09× |
+| `revs/count-author@deep-history` | 110.9 / 21.8 | 190.9 / 23.2 | 120.9 / 23.2 | 1.72 → 1.09 | 1.06× → 1.06× |
+| `revs/count-author@deep-history-cg` | 120.6 / 25.0 | 192.0 / 23.2 | 120.1 / 23.2 | 1.59 → 1.00 | 0.93× → 0.93× |
+| `revs/count-range-commit-graph@git-git` | 2.39 / 19.9 | 2.56 / 13.7 | 2.64 / 14.7 | 1.07 → 1.11 | 0.69× → 0.74× |
+| `revs/count-since@deep-history` | 1.44 / 8.7 | 2.01 / 11.0 | 2.08 / 10.4 | 1.39 → 1.44 | 1.27× → 1.20× |
+| `revs/author-n50@deep-history` | 1.58 / 9.1 | 2.59 / 12.0 | 2.64 / 12.3 | 1.64 → 1.67 | 1.33× → 1.36× |
+| `revs/author-n50@deep-history-cg` | 1.89 / 12.3 | 2.71 / 16.0 | 2.79 / 15.8 | 1.43 → 1.47 | 1.30× → 1.28× |
+| `revs/left-right-count@deep-history` | 2.31 / 9.1 | 4.26 / 12.0 | 3.73 / 11.7 | 1.85 → 1.62 | 1.32× → 1.30× |
+| `log/all@git-git` | 44.5 / 20.9 | 60.2 / 27.1 | 43.9 / 27.0 | 1.35 → 0.99 | 1.29× → 1.29× |
+| `log/path@git-git` | 327.3 / 261.8 | 402.0 / 277.9 | 331.7 / 277.8 | 1.23 → 1.01 | 1.06× → 1.06× |
+| `log/author@git-git` | 2.27 / 12.4 | 3.78 / 16.5 | 3.93 / 16.8 | 1.67 → 1.73 | 1.32× → 1.35× |
+| `log/oneline-100@git-git` | 2.93 / 15.0 | 4.23 / 17.2 | 3.59 / 16.8 | 1.44 → 1.22 | 1.14× → 1.12× |
+| `blame/file@git-git` | 276.4 / 244.7 | 250.2 / 266.3 | 227.2 / 266.3 | 0.91 → 0.82 | 1.09× → 1.09× |
+| `merge-base/branches@git-git` | 15.3 / 19.8 | 3.71 / 17.2 | 3.57 / 17.9 | 0.24 → 0.23 | 0.87× → 0.90× |
+| `show/head@git-git` | 1.84 / 8.9 | 2.34 / 10.2 | 2.24 / 10.3 | 1.27 → 1.21 | 1.14× → 1.16× |
+| `cat/blob@git-git` | 1.40 / 7.3 | 1.80 / 9.3 | 1.85 / 9.5 | 1.29 → 1.32 | 1.28× → 1.30× |
+
+The rows under 5 ms moved within noise (±0.1 ms between rounds).
+
+```bash
+./target/dist/grit-bench daily --only revs/count@git-git,revs/count-path@git-git,revs/count-author@deep-history,revs/count-author@deep-history-cg,revs/count-range-commit-graph@git-git,revs/count-since@deep-history,revs/author-n50@deep-history,revs/author-n50@deep-history-cg,revs/left-right-count@deep-history,log/all@git-git,log/author@git-git,log/oneline-100@git-git,log/path@git-git,blame/file@git-git,cat/blob@git-git,merge-base/branches@git-git,show/head@git-git \
+  --min-runs 10 --grit ./target/dist/grit --format json --output grit-utils/baselines/daily-revs-count-6954-after.json
+```
+
 ## Pick, revert and merge join the hot text layout (2026-11-02)
 
 `pick/one@synth-10k` cherry-picks a topic commit that rewrites 2,000 of 10,000 files onto `main`. Grit already took under half Git's time, but peaked at 18.8 MB on a `dist` build and 22.3 MB on `release`, against Git's 9.4 MB. Little of that was data: the heap peaks at 4.7 MB. On `release`, 12.5 MB of the binary was still resident when `grit pick` exited (8.6 MB on `dist`).
