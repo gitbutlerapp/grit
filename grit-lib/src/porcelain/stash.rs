@@ -2603,7 +2603,7 @@ fn untracked_on_disk_matches_stash(
     let worktree_bytes = smudge_bytes_for_worktree_path(
         repo,
         &rules,
-        &stored,
+        path,
         entry.mode,
         &stash_blob.data,
         &entry.oid,
