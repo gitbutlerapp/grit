@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::ident::Signature;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
+    DirectoryRenameMode, ReplayConflictLabels, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId};
@@ -28,6 +28,7 @@ use crate::refs::{
     should_autocreate_reflog_with_config, update_branch_for_commit_on_store, BranchCommitRefLock,
     BranchCommitRefUpdate,
 };
+use crate::replay_merge_session::ReplayMergeSession;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 
@@ -137,19 +138,28 @@ pub fn replay_commit(
         return Ok(ReplayOutcome::Empty);
     }
 
+    let subject = source
+        .message
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default()
+        .to_owned();
+    let labels = ReplayConflictLabels::new(req.commit, &subject);
     let presentation = TreeMergeConflictPresentation {
         df_directory_ours_commit: Some(head_oid),
         df_directory_theirs_commit: Some(req.commit),
-        ..TreeMergeConflictPresentation::default()
+        ..labels.presentation(crate::merge_file::ConflictStyle::Merge)
     };
-    let merged = merge_trees_three_way(
+    let mut replay_session = ReplayMergeSession::default();
+    let merged = replay_session.merge_for_replay(
         repo,
+        &labels,
         base_tree,
         ours_tree,
         theirs_tree,
         MergeFavor::default(),
         WhitespaceMergeOptions::default(),
-        None,
         presentation,
         DirectoryRenameMode::from_repo(repo)?,
     )?;

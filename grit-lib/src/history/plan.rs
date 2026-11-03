@@ -19,7 +19,6 @@ use crate::state::resolve_head_for_repository;
 use crate::worktree::{find_worktree_with_branch_checked_out, worktree_admin_dir};
 
 use super::error::HistoryError;
-use super::replay_merge_session::ReplayMergeSession;
 use super::subject::{
     commit_message_subject_line, replay_conflict_labels, subject_for_rewrite_row,
 };
@@ -27,6 +26,7 @@ use super::types::{
     CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, PlannedRefUpdate, RefScope, RewriteOptions,
     RewritePlan, RewrittenCommit,
 };
+use crate::replay_merge_session::ReplayMergeSession;
 
 // hygiene: resumable replay control (thread-local for parallel tests)
 thread_local! {
@@ -1625,24 +1625,26 @@ fn transplant_tree_across_parent_move(
     merge_favor: MergeFavor,
     replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
-    replay_session.transplant_tree(
-        repo,
-        commit,
-        labels,
-        subject_tree,
-        old_parent_tree,
-        new_parent_tree,
-        merge_favor,
-        |commit, merge| {
-            let err = conflict_error(repo, commit, &merge);
-            if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
-                if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
-                    note_resumable_conflict(commit, replayed_parent, merge);
+    replay_session
+        .transplant_tree(
+            repo,
+            commit,
+            labels,
+            subject_tree,
+            old_parent_tree,
+            new_parent_tree,
+            merge_favor,
+            |commit, merge| {
+                let err = conflict_error(repo, commit, &merge);
+                if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
+                    if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
+                        note_resumable_conflict(commit, replayed_parent, merge);
+                    }
                 }
-            }
-            Err(err)
-        },
-    )
+                Err(Error::from(err))
+            },
+        )
+        .map_err(HistoryError::from)
 }
 
 /// [`HistoryError::Conflict`] for `commit` from a conflicted tree merge, with no refs attributed.
@@ -2038,7 +2040,7 @@ mod merge_call_tests {
         write_tree_from_index(repo.odb(), &index, "")
     }
 
-    use super::super::replay_merge_session::{
+    use crate::replay_merge_session::{
         test_merge_tree_call_count, test_reset_merge_tree_call_count,
         test_reset_upstream_delta_scan_count, test_upstream_delta_scan_count,
     };

@@ -18,8 +18,8 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
-    merge_trees_three_way, merge_trees_three_way_cached, DirectoryRenameMode, MergeTreeCache,
-    ReplayConflictLabels, TreeMergeConflictPresentation, WhitespaceMergeOptions,
+    DirectoryRenameMode, ReplayConflictLabels, TreeMergeConflictPresentation,
+    WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::operation::Conflict;
@@ -36,6 +36,7 @@ use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
 use crate::refs::{update_branch_for_commit_on_store, BranchCommitRefUpdate};
+use crate::replay_merge_session::ReplayMergeSession;
 use crate::repo::Repository;
 use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::rev_parse::{resolve_revision_as_commit, try_parse_double_dot_log_range};
@@ -771,7 +772,7 @@ fn run_sequence(
     let _ = abort_safety;
     let config = repo.config()?;
     let change_id_policy = ChangeIdPolicy::from_config(&config);
-    let mut merge_cache = MergeTreeCache::default();
+    let mut replay_session = ReplayMergeSession::default();
     let mut cached_head_tree = repo.odb().commit_tree(&head)?;
     let mut worktree_snapshot = match initial_worktree {
         Some(snapshot) => Some(snapshot),
@@ -794,7 +795,7 @@ fn run_sequence(
             &entry,
             &config,
             &change_id_policy,
-            &mut merge_cache,
+            &mut replay_session,
             &mut worktree_snapshot,
             progress,
             cancel,
@@ -824,7 +825,7 @@ fn run_sequence(
                 created_so_far.push(oid);
                 created_records.push(replay_created_record(repo, entry.oid, oid)?);
                 cached_head_tree = tree;
-                merge_cache.clear_retained();
+                replay_session.clear_merge_cache_retained();
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
                     return Ok(SequenceOutcome::Completed {
@@ -847,7 +848,7 @@ fn run_sequence(
             StepResult::AppliedNoCommit { tree } => {
                 todo.remove(0);
                 cached_head_tree = tree;
-                merge_cache.clear_retained();
+                replay_session.clear_merge_cache_retained();
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
                     return Ok(SequenceOutcome::Completed {
@@ -969,6 +970,7 @@ fn predict_sequence(
     let mut head_commit = head_oid;
     let mut head_tree = repo.odb().commit_tree(&head_oid)?;
     let directory_renames = DirectoryRenameMode::from_repo(repo)?;
+    let mut replay_session = ReplayMergeSession::default();
     for entry in todo {
         match predict_one_step(
             repo,
@@ -978,6 +980,7 @@ fn predict_sequence(
             opts,
             entry,
             directory_renames,
+            &mut replay_session,
         )? {
             PredictStepResult::Advanced => {}
             PredictStepResult::DroppedEmpty => dropped.push(entry.oid),
@@ -1038,6 +1041,7 @@ fn predict_advance_head(repo: &Repository, parent: ObjectId, tree: ObjectId) -> 
     write_commit_object(repo, &data, Some(false))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn predict_one_step(
     repo: &Repository,
     head_commit: &mut ObjectId,
@@ -1046,6 +1050,7 @@ fn predict_one_step(
     opts: &ReplayOptions,
     entry: &TodoEntry,
     directory_renames: DirectoryRenameMode,
+    replay_session: &mut ReplayMergeSession,
 ) -> Result<PredictStepResult> {
     let source_oid = entry.oid;
     if direction == ReplayDirection::Pick && source_oid == *head_commit {
@@ -1081,14 +1086,14 @@ fn predict_one_step(
 
     let labels = ReplayConflictLabels::new(source_oid, &entry.subject);
     let presentation = replay_step_presentation(&labels, *head_commit, source_oid, opts);
-    let merged = merge_trees_three_way(
+    let merged = replay_session.merge_for_replay(
         repo,
+        &labels,
         base_tree,
         ours_tree,
         theirs_tree,
         opts.favor,
         WhitespaceMergeOptions::default(),
-        None,
         presentation,
         directory_renames,
     )?;
@@ -1135,7 +1140,7 @@ fn apply_one_step(
     entry: &TodoEntry,
     config: &ConfigSet,
     change_id_policy: &ChangeIdPolicy,
-    merge_cache: &mut MergeTreeCache,
+    replay_session: &mut ReplayMergeSession,
     worktree_snapshot: &mut Option<WorktreeSnapshot>,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
@@ -1195,15 +1200,14 @@ fn apply_one_step(
     let labels = ReplayConflictLabels::new(source_oid, &entry.subject);
     let presentation = replay_step_presentation(&labels, *head, source_oid, opts);
     let _ephemeral_merge_objects = MemOverlayGuard::enter(repo.odb());
-    let merged = merge_trees_three_way_cached(
+    let merged = replay_session.merge_for_replay(
         repo,
-        merge_cache,
+        &labels,
         base_tree,
         ours_tree,
         theirs_tree,
         opts.favor,
         WhitespaceMergeOptions::default(),
-        None,
         presentation,
         DirectoryRenameMode::from_config(config)?,
     )?;

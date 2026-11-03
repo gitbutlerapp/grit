@@ -1494,3 +1494,73 @@ fn pick_abort_skip_and_hard_reset_remove_modify_delete_conflict_files() {
     assert_worktree_matches_git_oracle(grit_root.path(), git_root.path());
     git_fsck_strict(grit_root.path());
 }
+
+/// Backport-style picks: many commits each adding one file, forked from an old point while `main`
+/// diverged across a wide tree (issue #2532).
+#[test]
+fn wide_divergence_independent_adds_match_git_cherry_pick() {
+    const MAIN_FILES: usize = 48;
+    const LC_COMMITS: usize = 16;
+
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    for i in 0..MAIN_FILES {
+        commit_file(
+            root.path(),
+            &format!("wide/f{i:02}.txt"),
+            "base\n",
+            &format!("base {i}"),
+        );
+    }
+    let fork = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["branch", "lc"]);
+    for i in 0..MAIN_FILES {
+        fs::write(
+            root.path().join(format!("wide/f{i:02}.txt")),
+            format!("main {i}\n"),
+        )
+        .expect("write");
+    }
+    git(root.path(), &["commit", "-qam", "main wide diverge"]);
+
+    git(root.path(), &["switch", "lc"]);
+    let mut lc = Vec::with_capacity(LC_COMMITS);
+    for i in 0..LC_COMMITS {
+        commit_file(
+            root.path(),
+            &format!("tp/u{i}.txt"),
+            &format!("c {i}\n"),
+            &format!("lc {i}"),
+        );
+        lc.push(oid_from_rev(root.path(), "HEAD"));
+    }
+
+    let git_wt = tempfile::tempdir().expect("git copy");
+    fs::create_dir_all(git_wt.path()).unwrap();
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", root.path().display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()
+        .unwrap();
+    git(git_wt.path(), &["switch", "main"]);
+    git(
+        git_wt.path(),
+        &["cherry-pick", &format!("{}..lc", fork.to_hex())],
+    );
+
+    let repo = open_repo(root.path());
+    git(root.path(), &["switch", "main"]);
+    let out = start_replay_sequence(
+        &repo,
+        &pick_req(lc.clone(), ReplayOptions::default()),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("pick sequence");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    assert_eq!(head_tree_hex(root.path()), head_tree_hex(git_wt.path()));
+    git_fsck_strict(root.path());
+}
