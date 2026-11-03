@@ -1036,6 +1036,27 @@ impl<'a> TreeRefIter<'a> {
     }
 }
 
+/// Parse a tree entry's octal mode, accepting exactly what `u32::from_str_radix(_, 8)` does.
+#[inline]
+fn parse_tree_mode(bytes: &[u8]) -> Option<u32> {
+    // Ten octal digits cannot overflow a `u32`.
+    if (1..=10).contains(&bytes.len()) {
+        let mut mode = 0u32;
+        let mut all_octal = true;
+        for &b in bytes {
+            let digit = b.wrapping_sub(b'0');
+            all_octal &= digit < 8;
+            mode = (mode << 3) | u32::from(digit & 7);
+        }
+        if all_octal {
+            return Some(mode);
+        }
+    }
+    std::str::from_utf8(bytes)
+        .ok()
+        .and_then(|s| u32::from_str_radix(s, 8).ok())
+}
+
 /// Parse one tree entry and advance `pos`. Returns `Ok(None)` when `pos` is at end of `data`.
 fn parse_tree_entry_at<'a>(
     data: &'a [u8],
@@ -1045,25 +1066,18 @@ fn parse_tree_entry_at<'a>(
     if *pos >= data.len() {
         return Ok(None);
     }
-    let sp = data[*pos..]
-        .iter()
-        .position(|&b| b == b' ')
+    let sp = memchr::memchr(b' ', &data[*pos..])
         .ok_or_else(|| Error::CorruptObject("tree entry missing space".to_owned()))?;
     let mode_bytes = &data[*pos..*pos + sp];
-    let mode = std::str::from_utf8(mode_bytes)
-        .ok()
-        .and_then(|s| u32::from_str_radix(s, 8).ok())
-        .ok_or_else(|| {
-            Error::CorruptObject(format!(
-                "invalid tree mode: {}",
-                String::from_utf8_lossy(mode_bytes)
-            ))
-        })?;
+    let mode = parse_tree_mode(mode_bytes).ok_or_else(|| {
+        Error::CorruptObject(format!(
+            "invalid tree mode: {}",
+            String::from_utf8_lossy(mode_bytes)
+        ))
+    })?;
     *pos += sp + 1;
 
-    let nul = data[*pos..]
-        .iter()
-        .position(|&b| b == 0)
+    let nul = memchr::memchr(0, &data[*pos..])
         .ok_or_else(|| Error::CorruptObject("tree entry missing NUL".to_owned()))?;
     let name = &data[*pos..*pos + nul];
     *pos += nul + 1;
@@ -2455,6 +2469,41 @@ mod commit_parse_tests {
         assert_eq!(found.oid, oid);
         assert_eq!(found.mode, 0o100644);
         Ok(())
+    }
+
+    #[test]
+    fn parse_tree_mode_accepts_what_from_str_radix_accepts() {
+        let cases: &[&[u8]] = &[
+            b"100644",
+            b"40000",
+            b"040000",
+            b"160000",
+            b"120000",
+            b"0",
+            b"7777777777",
+            b"37777777777",
+            b"77777777777",
+            b"777777777777",
+            b"",
+            b"+644",
+            b"-644",
+            b"100648",
+            b"10064a",
+            b"1 0",
+            b"\xff",
+            b"00000000000100644",
+        ];
+        for &case in cases {
+            let expected = std::str::from_utf8(case)
+                .ok()
+                .and_then(|s| u32::from_str_radix(s, 8).ok());
+            assert_eq!(
+                parse_tree_mode(case),
+                expected,
+                "mode {:?}",
+                String::from_utf8_lossy(case)
+            );
+        }
     }
 }
 
