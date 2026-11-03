@@ -15,8 +15,10 @@ use crate::objects::{
 };
 use crate::odb::store::{CompositeStore, ObjectStore};
 use crate::odb::Odb;
+use crate::pack::SingleLocalPackReader;
 use crate::pack_bitmap::BitmapIndex;
 use crate::pack_name_hash::{pack_name_hash, pack_name_hash_child};
+use crate::pack_tree_read_ahead::{ReadAheadEntry, TreeReadAhead};
 use crate::progress::CancelSignal;
 use crate::repo::Repository;
 use crate::rev_list::{MissingAction, ObjectFilter};
@@ -1048,6 +1050,7 @@ fn collect_reachable_excluding_with_name_hashes(
         name_hashes: HashMap::new(),
         edges: HashSet::new(),
         missing: (missing_mode == MissingBlobMode::Probe).then(Vec::new),
+        session_pack: odb.open_session_pack_reader().ok().flatten(),
     };
     // Commit root trees the filter drops, even where a root or tag names them.
     let mut dropped_root_trees: Option<OidHashSet> = filter
@@ -1064,98 +1067,68 @@ fn collect_reachable_excluding_with_name_hashes(
         }
     }
     let mut path_less_roots = path_less_roots.into_iter();
+    // The walk's thread parses trees; the others read the queued ones ahead of it.
+    let read_ahead_workers = crate::pack_delta::pack_delta_search_parallel_options(odb, None)
+        .map_or(0, |par| par.threads.get() - 1);
 
-    loop {
-        stop.poll()?;
-        if let Some(commit) = walk.commits.pop() {
-            if !shallow_grafts.contains(&commit.oid) {
-                for parent in commit.parents {
-                    walk.push_parent(parent)?;
+    std::thread::scope(|scope| -> Result<()> {
+        let mut read_ahead = TreeReadAhead::new(scope, odb, read_ahead_workers);
+        loop {
+            stop.poll()?;
+            if let Some(commit) = walk.commits.pop() {
+                if !shallow_grafts.contains(&commit.oid) {
+                    for parent in commit.parents {
+                        walk.push_parent(parent)?;
+                    }
                 }
-            }
-            if let Some(dropped) = dropped_root_trees.as_mut() {
-                dropped.insert(commit.tree);
-            }
-            walk.push_tree(commit.tree, None, 0);
-            continue;
-        }
-        let Some(QueuedObject {
-            oid,
-            path_hash,
-            depth,
-            found_as_tree,
-        }) = walk.queue.pop_front()
-        else {
-            match path_less_roots.next() {
-                Some(root) => {
-                    walk.push_object(root, None, false);
-                    continue;
+                if let Some(dropped) = dropped_root_trees.as_mut() {
+                    dropped.insert(commit.tree);
                 }
-                None => break,
-            }
-        };
-        // Queued blobs are wanted directly (a lazy fetch names thousands); the
-        // header says there is nothing to walk without inflating them. Objects
-        // found as trees are read straight away; their own kind still decides below.
-        if !found_as_tree {
-            match odb.read_info(&oid) {
-                Ok(info) if info.kind == ObjectKind::Blob => continue,
-                Ok(_) => {}
-                Err(_) if skip_missing => continue,
-                Err(e) => return Err(e),
-            }
-        }
-        let obj = match odb.read(&oid) {
-            Ok(o) => o,
-            Err(_) if skip_missing => continue,
-            Err(e) => return Err(e),
-        };
-        match obj.kind {
-            ObjectKind::Commit => {
-                walk.queue_commit(oid, obj)?;
+                walk.push_tree(commit.tree, None, 0);
+                read_ahead.top_up(&walk.queue);
                 continue;
             }
-            ObjectKind::Tree => {
-                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
-                    let entry = entry?;
-                    if entry.mode == 0o160000 {
+            let Some(QueuedObject {
+                oid,
+                path_hash,
+                depth,
+                found_as_tree,
+            }) = walk.queue.pop_front()
+            else {
+                match path_less_roots.next() {
+                    Some(root) => {
+                        walk.push_object(root, None, false);
                         continue;
                     }
-                    // Only a filter leaves objects unlisted, so without one an
-                    // object already visited has nothing left to record.
-                    if walk.filter.is_none() && walk.visited.contains(&entry.oid) {
-                        continue;
-                    }
-                    // Regular files and symlinks have no children: record them
-                    // without inflating their contents. The pack writer reads (or
-                    // copies verbatim) each one later and fails there if it is
-                    // missing. Any other mode, including directories written with
-                    // non-canonical permission bits, is read so the object's own
-                    // kind decides whether it is walked.
-                    match entry.mode & 0o170000 {
-                        0o120000 => walk.push_blob(entry.oid, None, oid, depth)?,
-                        0o100000 => {
-                            let name = pack_name_hash_child(path_hash, entry.name);
-                            walk.push_blob(entry.oid, Some(name), oid, depth)?;
-                        }
-                        file_type => {
-                            let name = Some(pack_name_hash_child(path_hash, entry.name));
-                            if file_type == 0o040000 {
-                                walk.push_tree(entry.oid, name, depth + 1);
-                            } else {
-                                walk.push_object(entry.oid, name, false);
-                            }
-                        }
-                    }
+                    None => break,
+                }
+            };
+            let read_ahead_result = read_ahead.take_front();
+            read_ahead.top_up(&walk.queue);
+            // Queued blobs are wanted directly (a lazy fetch names thousands); the
+            // header says there is nothing to walk without inflating them. Objects
+            // found as trees are read straight away; their own kind still decides below.
+            if !found_as_tree {
+                match odb.read_info(&oid) {
+                    Ok(info) if info.kind == ObjectKind::Blob => continue,
+                    Ok(_) => {}
+                    Err(_) if skip_missing => continue,
+                    Err(e) => return Err(e),
                 }
             }
-            ObjectKind::Tag => {
-                let tag = parse_tag(&obj.data)?;
-                walk.push_object(tag.object, path_hash, false);
-            }
-            ObjectKind::Blob => {}
+            let read = match read_ahead_result {
+                Some(read) => read,
+                None => walk.read_object(&oid),
+            };
+            let obj = match read {
+                Ok(o) => o,
+                Err(_) if skip_missing => continue,
+                Err(e) => return Err(e),
+            };
+            walk.expand(oid, obj, path_hash, depth, oid_len)?;
         }
-    }
+        Ok(())
+    })?;
 
     if let Some(dropped) = dropped_root_trees.filter(|d| !d.is_empty()) {
         walk.ordered.retain(|oid| !dropped.contains(oid));
@@ -1199,6 +1172,12 @@ struct QueuedObject {
     found_as_tree: bool,
 }
 
+impl ReadAheadEntry for QueuedObject {
+    fn read_ahead_oid(&self) -> Option<ObjectId> {
+        self.found_as_tree.then_some(self.oid)
+    }
+}
+
 /// State of [`collect_reachable_excluding_with_name_hashes`].
 struct EnumerationWalk<'a> {
     odb: &'a Odb,
@@ -1236,6 +1215,9 @@ struct EnumerationWalk<'a> {
     edges: HashSet<ObjectId>,
     /// With [`MissingBlobMode::Probe`], blobs that would be listed but are not stored.
     missing: Option<Vec<MissingBlob>>,
+    /// Reader over the single local pack, kept for the whole walk instead of the one
+    /// [`Odb::read`] opens per object (see [`Odb::open_session_pack_reader`]).
+    session_pack: Option<SingleLocalPackReader>,
 }
 
 /// A commit waiting in [`EnumerationWalk::commits`], ordered newest first and,
@@ -1416,8 +1398,74 @@ impl<'a> EnumerationWalk<'a> {
         });
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        match self.odb.read(oid) {
+    /// Expand an object read from [`Self::queue`]: queue a commit, list and queue the
+    /// entries of a tree, or follow a tag.
+    fn expand(
+        &mut self,
+        oid: ObjectId,
+        obj: Object,
+        path_hash: Option<u32>,
+        depth: u64,
+        oid_len: usize,
+    ) -> Result<()> {
+        match obj.kind {
+            ObjectKind::Commit => {
+                self.queue_commit(oid, obj)?;
+            }
+            ObjectKind::Tree => {
+                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
+                    let entry = entry?;
+                    if entry.mode == 0o160000 {
+                        continue;
+                    }
+                    // Only a filter leaves objects unlisted, so without one an
+                    // object already visited has nothing left to record.
+                    if self.filter.is_none() && self.visited.contains(&entry.oid) {
+                        continue;
+                    }
+                    // Regular files and symlinks have no children: record them
+                    // without inflating their contents. The pack writer reads (or
+                    // copies verbatim) each one later and fails there if it is
+                    // missing. Any other mode, including directories written with
+                    // non-canonical permission bits, is read so the object's own
+                    // kind decides whether it is walked.
+                    match entry.mode & 0o170000 {
+                        0o120000 => self.push_blob(entry.oid, None, oid, depth)?,
+                        0o100000 => {
+                            let name = pack_name_hash_child(path_hash, entry.name);
+                            self.push_blob(entry.oid, Some(name), oid, depth)?;
+                        }
+                        file_type => {
+                            let name = Some(pack_name_hash_child(path_hash, entry.name));
+                            if file_type == 0o040000 {
+                                self.push_tree(entry.oid, name, depth + 1);
+                            } else {
+                                self.push_object(entry.oid, name, false);
+                            }
+                        }
+                    }
+                }
+            }
+            ObjectKind::Tag => {
+                let tag = parse_tag(&obj.data)?;
+                self.push_object(tag.object, path_hash, false);
+            }
+            ObjectKind::Blob => {}
+        }
+        Ok(())
+    }
+
+    /// Read `oid`, preferring the walk's pack reader; a miss or error there falls back
+    /// to the object database, which reports the authoritative result.
+    fn read_object(&mut self, oid: &ObjectId) -> Result<Object> {
+        if let Some(Ok(obj)) = self.session_pack.as_mut().map(|r| r.read_object(oid)) {
+            return Ok(obj);
+        }
+        self.odb.read_once(oid)
+    }
+
+    fn read(&mut self, oid: &ObjectId) -> Result<Option<Object>> {
+        match self.read_object(oid) {
             Ok(obj) => Ok(Some(obj)),
             Err(_) if self.skip_missing => Ok(None),
             Err(e) => Err(e),

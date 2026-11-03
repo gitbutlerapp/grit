@@ -642,6 +642,16 @@ impl Odb {
         }
     }
 
+    /// [`Self::read`] without keeping a copy in the session read cache, for walks that
+    /// read each object once (pack enumeration), where the copy is pure overhead.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read`].
+    pub(crate) fn read_once(&self, oid: &ObjectId) -> Result<Object> {
+        self.read_impl(oid, false)
+    }
+
     fn read_tree_payload(&self, oid: &ObjectId) -> Result<Vec<u8>> {
         let obj = self.read_impl(oid, false)?;
         if obj.kind != ObjectKind::Tree {
