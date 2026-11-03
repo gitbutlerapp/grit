@@ -1955,7 +1955,7 @@ pub(crate) fn plan_deltas(
         );
         for target in reused_zlib.keys() {
             let (end, depth) = match ends.as_ref().and_then(|ends| ends.get(target)) {
-                Some(&(end, depth)) => (end, depth as usize),
+                Some((end, depth)) => (end, depth as usize),
                 None => {
                     let mut cur = *target;
                     let mut depth = 0usize;

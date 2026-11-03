@@ -2835,38 +2835,59 @@ pub(crate) fn delta_chain_cuts(
     let modulus = max_depth.saturating_add(1);
     let ends = delta_chain_ends(targets, len, base_of)?;
     Some(
-        ends.into_iter()
+        ends.by_target
+            .into_iter()
             .filter(|(_, (_, depth))| (*depth as usize).is_multiple_of(modulus))
             .map(|(target, _)| target)
             .collect(),
     )
 }
 
+/// Where each target of a target→base map sits on its delta chain, from
+/// [`delta_chain_ends`].
+pub(crate) struct DeltaChainEnds {
+    /// Per target: index into [`Self::ends`] and the number of delta edges to that end.
+    by_target: crate::objects::OidHashMap<(u32, u32)>,
+    /// Chain ends: objects that are bases but not themselves targets.
+    ends: Vec<ObjectId>,
+}
+
+impl DeltaChainEnds {
+    /// The end of `target`'s chain and the number of delta edges to it.
+    pub(crate) fn get(&self, target: &ObjectId) -> Option<(ObjectId, u32)> {
+        let &(end, depth) = self.by_target.get(target)?;
+        Some((self.ends[end as usize], depth))
+    }
+}
+
 /// For every target of a target→base map with `len` targets, the end of its chain (the
 /// first object that is not itself a target) and the number of delta edges to it.
 ///
 /// Each object is visited once, however many chains share it. `None` when the map has
-/// a cycle.
+/// a cycle (or more than `u32::MAX` chains).
 pub(crate) fn delta_chain_ends(
     targets: impl IntoIterator<Item = ObjectId>,
     len: usize,
     base_of: impl Fn(&ObjectId) -> Option<ObjectId>,
-) -> Option<crate::objects::OidHashMap<(ObjectId, u32)>> {
-    let mut ends: crate::objects::OidHashMap<(ObjectId, u32)> =
+) -> Option<DeltaChainEnds> {
+    let mut by_target: crate::objects::OidHashMap<(u32, u32)> =
         crate::objects::oid_hash_map_with_capacity(len);
+    let mut ends: Vec<ObjectId> = Vec::new();
     let mut path: Vec<ObjectId> = Vec::new();
     for start in targets {
-        if ends.contains_key(&start) {
+        if by_target.contains_key(&start) {
             continue;
         }
         path.clear();
         let mut cur = start;
         let (end, mut depth) = loop {
-            if let Some(&known) = ends.get(&cur) {
+            if let Some(&known) = by_target.get(&cur) {
                 break known;
             }
             let Some(base) = base_of(&cur) else {
-                break (cur, 0);
+                let end = u32::try_from(ends.len()).ok()?;
+                ends.push(cur);
+                break (end, 0);
             };
             // An acyclic chain holds each target at most once.
             if path.len() >= len {
@@ -2877,10 +2898,10 @@ pub(crate) fn delta_chain_ends(
         };
         for &target in path.iter().rev() {
             depth += 1;
-            ends.insert(target, (end, depth));
+            by_target.insert(target, (end, depth));
         }
     }
-    Some(ends)
+    Some(DeltaChainEnds { by_target, ends })
 }
 
 /// [`cap_delta_chain_depth`] by walking each tip's chain, which also defines what
@@ -6362,7 +6383,6 @@ fn scan_packed_delta_reuse(
 ) -> Result<()> {
     let pack_end = pack_bytes.len().checked_sub(idx.hash_bytes());
     idx.with_offset_order(|pairs| -> Result<()> {
-        found.reserve(pairs.len().min(send.len()));
         let row_at_offset = |offset: u64| {
             Ok(pairs
                 .binary_search_by_key(&offset, |p| p.0)
@@ -9772,8 +9792,8 @@ mod cached_lookup_tests {
             chain.get(o).copied()
         })
         .unwrap();
-        assert_eq!(ends.get(&c), Some(&(a, 2)));
-        assert_eq!(ends.get(&b), Some(&(a, 1)));
+        assert_eq!(ends.get(&c), Some((a, 2)));
+        assert_eq!(ends.get(&b), Some((a, 1)));
         assert_eq!(ends.get(&a), None);
     }
 

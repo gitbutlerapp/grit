@@ -1134,6 +1134,9 @@ fn collect_reachable_excluding_with_name_hashes(
         }
         Ok(())
     })?;
+    // The delta bases cached while reading trees are not read again by what follows a
+    // walk: delta planning reads entry headers and the writer copies stored entries.
+    odb.clear_delta_base_cache();
 
     if let Some(dropped) = dropped_root_trees.filter(|d| !d.is_empty()) {
         walk.ordered.retain(|oid| !dropped.contains(oid));
