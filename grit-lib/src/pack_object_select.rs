@@ -11,7 +11,8 @@ use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_with_capacity, parse_tag, tag_object_line_oid,
-    CommitRef, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
+    tree_entry_span, CommitRef, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntryRef,
+    TreeRefIter,
 };
 use crate::odb::store::{CompositeStore, ObjectStore};
 use crate::odb::Odb;
@@ -1056,6 +1057,7 @@ fn collect_reachable_excluding_with_name_hashes(
         edges: HashSet::new(),
         missing: (missing_mode == MissingBlobMode::Probe).then(Vec::new),
         session_pack: odb.open_session_pack_reader().ok().flatten(),
+        expanded: filter.is_none().then(HashMap::new),
     };
     // Commit root trees the filter drops, even where a root or tag names them.
     let mut dropped_root_trees: Option<OidHashSet> = filter
@@ -1226,6 +1228,107 @@ struct EnumerationWalk<'a> {
     /// Reader over the single local pack, kept for the whole walk instead of the one
     /// [`Odb::read`] opens per object (see [`Odb::open_session_pack_reader`]).
     session_pack: Option<SingleLocalPackReader>,
+    /// Without a filter, the last tree expanded at each path, keyed by the path's
+    /// name hash (see [`ExpandedTree`]).
+    expanded: Option<HashMap<Option<u32>, ExpandedTree>>,
+}
+
+/// A tree whose every entry the walk has pushed.
+///
+/// Without a filter, pushing an entry always leaves the object it names in
+/// [`EnumerationWalk::visited`], so an entry that another tree repeats byte for byte
+/// has nothing left to do. Successive versions of one directory usually differ in a
+/// few entries: a new version is compared with the last one expanded at its path, and
+/// only the entries between their shared leading and trailing bytes are parsed. Of
+/// those, an entry the earlier version also has, byte for byte, is skipped as well.
+///
+/// Which tree a version is compared with only decides how much is skipped, never what
+/// is listed, so paths whose name hashes collide may share an entry.
+struct ExpandedTree {
+    data: Vec<u8>,
+    /// Byte offset of every entry, ascending, then `data.len()`.
+    entry_starts: Vec<usize>,
+}
+
+impl ExpandedTree {
+    /// Entry offsets from `pos` on, when `pos` is where an entry starts.
+    fn starts_from(&self, pos: usize) -> Option<&[usize]> {
+        let at = self.entry_starts.binary_search(&pos).ok()?;
+        Some(&self.entry_starts[at..])
+    }
+
+    /// The raw bytes of entry `index`, if there is one.
+    fn entry(&self, index: usize) -> Option<&[u8]> {
+        let start = *self.entry_starts.get(index)?;
+        let end = *self.entry_starts.get(index + 1)?;
+        self.data.get(start..end)
+    }
+
+    /// Whether `bytes`, a whole entry named `name` of a newer version, is also an entry
+    /// here, looked for from entry `*cursor` on.
+    ///
+    /// Both versions list entries in tree order, so the cursor only moves forward: past
+    /// entries whose names sort before `name`, and past the one entry matched. Names
+    /// compare as plain bytes, which can differ from tree order where a directory name
+    /// is a prefix of another name; that only costs a missed match, since a match
+    /// always means equal bytes.
+    fn repeats_entry(&self, cursor: &mut usize, bytes: &[u8], name: &[u8], oid_len: usize) -> bool {
+        while let Some(old) = self.entry(*cursor) {
+            if old == bytes {
+                *cursor += 1;
+                return true;
+            }
+            let old_name = memchr::memchr(b' ', old)
+                .and_then(|space| old.get(space + 1..old.len().checked_sub(oid_len + 1)?));
+            match old_name.map(|old_name| old_name.cmp(name)) {
+                Some(std::cmp::Ordering::Less) => *cursor += 1,
+                Some(std::cmp::Ordering::Equal) => {
+                    *cursor += 1;
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+}
+
+/// Length of the longest common prefix of `a` and `b`.
+fn common_prefix_len(a: &[u8], b: &[u8]) -> usize {
+    let (a_chunks, _) = a.as_chunks::<16>();
+    let (b_chunks, _) = b.as_chunks::<16>();
+    let whole = a_chunks
+        .iter()
+        .zip(b_chunks)
+        .take_while(|(x, y)| x == y)
+        .count()
+        * 16;
+    whole
+        + a[whole..]
+            .iter()
+            .zip(&b[whole..])
+            .take_while(|(x, y)| x == y)
+            .count()
+}
+
+/// Length of the longest common suffix of `a` and `b`.
+fn common_suffix_len(a: &[u8], b: &[u8]) -> usize {
+    let (_, a_chunks) = a.as_rchunks::<16>();
+    let (_, b_chunks) = b.as_rchunks::<16>();
+    let whole = a_chunks
+        .iter()
+        .rev()
+        .zip(b_chunks.iter().rev())
+        .take_while(|(x, y)| x == y)
+        .count()
+        * 16;
+    whole
+        + a[..a.len() - whole]
+            .iter()
+            .rev()
+            .zip(b[..b.len() - whole].iter().rev())
+            .take_while(|(x, y)| x == y)
+            .count()
 }
 
 /// A commit waiting in [`EnumerationWalk::commits`], ordered newest first and,
@@ -1420,45 +1523,127 @@ impl<'a> EnumerationWalk<'a> {
             ObjectKind::Commit => {
                 self.queue_commit(oid, obj)?;
             }
-            ObjectKind::Tree => {
-                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
-                    let entry = entry?;
-                    if entry.mode == 0o160000 {
-                        continue;
-                    }
-                    // Only a filter leaves objects unlisted, so without one an
-                    // object already visited has nothing left to record.
-                    if self.filter.is_none() && self.visited.contains(&entry.oid) {
-                        continue;
-                    }
-                    // Regular files and symlinks have no children: record them
-                    // without inflating their contents. The pack writer reads (or
-                    // copies verbatim) each one later and fails there if it is
-                    // missing. Any other mode, including directories written with
-                    // non-canonical permission bits, is read so the object's own
-                    // kind decides whether it is walked.
-                    match entry.mode & 0o170000 {
-                        0o120000 => self.push_blob(entry.oid, None, oid, depth)?,
-                        0o100000 => {
-                            let name = pack_name_hash_child(path_hash, entry.name);
-                            self.push_blob(entry.oid, Some(name), oid, depth)?;
-                        }
-                        file_type => {
-                            let name = Some(pack_name_hash_child(path_hash, entry.name));
-                            if file_type == 0o040000 {
-                                self.push_tree(entry.oid, name, depth + 1);
-                            } else {
-                                self.push_object(entry.oid, name, false);
-                            }
-                        }
-                    }
-                }
-            }
+            ObjectKind::Tree => self.expand_tree(oid, obj.data, path_hash, depth, oid_len)?,
             ObjectKind::Tag => {
                 let tag = parse_tag(&obj.data)?;
                 self.push_object(tag.object, path_hash, false);
             }
             ObjectKind::Blob => {}
+        }
+        Ok(())
+    }
+
+    /// Push every entry of tree `oid` (payload `data`, found at `path_hash` and `depth`).
+    fn expand_tree(
+        &mut self,
+        oid: ObjectId,
+        data: Vec<u8>,
+        path_hash: Option<u32>,
+        depth: u64,
+        oid_len: usize,
+    ) -> Result<()> {
+        let prev = self
+            .expanded
+            .as_mut()
+            .and_then(|by_path| by_path.remove(&path_hash));
+        let mut entry_starts = Vec::new();
+        let mut pos = 0;
+        // Entries before `pos` are byte-identical to `prev`'s, and from `shared_tail`
+        // on the two trees end in the same bytes.
+        let mut shared_tail = data.len();
+        // Index in `prev.entry_starts` of the earlier version's next unmatched entry.
+        let mut prev_entry = 0;
+        if let Some(prev) = &prev {
+            let prefix = common_prefix_len(&data, &prev.data);
+            let shared = prev.entry_starts.partition_point(|&start| start <= prefix);
+            if let Some(&last) = shared.checked_sub(1).and_then(|i| prev.entry_starts.get(i)) {
+                pos = last;
+                prev_entry = shared - 1;
+                entry_starts.extend_from_slice(&prev.entry_starts[..shared - 1]);
+            }
+            shared_tail = data.len() - common_suffix_len(&data[pos..], &prev.data[pos..]);
+        }
+        loop {
+            let at = pos;
+            if let Some(prev) = prev.as_ref().filter(|_| at >= shared_tail) {
+                // `at` is an entry start here; when it is one in `prev` as well, both
+                // trees parse the same from there to the end.
+                let prev_at = at + prev.data.len() - data.len();
+                if let Some(rest) = prev.starts_from(prev_at) {
+                    entry_starts.extend(rest.iter().map(|&s| s + data.len() - prev.data.len()));
+                    break;
+                }
+            }
+            entry_starts.push(at);
+            if at >= data.len() {
+                break;
+            }
+            let entry = match tree_entry_span(&data, at, oid_len) {
+                Some(span) => {
+                    pos = span.end;
+                    if let Some(prev) = &prev {
+                        let name = &data[span.name.clone()];
+                        if prev.repeats_entry(&mut prev_entry, &data[at..pos], name, oid_len) {
+                            continue;
+                        }
+                    }
+                    TreeEntryRef {
+                        mode: span.mode,
+                        name: &data[span.name],
+                        oid: ObjectId::from_bytes(&data[pos - oid_len..pos])?,
+                    }
+                }
+                None => {
+                    let mut entries = TreeRefIter::with_oid_len_at(&data, oid_len, at);
+                    let Some(entry) = entries.next().transpose()? else {
+                        break;
+                    };
+                    pos = entries.position();
+                    entry
+                }
+            };
+            self.push_tree_entry(entry, oid, path_hash, depth)?;
+        }
+        if let Some(by_path) = self.expanded.as_mut() {
+            by_path.insert(path_hash, ExpandedTree { data, entry_starts });
+        }
+        Ok(())
+    }
+
+    fn push_tree_entry(
+        &mut self,
+        entry: TreeEntryRef<'_>,
+        tree: ObjectId,
+        path_hash: Option<u32>,
+        depth: u64,
+    ) -> Result<()> {
+        if entry.mode == 0o160000 {
+            return Ok(());
+        }
+        // Only a filter leaves objects unlisted, so without one an object already
+        // visited has nothing left to record.
+        if self.filter.is_none() && self.visited.contains(&entry.oid) {
+            return Ok(());
+        }
+        // Regular files and symlinks have no children: record them without inflating
+        // their contents. The pack writer reads (or copies verbatim) each one later
+        // and fails there if it is missing. Any other mode, including directories
+        // written with non-canonical permission bits, is read so the object's own
+        // kind decides whether it is walked.
+        match entry.mode & 0o170000 {
+            0o120000 => self.push_blob(entry.oid, None, tree, depth)?,
+            0o100000 => {
+                let name = pack_name_hash_child(path_hash, entry.name);
+                self.push_blob(entry.oid, Some(name), tree, depth)?;
+            }
+            file_type => {
+                let name = Some(pack_name_hash_child(path_hash, entry.name));
+                if file_type == 0o040000 {
+                    self.push_tree(entry.oid, name, depth + 1);
+                } else {
+                    self.push_object(entry.oid, name, false);
+                }
+            }
         }
         Ok(())
     }
@@ -2355,5 +2540,250 @@ mod tests {
             2,
             "the want and the tag-named commit, each queued once"
         );
+    }
+
+    #[test]
+    fn common_prefix_and_suffix_lengths_cover_chunked_and_tail_bytes() {
+        let a: Vec<u8> = (0..100u8).collect();
+        assert_eq!(common_prefix_len(&a, &a), 100);
+        assert_eq!(common_suffix_len(&a, &a), 100);
+        assert_eq!(common_prefix_len(&a, &[]), 0);
+        assert_eq!(common_suffix_len(&[], &a), 0);
+        for at in [0, 1, 15, 16, 17, 31, 32, 63, 64, 99] {
+            let mut b = a.clone();
+            b[at] ^= 0xff;
+            assert_eq!(common_prefix_len(&a, &b), at, "prefix, mismatch at {at}");
+            assert_eq!(
+                common_suffix_len(&a, &b),
+                99 - at,
+                "suffix, mismatch at {at}"
+            );
+        }
+        // Different lengths: the prefix stops at the shorter end, the suffix aligns ends.
+        assert_eq!(common_prefix_len(&a[..40], &a), 40);
+        assert_eq!(common_suffix_len(&a[37..], &a), 63);
+        assert_eq!(common_suffix_len(&a[..50], &a), 0);
+    }
+
+    /// Every commit, tree and blob reachable from `tip`, with the paths each blob has as
+    /// a regular file.
+    fn reachable_with_blob_paths(
+        repo: &Repository,
+        tip: ObjectId,
+    ) -> (HashSet<ObjectId>, HashMap<ObjectId, HashSet<String>>) {
+        let mut objects = HashSet::new();
+        let mut blob_paths: HashMap<ObjectId, HashSet<String>> = HashMap::new();
+        let mut commits = vec![tip];
+        let mut trees = Vec::new();
+        while let Some(commit) = commits.pop() {
+            if !objects.insert(commit) {
+                continue;
+            }
+            let obj = repo.odb().read(&commit).unwrap();
+            let parsed = CommitRef::parse(&obj.data).unwrap();
+            commits.extend(parsed.parents().iter().copied());
+            trees.push((parsed.tree(), String::new()));
+        }
+        while let Some((tree, path)) = trees.pop() {
+            objects.insert(tree);
+            let obj = repo.odb().read(&tree).unwrap();
+            for entry in TreeRefIter::with_oid_len(&obj.data, 20) {
+                let entry = entry.unwrap();
+                let child = if path.is_empty() {
+                    String::from_utf8(entry.name.to_vec()).unwrap()
+                } else {
+                    format!("{path}/{}", String::from_utf8_lossy(entry.name))
+                };
+                match entry.mode {
+                    0o160000 => {}
+                    0o040000 => trees.push((entry.oid, child)),
+                    0o120000 => {
+                        objects.insert(entry.oid);
+                    }
+                    _ => {
+                        objects.insert(entry.oid);
+                        blob_paths.entry(entry.oid).or_default().insert(child);
+                    }
+                }
+            }
+        }
+        (objects, blob_paths)
+    }
+
+    fn assert_walk_lists_reachable(repo: &Repository, tip: ObjectId) {
+        let walked = walk(repo, &[tip], NameTrees::Yes);
+        let listed: HashSet<ObjectId> = walked.send.iter().copied().collect();
+        assert_eq!(listed.len(), walked.send.len(), "nothing is listed twice");
+        let (expected, blob_paths) = reachable_with_blob_paths(repo, tip);
+        assert_eq!(listed, expected);
+        for (blob, paths) in &blob_paths {
+            let hash = walked.name_hashes.get(blob).copied();
+            assert!(
+                paths.iter().any(|p| Some(pack_name_hash(p)) == hash),
+                "blob {blob} is named after one of its paths {paths:?}"
+            );
+        }
+    }
+
+    /// Deterministic xorshift so the edit sequence is the same on every run.
+    struct Xorshift(u64);
+
+    impl Xorshift {
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    #[test]
+    fn walk_lists_every_entry_of_successive_tree_versions() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
+        let mut next_blob = 0usize;
+        let mut new_blob = |repo: &Repository| {
+            next_blob += 1;
+            repo.odb()
+                .write(ObjectKind::Blob, format!("blob {next_blob}\n").as_bytes())
+                .unwrap()
+        };
+        // Names of varying length so edits shift every later entry's offset.
+        let mut root: std::collections::BTreeMap<String, ObjectId> = (0..40)
+            .map(|i| {
+                (
+                    format!("f{}", "x".repeat(i % 7) + &i.to_string()),
+                    new_blob(&repo),
+                )
+            })
+            .collect();
+        let mut sub: std::collections::BTreeMap<String, ObjectId> = (0..12)
+            .map(|i| (format!("s{i}"), new_blob(&repo)))
+            .collect();
+        let gitlink = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
+        let link_target = repo.odb().write(ObjectKind::Blob, b"target").unwrap();
+        let mut parent: Option<ObjectId> = None;
+        for version in 0..300i64 {
+            let files = if rng.below(3) == 0 {
+                &mut sub
+            } else {
+                &mut root
+            };
+            let names: Vec<String> = files.keys().cloned().collect();
+            match rng.below(4) {
+                0 if names.len() > 2 => {
+                    files.remove(&names[rng.below(names.len())]);
+                }
+                1 => {
+                    let name = format!("f{}", "y".repeat(rng.below(5)) + &version.to_string());
+                    files.insert(name, new_blob(&repo));
+                }
+                _ => {
+                    let name = names[rng.below(names.len())].clone();
+                    // Restoring an earlier blob makes a version repeat older bytes.
+                    let blob = if rng.below(4) == 0 {
+                        *files.values().next().unwrap()
+                    } else {
+                        new_blob(&repo)
+                    };
+                    files.insert(name, blob);
+                }
+            }
+            let sub_entries: Vec<(u32, &str, ObjectId)> = sub
+                .iter()
+                .map(|(name, &oid)| (0o100644, name.as_str(), oid))
+                .collect();
+            let sub_tree = write_tree(&repo, &sub_entries);
+            let mut entries: Vec<(u32, &str, ObjectId)> = vec![
+                (0o160000, "a-module", gitlink),
+                (0o120000, "a-link", link_target),
+                (0o040000, "d", sub_tree),
+            ];
+            entries.extend(
+                root.iter()
+                    .map(|(name, &oid)| (0o100644, name.as_str(), oid)),
+            );
+            entries.sort_by(|a, b| a.1.cmp(b.1));
+            let tree = write_tree(&repo, &entries);
+            let parents: Vec<ObjectId> = parent.into_iter().collect();
+            parent = Some(write_commit(&repo, tree, &parents, version));
+        }
+        assert_walk_lists_reachable(&repo, parent.unwrap());
+    }
+
+    #[test]
+    fn walk_reparses_a_tree_whose_shared_tail_starts_inside_an_entry() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let kept = repo.odb().write(ObjectKind::Blob, b"kept").unwrap();
+        let older = repo.odb().write(ObjectKind::Blob, b"older").unwrap();
+        let newer = repo.odb().write(ObjectKind::Blob, b"newer").unwrap();
+        // The newest commit's tree is expanded first. `100644 g\0<kept>` is the whole
+        // second entry of the older tree and the tail of the newer tree's entry named
+        // `w100644 g`, so the trees share their last bytes from an offset that is no
+        // entry start in the tree expanded before.
+        let old_tree = write_tree(&repo, &[(0o100644, "a", older), (0o100644, "g", kept)]);
+        let new_tree = write_tree(
+            &repo,
+            &[(0o100644, "a", newer), (0o100644, "w100644 g", kept)],
+        );
+        let old = write_commit(&repo, old_tree, &[], 1);
+        let new = write_commit(&repo, new_tree, &[old], 2);
+        assert_walk_lists_reachable(&repo, new);
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git; run with --features full-tests"
+    )]
+    #[test]
+    fn walk_matches_git_rev_list_objects_on_edited_history() {
+        let dir = TempDir::new().unwrap();
+        let git = |args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .current_dir(dir.path())
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .expect("run git");
+            assert!(out.status.success(), "git {args:?}: {out:?}");
+            String::from_utf8(out.stdout).unwrap()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        let mut rng = Xorshift(0x9e37_79b9_7f4a_7c15);
+        for i in 0..60 {
+            let dir_name = ["src", "src/deep", "docs", "."][rng.below(4)];
+            std::fs::create_dir_all(dir.path().join(dir_name)).unwrap();
+            let file = dir
+                .path()
+                .join(dir_name)
+                .join(format!("f{}", rng.below(15)));
+            if rng.below(5) == 0 && file.exists() {
+                std::fs::remove_file(&file).unwrap();
+            } else {
+                std::fs::write(&file, format!("{i}\n")).unwrap();
+            }
+            git(&["add", "-A"]);
+            git(&["commit", "-q", "--allow-empty", "-m", &format!("c{i}")]);
+        }
+        git(&["repack", "-adq"]);
+        let expected: HashSet<ObjectId> = git(&["rev-list", "--objects", "--all"])
+            .lines()
+            .map(|line| ObjectId::from_hex(&line[..40]).unwrap())
+            .collect();
+        let repo =
+            Repository::open(&dir.path().join(".git"), &RepositoryOptions::empty()).expect("open");
+        let tip = ObjectId::from_hex(git(&["rev-parse", "HEAD"]).trim()).unwrap();
+        let walked = walk(&repo, &[tip], NameTrees::Yes);
+        let listed: HashSet<ObjectId> = walked.send.iter().copied().collect();
+        assert_eq!(listed.len(), walked.send.len());
+        assert_eq!(listed, expected);
+        assert_walk_lists_reachable(&repo, tip);
     }
 }
