@@ -1,0 +1,375 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-11-03T07:17:20.072837751Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.29",
+    "grit_commit": "8cb4162ac83b2caac4c27d61235368c7e6e1d616"
+  },
+  "scenarios": [
+    {
+      "id": "gc/default@synth-10k",
+      "area": "maintenance",
+      "description": "Full grit gc vs git gc on synth-10k with loose objects",
+      "git": {
+        "median_wall_ms": 338.926703,
+        "peak_rss_bytes": 49270784,
+        "runs": 10,
+        "samples_ms": [
+          356.481,
+          328.061,
+          348.216,
+          335.734,
+          337.06,
+          330.143,
+          342.533,
+          338.909,
+          342.754,
+          338.945
+        ],
+        "min_ms": 328.06084200000004,
+        "max_ms": 356.480822,
+        "stddev_ms": 8.312220816758154
+      },
+      "grit": {
+        "median_wall_ms": 286.35208550000004,
+        "peak_rss_bytes": 53600256,
+        "runs": 10,
+        "samples_ms": [
+          286.471,
+          281.484,
+          19.242,
+          273.288,
+          294.174,
+          286.233,
+          282.181,
+          302.316,
+          292.543,
+          289.596
+        ],
+        "min_ms": 19.242133000000003,
+        "max_ms": 302.31582099999997,
+        "stddev_ms": 85.2259521445524
+      },
+      "ratio": 0.8448790932238823,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git\ngrit-bench prepare-daily-gc-seed --git git",
+        "commands": {
+          "git": "git gc --quiet",
+          "grit": "grit gc"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "run: git repack",
+              "ms": 332.807,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git pack-objects",
+              "ms": 323.966,
+              "count": 2,
+              "depth": 2
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 194.903,
+              "count": 2,
+              "depth": 2
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 105.339,
+              "count": 1,
+              "depth": 2
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 19.312,
+              "count": 1,
+              "depth": 2
+            },
+            {
+              "name": "run: git reflog",
+              "ms": 6.473,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git pack-refs",
+              "ms": 1.872,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git prune",
+              "ms": 1.666,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git worktree",
+              "ms": 1.374,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git rerere",
+              "ms": 1.263,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "index: do_read_index",
+              "ms": 0.714,
+              "count": 1,
+              "depth": 2
+            },
+            {
+              "name": "chunkfile: write",
+              "ms": 0.141,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.02,
+              "count": 1,
+              "depth": 2
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.287,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.079,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.075,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "repack/commit-graph@git-git",
+      "area": "maintenance",
+      "description": "grit gc commit-graph vs git commit-graph write on git.git",
+      "git": {
+        "median_wall_ms": 619.195775,
+        "peak_rss_bytes": 75509760,
+        "runs": 10,
+        "samples_ms": [
+          625.544,
+          619.785,
+          618.607,
+          625.238,
+          616.029,
+          627.047,
+          612.454,
+          628.047,
+          618.394,
+          612.759
+        ],
+        "min_ms": 612.453551,
+        "max_ms": 628.0471229999999,
+        "stddev_ms": 5.781055399157597
+      },
+      "grit": {
+        "median_wall_ms": 1244.095013,
+        "peak_rss_bytes": 107130880,
+        "runs": 10,
+        "samples_ms": [
+          1240.367,
+          1276.852,
+          1268.487,
+          1247.136,
+          1276.003,
+          1251.128,
+          1228.145,
+          1239.291,
+          1229.43,
+          1241.054
+        ],
+        "min_ms": 1228.1451789999999,
+        "max_ms": 1276.851964,
+        "stddev_ms": 18.062342082797695
+      },
+      "ratio": 2.009211081907011,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git",
+        "commands": {
+          "git": "git commit-graph write --reachable --changed-paths",
+          "grit": "grit gc commit-graph"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "chunkfile: write",
+              "ms": 48.882,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.229,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.072,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.012,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "repack/full@git-git",
+      "area": "maintenance",
+      "description": "grit gc repack vs git repack -ad on git.git worktree",
+      "git": {
+        "median_wall_ms": 4003.1584795,
+        "peak_rss_bytes": 480956416,
+        "runs": 10,
+        "samples_ms": [
+          4089.004,
+          4065.589,
+          3990.907,
+          3934.211,
+          4030.588,
+          4028.944,
+          4015.41,
+          3977.637,
+          3936.816,
+          3986.107
+        ],
+        "min_ms": 3934.210922,
+        "max_ms": 4089.0043020000003,
+        "stddev_ms": 50.580933374112085
+      },
+      "grit": {
+        "median_wall_ms": 6334.2240010000005,
+        "peak_rss_bytes": 565116928,
+        "runs": 10,
+        "samples_ms": [
+          6619.565,
+          6305.657,
+          6209.716,
+          6362.791,
+          7007.742,
+          6513.972,
+          6235.064,
+          6433.431,
+          6259.118,
+          6221.389
+        ],
+        "min_ms": 6209.715569,
+        "max_ms": 7007.741841999999,
+        "stddev_ms": 248.16561130326485
+      },
+      "ratio": 1.5823065795264628,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git",
+        "commands": {
+          "git": "git repack -ad",
+          "grit": "grit gc repack"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "run: git pack-objects",
+              "ms": 3906.75,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 2374.35,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 1356.258,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 159.872,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "index: do_read_index",
+              "ms": 0.399,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.037,
+              "count": 1,
+              "depth": 1
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.275,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.086,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.05,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

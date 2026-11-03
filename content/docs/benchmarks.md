@@ -36,6 +36,29 @@ The first four rows are pushes. Interleaved hyperfine runs show no change in the
   --min-runs 10 --grit ./target/release/grit --format json --output grit-utils/baselines/daily-push-refspec-6936-after.json
 ```
 
+## Writing the commit-graph reads each commit once (2026-11-03)
+
+`repack/commit-graph@git-git` times `grit gc commit-graph` against `git commit-graph write --reachable --changed-paths` on git.git (75,031 commits, one pack) with a changed-path graph already in place, so both tools reuse every Bloom filter. Grit took twice Git's time, and almost all of it went to zlib: the writer walked the refs to collect the reachable commits, then read every commit a second time to load its tree, parents and date, reopening the single-pack reader for each read.
+
+The walk now keeps each commit's graph data as it goes, reading every object once through one pack reader for the whole walk. Each commit is still read whole, zlib checksum included, and parsed from the object database rather than from the graph it replaces, so a damaged commit fails the write as it does in Git, and rewriting a damaged graph repairs it. (Inflating only the commit headers would be faster still, but would accept a commit whose message is corrupt.) A commit that exists but cannot be read used to be left out of the graph silently; it is now an error.
+
+When filters have to be computed (no graph yet, or `--max-new-filters` left some out), the writer used to diff each commit against its first parent in object-id order, which visits history at random, and read the parent commit again to find its tree. It now diffs in generation order, so consecutive diffs share most of their trees and find them in the object database's tree cache, and takes the parent's tree from the walk. The budget still goes to the first commits in object-id order, and the file is byte-for-byte what the previous writer produced. On the same git.git clone with no graph, `grit gc commit-graph` drops from 11.8 to 5.7 s (Git: 4.6 s in the same sitting), at 380 MB peak RSS instead of 361 MB (Git: 366 MB).
+
+Rows from `grit-bench daily` on `release` builds against the system `git` in one sitting, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0. "base" is `8cb4162ac`; "after" is the branch's code at `e5c51b48c`. Times are medians of 10 runs; values are **milliseconds / MB**. The git column is from the second report, and each ratio uses the git time of its own report. Reports: `daily-commit-graph-6930-before.json` → `daily-commit-graph-6930-after.json`.
+
+| Scenario | git ms / MB | base ms / MB | after ms / MB | time vs git |
+| --- | ---: | ---: | ---: | ---: |
+| `repack/commit-graph@git-git` | 619.88 / 75.4 | 1244.10 / 107.1 | **493.35** / 106.3 | 2.01 → 0.80 |
+| `repack/full@git-git` | 4076.84 / 481.0 | 6334.22 / 565.1 | 6357.35 / 564.3 | 1.58 → 1.56 |
+| `gc/default@synth-10k` | 326.92 / 49.3 | 286.47 / 53.6 | 266.33 / 53.9 | 0.85 → 0.81 |
+
+The `gc/default@synth-10k` cells are medians of the runs that repacked (9 of 10 before, 4 of 10 after). In the others the prepare step had not seeded loose objects and `grit gc` only rewrote the 1,000-commit graph, in 19 ms before and 11 ms after; the reports' own medians mix both kinds of run.
+
+```bash
+GRIT_BENCH_REPORT_GRIT_COMMIT=<measured revision> ./target/release/grit-bench daily --offline --only repack/commit-graph@git-git,repack/full@git-git,gc/default@synth-10k \
+  --min-runs 10 --grit ./target/release/grit --format json --output grit-utils/baselines/daily-commit-graph-6930-after.json
+```
+
 ## Pick, revert and merge join the hot text layout (2026-11-02)
 
 `pick/one@synth-10k` cherry-picks a topic commit that rewrites 2,000 of 10,000 files onto `main`. Grit already took under half Git's time, but peaked at 18.8 MB on a `dist` build and 22.3 MB on `release`, against Git's 9.4 MB. Little of that was data: the heap peaks at 4.7 MB. On `release`, 12.5 MB of the binary was still resident when `grit pick` exited (8.6 MB on `dist`).
