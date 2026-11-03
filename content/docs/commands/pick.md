@@ -26,7 +26,7 @@ Positional arguments are applied **oldest first**. Each argument is either:
 
 - a step has **merge conflicts** (conflict markers in the worktree, `CHERRY_PICK_HEAD`, `MERGE_MSG`, `.git/sequencer/`)
 - a step would be **empty** and `--empty stop` (default)
-- the worktree is **dirty**, `HEAD` is **detached**, or the branch has **no commits**
+- the worktree is **dirty**, or the branch has **no commits** (detached `HEAD` is allowed, like `git cherry-pick`)
 - a commit is a **merge** without `--mainline` (not yet exposed on the CLI)
 
 Resolve conflicts, then either run [`grit commit`](../commit/) (auto-stages the worktree and finishes the step, keeping the picked author) or stage with [`grit add`](../add/) and run `grit pick --continue`. Use `grit pick --skip` to drop the current step, or `grit pick --abort` to cancel. If the branch tip moved because you already committed the resolution, `--abort` clears replay state without moving the branch (Git warns and exits 0 in the same situation).

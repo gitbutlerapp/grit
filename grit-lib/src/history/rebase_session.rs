@@ -252,7 +252,7 @@ impl RebaseSessionError {
 /// # Errors
 ///
 /// Returns [`RebaseSessionError::RebaseAlreadyInProgress`] when grit or `git` already has a
-/// rebase in progress, [`RebaseSessionError::NotOnBranch`] when `HEAD` is not on a branch,
+/// rebase in progress, [`RebaseSessionError::NotOnBranch`] when `HEAD` is unborn,
 /// and planning/apply failures otherwise. When the replay would stop on conflicts but the index
 /// or worktree has local changes (or an untracked file sits where the stop checks out a path),
 /// returns [`RebaseSessionError::Library`] wrapping
@@ -904,7 +904,12 @@ pub fn abort_rebase(
         Some(ActiveRebase::Grit) => {
             let state = load_persisted_state(repo.git_dir())?;
             crate::rerere::rerere_clear(repo.git_dir()).map_err(map_lib)?;
-            let abort = hard_reset_branch(repo, &state.head_ref, state.orig_head, identity)?;
+            let abort = if rebase_head_is_branch(&state.head_ref) {
+                hard_reset_branch(repo, &state.head_ref, state.orig_head, identity)?
+            } else {
+                hard_reset_head(repo, state.orig_head, identity)?;
+                RebaseAbort::default()
+            };
             clear_rebase_state(repo.git_dir())?;
             Ok(abort)
         }
@@ -1462,27 +1467,36 @@ fn advance_after_plan(
             // The branch moved while HEAD was detached for the replay, so apply_rewrite only
             // logged it on the branch; HEAD's log still ends at the pre-rebase tip. Log before
             // reattaching so a failure leaves a detached, abortable rebase.
-            if let Some(branch) = plan
-                .ref_updates
-                .iter()
-                .find(|u| u.name == prev.head_ref && u.old != u.new)
-            {
-                log_head_move(repo, branch, apply)?;
-            }
-            refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &prev.head_ref)
+            let final_head = if rebase_head_is_branch(&prev.head_ref) {
+                if let Some(branch) = plan
+                    .ref_updates
+                    .iter()
+                    .find(|u| u.name == prev.head_ref && u.old != u.new)
+                {
+                    log_head_move(repo, branch, apply)?;
+                }
+                refs::write_symbolic_ref_on_store(
+                    repo.refs(),
+                    repo.git_dir(),
+                    "HEAD",
+                    &prev.head_ref,
+                )
                 .map_err(map_lib)?;
-            let branch_tip = repo.resolve_ref_oid(&prev.head_ref).map_err(map_lib)?;
+                repo.resolve_ref_oid(&prev.head_ref).map_err(map_lib)?
+            } else {
+                applied.head
+            };
             // The refs already moved: finish the rebase even if a cancel arrives now.
-            reset_index_worktree_to_head(repo, branch_tip, &mut NullProgress, &NeverCancel)?;
-            applied.head = branch_tip;
+            reset_index_worktree_to_head(repo, final_head, &mut NullProgress, &NeverCancel)?;
+            applied.head = final_head;
             if let Some(operation) = apply.record_operation.as_deref() {
                 let head_old_tree = commit_tree(repo, prev.orig_head)?;
-                let head_new_tree = commit_tree(repo, branch_tip)?;
+                let head_new_tree = commit_tree(repo, final_head)?;
                 let record = HistoryLastRecord {
                     operation: operation.into(),
                     head_ref: Some(prev.head_ref.clone()),
                     head_old_commit: Some(prev.orig_head),
-                    head_new_commit: Some(branch_tip),
+                    head_new_commit: Some(final_head),
                     head_old_tree: Some(head_old_tree),
                     head_new_tree: Some(head_new_tree),
                     ref_updates: plan.ref_updates.clone(),
@@ -1661,6 +1675,12 @@ pub(super) fn clear_rebase_state(git_dir: &Path) -> Result<(), RebaseSessionErro
     Ok(())
 }
 
+const REBASE_DETACHED_HEAD_NAME: &str = "detached HEAD";
+
+fn rebase_head_is_branch(head_ref: &str) -> bool {
+    head_ref.starts_with("refs/")
+}
+
 fn branch_head(repo: &Repository) -> Result<(String, ObjectId), RebaseSessionError> {
     match resolve_head_for_repository(repo).map_err(map_lib)? {
         HeadState::Branch {
@@ -1668,18 +1688,20 @@ fn branch_head(repo: &Repository) -> Result<(String, ObjectId), RebaseSessionErr
             oid: Some(oid),
             ..
         } => Ok((refname, oid)),
-        HeadState::Branch { oid: None, .. } | HeadState::Detached { .. } | HeadState::Invalid => {
+        HeadState::Detached { oid } => Ok((REBASE_DETACHED_HEAD_NAME.to_owned(), oid)),
+        HeadState::Branch { oid: None, .. } | HeadState::Invalid => {
             Err(RebaseSessionError::NotOnBranch)
         }
     }
 }
 
 fn resolve_head_oid(repo: &Repository) -> Result<ObjectId, RebaseSessionError> {
-    resolve_head_for_repository(repo)
-        .map_err(map_lib)?
-        .oid()
-        .copied()
-        .ok_or(RebaseSessionError::NotOnBranch)
+    match resolve_head_for_repository(repo).map_err(map_lib)? {
+        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
+        HeadState::Branch { oid: None, .. } | HeadState::Invalid => {
+            Err(RebaseSessionError::NotOnBranch)
+        }
+    }
 }
 
 fn reset_index_worktree_to_head(

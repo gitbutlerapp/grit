@@ -213,6 +213,9 @@ mod config_advanced_cli;
 #[path = "config_location_cli.rs"]
 mod config_location_cli;
 #[cfg(feature = "full-tests")]
+#[path = "detached_head_pick_revert_rebase.rs"]
+mod detached_head_pick_revert_rebase;
+#[cfg(feature = "full-tests")]
 #[path = "diff_commit_range_stream.rs"]
 mod diff_commit_range_stream;
 #[cfg(feature = "full-tests")]

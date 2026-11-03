@@ -25,8 +25,8 @@ use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::refs::{
-    should_autocreate_reflog_with_config, update_branch_for_commit_on_store, BranchCommitRefLock,
-    BranchCommitRefUpdate,
+    should_autocreate_reflog_with_config, update_branch_for_commit_on_store,
+    update_detached_head_for_commit_on_store, BranchCommitRefLock, BranchCommitRefUpdate,
 };
 use crate::replay_merge_session::ReplayMergeSession;
 use crate::repo::Repository;
@@ -79,9 +79,9 @@ pub enum ReplayOutcome {
 
 /// Replay `req.commit` onto the current branch using pick or revert merge semantics.
 ///
-/// Requires a clean worktree (same checks as `grit pick`), a branch `HEAD`, and a
-/// resolvable first-parent chain for the source commit. The source must not be a
-/// merge commit.
+/// Requires a clean worktree (same checks as `grit pick`), a branch or detached `HEAD`
+/// with at least one commit, and a resolvable first-parent chain for the source commit.
+/// The source must not be a merge commit.
 ///
 /// Successful pick and revert commits receive a fresh [`change-id`](crate::change_id::change_id);
 /// the source commit's id is not copied. When conflicted replay with `--continue` is
@@ -89,8 +89,7 @@ pub enum ReplayOutcome {
 ///
 /// # Errors
 ///
-/// - [`Error::DetachedHead`] when `HEAD` is not on a branch.
-/// - [`Error::UnbornHead`] when the branch has no commits yet.
+/// - [`Error::UnbornHead`] when `HEAD` has no commits yet.
 /// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
@@ -107,14 +106,18 @@ pub fn replay_commit(
 ) -> Result<ReplayOutcome> {
     ensure_worktree_clean_for_pick(repo)?;
 
-    let (refname, head_oid) = match resolve_head_for_repository(repo)? {
+    enum CheckoutTip {
+        Branch(String),
+        Detached,
+    }
+    let (checkout_tip, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             refname,
             oid: Some(oid),
             ..
-        } => (refname, oid),
+        } => (CheckoutTip::Branch(refname), oid),
         HeadState::Branch { .. } => return Err(Error::UnbornHead),
-        HeadState::Detached { .. } => return Err(Error::DetachedHead),
+        HeadState::Detached { oid } => (CheckoutTip::Detached, oid),
         HeadState::Invalid => {
             return Err(Error::Message("HEAD is in an unknown state".into()));
         }
@@ -205,75 +208,112 @@ pub fn replay_commit(
         ReplayDirection::Pick => format!("cherry-pick: {subject}"),
         ReplayDirection::Revert => format!("revert: {subject}"),
     };
-    let ref_update = BranchCommitRefUpdate {
-        branch_ref: &refname,
-        expected_old: Some(head_oid),
-        new_oid,
-        identity: &committer_line,
-        reflog_message: &reflog_msg,
-    };
-
     let index_snapshot = fs::read(repo.index_path()).ok();
 
-    if let Some(files) = repo.refs().as_files() {
-        crate::refs::verify_new_tip(repo.refs(), &refname, new_oid)?;
-        let git_dir = files.git_dir();
-        let mut branch_ref_lock = BranchCommitRefLock::acquire(git_dir, &refname, Some(head_oid))?;
-        branch_ref_lock.write_reflogs(git_dir, &ref_update, &head_oid, config.as_ref())?;
+    match checkout_tip {
+        CheckoutTip::Branch(ref refname) => {
+            let ref_update = BranchCommitRefUpdate {
+                branch_ref: refname,
+                expected_old: Some(head_oid),
+                new_oid,
+                identity: &committer_line,
+                reflog_message: &reflog_msg,
+            };
+            if let Some(files) = repo.refs().as_files() {
+                crate::refs::verify_new_tip(repo.refs(), refname, new_oid)?;
+                let git_dir = files.git_dir();
+                let mut branch_ref_lock =
+                    BranchCommitRefLock::acquire(git_dir, refname, Some(head_oid))?;
+                branch_ref_lock.write_reflogs(git_dir, &ref_update, &head_oid, config.as_ref())?;
 
-        if let Err(err) =
-            apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged, progress, cancel)
-        {
-            undo_prepared_branch_commit_reflogs(git_dir, &refname, config.as_ref());
-            if matches!(err, Error::Cancelled) {
+                if let Err(err) =
+                    apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged, progress, cancel)
+                {
+                    undo_prepared_branch_commit_reflogs(git_dir, refname, config.as_ref());
+                    if matches!(err, Error::Cancelled) {
+                        restore_worktree_after_failed_ref_commit(
+                            repo,
+                            &head_tree,
+                            &new_tree,
+                            index_snapshot.as_deref(),
+                        )?;
+                    }
+                    return Err(err);
+                }
+
+                if let Err(err) = branch_ref_lock.finish_ref_commit(git_dir, &ref_update) {
+                    undo_prepared_branch_commit_reflogs(git_dir, refname, config.as_ref());
+                    restore_worktree_after_failed_ref_commit(
+                        repo,
+                        &head_tree,
+                        &new_tree,
+                        index_snapshot.as_deref(),
+                    )?;
+                    return Err(err);
+                }
+            } else {
+                let current = repo.references().resolve_if_exists(refname).ok().flatten();
+                crate::refs::verify_branch_commit_cas(Some(head_oid), current, refname)?;
+
+                if let Err(err) =
+                    apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged, progress, cancel)
+                {
+                    if matches!(err, Error::Cancelled) {
+                        restore_worktree_after_failed_ref_commit(
+                            repo,
+                            &head_tree,
+                            &new_tree,
+                            index_snapshot.as_deref(),
+                        )?;
+                    }
+                    return Err(err);
+                }
+
+                // Branch and reflog updates commit as one transaction here, so a failure leaves no
+                // reflog lines to undo.
+                if let Err(err) =
+                    update_branch_for_commit_on_store(repo.refs(), &ref_update, &config)
+                {
+                    restore_worktree_after_failed_ref_commit(
+                        repo,
+                        &head_tree,
+                        &new_tree,
+                        index_snapshot.as_deref(),
+                    )?;
+                    return Err(err);
+                }
+            }
+        }
+        CheckoutTip::Detached => {
+            if let Err(err) =
+                apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged, progress, cancel)
+            {
+                if matches!(err, Error::Cancelled) {
+                    restore_worktree_after_failed_ref_commit(
+                        repo,
+                        &head_tree,
+                        &new_tree,
+                        index_snapshot.as_deref(),
+                    )?;
+                }
+                return Err(err);
+            }
+            if let Err(err) = update_detached_head_for_commit_on_store(
+                repo.refs(),
+                Some(head_oid),
+                new_oid,
+                &committer_line,
+                &reflog_msg,
+                config.as_ref(),
+            ) {
                 restore_worktree_after_failed_ref_commit(
                     repo,
                     &head_tree,
                     &new_tree,
                     index_snapshot.as_deref(),
                 )?;
+                return Err(err);
             }
-            return Err(err);
-        }
-
-        if let Err(err) = branch_ref_lock.finish_ref_commit(git_dir, &ref_update) {
-            undo_prepared_branch_commit_reflogs(git_dir, &refname, config.as_ref());
-            restore_worktree_after_failed_ref_commit(
-                repo,
-                &head_tree,
-                &new_tree,
-                index_snapshot.as_deref(),
-            )?;
-            return Err(err);
-        }
-    } else {
-        let current = repo.references().resolve_if_exists(&refname).ok().flatten();
-        crate::refs::verify_branch_commit_cas(Some(head_oid), current, &refname)?;
-
-        if let Err(err) =
-            apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged, progress, cancel)
-        {
-            if matches!(err, Error::Cancelled) {
-                restore_worktree_after_failed_ref_commit(
-                    repo,
-                    &head_tree,
-                    &new_tree,
-                    index_snapshot.as_deref(),
-                )?;
-            }
-            return Err(err);
-        }
-
-        // Branch and reflog updates commit as one transaction here, so a failure leaves no
-        // reflog lines to undo.
-        if let Err(err) = update_branch_for_commit_on_store(repo.refs(), &ref_update, &config) {
-            restore_worktree_after_failed_ref_commit(
-                repo,
-                &head_tree,
-                &new_tree,
-                index_snapshot.as_deref(),
-            )?;
-            return Err(err);
         }
     }
 

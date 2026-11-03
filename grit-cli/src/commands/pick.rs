@@ -416,7 +416,6 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
         Error::OperationInProgress(kind) => {
             crate::json_error::operation_in_progress_for_repo(repo, "pick", kind)
         }
-        Error::DetachedHead => anyhow::anyhow!("HEAD is detached; grit pick needs a branch"),
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to pick onto"),
         Error::MergeCommit { oid } => {
             let s = oid.to_short_hex();

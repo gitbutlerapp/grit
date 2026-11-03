@@ -532,6 +532,9 @@ mod describe_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "describe_seed6593_skew_git_compat.rs"]
 mod describe_seed6593_skew_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "detached_head_pick_revert_rebase_git_compat.rs"]
+mod detached_head_pick_revert_rebase_git_compat;
 #[path = "detect_copies_hash_collision.rs"]
 mod detect_copies_hash_collision;
 #[cfg(feature = "full-tests")]

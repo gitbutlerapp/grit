@@ -35,15 +35,18 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
-use crate::refs::{update_branch_for_commit_on_store, BranchCommitRefUpdate};
+use crate::refs::{
+    update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
+    BranchCommitRefUpdate,
+};
 use crate::replay_merge_session::ReplayMergeSession;
 use crate::repo::Repository;
 use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::rev_parse::{resolve_revision_as_commit, try_parse_double_dot_log_range};
 use crate::state::clear_replay_state;
 use crate::state::{
-    read_cherry_pick_head, read_merge_msg, read_revert_head, resolve_head_for_repository,
-    write_orig_head, HeadState,
+    read_cherry_pick_head, read_merge_msg, read_orig_head_for_repository, read_revert_head,
+    resolve_head_for_repository, write_orig_head, HeadState,
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -271,7 +274,7 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 ///
 /// # Errors
 ///
-/// - [`Error::DetachedHead`], [`Error::UnbornHead`], [`Error::MergeCommit`] (without `mainline`).
+/// - [`Error::UnbornHead`], [`Error::MergeCommit`] (without `mainline`).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
 /// - Worktree cleanliness, merge, checkout, and ref update failures.
 pub fn start_replay_sequence(
@@ -289,7 +292,7 @@ pub fn start_replay_sequence(
         return Err(Error::OperationInProgress(op));
     }
     let worktree = prepare_worktree_for_pick(repo)?;
-    let (refname, head_oid) = branch_head(repo)?;
+    let (branch_ref, head_oid) = branch_head(repo)?;
     if req.commits.is_empty() {
         return Ok(SequenceOutcome::Completed {
             created: Vec::new(),
@@ -310,7 +313,7 @@ pub fn start_replay_sequence(
     let committer = req.committer.header_line();
     run_sequence(
         repo,
-        &refname,
+        branch_ref.as_deref(),
         head_oid,
         head_oid,
         head_oid,
@@ -347,7 +350,7 @@ pub fn continue_replay_sequence(
         return Err(Error::ReplayContinueUnmerged);
     }
     let rerere = crate::rerere::finish_merge_rerere(repo)?;
-    let (refname, head_oid) = branch_head(repo)?;
+    let (branch_ref, head_oid) = branch_head(repo)?;
     let git_dir = repo.git_dir();
     let step_head_present =
         read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some();
@@ -390,7 +393,7 @@ pub fn continue_replay_sequence(
         return attach_continue_rerere(
             run_sequence(
                 repo,
-                &refname,
+                branch_ref.as_deref(),
                 head_oid,
                 head_oid,
                 sequence_start,
@@ -442,7 +445,7 @@ pub fn continue_replay_sequence(
         let change_id_policy = ChangeIdPolicy::from_config(&config);
         let new_oid = write_replay_commit(
             repo,
-            &refname,
+            branch_ref.as_deref(),
             head_oid,
             &committer,
             &message,
@@ -485,7 +488,7 @@ pub fn continue_replay_sequence(
     attach_continue_rerere(
         run_sequence(
             repo,
-            &refname,
+            branch_ref.as_deref(),
             head_after,
             head_after,
             sequence_start,
@@ -537,7 +540,7 @@ pub fn skip_replay_step(
     identity.validate().map_err(Error::InvalidSignature)?;
     let committer = identity.header_line();
     let active = load_active_replay(repo)?;
-    let (refname, head_oid) = branch_head(repo)?;
+    let (branch_ref, head_oid) = branch_head(repo)?;
     let git_dir = repo.git_dir();
     let step_head_present =
         read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some();
@@ -566,7 +569,7 @@ pub fn skip_replay_step(
     let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
     match run_sequence(
         repo,
-        &refname,
+        branch_ref.as_deref(),
         head_oid,
         head_oid,
         sequence_start,
@@ -661,15 +664,17 @@ pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -
 /// - [`Error::NoReplayInProgress`] when nothing is in progress.
 pub fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
     let active = load_active_replay(repo)?;
-    let (refname, head_oid) = branch_head(repo)?;
+    let (branch_ref, head_oid) = branch_head(repo)?;
     if head_oid != active.abort_safety {
         crate::rerere::rerere_clear(repo.git_dir())?;
         clear_replay_state(repo.git_dir())?;
         return Ok(ReplayAbortOutcome::ClearedInPlace);
     }
     crate::rerere::rerere_clear(repo.git_dir())?;
-    let restore_oid = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
-    hard_reset_branch(repo, &refname, restore_oid)?;
+    let restore_oid = read_sequencer_head(repo.git_dir())
+        .or(read_orig_head_for_repository(repo).ok().flatten())
+        .unwrap_or(active.abort_safety);
+    hard_reset_replay_tip(repo, branch_ref.as_deref(), restore_oid)?;
     clear_replay_state(repo.git_dir())?;
     Ok(ReplayAbortOutcome::Rewound)
 }
@@ -703,16 +708,46 @@ fn replay_in_progress(git_dir: &Path) -> Result<bool> {
         || git_dir.join("sequencer").join("todo").is_file())
 }
 
-fn branch_head(repo: &Repository) -> Result<(String, ObjectId)> {
+fn branch_head(repo: &Repository) -> Result<(Option<String>, ObjectId)> {
     match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             refname,
             oid: Some(oid),
             ..
-        } => Ok((refname, oid)),
+        } => Ok((Some(refname), oid)),
         HeadState::Branch { .. } => Err(Error::UnbornHead),
-        HeadState::Detached { .. } => Err(Error::DetachedHead),
+        HeadState::Detached { oid } => Ok((None, oid)),
         HeadState::Invalid => Err(Error::Message("HEAD is in an unknown state".into())),
+    }
+}
+
+fn advance_replay_tip(
+    repo: &Repository,
+    branch_ref: Option<&str>,
+    head_oid: ObjectId,
+    new_oid: ObjectId,
+    committer: &str,
+    reflog_message: &str,
+    config: &ConfigSet,
+) -> Result<()> {
+    if let Some(refname) = branch_ref {
+        let ref_update = BranchCommitRefUpdate {
+            branch_ref: refname,
+            expected_old: Some(head_oid),
+            new_oid,
+            identity: committer,
+            reflog_message,
+        };
+        update_branch_for_commit_on_store(repo.refs(), &ref_update, config)
+    } else {
+        update_detached_head_for_commit_on_store(
+            repo.refs(),
+            Some(head_oid),
+            new_oid,
+            committer,
+            reflog_message,
+            config,
+        )
     }
 }
 
@@ -756,7 +791,7 @@ fn message_subject(message: &str) -> String {
 #[allow(clippy::too_many_arguments)]
 fn run_sequence(
     repo: &Repository,
-    refname: &str,
+    branch_ref: Option<&str>,
     head_oid: ObjectId,
     abort_safety: ObjectId,
     sequence_start: ObjectId,
@@ -788,7 +823,7 @@ fn run_sequence(
     while let Some(entry) = todo.first().cloned() {
         let step = match apply_one_step(
             repo,
-            refname,
+            branch_ref,
             &mut head,
             &mut cached_head_tree,
             sequence_start,
@@ -1133,7 +1168,7 @@ fn predict_one_step(
 #[allow(clippy::too_many_arguments)]
 fn apply_one_step(
     repo: &Repository,
-    refname: &str,
+    branch_ref: Option<&str>,
     head: &mut ObjectId,
     cached_head_tree: &mut ObjectId,
     _sequence_start: ObjectId,
@@ -1179,7 +1214,7 @@ fn apply_one_step(
                     replay_message(config, opts, direction, &source, source_oid, committer)?;
                 let new_oid = write_replay_commit_with_head_tree(
                     repo,
-                    refname,
+                    branch_ref,
                     *head,
                     head_tree,
                     committer,
@@ -1238,7 +1273,7 @@ fn apply_one_step(
                     replay_message(config, opts, direction, &source, source_oid, committer)?;
                 let new_oid = write_replay_commit_with_head_tree(
                     repo,
-                    refname,
+                    branch_ref,
                     *head,
                     head_tree,
                     committer,
@@ -1282,7 +1317,7 @@ fn apply_one_step(
     )?;
     let new_oid = write_replay_commit_with_head_tree(
         repo,
-        refname,
+        branch_ref,
         *head,
         head_tree,
         committer,
@@ -1442,7 +1477,7 @@ fn identity_name_email(ident: &str) -> (&str, &str) {
 #[allow(clippy::too_many_arguments)]
 fn write_replay_commit(
     repo: &Repository,
-    refname: &str,
+    branch_ref: Option<&str>,
     head_oid: ObjectId,
     committer: &str,
     message: &str,
@@ -1458,7 +1493,7 @@ fn write_replay_commit(
     let source_commit = parse_commit(&source_obj.data)?;
     write_replay_commit_with_head_tree(
         repo,
-        refname,
+        branch_ref,
         head_oid,
         head_tree,
         committer,
@@ -1475,7 +1510,7 @@ fn write_replay_commit(
 #[allow(clippy::too_many_arguments)]
 fn write_replay_commit_with_head_tree(
     repo: &Repository,
-    refname: &str,
+    branch_ref: Option<&str>,
     head_oid: ObjectId,
     head_tree: ObjectId,
     committer: &str,
@@ -1513,14 +1548,15 @@ fn write_replay_commit_with_head_tree(
         ReplayDirection::Pick => format!("cherry-pick: {subject}"),
         ReplayDirection::Revert => format!("revert: {subject}"),
     };
-    let ref_update = BranchCommitRefUpdate {
-        branch_ref: refname,
-        expected_old: Some(head_oid),
+    advance_replay_tip(
+        repo,
+        branch_ref,
+        head_oid,
         new_oid,
-        identity: committer,
-        reflog_message: &reflog_msg,
-    };
-    update_branch_for_commit_on_store(repo.refs(), &ref_update, config)?;
+        committer,
+        &reflog_msg,
+        config,
+    )?;
     Ok(new_oid)
 }
 
@@ -2003,9 +2039,12 @@ fn reset_index_worktree_to_head(repo: &Repository, head_oid: &ObjectId) -> Resul
     Ok(())
 }
 
-fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Result<()> {
-    let short = refname.strip_prefix("refs/heads/").unwrap_or(refname);
-    let _ = refname;
+fn hard_reset_replay_tip(
+    repo: &Repository,
+    branch_ref: Option<&str>,
+    target: ObjectId,
+) -> Result<()> {
+    let _ = branch_ref;
     let identity = "Grit <grit@local> 0 +0000"
         .parse()
         .map_err(Error::InvalidSignature)?;
@@ -2015,7 +2054,6 @@ fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Resu
         &mut crate::progress::NullProgress,
         &crate::progress::NeverCancel,
     )?;
-    let _ = short;
     Ok(())
 }
 

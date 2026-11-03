@@ -1664,6 +1664,14 @@ fn run_rebase_check(
 }
 
 fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<ObjectId> {
+    if upstream.is_none()
+        && matches!(
+            grit_lib::state::resolve_head_for_repository(repo)?,
+            grit_lib::state::HeadState::Detached { .. }
+        )
+    {
+        anyhow::bail!("cannot rebase detached HEAD without an upstream argument");
+    }
     let spec = upstream.unwrap_or("@{upstream}");
     match resolve_revision_as_commit(repo, spec) {
         Ok(oid) => Ok(oid),
