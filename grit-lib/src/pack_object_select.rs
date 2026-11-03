@@ -16,7 +16,7 @@ use crate::objects::{
 use crate::odb::store::{CompositeStore, ObjectStore};
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
-use crate::pack_name_hash::pack_name_hash;
+use crate::pack_name_hash::{pack_name_hash, pack_name_hash_child};
 use crate::progress::CancelSignal;
 use crate::repo::Repository;
 use crate::rev_list::{MissingAction, ObjectFilter};
@@ -157,6 +157,7 @@ pub(crate) fn enumerate_pack_objects_naming(
     local_only: bool,
     stop: &CancelSignal<'_>,
 ) -> Result<PackObjectSelection> {
+    crate::trace::trace_span!("grit.pack.enumerate");
     stop.poll()?;
     if !local_only && opts.use_bitmaps {
         if let Some(sel) = try_bitmap_enumeration(odb, wants, haves, opts)? {
@@ -1075,25 +1076,34 @@ fn collect_reachable_excluding_with_name_hashes(
             if let Some(dropped) = dropped_root_trees.as_mut() {
                 dropped.insert(commit.tree);
             }
-            walk.push_tree(commit.tree, String::new(), 0);
+            walk.push_tree(commit.tree, None, 0);
             continue;
         }
-        let Some((oid, path, depth)) = walk.queue.pop_front() else {
+        let Some(QueuedObject {
+            oid,
+            path_hash,
+            depth,
+            found_as_tree,
+        }) = walk.queue.pop_front()
+        else {
             match path_less_roots.next() {
                 Some(root) => {
-                    walk.push_object(root, String::new());
+                    walk.push_object(root, None, false);
                     continue;
                 }
                 None => break,
             }
         };
         // Queued blobs are wanted directly (a lazy fetch names thousands); the
-        // header says there is nothing to walk without inflating them.
-        match odb.read_info(&oid) {
-            Ok(info) if info.kind == ObjectKind::Blob => continue,
-            Ok(_) => {}
-            Err(_) if skip_missing => continue,
-            Err(e) => return Err(e),
+        // header says there is nothing to walk without inflating them. Objects
+        // found as trees are read straight away; their own kind still decides below.
+        if !found_as_tree {
+            match odb.read_info(&oid) {
+                Ok(info) if info.kind == ObjectKind::Blob => continue,
+                Ok(_) => {}
+                Err(_) if skip_missing => continue,
+                Err(e) => return Err(e),
+            }
         }
         let obj = match odb.read(&oid) {
             Ok(o) => o,
@@ -1111,6 +1121,11 @@ fn collect_reachable_excluding_with_name_hashes(
                     if entry.mode == 0o160000 {
                         continue;
                     }
+                    // Only a filter leaves objects unlisted, so without one an
+                    // object already visited has nothing left to record.
+                    if walk.filter.is_none() && walk.visited.contains(&entry.oid) {
+                        continue;
+                    }
                     // Regular files and symlinks have no children: record them
                     // without inflating their contents. The pack writer reads (or
                     // copies verbatim) each one later and fails there if it is
@@ -1120,14 +1135,15 @@ fn collect_reachable_excluding_with_name_hashes(
                     match entry.mode & 0o170000 {
                         0o120000 => walk.push_blob(entry.oid, None, oid, depth)?,
                         0o100000 => {
-                            walk.push_blob(entry.oid, Some((&path, entry.name)), oid, depth)?;
+                            let name = pack_name_hash_child(path_hash, entry.name);
+                            walk.push_blob(entry.oid, Some(name), oid, depth)?;
                         }
                         file_type => {
-                            let child_path = child_path(&path, entry.name);
+                            let name = Some(pack_name_hash_child(path_hash, entry.name));
                             if file_type == 0o040000 {
-                                walk.push_tree(entry.oid, child_path, depth + 1);
+                                walk.push_tree(entry.oid, name, depth + 1);
                             } else {
-                                walk.push_object(entry.oid, child_path);
+                                walk.push_object(entry.oid, name, false);
                             }
                         }
                     }
@@ -1135,7 +1151,7 @@ fn collect_reachable_excluding_with_name_hashes(
             }
             ObjectKind::Tag => {
                 let tag = parse_tag(&obj.data)?;
-                walk.push_object(tag.object, path);
+                walk.push_object(tag.object, path_hash, false);
             }
             ObjectKind::Blob => {}
         }
@@ -1170,13 +1186,17 @@ struct WalkedObjects {
     missing: Vec<MissingBlob>,
 }
 
-fn child_path(parent: &str, name: &[u8]) -> String {
-    let name = String::from_utf8_lossy(name);
-    if parent.is_empty() {
-        name.into_owned()
-    } else {
-        format!("{parent}/{name}")
-    }
+/// An object waiting in [`EnumerationWalk::queue`].
+struct QueuedObject {
+    oid: ObjectId,
+    /// Pack name hash of the path the object was found at; `None` for a root tree or
+    /// an object reached without a path (a root or a tag target).
+    path_hash: Option<u32>,
+    /// Tree depth, for depth-sensitive filters.
+    depth: u64,
+    /// Named as a tree by a commit or a tree entry, so its kind is not looked up
+    /// before it is read.
+    found_as_tree: bool,
 }
 
 /// State of [`collect_reachable_excluding_with_name_hashes`].
@@ -1209,9 +1229,8 @@ struct EnumerationWalk<'a> {
     /// Commits read but not yet expanded, newest first.
     commits: BinaryHeap<QueuedCommit>,
     next_seq: u64,
-    /// Objects to read: id, path for name hashes, and tree depth. Drained only
-    /// while [`Self::commits`] is empty.
-    queue: VecDeque<(ObjectId, String, u64)>,
+    /// Objects to read. Drained only while [`Self::commits`] is empty.
+    queue: VecDeque<QueuedObject>,
     name_hashes: HashMap<ObjectId, u32>,
     /// Have-side commits the walk stopped at (Git's edge commits).
     edges: HashSet<ObjectId>,
@@ -1293,7 +1312,7 @@ impl<'a> EnumerationWalk<'a> {
     }
 
     /// An object that is sent whatever the filter says: a root or a tag target.
-    fn push_object(&mut self, oid: ObjectId, path: String) {
+    fn push_object(&mut self, oid: ObjectId, path_hash: Option<u32>, found_as_tree: bool) {
         if let Ok(true) = self.commit_on_have_side(oid) {
             let _ = self.seal_have_reachable_commit(oid);
             return;
@@ -1304,7 +1323,12 @@ impl<'a> EnumerationWalk<'a> {
         }
         if self.visited.insert(oid) {
             self.list(oid);
-            self.queue.push_back((oid, path, 0));
+            self.queue.push_back(QueuedObject {
+                oid,
+                path_hash,
+                depth: 0,
+                found_as_tree,
+            });
         } else if self.unlisted.remove(&oid) {
             self.list(oid);
         }
@@ -1331,7 +1355,7 @@ impl<'a> EnumerationWalk<'a> {
         // all, when the queue reaches it.
         match self.odb.read_info(&oid) {
             Ok(info) if info.kind != ObjectKind::Commit => {
-                self.queue.push_back((oid, String::new(), 0));
+                self.queue_unnamed(oid, info.kind == ObjectKind::Tree);
                 return Ok(());
             }
             Ok(_) => {}
@@ -1340,8 +1364,8 @@ impl<'a> EnumerationWalk<'a> {
         }
         match self.read(&oid)? {
             Some(obj) if obj.kind == ObjectKind::Commit => self.queue_commit(oid, obj),
-            Some(_) => {
-                self.queue.push_back((oid, String::new(), 0));
+            Some(obj) => {
+                self.queue_unnamed(oid, obj.kind == ObjectKind::Tree);
                 Ok(())
             }
             None => Ok(()),
@@ -1374,12 +1398,22 @@ impl<'a> EnumerationWalk<'a> {
         }
         match self.read(&oid)? {
             Some(obj) if obj.kind == ObjectKind::Commit => self.queue_commit(oid, obj),
-            Some(_) => {
-                self.queue.push_back((oid, String::new(), 0));
+            Some(obj) => {
+                self.queue_unnamed(oid, obj.kind == ObjectKind::Tree);
                 Ok(())
             }
             None => Ok(()),
         }
+    }
+
+    /// Queue an object reached without a path (a root, or a parent that is not a commit).
+    fn queue_unnamed(&mut self, oid: ObjectId, found_as_tree: bool) {
+        self.queue.push_back(QueuedObject {
+            oid,
+            path_hash: None,
+            depth: 0,
+            found_as_tree,
+        });
     }
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
@@ -1407,14 +1441,15 @@ impl<'a> EnumerationWalk<'a> {
     }
 
     /// A commit's root tree (`depth` 0) or a subtree found in a tree.
-    fn push_tree(&mut self, oid: ObjectId, path: String, depth: u64) {
-        if self.name_trees == NameTrees::Yes && !path.is_empty() && !self.visited.contains(&oid) {
-            self.name_hashes
-                .entry(oid)
-                .or_insert_with(|| pack_name_hash(&path));
+    /// `path_hash` is the pack name hash of the tree's path, `None` for a root tree.
+    fn push_tree(&mut self, oid: ObjectId, path_hash: Option<u32>, depth: u64) {
+        if let Some(hash) = path_hash.filter(|_| self.name_trees == NameTrees::Yes) {
+            if !self.visited.contains(&oid) {
+                self.name_hashes.entry(oid).or_insert(hash);
+            }
         }
         let Some(filter) = self.filter else {
-            self.push_object(oid, path);
+            self.push_object(oid, path_hash, true);
             return;
         };
         // A tree in a have commit's snapshot is already on the peer, whatever the filter.
@@ -1444,16 +1479,21 @@ impl<'a> EnumerationWalk<'a> {
             self.unlisted.insert(oid);
         }
         if !filter.prunes_tree_entries(depth) {
-            self.queue.push_back((oid, path, depth));
+            self.queue.push_back(QueuedObject {
+                oid,
+                path_hash,
+                depth,
+                found_as_tree: true,
+            });
         }
     }
 
-    /// A blob in a tree at `tree_depth`; `name` is `(tree path, entry name)` for regular
-    /// files, which get a pack name hash.
+    /// A blob in a tree at `tree_depth`; `name_hash` is the pack name hash of its path,
+    /// given for regular files only.
     fn push_blob(
         &mut self,
         oid: ObjectId,
-        name: Option<(&str, &[u8])>,
+        name_hash: Option<u32>,
         referrer: ObjectId,
         tree_depth: u64,
     ) -> Result<()> {
@@ -1485,9 +1525,8 @@ impl<'a> EnumerationWalk<'a> {
         if passes {
             self.visited.insert(oid);
             self.list(oid);
-            if let Some((parent, entry_name)) = name {
-                self.name_hashes
-                    .insert(oid, pack_name_hash(&child_path(parent, entry_name)));
+            if let Some(hash) = name_hash {
+                self.name_hashes.insert(oid, hash);
             }
         } else if size_checked && !self.depth_sensitive {
             self.visited.insert(oid);

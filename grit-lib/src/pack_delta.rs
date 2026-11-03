@@ -164,6 +164,7 @@ pub(crate) fn write_pack_with_deltas(
     stop: &CancelSignal<'_>,
     on_objects: Option<&mut dyn FnMut(u64)>,
 ) -> Result<PackStats> {
+    crate::trace::trace_span!("grit.pack.write");
     write_pack_in_batches(
         odb,
         entries,

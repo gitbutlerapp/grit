@@ -1872,6 +1872,7 @@ pub(crate) fn plan_deltas(
     search_threads: Option<usize>,
     stop: &CancelSignal<'_>,
 ) -> Result<DeltaPlan> {
+    crate::trace::trace_span!("grit.pack.plan_deltas");
     let has_local_packs = objects_dir_has_local_packs(odb.objects_dir());
     let reuse_on_disk = opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 && has_local_packs;
     let search = opts.window > 0 && opts.max_depth > 0;
