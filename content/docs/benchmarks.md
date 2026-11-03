@@ -9,6 +9,33 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds. The daily census behind the [Performance overview](performance-overview.md) measures the shipped **`dist`** build since 2026-10-28; see [Benchmarking](benchmarking.md#grit-bench-daily-factory-census) for what that switch did to every baseline.
 
+## Push reads only commit headers while finding what the remote has (2026-11-03)
+
+`push/refspec@git-git` pushes 50 new commits to a new branch over smart HTTP, against a copy of git.git served by `git http-backend`. The harness dates those commits in 2001, before any of git.git's history. Before it builds the pack, a push walks the remote's tips and the new commits in commit-date order, stopping once no queued commit is reachable only from the new ones. Here that order puts the new commits last, so the walk reads all of the remote's history first: about 75,000 commits in a client with no commit-graph. Git makes the same walk, and spends about 510 ms of its 1.05 s on it; most of the rest is the server.
+
+Grit read each of those commits through the general object read: it set up a pack reader and checked the pack directory for every object, then inflated the whole commit, message included. The walk needs only the tree, parents and committer date. It now reads just the commit's header block from the pack, and falls back to a whole read for loose or deltified commits. The header-block reader also stops inflating at the blank line that ends the headers, stepping through the compressed input 256 bytes at a time. Before, it inflated up to 1 KiB plus slack for every commit, which for most commits is the whole message. fsck's connectivity pass and merge-base's tip seeding use the same reader.
+
+Rows from `grit-bench daily` on `release` builds against the system `git`, on a four-vCPU Intel Xeon VM with Git 2.43.0 and Rust 1.99.0, 10 runs per row. "before" is `3517a637f`, the build fix this change sits on. The before and after reports were taken back to back, and Git's own times differ by up to 3% between them. Values are **milliseconds / MB**. Reports: `daily-push-refspec-6936-before.json` → `daily-push-refspec-6936-after.json`.
+
+| Scenario | git ms / MB | before ms / MB | after ms / MB | time vs git |
+| --- | ---: | ---: | ---: | ---: |
+| `push/refspec@git-git` | 1031.7 / 100.3 | 1132.7 / 77.7 | **989.1** / 77.8 | 1.10 → 0.94 |
+| `push/force-with-lease@git-git` | 2114.8 / 334.2 | 1127.7 / 75.1 | **984.4** / 74.7 | 0.53 → 0.45 |
+| `push/incremental-http@git-git` | 1616.2 / 334.1 | 1227.4 / 91.0 | **1094.0** / 91.5 | 0.76 → 0.66 |
+| `push/incremental@git-git` | 2135.6 / 334.3 | 1712.2 / 90.4 | **1598.2** / 91.0 | 0.80 → 0.73 |
+| `fsck/full@git-git` | 27492.5 / 444.2 | 13292.2 / 593.0 | 13577.4 / 595.1 | 0.48 → 0.49 |
+| `merge-base/branches@git-git` | 15.2 / 19.7 | 4.1 / 19.3 | 4.2 / 19.5 | 0.27 → 0.27 |
+| `log/json-n10-loose-tags@git-git` | 12.1 / 17.4 | 13.8 / 21.4 | 14.0 / 21.3 | 1.14 → 1.17 |
+| `log/json-n10-packed-tags@git-git` | 10.0 / 17.4 | 2.8 / 13.6 | 2.8 / 13.8 | 0.28 → 0.28 |
+| `revs/count@git-git` | 497.6 / 62.9 | 711.8 / 122.3 | 744.1 / 122.6 | 1.43 → 1.46 |
+
+The first four rows are pushes. Interleaved hyperfine runs show no change in the others: `grit fsck` took 13.13 and 13.32 s before and 13.17 and 12.96 s after, and `grit revs --count HEAD` 717 and 724 ms before and 729 and 708 ms after. With a hand-run `git http-backend` front end and 10 hyperfine runs per command, the target push went from 1.287 s to 0.988 s against Git's 1.054 s, and grit's own CPU time from 625 to 400 ms. Peak memory did not move.
+
+```bash
+./target/release/grit-bench daily --only push/refspec@git-git,push/force-with-lease@git-git,push/incremental-http@git-git,push/incremental@git-git,fsck/full@git-git,merge-base/branches@git-git,log/json-n10-loose-tags@git-git,log/json-n10-packed-tags@git-git,revs/count@git-git \
+  --min-runs 10 --grit ./target/release/grit --format json --output grit-utils/baselines/daily-push-refspec-6936-after.json
+```
+
 ## Pick, revert and merge join the hot text layout (2026-11-02)
 
 `pick/one@synth-10k` cherry-picks a topic commit that rewrites 2,000 of 10,000 files onto `main`. Grit already took under half Git's time, but peaked at 18.8 MB on a `dist` build and 22.3 MB on `release`, against Git's 9.4 MB. Little of that was data: the heap peaks at 4.7 MB. On `release`, 12.5 MB of the binary was still resident when `grit pick` exited (8.6 MB on `dist`).
