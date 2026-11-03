@@ -6,8 +6,10 @@ use std::collections::{HashMap, HashSet};
 use std::cell::Cell;
 
 use crate::branch_tracking::upstream_tracking_full_ref;
+use crate::commit_graph_file::{BloomPrecheck, CommitGraphChain};
 use crate::config::ConfigSet;
 use crate::diff::diff_trees;
+use crate::diff::diff_trees_for_pathspecs;
 use crate::hooks::run_pre_rebase;
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of, is_ancestor, merge_bases_first_vs_rest,
@@ -1059,42 +1061,144 @@ fn collect_range_touched_paths(
     Ok(paths)
 }
 
-fn commit_touches_any_path(
+fn commit_touches_replay_paths(
     repo: &Repository,
     commit: ObjectId,
-    paths: &HashSet<String>,
+    pathspecs: &[String],
+    bloom_chain: Option<&CommitGraphChain>,
 ) -> Result<bool, HistoryError> {
-    if paths.is_empty() {
+    if pathspecs.is_empty() {
         return Ok(true);
     }
-    let touched = paths_changed_by_commit(repo, commit)?;
-    Ok(touched.iter().any(|p| paths.contains(p)))
+    let obj = repo.odb().read(&commit)?;
+    let parsed = parse_commit(&obj.data)?;
+    let parents = &parsed.parents;
+    if parents.len() > 1 {
+        for parent in parents {
+            let parent_tree = repo.odb().commit_tree(parent)?;
+            if trees_differ_on_pathspecs(
+                repo,
+                Some(&parent_tree),
+                Some(&parsed.tree),
+                pathspecs,
+                bloom_chain,
+                commit,
+                false,
+            )? {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    }
+    let parent_tree = if parents.is_empty() {
+        None
+    } else {
+        Some(repo.odb().commit_tree(&parents[0])?)
+    };
+    trees_differ_on_pathspecs(
+        repo,
+        parent_tree.as_ref(),
+        Some(&parsed.tree),
+        pathspecs,
+        bloom_chain,
+        commit,
+        true,
+    )
 }
 
-/// Stable patch-ids for commits on `fork..onto`, optionally limited to commits touching `range_paths`.
+fn trees_differ_on_pathspecs(
+    repo: &Repository,
+    old_tree: Option<&ObjectId>,
+    new_tree: Option<&ObjectId>,
+    pathspecs: &[String],
+    bloom_chain: Option<&CommitGraphChain>,
+    commit_oid: ObjectId,
+    bloom_first_parent: bool,
+) -> Result<bool, HistoryError> {
+    if old_tree == new_tree && old_tree.is_some() {
+        return Ok(false);
+    }
+    if bloom_first_parent {
+        if let Some(chain) = bloom_chain {
+            if let Ok(BloomPrecheck::DefinitelyNot) =
+                chain.bloom_precheck_for_paths(repo.odb(), commit_oid, pathspecs, None, -1, true)
+            {
+                return Ok(false);
+            }
+        }
+    }
+    let entries = diff_trees_for_pathspecs(repo.odb(), old_tree, new_tree, pathspecs, None)
+        .map_err(history_repo_err)?;
+    Ok(!entries.is_empty())
+}
+
+/// True when every replay path is absent from the commit's changed-path Bloom filter.
+fn replay_paths_bloom_definitely_unchanged(
+    chain: &CommitGraphChain,
+    commit_oid: ObjectId,
+    pathspecs: &[String],
+) -> bool {
+    use crate::bloom::bloom_keyvec_for_path;
+    let Some(settings) = chain.bloom_settings_for_commit(&commit_oid) else {
+        return false;
+    };
+    let mut checked_any = false;
+    for spec in pathspecs {
+        if spec.is_empty() || crate::pathspec::pathspec_is_exclude(spec) {
+            continue;
+        }
+        let Some(norm) = crate::pathspec::bloom_lookup_prefix_with_cwd(spec, None) else {
+            continue;
+        };
+        let keys = bloom_keyvec_for_path(norm.as_str(), &settings);
+        if keys.is_empty() {
+            return false;
+        }
+        checked_any = true;
+        if !chain.bloom_definitely_not_for_keys(commit_oid, &keys) {
+            return false;
+        }
+    }
+    checked_any
+}
+
+/// Stable patch-ids for commits on `fork..onto`, limited to `needed_pids` and path filters.
 fn patch_ids_in_fork_to_onto(
     repo: &Repository,
     fork: ObjectId,
     onto: ObjectId,
     range_paths: &HashSet<String>,
+    needed_pids: &HashSet<ObjectId>,
 ) -> Result<HashMap<ObjectId, ObjectId>, HistoryError> {
-    if fork == onto {
+    if fork == onto || needed_pids.is_empty() {
         return Ok(HashMap::new());
     }
     let mut commits = commits_reachable_excluding_ancestors_of(repo, &[onto], &[fork], None)?;
     commits.retain(|oid| *oid != fork);
     let mut commits = topo_order_commit_subset(repo, &commits, true)?;
     commits.reverse();
+    let pathspecs: Vec<String> = range_paths.iter().cloned().collect();
+    let bloom_chain = repo.odb().commit_graph_chain();
+    let bloom_ref = bloom_chain.as_deref();
     let algo = repo.odb().hash_algo();
     let mut by_patch: HashMap<ObjectId, ObjectId> = HashMap::new();
     for oid in commits {
-        if !range_paths.is_empty() && !commit_touches_any_path(repo, oid, range_paths)? {
-            continue;
+        if !pathspecs.is_empty() {
+            if bloom_ref.is_some_and(|chain| {
+                replay_paths_bloom_definitely_unchanged(chain, oid, &pathspecs)
+            }) {
+                continue;
+            }
+            if !commit_touches_replay_paths(repo, oid, &pathspecs, bloom_ref)? {
+                continue;
+            }
         }
         if let Ok(Some(pid)) =
             compute_patch_id_recorded(algo, repo.odb(), &oid, PatchIdMode::Stable)
         {
-            by_patch.insert(pid, oid);
+            if needed_pids.contains(&pid) {
+                by_patch.insert(pid, oid);
+            }
         }
     }
     Ok(by_patch)
@@ -1119,8 +1223,19 @@ fn applied_by_patch(
     range: &[ObjectId],
 ) -> Result<HashMap<ObjectId, ObjectId>, HistoryError> {
     let range_paths = collect_range_touched_paths(repo, range)?;
-    let by_patch = patch_ids_in_fork_to_onto(repo, fork, onto, &range_paths)?;
     let algo = repo.odb().hash_algo();
+    let mut needed_pids = HashSet::new();
+    for &commit in range {
+        if let Some(pid) =
+            compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)?
+        {
+            needed_pids.insert(pid);
+        }
+    }
+    if needed_pids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let by_patch = patch_ids_in_fork_to_onto(repo, fork, onto, &range_paths, &needed_pids)?;
     let mut out = HashMap::new();
     for &commit in range {
         let Some(pid) = compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)?
@@ -1277,7 +1392,16 @@ mod tests {
         )
         .expect("init");
         let id = ident(1);
-        let fork_tree = blob_tree(&repo, "f.txt", b"base\n").expect("fork tree");
+        let fork_tree = files_tree(
+            &repo,
+            &[
+                ("f.txt", b"base\n"),
+                ("wide/shared/a.txt", b"a\n"),
+                ("wide/shared/b.txt", b"b\n"),
+                ("wide/shared/c.txt", b"c\n"),
+            ],
+        )
+        .expect("fork tree");
         let fork = write_commit(&repo, fork_tree, &[], "fork", &id).expect("fork");
         let mut parent = fork;
         for i in 0..120 {

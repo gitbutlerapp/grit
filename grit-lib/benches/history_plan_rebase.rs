@@ -60,6 +60,14 @@ fn build_rebase_plan_fixture(
     index.hash_algo = repo.odb().hash_algo();
     let base_blob = repo.odb().write(ObjectKind::Blob, b"base\n").expect("blob");
     index.add_or_replace(index_entry(b"f.txt", base_blob, 5));
+    for path in [
+        b"wide/shared/a.txt",
+        b"wide/shared/b.txt",
+        b"wide/shared/c.txt",
+    ] {
+        let blob = repo.odb().write(ObjectKind::Blob, b"x\n").expect("blob");
+        index.add_or_replace(index_entry(path, blob, 2));
+    }
     let fork_tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
     let ident = "Bench <b@grit.test> 1 +0000";
     let fork_raw = serialize_commit(&CommitData {
