@@ -59,6 +59,15 @@
 //! - [`progress`] defines how long-running operations report progress and
 //!   observe cancellation without touching the terminal.
 //!
+//! # API stability
+//!
+//! This documentation is for **grit-lib** 0.5 (major.minor tracks the published crate).
+//!
+//! Conventions, semver policy, and a checklist for new public items are in
+//! [`API.md`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/API.md).
+//! Canonical module paths are described on
+//! [grit-scm.com/docs/library/api-layout](https://grit-scm.com/docs/library/api-layout).
+//!
 //! # API layout (canonical domains)
 //!
 //! | Flat path | Canonical path |
@@ -109,7 +118,7 @@
 //! Enable HTTP in `Cargo.toml`:
 //!
 //! ```toml
-//! grit-lib = { version = "0.1", features = ["http-ureq"] }
+//! grit-lib = { version = "0.5", features = ["http-ureq"] }
 //! ```
 //!
 //! # Errors and progress

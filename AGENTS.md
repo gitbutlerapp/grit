@@ -249,6 +249,8 @@ Aligns with **how work is judged** above:
 
 The Git engine lives in **`grit-lib`**. Binaries stay thin: parse CLI, open a `Repository`, call library APIs, map `grit_lib::Error` to exit codes and output sinks.
 
+**API conventions and stability:** [`grit-lib/API.md`](grit-lib/API.md) (seven conventions, 0.6.0 semver policy, checklist for new public items). Canonical module paths: [`content/docs/library/api-layout.md`](content/docs/library/api-layout.md).
+
 ### When to use one crate vs several
 
 - **Start with one library crate** plus binary crates in a workspace unless a split is clearly needed. Prefer **modules** (`objects`, `index`, `refs`, `odb`, `tree`, `worktree`, …) for boundaries before adding more crates.

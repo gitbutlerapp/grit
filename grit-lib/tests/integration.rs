@@ -508,6 +508,8 @@ mod coverage_gate_bulk_sweep;
 mod coverage_max_sweep;
 #[path = "coverage_total_blame_crlf_sweep.rs"]
 mod coverage_total_blame_crlf_sweep;
+#[path = "crate_docs_dependency_snippet_matches_version.rs"]
+mod crate_docs_dependency_snippet_matches_version;
 #[cfg(feature = "full-tests")]
 #[path = "create_commit_git_compat.rs"]
 mod create_commit_git_compat;
