@@ -1140,6 +1140,12 @@ pub fn rev_list(
         return Ok(result);
     }
 
+    if let Some(count) = try_unfiltered_count_only(repo, &include, &exclude, options)? {
+        let mut result = rev_list_result_from_commits(Vec::new());
+        result.reachable_commit_count = Some(count);
+        return Ok(result);
+    }
+
     let object_walk_tip_commits: Vec<ObjectId> = if options.objects {
         include.clone()
     } else {
@@ -5690,6 +5696,96 @@ fn try_filtered_count_only(
         }
         Ok(Some(count))
     })
+}
+
+/// Count every commit reachable from `include` when nothing filters, limits, orders or hides
+/// the walk, and neither a bitmap nor the commit-graph answered it.
+///
+/// Counting needs only each commit's parent list, so commits the single local pack stores
+/// whole inflate just their leading headers; anything else is read whole. Replacement refs
+/// rewrite commits behind the object ids this walk reads, so their presence defers to the
+/// full walk.
+fn try_unfiltered_count_only(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<usize>> {
+    if !options.count
+        || options.objects
+        || options.filter.is_some()
+        || !exclude.is_empty()
+        || !rev_list_acceleration_compatible(options)
+        || has_replace_refs(repo)?
+    {
+        return Ok(None);
+    }
+    let shallow: OidHashSet = crate::shallow::load_shallow_boundaries(repo.git_dir())
+        .into_iter()
+        .collect();
+    let grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
+    let hex_len = repo.odb().hash_algo().hex_len();
+    repo.odb().with_pack_read_context(|| {
+        let objects_dir = repo.odb().objects_dir();
+        let mut pack = if repo.odb().uses_files_primary()
+            && crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir)
+        {
+            crate::pack::SingleLocalPackReader::open_allow_loose(objects_dir)?
+        } else {
+            None
+        };
+        let mut visited = oid_hash_set();
+        let mut stack = include.to_vec();
+        let mut buf = Vec::new();
+        while let Some(oid) = stack.pop() {
+            if !visited.insert(oid) {
+                continue;
+            }
+            let parents = match pack
+                .as_mut()
+                .map(|reader| reader.read_commit_parents(&oid, hex_len))
+                .transpose()?
+                .flatten()
+            {
+                Some(parents) => parents,
+                None => whole_commit_parents(repo, oid, hex_len, &mut buf)?,
+            };
+            if let Some(grafted) = grafts.get(&oid) {
+                stack.extend(grafted.iter().filter(|p| !visited.contains(*p)));
+            } else if !shallow.contains(&oid) {
+                stack.extend(parents.into_iter().filter(|p| !visited.contains(p)));
+            }
+        }
+        Ok(Some(visited.len()))
+    })
+}
+
+/// Parents of commit `oid`, read whole from the object database through `buf`.
+fn whole_commit_parents(
+    repo: &Repository,
+    oid: ObjectId,
+    hex_len: usize,
+    buf: &mut Vec<u8>,
+) -> Result<Vec<ObjectId>> {
+    if repo.odb().read_into_caching_delta_bases(&oid, buf)? != ObjectKind::Commit {
+        return Err(rev_list_unexpected_kind(oid, "commit"));
+    }
+    crate::objects::parse_commit_tree_and_parents_lenient(buf, hex_len)
+        .map(|(_, parents)| parents)
+        .ok_or_else(|| Error::CorruptObject(format!("commit {oid} has no valid tree header")))
+}
+
+/// Whether any replacement ref applies to object reads in `repo`.
+fn has_replace_refs(repo: &Repository) -> Result<bool> {
+    let Some(prefix) = repo.replace_ref_base_if_enabled() else {
+        return Ok(false);
+    };
+    let mut found = false;
+    repo.refs().for_each_ref(&prefix, &mut |_| {
+        found = true;
+        std::ops::ControlFlow::Break(())
+    })?;
+    Ok(found)
 }
 
 fn try_commit_graph_count_only(

@@ -1707,6 +1707,9 @@ mod rev_list_commit_filter_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "rev_list_commit_graph_walk.rs"]
 mod rev_list_commit_graph_walk;
+#[cfg(feature = "full-tests")]
+#[path = "rev_list_count_git_compat.rs"]
+mod rev_list_count_git_compat;
 #[path = "rev_list_diff_coverage_sweep.rs"]
 mod rev_list_diff_coverage_sweep;
 #[cfg(feature = "full-tests")]
