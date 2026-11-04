@@ -71,7 +71,7 @@ Schema: [v1](/schemas/sync/v1.json)
 | `remote` | string | The remote branches are pushed to and pulled from: `origin` when it is your space, else `space`. |
 | `configured` | boolean | Whether this run set the clone up to push to your space. |
 | `target` | object or omitted | The target branch: `name`, `action` (`up_to_date`, `fast_forwarded`, `created`, `ahead` or `diverged`) and `tip`. |
-| `branches` | array | Each active branch: `name`, `action` (`pushed`, `pulled`, `created`, `up_to_date`, `diverged` or `refused`), `tip`, a `message` for a divergence or refusal, and for a [shared](../share/) branch `shared`: each other member's head (`user`, `tip`, `relation`: `same`, `ahead`, `behind`, `diverged` or `unknown`). |
+| `branches` | array | Each active branch: `name`, `action` (`pushed`, `pulled`, `created`, `up_to_date`, `diverged` or `refused`), `tip`, a `message` for a divergence or refusal, and for a [shared](../share/) branch `shared`: the other members' heads, each with `user`, `tip`, `relation` to your branch (`same`, `ahead`, `behind`, `diverged` or `unknown`), and for a head that diverged from yours `divergence`: `scenario` (a stable code such as `amended_both_conflicting`; see [Divergence scenarios](../share/#divergence-scenarios)), `summary`, `needs_decision`, `base`, `changes` (each commit's `change`, `subject`, and what `you` and `them` did to it), `conflicts` and `also`. |
 
 ```json
 {
@@ -108,6 +108,7 @@ Schema: [v1](/schemas/sync/v1.json)
 | --- | --- |
 | `0` | Every active branch is in step with your space. |
 | `1` | A branch diverged or a push was refused (the output names it), the target diverged from upstream, or sync could not run: not a clone of a hosted project, not signed in, or this is a snapshot checkout. |
+| `3` | Everything else is in step, but another member's head of a [shared](../share/) branch diverged from yours in a way someone has to decide about (`needs_decision`). |
 
 ## See also
 

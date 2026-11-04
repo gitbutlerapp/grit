@@ -44,7 +44,9 @@ While the pack streams in, grit counts its objects as they arrive (the total com
 
 The step under way is projected from its own pace so far. Steps that have not started are sized from the pack's object and delta counts at typical indexing, delta and checkout rates. Before any objects arrive (while the remote is still preparing the pack), the bar shows `estimating`. The percentage never goes down, but the time left can grow when objects slow down, for example when large blobs follow many small commits. The overall bar needs an ANSI terminal; it is cleared once the clone finishes, before the summary.
 
-After the clone, stdout gets a summary: total time with a bar showing where it went (including time spent connecting before any data arrives and finishing after the last step), bytes received with average and peak throughput, objects by type, branches and tags, and the files and bytes in the work tree. Colors follow the terminal and are turned off by `NO_COLOR`.
+After the clone, stdout gets a summary: total time with a bar showing where it went, bytes received with average and peak throughput, objects by type, branches and tags, and the files and bytes in the work tree. Colors follow the terminal and are turned off by `NO_COLOR`.
+
+Over the network, the bar splits the wait before any pack data arrives into three parts: **handshake** (opening the connection — TCP, TLS or SSH, and starting the server's `upload-pack` — until its advertisement is read), **negotiate** (listing refs and the `want`/`have` exchange, until the final request is sent) and **pack prep** (the server counting and compressing objects, until the first pack byte). Local clones and bundles have no such stretch; any wait before their first step shows as **connect**. Time after the last step (writing refs and config) shows as **finish**, and gaps between steps as **other**.
 
 When `core.ignorecase` is enabled, grit stores every remote branch and tag during clone, including pairs that differ only by ASCII case (for example `Release` and `release`), in one `packed-refs` write — the same layout Git uses on APFS and NTFS. Later fetches into a loose files ref store can reject the second spelling of such a pair; see [`grit fetch`](../fetch/).
 
@@ -166,23 +168,23 @@ Clone a repository from GitHub:
 ```console
 $ grit clone https://github.com/BurntSushi/ripgrep.git
 Cloning https://github.com/BurntSushi/ripgrep.git → ripgrep
-  remote: Enumerating objects: 14062, done.
-  remote: Counting objects: 100% (83/83), done.
-  remote: Compressing objects: 100% (47/47), done.
-  remote: Total 14062 (delta 51), reused 36 (delta 36), pack-reused 13979 (from 2)
-✓ Receiving  ▃▃▃▃▆▆▆███▆▆▆▆▆▆▆▆▆▆▆▆▇▇▇▅▅▅          5.67 MiB         13.0 MiB/s   435ms
-✓ Indexing   ▆▆▆▆▆▆▆▆▆▆▆▆▆▆██████████████    14,062 objects   343.1k objects/s    40ms
-✓ Resolving  ████████████████████████████      9,840 deltas    370.3k deltas/s    26ms
-✓ Checkout   ████████████████████████████         237 files       4.6k files/s    51ms
+  remote: Enumerating objects: 14184, done.
+  remote: Counting objects: 100% (182/182), done.
+  remote: Compressing objects: 100% (99/99), done.
+  remote: Total 14184 (delta 128), reused 83 (delta 83), pack-reused 14002 (from 2)
+✓ Receiving  ███████████▅▅▅▅▅▅▅▅▅▅          5.76 MiB         39.6 MiB/s   145ms
+✓ Indexing   █████████████████████    14,184 objects   288.2k objects/s    49ms
+✓ Resolving                             9,918 deltas    833.1k deltas/s    11ms
+✓ Checkout   █████████████████████         226 files      10.6k files/s    21ms
 
-✓ Cloned into ripgrep on master in 1.6s
+✓ Cloned into ripgrep on master in 1.2s
 
-  time      ················███████████·▓▒·········░  1.6s
-            · connect 651ms  █ receiving 435ms  ▓ indexing 40ms  ▒ resolving 26ms  · other 359ms  ░ checkout 51ms
-  data      5.67 MiB received · 13.0 MiB/s avg · 20.1 MiB/s peak
-  objects   14,062 · 2,327 commits · 6,351 trees · 5,112 blobs · 272 tags
-  refs      16 branches · 272 tags
-  files     237 files · 3.11 MiB in the work tree
+  time      ·······························█████·▓▓▒  1.2s
+            · handshake 475ms  · negotiate 197ms  · pack prep 312ms  █ receiving 145ms  ▓ indexing 49ms  ▒ resolving 11ms  ░ checkout 21ms
+  data      5.76 MiB received · 39.6 MiB/s avg · 45.3 MiB/s peak
+  objects   14,184 · 2,343 commits · 6,420 trees · 5,147 blobs · 274 tags
+  refs      16 branches · 274 tags
+  files     226 files · 3.09 MiB in the work tree
 ```
 
 Progress lines are written to stderr and update in place on a terminal; the time bar and legend are colored by step there. When stderr is not a TTY (for example in a CI log or with stderr redirected), only the initial `Cloning into …` line is written to stderr, and the summary still appears on stdout.

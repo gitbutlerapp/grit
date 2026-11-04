@@ -42,6 +42,40 @@ When the project is a copy of an organization's project, everyone's copy is a co
 - one that your branch builds on: nothing to do;
 - one that has diverged from yours: reported. Rebase onto it with `grit rebase <remote>/shared/<branch>/<user>` (or have them rebase onto yours) and sync again.
 
+### Divergence scenarios
+
+When another member's head has diverged from yours, `grit sync`, `grit status`, `grit share list` and `grit push` say what happened, commit by commit: for each commit, what you did and what they did (`unchanged`, `moved`, `reworded`, `amended`, `dropped`, `squashed`, `split`, `new`), matched by change id. The situation gets one of these codes, which scripts and agents can rely on. Some can be put together without losing anything; the rest need someone to decide, and `grit push` and `grit sync` exit with status `3` for them.
+
+| Scenario | What happened | Needs a decision |
+| --- | --- | --- |
+| `added_both` | You both added commits on top of the same base, and they don't conflict. | no |
+| `rewrote_one` | One of you rewrote commits (amended, reordered, split, squashed or dropped); the other only added on top. | no |
+| `amended_both_compatible` | You both amended the same commit, without overlapping (or one changed only its message). | no |
+| `amended_one_reordered_other` | One reordered commits; the other amended one of them. | no |
+| `amended_different` | You each amended different commits. | no |
+| `rebased_one` | One rebased onto a newer target; the other only changed commits. | no |
+| `rebased_both` | You both rebased, onto different target commits. | no |
+| `dropped_one` | One dropped a commit the other didn't touch. | no |
+| `dropped_both` | You both dropped the same commit. | no |
+| `split_one` | One split a commit the other didn't touch. | no |
+| `squashed_one_added_other` | One squashed commits; the other added on top. | no |
+| `squashed_one_amended_other` | One squashed a commit into another; the other amended it. | no |
+| `split_one_amended_other` | One split a commit; the other's amendment of it fits one piece. | no |
+| `amended_both_conflicting` | You both amended the same commit, and the edits overlap. | yes |
+| `added_both_conflict` | You both added commits, which conflict with each other. | yes |
+| `dropped_one_amended_other` | One deleted a commit; the other amended it. | yes |
+| `reordered_both` | You both reordered the commits, into different orders. | yes |
+| `split_both` | You both split the same commit, differently. | yes |
+| `split_one_amended_other_spanning` | One split a commit; the other's amendment of it spans the pieces. | yes |
+| `squashed_both_differently` | You both squashed commits, differently. | yes |
+| `reset_one` | One head drops most of the branch: perhaps an accidental reset. | yes |
+| `merge_commit` | One head has a merge commit. | yes |
+| `no_change_ids` | Commits made or rebased with plain `git` have no change ids, so an amend can't be told from a new commit. | yes |
+
+Heads that haven't diverged are `same`, `ahead`, `behind`, `same_content` (the same changes as different commits) or `same_rewrite` (the same amend, drop or squash on both sides).
+
+The comparison starts from the last head you both had, read from the reflogs of your branch and of their head here; without one, from where the two heads meet. Use `grit commit` and `grit rebase`, which keep change ids, so commits can be followed across amends.
+
 ## Options
 
 | Option | Description |
@@ -98,7 +132,7 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
 | ----- | ---- | ------- |
 | `action` | string | `add`, `list`, `remove`, `leave` or `revoke`. |
 | `project` | string | Your project the shares are in, `<you>/<project>`. |
-| `shares` | array | Each shared branch: `branch`, `origin`, `sharer`, `state` (`active`, `integrated`, `ended`), `mode` (`full`), `base_branch`, `members` (`user`, `sharer`, `you`, `head`, `project`, and `relation` to your branch: `same`, `ahead`, `behind`, `diverged`, `unknown`), `invited` (email addresses that haven't accepted yet), `links` (`id`, `uses_left`, `expires_at`) and `url`. |
+| `shares` | array | Each shared branch: `branch`, `origin`, `sharer`, `state` (`active`, `integrated`, `ended`), `mode` (`full`), `base_branch`, `members` (`user`, `sharer`, `you`, `head`, `project`, `relation` to your branch: `same`, `ahead`, `behind`, `diverged`, `unknown`, and for a diverged head `divergence`, as in [`grit sync`](../sync/#json-output)), `invited` (email addresses that haven't accepted yet), `links` (`id`, `uses_left`, `expires_at`) and `url`. |
 | `link` | object or omitted | The link `add --link` made: `id`, `url`, `uses_left` and `expires_at`. |
 | `added` | array or omitted | People added, who were emailed: user names, and the email addresses invited. |
 | `removed` | array or omitted | People removed (or you, when leaving), and the email addresses whose invitations were withdrawn. |

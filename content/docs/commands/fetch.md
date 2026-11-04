@@ -23,7 +23,7 @@ When the source is a **literal path or URL** (not a configured remote), grit doe
 
 Human output lists each local ref with its remote source and old → new oids. Pruned refs show `deleted`; rejected updates are listed and exit **1** (same as [`grit push`](../push/) rejections). When a stale remote-tracking ref blocks another update (for example `origin/gone/x` still exists locally but the remote now has `gone`), grit still applies every ref it can and reports the blocked ref as rejected; the `reason` field suggests `grit fetch --prune` or `grit remote prune <remote>` when pruning would remove the stale ref. With `core.ignorecase`, when the remote advertises two refs that differ only by case, grit stores the first and rejects the second as a loose ref; the `reason` mentions case and suggests `grit init --ref-format=reftable` if you need both spellings locally.
 
-When the fetch received objects, the ref list is followed by the same transfer summary [`grit clone`](../clone/) prints: a `time` bar splitting the run into connecting, receiving, indexing, resolving deltas and finishing; the `data` received off the wire with its average and peak rate; and the `objects` received by type. Local `file://` and plain-path remotes use the same summary shape, with **Enumerating** (reachability walk) and **Copying** (link or pack the send set) instead of network **Receiving**. Nothing extra is printed when the fetch was already up to date. With `--all`, one summary after the last remote covers the whole run.
+When the fetch received objects, the ref list is followed by the same transfer summary [`grit clone`](../clone/) prints: a `time` bar splitting the run into the network wait before the pack (**handshake**, **negotiate** and the server's **pack prep**, as described for [`grit clone`](../clone/)), receiving, indexing, resolving deltas and finishing; the `data` received off the wire with its average and peak rate; and the `objects` received by type. Local `file://` and plain-path remotes use the same summary shape, with **Enumerating** (reachability walk) and **Copying** (link or pack the send set) instead of network **Receiving**. Nothing extra is printed when the fetch was already up to date. With `--all`, one summary after the last remote covers the whole run.
 
 On a terminal, stderr first shows `Fetching <remote> <url>`, then one live progress line per phase with a throughput graph and, under it, an overall bar with a time-left estimate. Finished phases stay on screen as `✓` lines. When stderr is not a TTY, or with `--json`, `--markdown` or `-q`, no progress is drawn.
 
@@ -102,15 +102,15 @@ On a terminal, with progress on stderr above the summary (here filling in a shal
 ```console
 $ grit fetch --unshallow
 Fetching origin https://github.com/BurntSushi/ripgrep.git
-✓ Receiving  ▇▇▄▄▄▄▅▅▅▆▆▆▆▆▆▆▆█▇▇█          4.66 MiB          381 KiB/s   12.5s
-✓ Indexing   ▆▆▆▆▆▆▆▆▆▆▆██████████    13,689 objects    82.2k objects/s   166ms
-✓ Resolving  ▃▃▃▃▃▃▃▃▃▃▃██████████      9,877 deltas     49.1k deltas/s   201ms
+✓ Receiving  █████████████████████          4.64 MiB         48.1 MiB/s    96ms
+✓ Indexing   █████████████████████    13,715 objects   223.6k objects/s    61ms
+✓ Resolving  █████████████████████      9,905 deltas    451.8k deltas/s    21ms
 Already up to date with origin.
 
-  time      ·······████████████████████████████·▓▒··  18.1s
-            · connect 3.0s  █ receiving 12.5s  ▓ indexing 166ms  ▒ resolving 201ms  · finish 2.1s
-  data      4.66 MiB received · 381 KiB/s avg · 583 KiB/s peak
-  objects   13,845 · 2,297 commits · 6,306 trees · 4,973 blobs · 269 tags
+  time      ·····························███·▓▓▒····  1.2s
+            · handshake 259ms  · negotiate 584ms  · pack prep 61ms  █ receiving 96ms  ▓ indexing 61ms  ▒ resolving 21ms  · finish 138ms
+  data      4.64 MiB received · 48.1 MiB/s avg · 48.1 MiB/s peak
+  objects   13,868 · 2,302 commits · 6,319 trees · 4,977 blobs · 270 tags
 ```
 
 The rates are left out when the pack arrived in a single read, too fast to time. A fetch pack can be *thin*: grit completes it with the delta bases it already has, so `objects` can be a little higher than the `Indexing` count.
