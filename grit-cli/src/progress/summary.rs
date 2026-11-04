@@ -7,13 +7,14 @@ use std::time::Duration;
 use anyhow::Result;
 use grit_lib::objects::index_pack::ObjectKindCounts;
 use grit_lib::progress::{ProgressPhase, ProgressUnit};
+use grit_lib::remote::fetch::FetchMilestone;
 use grit_lib::remote::transfer::TransferStats;
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use super::{
     format_bytes, format_duration, format_rate, group_digits, paint, phase_label, phase_palette,
-    rate, PhaseRecord, BOLD, DIM,
+    rate, MilestoneRecord, PhaseRecord, BOLD, DIM,
 };
 use crate::output::outln;
 
@@ -51,6 +52,8 @@ pub struct TransferSummary {
     pub elapsed: Duration,
     /// Finished progress phases, in order.
     pub records: Vec<PhaseRecord>,
+    /// Wire fetch milestones, in order; they split the wait before the pack.
+    pub milestones: Vec<MilestoneRecord>,
     /// Objects received.
     pub objects: u64,
     /// Pack bytes received.
@@ -66,10 +69,18 @@ impl TransferSummary {
         Self {
             elapsed,
             records,
+            milestones: Vec::new(),
             objects: stats.objects,
             bytes: stats.bytes,
             object_types: stats.kinds.map(ObjectTypes::from),
         }
+    }
+
+    /// Also split the time bar at these wire fetch milestones.
+    #[must_use]
+    pub fn with_milestones(mut self, milestones: Vec<MilestoneRecord>) -> Self {
+        self.milestones = milestones;
+        self
     }
 
     /// Whether anything was received (an up-to-date fetch has nothing to show).
@@ -82,7 +93,7 @@ impl TransferSummary {
     pub fn render_rows(&self, w: &mut dyn Write, color: bool) -> Result<()> {
         let total = format_duration(self.elapsed);
         if !self.records.is_empty() {
-            let (bar, legend) = time_bar(&self.records, self.elapsed, color);
+            let (bar, legend) = time_bar(&self.records, &self.milestones, self.elapsed, color);
             outln!(w, "  {}  {bar}  {total}", row_label(color, "time"));
             outln!(w, "  {}  {legend}", row_label(color, ""));
         }
@@ -193,23 +204,45 @@ pub(crate) struct Segment {
 /// Lay the phases out on the command's timeline, naming the gaps: before the
 /// first byte arrives (connecting, ref negotiation, the server building the
 /// pack), between phases, and after the last one (writing refs and config).
-pub(crate) fn timeline(records: &[PhaseRecord], total: Duration) -> Vec<Segment> {
+///
+/// Wire fetch `milestones` split a gap where they fall: the stretch up to
+/// [`FetchMilestone::Connected`] is the handshake, from there to
+/// [`FetchMilestone::PackRequested`] is ref listing and negotiation, and from
+/// there to the next phase is the server preparing the pack. Without them the
+/// first gap is just "connect".
+pub(crate) fn timeline(
+    records: &[PhaseRecord],
+    milestones: &[MilestoneRecord],
+    total: Duration,
+) -> Vec<Segment> {
     const MIN_GAP: Duration = Duration::from_millis(5);
     let mut segments = Vec::new();
     let mut cursor = Duration::ZERO;
+    let mut marks = milestones.iter().peekable();
+    let push_gap =
+        |segments: &mut Vec<Segment>, from: Duration, to: Duration, name: &'static str| {
+            let gap = to.saturating_sub(from);
+            if gap > MIN_GAP {
+                segments.push(Segment {
+                    name,
+                    duration: gap,
+                    phase: None,
+                });
+            }
+        };
     for rec in records {
-        let gap = rec.started_at.saturating_sub(cursor);
-        if gap > MIN_GAP {
-            segments.push(Segment {
-                name: if segments.is_empty() {
-                    "connect"
-                } else {
-                    "other"
-                },
-                duration: gap,
-                phase: None,
-            });
+        // The milestone that opened the current stretch of the gap, if any.
+        let mut opened_by = None;
+        while let Some(mark) = marks.next_if(|m| m.at <= rec.started_at) {
+            let at_start = segments.is_empty() && opened_by.is_none();
+            let name = gap_name(opened_by, Some(mark.milestone), at_start);
+            push_gap(&mut segments, cursor, mark.at, name);
+            cursor = cursor.max(mark.at);
+            opened_by = Some(mark.milestone);
         }
+        let at_start = segments.is_empty() && opened_by.is_none();
+        let name = gap_name(opened_by, None, at_start);
+        push_gap(&mut segments, cursor, rec.started_at, name);
         segments.push(Segment {
             name: phase_label(rec.phase),
             duration: rec.elapsed,
@@ -217,21 +250,38 @@ pub(crate) fn timeline(records: &[PhaseRecord], total: Duration) -> Vec<Segment>
         });
         cursor = rec.started_at + rec.elapsed;
     }
-    let tail = total.saturating_sub(cursor);
-    if tail > MIN_GAP {
-        segments.push(Segment {
-            name: "finish",
-            duration: tail,
-            phase: None,
-        });
-    }
+    push_gap(&mut segments, cursor, total, "finish");
     segments
 }
 
+/// Gap names that come from wire fetch milestones (see [`gap_name`]).
+const MILESTONE_GAPS: [&str; 3] = ["handshake", "negotiate", "pack prep"];
+
+/// Name for a stretch of waiting between `opened_by` and `closed_by`;
+/// `at_start` when nothing has happened before it.
+fn gap_name(
+    opened_by: Option<FetchMilestone>,
+    closed_by: Option<FetchMilestone>,
+    at_start: bool,
+) -> &'static str {
+    match (opened_by, closed_by) {
+        (Some(FetchMilestone::Connected), _) => "negotiate",
+        (Some(FetchMilestone::PackRequested), _) => "pack prep",
+        (None, Some(FetchMilestone::Connected)) => "handshake",
+        _ if at_start => "connect",
+        _ => "other",
+    }
+}
+
 /// A bar splitting the total time across the timeline, plus its legend.
-pub(crate) fn time_bar(records: &[PhaseRecord], total: Duration, color: bool) -> (String, String) {
+pub(crate) fn time_bar(
+    records: &[PhaseRecord],
+    milestones: &[MilestoneRecord],
+    total: Duration,
+    color: bool,
+) -> (String, String) {
     const GAP_SHADE: u8 = 240;
-    let segments = timeline(records, total);
+    let segments = timeline(records, milestones, total);
     let total_secs = total.as_secs_f64().max(f64::EPSILON);
     let mut bar = String::new();
     let mut legend = Vec::new();
@@ -248,7 +298,14 @@ pub(crate) fn time_bar(records: &[PhaseRecord], total: Duration, color: bool) ->
                 phase_index += 1;
                 (glyph, phase_palette(phase)[3])
             }
-            None => ('·', GAP_SHADE),
+            // Network waits get muted hues of their own so the stretch
+            // before the pack reads as three parts; other gaps stay grey.
+            None => match seg.name {
+                "handshake" => ('·', 60),
+                "negotiate" => ('·', 66),
+                "pack prep" => ('·', 96),
+                _ => ('·', GAP_SHADE),
+            },
         };
         let (cell, marker) = if color {
             ('█', '■')
@@ -262,8 +319,9 @@ pub(crate) fn time_bar(records: &[PhaseRecord], total: Duration, color: bool) ->
             run
         });
         used += cells;
-        // Small gaps stay in the bar but out of the legend.
-        if seg.phase.is_none() && share < 0.03 {
+        // Small gaps stay in the bar but out of the legend, except the
+        // network stretches a fetch milestone named, which are always listed.
+        if seg.phase.is_none() && share < 0.03 && !MILESTONE_GAPS.contains(&seg.name) {
             continue;
         }
         let name = seg.name.to_lowercase();
@@ -327,7 +385,7 @@ mod tests {
                 10,
             ),
         ];
-        let names: Vec<&str> = timeline(&records, Duration::from_secs(2))
+        let names: Vec<&str> = timeline(&records, &[], Duration::from_secs(2))
             .iter()
             .map(|s| s.name)
             .collect();
@@ -342,6 +400,43 @@ mod tests {
                 "finish"
             ]
         );
+    }
+
+    #[test]
+    fn milestones_split_the_wait_before_the_pack() {
+        let records = vec![rec(
+            ProgressPhase::ReceivingObjects,
+            ProgressUnit::Bytes,
+            1800,
+            400,
+            10,
+        )];
+        let mark = |milestone, ms| MilestoneRecord {
+            milestone,
+            at: Duration::from_millis(ms),
+        };
+        let milestones = [
+            mark(FetchMilestone::Connected, 1100),
+            mark(FetchMilestone::PackRequested, 1400),
+        ];
+        let segments = timeline(&records, &milestones, Duration::from_millis(2200));
+        let got: Vec<(&str, u128)> = segments
+            .iter()
+            .map(|s| (s.name, s.duration.as_millis()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("handshake", 1100),
+                ("negotiate", 300),
+                ("pack prep", 400),
+                ("Receiving", 400)
+            ]
+        );
+        let (_, legend) = time_bar(&records, &milestones, Duration::from_millis(2200), false);
+        for part in ["handshake 1.1s", "negotiate 300ms", "pack prep 400ms"] {
+            assert!(legend.contains(part), "{legend}");
+        }
     }
 
     #[test]
@@ -362,7 +457,7 @@ mod tests {
                 10,
             ),
         ];
-        let (bar, legend) = time_bar(&records, Duration::from_secs(2), false);
+        let (bar, legend) = time_bar(&records, &[], Duration::from_secs(2), false);
         assert_eq!(bar.chars().count(), TIME_BAR_WIDTH);
         assert_eq!(bar.chars().filter(|&c| c == '█').count(), 30);
         assert!(legend.contains("receiving 1.5s"), "{legend}");
@@ -400,6 +495,7 @@ mod tests {
     #[test]
     fn rows_report_time_data_and_objects_without_color() {
         let summary = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_secs(2),
             records: vec![rec(
                 ProgressPhase::ReceivingObjects,
@@ -442,6 +538,7 @@ mod tests {
     #[test]
     fn data_row_reports_wire_bytes_not_the_completed_thin_pack() {
         let summary = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_secs(2),
             records: vec![rec(
                 ProgressPhase::ReceivingObjects,
@@ -476,6 +573,7 @@ mod tests {
         );
         second.peak_rate = 8.0 * 1024.0 * 1024.0;
         let summary = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_secs(3),
             records: vec![
                 rec(
@@ -511,6 +609,7 @@ mod tests {
         );
         burst.peak_rate = 0.0;
         let summary = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_secs(1),
             records: vec![burst],
             objects: 249,
@@ -534,6 +633,7 @@ mod tests {
         );
         recv.peak_rate = 1024.0;
         let summary = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_secs(2),
             records: vec![recv],
             objects: 5,
@@ -550,6 +650,7 @@ mod tests {
     #[test]
     fn data_row_falls_back_to_pack_size_for_local_copies() {
         let summary = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_millis(10),
             records: vec![rec(
                 ProgressPhase::CopyingObjects,

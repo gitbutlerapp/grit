@@ -66,6 +66,14 @@ pub struct SyncOutcome {
 impl SyncOutcome {
     /// Whether a branch could not be synced (diverged or refused).
     #[must_use]
+    /// Whether a shared branch's heads diverged in a way someone has to
+    /// decide about.
+    pub fn needs_decision(&self) -> bool {
+        self.branches
+            .iter()
+            .any(|b| b.shared.iter().any(SharedHead::needs_decision))
+    }
+
     pub fn needs_attention(&self) -> bool {
         self.branches
             .iter()
@@ -130,6 +138,43 @@ pub struct SharedHead {
     pub tip: String,
     /// How it compares with your branch here.
     pub relation: crate::commands::share::HeadRelation,
+    /// For a head that diverged from yours: what happened, and whether
+    /// someone has to decide what to do.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub divergence: Option<crate::commands::share::DivergenceJson>,
+}
+
+impl SharedHead {
+    /// The head `tip` of `user`, compared with `ours` (and explained when
+    /// they diverged).
+    pub(crate) fn new(
+        repo: &Repository,
+        remote: &str,
+        branch: &str,
+        user: String,
+        ours: Option<ObjectId>,
+        tip: ObjectId,
+    ) -> Self {
+        let relation = crate::commands::share::compare(repo, ours, tip);
+        let divergence = match (relation, ours) {
+            (crate::commands::share::HeadRelation::Diverged, Some(ours)) => {
+                crate::commands::share::explain(repo, remote, branch, &user, ours, tip)
+            }
+            _ => None,
+        };
+        Self {
+            user,
+            tip: tip.to_hex(),
+            relation,
+            divergence,
+        }
+    }
+
+    /// Whether someone has to decide what to do about this head.
+    pub(crate) fn needs_decision(&self) -> bool {
+        self.divergence.as_ref().is_some_and(|d| d.needs_decision)
+    }
 }
 
 /// What happened to one branch.
@@ -244,7 +289,12 @@ pub(crate) fn ensure_space(
         }
         SPACE_REMOTE.to_owned()
     };
-    if configure_shared(repo, &space_remote, &space.shared)? {
+    if configure_shared(
+        repo,
+        &space_remote,
+        &space.shared,
+        space.target_branch.as_deref(),
+    )? {
         configured = true;
     }
     for (name, _) in tips(repo, "refs/heads/")? {
@@ -304,18 +354,23 @@ pub(crate) fn fetch_in(repo: &Repository, remote: &str, mode: OutputMode) -> Res
         .get_all(&format!("remote.{remote}.fetch"))
         .contains(&refspec)
     {
-        // Other members' heads come and go: drop the ones the server no
-        // longer has.
-        let args = FetchArgs {
-            remote: Some(remote.to_owned()),
-            refspecs: vec![refspec],
-            prune: true,
-            quiet: QuietArgs { quiet: true },
-            ..FetchArgs::default()
-        };
-        crate::commands::fetch::run_one_in(repo, &args, mode)
-            .with_context(|| format!("fetching shared heads from {remote}"))?;
+        fetch_shared_heads(repo, remote, mode)?;
     }
+    Ok(())
+}
+
+/// Fetch only the other members' heads of shared branches from `remote`,
+/// dropping the ones the server no longer has.
+pub(crate) fn fetch_shared_heads(repo: &Repository, remote: &str, mode: OutputMode) -> Result<()> {
+    let args = FetchArgs {
+        remote: Some(remote.to_owned()),
+        refspecs: vec![shared_refspec(remote)],
+        prune: true,
+        quiet: QuietArgs { quiet: true },
+        ..FetchArgs::default()
+    };
+    crate::commands::fetch::run_one_in(repo, &args, mode)
+        .with_context(|| format!("fetching shared heads from {remote}"))?;
     Ok(())
 }
 
@@ -342,11 +397,14 @@ pub(crate) fn shared_heads(
 
 /// Set the clone up for shared `branches` of `remote`: fetch the other
 /// members' heads, and mark each branch shared (`branch.<name>.shared`), so
-/// `grit push` replaces your head without `--force`. Whether config changed.
+/// `grit push` replaces your head without `--force`. `base` is the branch
+/// they build on (`branch.<name>.sharedBase`), whose history comparisons
+/// leave out. Whether config changed.
 pub(crate) fn configure_shared(
     repo: &Repository,
     remote: &str,
     branches: &[String],
+    base: Option<&str>,
 ) -> Result<bool> {
     let env = context::environment();
     let config =
@@ -367,6 +425,21 @@ pub(crate) fn configure_shared(
         changed = true;
     }
     for branch in branches {
+        if let Some(base) = base {
+            let key = format!("branch.{branch}.sharedBase");
+            if config.get(&key).as_deref() != Some(base) {
+                set_config_value(
+                    ConfigLocation::Local,
+                    &env,
+                    Some(repo.git_dir()),
+                    &key,
+                    base,
+                    false,
+                )
+                .with_context(|| format!("setting {key}"))?;
+                changed = true;
+            }
+        }
         let key = format!("branch.{branch}.shared");
         if config.get(&key).as_deref() != Some("true") {
             set_config_value(
@@ -682,20 +755,16 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
         if shared.contains(branch.name.as_str()) {
             let ours = local.get(&branch.name).copied();
             for (user, tip) in shared_heads(&repo, &setup.remote, &branch.name)? {
-                let relation = crate::commands::share::compare(&repo, ours, tip);
-                if relation == crate::commands::share::HeadRelation::Diverged
+                let head = SharedHead::new(&repo, &setup.remote, &branch.name, user, ours, tip);
+                if head.relation == crate::commands::share::HeadRelation::Diverged
                     && branch.message.is_none()
                 {
                     branch.message = Some(format!(
-                        "{user}'s head and yours have diverged: rebase onto theirs with `grit rebase {}/shared/{}/{user}` (or have them rebase onto yours), then sync",
-                        setup.remote, branch.name
+                        "{}'s head and yours have diverged: rebase onto theirs with `grit rebase {}/shared/{}/{}` (or have them rebase onto yours), then sync",
+                        head.user, setup.remote, branch.name, head.user
                     ));
                 }
-                branch.shared.push(SharedHead {
-                    user,
-                    tip: tip.to_hex(),
-                    relation,
-                });
+                branch.shared.push(head);
             }
         }
     }
@@ -764,6 +833,9 @@ impl HumanRender for SyncOutcome {
                     short_hex(&h.tip),
                     h.relation.words()
                 );
+                if let Some(d) = &h.divergence {
+                    d.render_human(w, "    ")?;
+                }
             }
         }
         Ok(())
@@ -794,6 +866,9 @@ impl MarkdownRender for SyncOutcome {
                     short_hex(&h.tip),
                     h.relation.words()
                 );
+                if let Some(d) = &h.divergence {
+                    d.render_markdown(w, "    ")?;
+                }
             }
         }
         Ok(())

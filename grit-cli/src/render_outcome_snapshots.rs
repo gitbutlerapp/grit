@@ -479,6 +479,27 @@ fn serve_render() {
     CliFixture::snapshot_rendered_modes("serve_render", snapshot_dir(), &human, &json, &markdown);
 }
 
+/// carol amended the same commit as you did, overlapping in src/rpc.rs.
+fn sample_divergence() -> crate::commands::share::DivergenceJson {
+    use crate::commands::share::{DivergenceChangeJson, DivergenceJson};
+    DivergenceJson {
+        scenario: "amended_both_conflicting".to_owned(),
+        summary: "You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs."
+            .to_owned(),
+        needs_decision: true,
+        base: Some("1c3e9a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c".to_owned()),
+        changes: vec![DivergenceChangeJson {
+            change: "mzkqvnrwtlpxsoymuqkrnlwtzqmxsvpo".to_owned(),
+            subject: "Add the history RPC".to_owned(),
+            you: "amended".to_owned(),
+            them: "amended".to_owned(),
+            paths: vec!["src/rpc.rs".to_owned()],
+        }],
+        conflicts: vec!["src/rpc.rs".to_owned()],
+        also: Vec::new(),
+    }
+}
+
 /// A sync of a clone of an organization's project: the target fast-forwarded,
 /// branches pushed, pulled, created, and one diverged.
 #[test]
@@ -519,11 +540,13 @@ fn sync_render() {
                         user: "bob".to_owned(),
                         tip: "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e".to_owned(),
                         relation: HeadRelation::Same,
+                        divergence: None,
                     },
                     SharedHead {
                         user: "carol".to_owned(),
                         tip: "8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d".to_owned(),
                         relation: HeadRelation::Diverged,
+                        divergence: Some(sample_divergence()),
                     },
                 ],
                 ..branch(
@@ -547,6 +570,7 @@ fn share_render() {
         ShareOutcome,
     };
     let member = |user: &str, you: bool, head: Option<&str>, relation| ShareMemberJson {
+        divergence: (relation == Some(HeadRelation::Diverged)).then(sample_divergence),
         user: user.to_owned(),
         sharer: user == "alice",
         you,

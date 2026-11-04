@@ -23,6 +23,9 @@ pub enum ExitStatus {
     Failure,
     /// Usage / invalid arguments (2).
     Usage,
+    /// The command did its work, but a shared branch's heads diverged in a
+    /// way someone has to decide about (3).
+    NeedsDecision,
     /// Clone, fetch, pull, push, or `remote refs` could not reach or read the remote (128).
     RemoteUnreadable,
     /// Bundle unbundle missing prerequisite commits (128).
@@ -45,6 +48,7 @@ impl ExitStatus {
             Self::Success => 0,
             Self::Failure => 1,
             Self::Usage => 2,
+            Self::NeedsDecision => 3,
             Self::RemoteUnreadable | Self::MissingPrerequisite | Self::RefusedNotFf => 128,
             Self::InvalidCommitFilter => 129,
             Self::Interrupted => 130,
@@ -295,6 +299,19 @@ impl ExitStatus {
     pub fn from_integrate(outcome: &commands::checkin::IntegrateOutcome) -> Self {
         if outcome.needs_attention() {
             Self::Failure
+        } else {
+            Self::Success
+        }
+    }
+
+    /// Failure when something was refused, else [`Self::NeedsDecision`]
+    /// when a shared branch needs a decision, else success.
+    #[must_use]
+    pub fn from_shared(rejected: bool, needs_decision: bool) -> Self {
+        if rejected {
+            Self::Failure
+        } else if needs_decision {
+            Self::NeedsDecision
         } else {
             Self::Success
         }

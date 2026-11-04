@@ -294,10 +294,8 @@ fn shared_status(repo: &grit_lib::repo::Repository, branch: &str) -> Option<Stat
         return Some(StatusSharedJson {
             heads: heads
                 .into_iter()
-                .map(|(user, tip)| crate::commands::sync::SharedHead {
-                    relation: crate::commands::share::compare(repo, ours, tip),
-                    user,
-                    tip: tip.to_hex(),
+                .map(|(user, tip)| {
+                    crate::commands::sync::SharedHead::new(repo, &remote, branch, user, ours, tip)
                 })
                 .collect(),
             remote,
@@ -330,6 +328,9 @@ impl StatusSharedJson {
                 grit_lib::objects::short_hex(&h.tip),
                 h.relation.words()
             );
+            if let Some(d) = &h.divergence {
+                d.render_human(w, "      ")?;
+            }
         }
         Ok(())
     }
@@ -356,6 +357,14 @@ impl StatusSharedJson {
                 grit_lib::objects::short_hex(&h.tip),
                 h.relation.words()
             );
+        }
+        for h in &self.heads {
+            if let Some(d) = &h.divergence {
+                outln!(w);
+                outln!(w, "`{}`'s head diverged from yours:", h.user);
+                outln!(w);
+                d.render_markdown(w, "")?;
+            }
         }
         Ok(())
     }

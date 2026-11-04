@@ -2866,7 +2866,8 @@ fn dispatch(
         }
         Command::Sync => {
             let outcome = commands::sync::run(opts.mode)?;
-            let status = ExitStatus::from_push_rejected(outcome.needs_attention());
+            let status =
+                ExitStatus::from_shared(outcome.needs_attention(), outcome.needs_decision());
             emit_success(outcome, opts, ctx)?;
             Ok(status)
         }
@@ -4485,12 +4486,14 @@ fn dispatch(
                 no_verify,
             )?;
             let rejected = outcome.rejected;
-            if rejected || quiet.shows_outcome(opts.mode) {
+            let decide = outcome.needs_decision();
+            if rejected || decide || quiet.shows_outcome(opts.mode) {
                 emit_success(outcome, opts, ctx)?;
             }
             // The outcome (per-ref results) is reported in both modes; a rejected
-            // push is still a failure, so mirror Git and exit non-zero.
-            Ok(ExitStatus::from_push_rejected(rejected))
+            // push is still a failure, so mirror Git and exit non-zero. A shared
+            // branch whose heads need a decision exits 3.
+            Ok(ExitStatus::from_shared(rejected, decide))
         }
         Command::Auth {
             url,

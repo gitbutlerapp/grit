@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use grit_lib::progress::{
     OverallEstimate, OverallEstimator, ProgressPhase, ProgressSink, ProgressUnit, ReceivedObjects,
 };
-use grit_lib::remote::fetch::Progress;
+use grit_lib::remote::fetch::{FetchMilestone, Progress};
 use grit_lib::remote::sideband_lines::{RemoteLine, SidebandLines};
 use terminal_size::{terminal_size, Width};
 
@@ -57,6 +57,15 @@ pub struct PhaseRecord {
     pub samples: Vec<f64>,
     /// Highest sampled throughput.
     pub peak_rate: f64,
+}
+
+/// When a wire fetch reached a [`FetchMilestone`], on the [`PhaseRecord::started_at`] clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MilestoneRecord {
+    /// Which point of the fetch conversation was reached.
+    pub milestone: FetchMilestone,
+    /// When it was reached, measured from the sink's creation.
+    pub at: Duration,
 }
 
 impl PhaseRecord {
@@ -135,6 +144,7 @@ pub struct TerminalProgress {
     color: bool,
     active: Option<ActivePhase>,
     finished: Vec<PhaseRecord>,
+    milestones: Vec<MilestoneRecord>,
     last_draw: Instant,
     frame: usize,
     remote_lines: SidebandLines,
@@ -173,6 +183,7 @@ impl TerminalProgress {
             color,
             active: None,
             finished: Vec::new(),
+            milestones: Vec::new(),
             last_draw: Instant::now() - MIN_REDRAW,
             frame: 0,
             remote_lines: SidebandLines::new(),
@@ -233,6 +244,12 @@ impl TerminalProgress {
     #[must_use]
     pub fn phases(&self) -> &[PhaseRecord] {
         &self.finished
+    }
+
+    /// Wire fetch milestones reached so far, in order.
+    #[must_use]
+    pub fn milestones(&self) -> &[MilestoneRecord] {
+        &self.milestones
     }
 
     fn redraw(&mut self, force: bool) {
@@ -352,6 +369,11 @@ impl Progress for TerminalProgress {
 
     fn resumable_transfer(&mut self, event: &grit_lib::remote::resumable::ResumableEvent) {
         self.resumable.handle(event);
+    }
+
+    fn milestone(&mut self, milestone: FetchMilestone) {
+        let at = self.since_start();
+        self.milestones.push(MilestoneRecord { milestone, at });
     }
 
     fn received_objects(&mut self, counts: ReceivedObjects) {

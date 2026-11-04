@@ -50,6 +50,31 @@ pub struct PushOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(skip_serializing_if = "Vec::is_empty")]
     pub remote_messages: Vec<String>,
+    /// For each shared branch pushed (`grit share`): the other members'
+    /// heads, fetched after the push and compared with yours.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub shared: Vec<PushSharedBranch>,
+}
+
+/// A shared branch a push replaced your head of.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PushSharedBranch {
+    /// The branch.
+    pub branch: String,
+    /// The other members' heads, compared with yours.
+    pub heads: Vec<crate::commands::sync::SharedHead>,
+}
+
+impl PushOutcome {
+    /// Whether a shared branch pushed needs someone to decide what to do.
+    pub fn needs_decision(&self) -> bool {
+        self.shared.iter().any(|s| {
+            s.heads
+                .iter()
+                .any(crate::commands::sync::SharedHead::needs_decision)
+        })
+    }
 }
 
 /// JSON classification for [`PushOutcome`].
@@ -195,6 +220,21 @@ impl HumanRender for PushOutcome {
         if let Some(url) = &self.origin_added {
             outln!(w, "  added remote origin → {url}");
         }
+        for s in &self.shared {
+            for h in &s.heads {
+                outln!(
+                    w,
+                    "  {}: {}'s head {} {}",
+                    s.branch,
+                    h.user,
+                    grit_lib::objects::short_hex(&h.tip),
+                    h.relation.words()
+                );
+                if let Some(d) = &h.divergence {
+                    d.render_human(w, "    ")?;
+                }
+            }
+        }
         Ok(())
     }
 }
@@ -203,6 +243,30 @@ impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         markdown::print_remote_push_messages(w, &self.remote_messages)?;
         markdown::print_push_results(w, &self.remote, self.kind, self.dry_run, &self.results)?;
+        for s in &self.shared {
+            writeln!(w, "\n## Shared branch `{}`\n", s.branch)?;
+            if s.heads.is_empty() {
+                writeln!(w, "Nobody else has pushed a head yet.")?;
+            }
+            for h in &s.heads {
+                writeln!(
+                    w,
+                    "- `{}`'s head `{}`: {}",
+                    h.user,
+                    grit_lib::objects::short_hex(&h.tip),
+                    h.relation.words()
+                )?;
+                if let Some(d) = &h.divergence {
+                    d.render_markdown(w, "  ")?;
+                }
+            }
+            if s.heads
+                .iter()
+                .any(crate::commands::sync::SharedHead::needs_decision)
+            {
+                writeln!(w, "\nExit status 3: pushed, decision needed.")?;
+            }
+        }
         if let Some(url) = &self.origin_added {
             writeln!(w, "\nAdded remote `origin` → `{url}`.")?;
         }
@@ -358,7 +422,7 @@ pub fn run(
     };
 
     let rejected = report.has_rejections();
-    let results = report
+    let results: Vec<PushRefResult> = report
         .results
         .iter()
         .map(|result| {
@@ -407,6 +471,50 @@ pub fn run(
         _ => None,
     };
 
+    // After replacing your head of a shared branch, see where the others are.
+    let mut shared = Vec::new();
+    if !dry_run {
+        for result in &results {
+            let Some(name) = result.ref_name.strip_prefix("refs/heads/") else {
+                continue;
+            };
+            let pushed = matches!(
+                result.status,
+                PushRefOutcomeStatus::Ok | PushRefOutcomeStatus::UpToDate
+            );
+            if !pushed
+                || result.deleted == Some(true)
+                || !crate::commands::sync::is_shared(&config, name)
+            {
+                continue;
+            }
+            let space = crate::commands::sync::SPACE_REMOTE;
+            let pushurl = config.get(&format!("remote.{}.pushurl", plan.remote));
+            let tracking =
+                if pushurl.is_some() && pushurl == config.get(&format!("remote.{space}.url")) {
+                    space.to_owned()
+                } else {
+                    plan.remote.clone()
+                };
+            if crate::commands::sync::fetch_shared_heads(&repo, &tracking, mode).is_err() {
+                continue;
+            }
+            let ours =
+                grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{name}")).ok();
+            let heads = crate::commands::sync::shared_heads(&repo, &tracking, name)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(user, tip)| {
+                    crate::commands::sync::SharedHead::new(&repo, &tracking, name, user, ours, tip)
+                })
+                .collect();
+            shared.push(PushSharedBranch {
+                branch: name.to_owned(),
+                heads,
+            });
+        }
+    }
+
     Ok(PushOutcome {
         remote: plan.remote,
         kind: plan.kind.into(),
@@ -417,6 +525,7 @@ pub fn run(
         upstream_set: (!upstream_set.is_empty()).then_some(upstream_set),
         origin_added,
         remote_messages: report.remote_messages,
+        shared,
     })
 }
 
@@ -499,6 +608,7 @@ mod tests {
                 upstream_set: None,
                 origin_added: None,
                 remote_messages: Vec::new(),
+                shared: Vec::new(),
             };
             let mut out = Vec::new();
             outcome.render_human(&mut out, &ctx).expect("render");

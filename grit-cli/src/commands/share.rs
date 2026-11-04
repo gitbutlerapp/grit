@@ -67,6 +67,170 @@ impl HeadRelation {
     }
 }
 
+/// One commit of a divergence: what each side did to it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DivergenceChangeJson {
+    /// Its change id, or `patch:<patch id>` for a commit without one.
+    pub change: String,
+    /// Its subject line.
+    pub subject: String,
+    /// What you did to it: `unchanged`, `moved`, `reworded`, `amended`,
+    /// `dropped`, `squashed`, `split`, `new`, `split_piece` or `absent`.
+    pub you: String,
+    /// What they did to it, in the same words.
+    pub them: String,
+    /// The paths its versions change.
+    pub paths: Vec<String>,
+}
+
+/// How another member's head diverged from yours
+/// ([`grit_lib::divergence`]).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DivergenceJson {
+    /// The scenario's stable code, such as `amended_both_conflicting`.
+    pub scenario: String,
+    /// What happened, in a sentence.
+    pub summary: String,
+    /// Whether someone has to decide what to do. When `false`, the heads can
+    /// be put together without losing anything.
+    pub needs_decision: bool,
+    /// The last head you both had, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    /// The commits either side changed or added, oldest first.
+    pub changes: Vec<DivergenceChangeJson>,
+    /// Paths where the two heads' changes conflict.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub conflicts: Vec<String>,
+    /// Other scenarios that also apply, most pressing first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub also: Vec<String>,
+}
+
+impl DivergenceJson {
+    pub(crate) fn from_divergence(d: &grit_lib::divergence::Divergence, them: &str) -> Self {
+        Self {
+            scenario: d.scenario.code().to_owned(),
+            summary: d.summary(them),
+            needs_decision: d.scenario.needs_decision(),
+            base: d.base.map(|b| b.to_hex()),
+            changes: d
+                .changes
+                .iter()
+                .map(|c| DivergenceChangeJson {
+                    change: c.key.clone(),
+                    subject: c.subject.clone(),
+                    you: c.ours.word().to_owned(),
+                    them: c.theirs.word().to_owned(),
+                    paths: c.paths.clone(),
+                })
+                .collect(),
+            conflicts: d.conflicts.clone(),
+            also: d
+                .scenarios
+                .iter()
+                .skip(1)
+                .map(|s| s.code().to_owned())
+                .collect(),
+        }
+    }
+
+    fn short_change(change: &str) -> String {
+        match change.strip_prefix("patch:") {
+            Some(patch) => format!("patch {}", short_hex(patch)),
+            None => change.chars().take(8).collect(),
+        }
+    }
+
+    pub(crate) fn render_human(&self, w: &mut dyn Write, indent: &str) -> Result<()> {
+        let mark = if self.needs_decision { "!" } else { "·" };
+        outln!(w, "{indent}{mark} {} ({})", self.summary, self.scenario);
+        for c in &self.changes {
+            outln!(
+                w,
+                "{indent}  {:<8}  you {:<9} them {:<9} {}",
+                Self::short_change(&c.change),
+                c.you,
+                c.them,
+                c.subject
+            );
+        }
+        if self.needs_decision {
+            outln!(
+                w,
+                "{indent}  Someone has to decide what to do: nothing is lost either way, since every head stays in the share's log."
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn render_markdown(&self, w: &mut dyn Write, indent: &str) -> Result<()> {
+        let decide = if self.needs_decision {
+            "needs a decision"
+        } else {
+            "can be put together without losing anything"
+        };
+        outln!(
+            w,
+            "{indent}- **Scenario** `{}` ({decide}): {}",
+            self.scenario,
+            self.summary
+        );
+        for c in &self.changes {
+            outln!(
+                w,
+                "{indent}  - `{}` {}: you {}, them {}",
+                Self::short_change(&c.change),
+                c.subject,
+                c.you,
+                c.them
+            );
+        }
+        if !self.conflicts.is_empty() {
+            let paths: Vec<String> = self.conflicts.iter().map(|p| format!("`{p}`")).collect();
+            outln!(w, "{indent}  - Conflicts in {}", paths.join(", "));
+        }
+        Ok(())
+    }
+}
+
+/// Explain how `user`'s head `theirs` of shared `branch` (fetched from
+/// `remote`) diverged from yours, `ours`. `None` when it can't be worked
+/// out (objects missing, say).
+pub(crate) fn explain(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+    user: &str,
+    ours: ObjectId,
+    theirs: ObjectId,
+) -> Option<DivergenceJson> {
+    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true).ok()?;
+    let mut floor = Vec::new();
+    if let Some(base) = config.get(&format!("branch.{branch}.sharedBase")) {
+        for name in [
+            format!("refs/remotes/origin/{base}"),
+            format!("refs/remotes/{remote}/{base}"),
+            format!("refs/heads/{base}"),
+        ] {
+            if let Ok(oid) = grit_lib::refs::resolve_ref(repo.git_dir(), &name) {
+                if !floor.contains(&oid) {
+                    floor.push(oid);
+                }
+            }
+        }
+    }
+    let seen = |name: &str| grit_lib::divergence::heads_seen(repo, name);
+    let ours_seen = seen(&format!("refs/heads/{branch}"));
+    let theirs_seen = seen(&format!("refs/remotes/{remote}/shared/{branch}/{user}"));
+    let base =
+        grit_lib::divergence::common_base(repo, ours, theirs, &ours_seen, &theirs_seen).ok()?;
+    let d = grit_lib::divergence::classify(repo, &floor, base, ours, theirs).ok()?;
+    Some(DivergenceJson::from_divergence(&d, user))
+}
+
 /// A member of a share, as `grit share` reports it.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ShareMemberJson {
@@ -85,6 +249,10 @@ pub struct ShareMemberJson {
     /// How their head compares with your branch here (for other members).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relation: Option<HeadRelation>,
+    /// When their head diverged from yours: what happened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub divergence: Option<DivergenceJson>,
 }
 
 /// A share link, as `grit share` reports it.
@@ -224,21 +392,40 @@ pub(crate) fn compare(repo: &Repository, ours: Option<ObjectId>, theirs: ObjectI
     }
 }
 
-fn branch_json(repo: Option<&Repository>, share: SharedBranch) -> ShareBranchJson {
+fn branch_json(here: Option<(&Repository, &str)>, share: SharedBranch) -> ShareBranchJson {
+    let repo = here.map(|(repo, _)| repo);
     let ours = repo.and_then(|repo| {
         tips(repo, "refs/heads/")
             .ok()
             .and_then(|t| t.get(&share.branch).copied())
     });
+    let branch = share.branch.clone();
     ShareBranchJson {
         members: share
             .members
             .into_iter()
-            .map(|m| ShareMemberJson {
-                relation: match (repo, &m.head, m.you) {
+            .map(|m| {
+                let relation = match (repo, &m.head, m.you) {
                     (Some(repo), Some(head), false) => Some(relation(repo, ours, head)),
                     _ => None,
-                },
+                };
+                let divergence = match (here, relation, ours, m.head.as_deref()) {
+                    (
+                        Some((repo, remote)),
+                        Some(HeadRelation::Diverged),
+                        Some(ours),
+                        Some(head),
+                    ) => head
+                        .parse::<ObjectId>()
+                        .ok()
+                        .and_then(|head| explain(repo, remote, &branch, &m.user, ours, head)),
+                    _ => None,
+                };
+                (m, relation, divergence)
+            })
+            .map(|(m, relation, divergence)| ShareMemberJson {
+                relation,
+                divergence,
                 user: m.user,
                 sharer: m.sharer,
                 you: m.you,
@@ -326,8 +513,14 @@ fn ask(here: &Here, request: &ShareRequest) -> Result<ShareReply> {
 
 /// Bring the shares' heads into the clone after a change.
 fn refresh(here: &Here, reply: &ShareReply, mode: OutputMode) -> Result<()> {
-    let branches: Vec<String> = reply.shares.iter().map(|s| s.branch.clone()).collect();
-    configure_shared(&here.repo, &here.remote, &branches)?;
+    for share in &reply.shares {
+        configure_shared(
+            &here.repo,
+            &here.remote,
+            std::slice::from_ref(&share.branch),
+            share.base_branch.as_deref(),
+        )?;
+    }
     fetch(&here.remote, mode)
 }
 
@@ -344,7 +537,7 @@ fn outcome(here: &Here, action: &str, reply: ShareReply, pushed: bool) -> ShareO
         shares: reply
             .shares
             .into_iter()
-            .map(|s| branch_json(Some(&here.repo), s))
+            .map(|s| branch_json(Some((&here.repo, here.remote.as_str())), s))
             .collect(),
         added: reply.added,
         removed: reply.removed,
@@ -443,7 +636,7 @@ pub fn remove(branch: &str, users: &[String], mode: OutputMode) -> Result<ShareO
         },
     )?;
     if users.is_empty() {
-        configure_shared(&here.repo, &here.remote, &[])?;
+        configure_shared(&here.repo, &here.remote, &[], None)?;
     }
     fetch(&here.remote, mode)?;
     Ok(outcome(&here, "remove", reply, false))
@@ -531,7 +724,12 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
             let Some(setup) = ensure_space(repo, &config, "origin")? else {
                 bail!("origin is not a project on {}", server.host());
             };
-            configure_shared(repo, &setup.remote, std::slice::from_ref(&share.branch))?;
+            configure_shared(
+                repo,
+                &setup.remote,
+                std::slice::from_ref(&share.branch),
+                share.base_branch.as_deref(),
+            )?;
             fetch(&setup.remote, mode)?;
             let dir = repo
                 .work_tree()
@@ -561,7 +759,12 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
             let (options, _sink) = crate::diagnostics::repository_options(false);
             let repo = Repository::discover(Some(std::path::Path::new(&cloned.path)), &options)
                 .with_context(|| format!("opening {}", cloned.path))?;
-            configure_shared(&repo, "origin", std::slice::from_ref(&share.branch))?;
+            configure_shared(
+                &repo,
+                "origin",
+                std::slice::from_ref(&share.branch),
+                share.base_branch.as_deref(),
+            )?;
             crate::commands::sync::fetch_in(&repo, "origin", mode)?;
             (Some(cloned.path), true)
         }
@@ -613,6 +816,9 @@ fn render_branch_human(w: &mut dyn Write, s: &ShareBranchJson) -> Result<()> {
         };
         let line = format!("  {name:<width$}  {head:<7}  {note}");
         outln!(w, "{}", line.trim_end());
+        if let Some(d) = &m.divergence {
+            d.render_human(w, "    ")?;
+        }
     }
     for email in &s.invited {
         outln!(w, "  {email}  invited by email; hasn't accepted yet");
@@ -763,6 +969,14 @@ impl MarkdownRender for ShareOutcome {
             }
             for email in &s.invited {
                 outln!(w, "| {email} | invited by email, hasn't accepted | - |");
+            }
+            for m in &s.members {
+                if let Some(d) = &m.divergence {
+                    outln!(w);
+                    outln!(w, "`{}`'s head diverged from yours:", m.user);
+                    outln!(w);
+                    d.render_markdown(w, "")?;
+                }
             }
             if !s.links.is_empty() {
                 outln!(w);

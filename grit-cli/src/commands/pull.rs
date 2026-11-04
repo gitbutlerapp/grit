@@ -166,6 +166,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     };
     let mut outcome = map_outcome(lib);
     outcome.transfer.records = progress.phases().to_vec();
+    outcome.transfer.milestones = progress.milestones().to_vec();
     outcome.transfer.elapsed = progress.elapsed();
     Ok(outcome)
 }
@@ -267,6 +268,7 @@ fn pull_server_branch(
     let refreshed = refresh_branch(repo, marker, &info, args.check).map_err(refresh_error)?;
     let mut outcome = PullOutcome::from_server_branch(&info, &refreshed, transfer);
     outcome.transfer.records = progress.phases().to_vec();
+    outcome.transfer.milestones = progress.milestones().to_vec();
     outcome.transfer.elapsed = progress.elapsed();
     Ok(outcome)
 }
@@ -327,6 +329,7 @@ fn refresh_checkout(
     .map_err(refresh_error)?;
     let mut outcome = PullOutcome::from_refresh(refreshed);
     outcome.transfer.records = progress.phases().to_vec();
+    outcome.transfer.milestones = progress.milestones().to_vec();
     outcome.transfer.elapsed = progress.elapsed();
     Ok(outcome)
 }

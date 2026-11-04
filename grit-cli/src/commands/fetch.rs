@@ -383,7 +383,8 @@ pub(crate) fn run_one_in(
         result.transfer,
         progress.phases().to_vec(),
         progress.elapsed(),
-    );
+    )
+    .with_milestones(progress.milestones().to_vec());
 
     Ok(FetchOutcome {
         remote: refs.remote,
@@ -468,7 +469,8 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
         remotes,
         updated: total_updated,
         dry_run: args.dry_run,
-        transfer: TransferSummary::new(received, progress.phases().to_vec(), progress.elapsed()),
+        transfer: TransferSummary::new(received, progress.phases().to_vec(), progress.elapsed())
+            .with_milestones(progress.milestones().to_vec()),
     })
 }
 

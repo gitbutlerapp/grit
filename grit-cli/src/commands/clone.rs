@@ -809,7 +809,8 @@ fn clone_into(
         }
     };
     let elapsed = started.elapsed();
-    let transfer = TransferSummary::new(outcome.transfer, term_progress.phases().to_vec(), elapsed);
+    let transfer = TransferSummary::new(outcome.transfer, term_progress.phases().to_vec(), elapsed)
+        .with_milestones(term_progress.milestones().to_vec());
 
     if outcome.filter_ignored() {
         eprintln!(
@@ -976,6 +977,7 @@ mod tests {
             seconds: 2.0,
             phases: Vec::new(),
             transfer: TransferSummary {
+                milestones: Vec::new(),
                 elapsed: Duration::from_secs(2),
                 records,
                 objects: 1_234,
@@ -1036,6 +1038,7 @@ mod tests {
         o.files = 0;
         o.object_types = None;
         o.transfer = TransferSummary {
+            milestones: Vec::new(),
             elapsed: Duration::from_secs(2),
             ..TransferSummary::default()
         };
