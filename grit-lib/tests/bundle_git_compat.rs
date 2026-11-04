@@ -430,7 +430,10 @@ fn prerequisites_reachable_from_any_ref_are_connected() {
             "refs/heads/old:refs/pull/1/head",
         ],
     );
-    git_ok(consumer.path(), &["bundle", "verify", inc.to_str().unwrap()]);
+    git_ok(
+        consumer.path(),
+        &["bundle", "verify", inc.to_str().unwrap()],
+    );
 
     let repo = grit_repo(consumer.path());
     let bundle = Bundle::open(&inc).expect("open");
