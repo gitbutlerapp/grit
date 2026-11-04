@@ -196,6 +196,7 @@ pub mod diagnostics;
 pub mod diff;
 pub(crate) mod diff_indent_heuristic;
 mod diff_rename_parallel;
+pub mod divergence;
 pub(crate) mod dotfile;
 pub(crate) mod environment;
 pub mod error;

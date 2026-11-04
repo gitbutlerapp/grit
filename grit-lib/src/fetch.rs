@@ -75,6 +75,33 @@ pub trait Progress: ProgressSink {
     /// Progress of a resumable bundle download (clone with `bundle-uri`) or
     /// upload (push to a `pushBundle` endpoint).
     fn resumable_transfer(&mut self, _event: &crate::resumable::ResumableEvent) {}
+
+    /// The fetch conversation with a remote reached `milestone`.
+    ///
+    /// Reported once per milestone per connection, in [`FetchMilestone`]
+    /// order, before the pack's first byte starts the
+    /// [`ReceivingObjects`](crate::progress::ProgressPhase::ReceivingObjects)
+    /// phase. A sink that timestamps these can split the wait before the pack
+    /// into the transport handshake, ref listing and negotiation, and the
+    /// remote preparing the pack. Local copies and bundles report none.
+    fn milestone(&mut self, _milestone: FetchMilestone) {}
+}
+
+/// A point reached in a wire fetch, reported through [`Progress::milestone`].
+///
+/// New variants may be added; match with a wildcard arm outside this crate.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FetchMilestone {
+    /// The connection is open and the remote's advertisement has been read:
+    /// the capabilities for protocol v2, the capabilities and refs for v0/v1.
+    /// Time before this is the transport handshake (TCP, TLS or SSH, and
+    /// starting the remote's `upload-pack`).
+    Connected,
+    /// Ref listing and `want`/`have` negotiation are over and the client has
+    /// sent its final request. Time from here to the first pack byte is the
+    /// remote preparing the pack (counting, compressing).
+    PackRequested,
 }
 
 /// A [`Progress`] / [`ProgressSink`] that discards everything.
@@ -551,6 +578,7 @@ fn negotiate_pack(
         }
     }
 
+    progress.milestone(FetchMilestone::PackRequested);
     read_final_ack(conn.reader())?;
 
     let mut pack_receive = crate::pack_receive::TempPackReceive::create(local.odb().objects_dir())?;
@@ -1148,6 +1176,7 @@ fn negotiate_pack_v2(
             _ => break,
         }
     }
+    progress.milestone(FetchMilestone::PackRequested);
     read_v2_fetch_pack_response(
         conn.reader(),
         &mut Vec::new(),
@@ -1598,6 +1627,9 @@ pub fn fetch_remote_into(
         opts.tags,
         opts.fetch_depth
     );
+    // Every transport reads the remote's advertisement while connecting, so
+    // the handshake is over by the time a connection reaches this point.
+    progress.milestone(FetchMilestone::Connected);
     validate_fetch_depth_local(local_git_dir, opts)?;
     conn.mirror_http_cancel(cancel);
     let local_cfg = crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
@@ -3776,5 +3808,88 @@ mod v2_negotiation_tests {
         // common commit): 480 vain haves, so the cutoff fires with that round.
         assert_eq!(distinct.len(), 16 + 32 + 64 + 128 + 256);
         assert!(distinct.len() < TIPS, "cutoff never fired");
+    }
+
+    /// Records milestones and phase starts in arrival order.
+    #[derive(Default)]
+    struct MilestoneRecorder {
+        events: Vec<String>,
+    }
+
+    impl ProgressSink for MilestoneRecorder {
+        fn start_with_unit(
+            &mut self,
+            phase: crate::progress::ProgressPhase,
+            _unit: crate::progress::ProgressUnit,
+            _total: Option<u64>,
+        ) {
+            self.events.push(format!("start {phase:?}"));
+        }
+    }
+
+    impl Progress for MilestoneRecorder {
+        fn milestone(&mut self, milestone: FetchMilestone) {
+            self.events.push(format!("{milestone:?}"));
+        }
+    }
+
+    fn milestones_over_local_upload_pack(protocol_version: u8) -> Vec<String> {
+        let tmp = tempfile::tempdir().unwrap();
+        let src = Repository::init(&tmp.path().join("src"), &InitOptions::default()).unwrap();
+        let tree = src.odb().write(ObjectKind::Tree, &[]).unwrap();
+        let body = format!(
+            "tree {tree}\nauthor T <t@example.com> 1600000000 +0000\n\
+             committer T <t@example.com> 1600000000 +0000\n\nroot\n"
+        );
+        let commit = src
+            .odb()
+            .write(ObjectKind::Commit, body.as_bytes())
+            .unwrap();
+        crate::refs::write_ref(src.git_dir(), "refs/heads/main", &commit).unwrap();
+
+        let dst = Repository::init(&tmp.path().join("dst"), &InitOptions::default()).unwrap();
+        let mut conn = crate::transport::connect_local_upload_pack(
+            src.git_dir(),
+            crate::transport::Service::UploadPack,
+            &crate::transport::ConnectOptions {
+                protocol_version,
+                ..Default::default()
+            },
+            dst.environment(),
+            None,
+        )
+        .unwrap();
+        let mut opts = FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+            ..FetchOptions::default()
+        };
+        let mut recorder = MilestoneRecorder::default();
+        fetch_remote_into(&dst, &mut *conn, &mut opts, &mut recorder, &NeverCancel).unwrap();
+        conn.finish().unwrap();
+        recorder.events
+    }
+
+    #[test]
+    fn wire_fetch_reports_milestones_in_order_before_the_pack() {
+        for protocol_version in [0, 2] {
+            let events = milestones_over_local_upload_pack(protocol_version);
+            let at = |name: &str| {
+                let hits: Vec<usize> = events
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e)| e.as_str() == name)
+                    .map(|(i, _)| i)
+                    .collect();
+                assert_eq!(hits.len(), 1, "v{protocol_version}: {name} in {events:?}");
+                hits[0]
+            };
+            let connected = at("Connected");
+            let requested = at("PackRequested");
+            let receiving = at("start ReceivingObjects");
+            assert!(
+                connected < requested && requested < receiving,
+                "v{protocol_version}: {events:?}"
+            );
+        }
     }
 }

@@ -639,6 +639,9 @@ mod diff_worktree_stat_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "diff_ws_filter_integration.rs"]
 mod diff_ws_filter_integration;
+#[cfg(feature = "full-tests")]
+#[path = "divergence_scenarios.rs"]
+mod divergence_scenarios;
 #[path = "drop_promised_blobs.rs"]
 mod drop_promised_blobs;
 #[cfg(feature = "full-tests")]
