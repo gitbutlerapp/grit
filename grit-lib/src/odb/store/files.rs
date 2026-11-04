@@ -158,6 +158,11 @@ impl FilesSource {
         self.use_midx && self.midx.status() == MidxObjectsStatus::Active
     }
 
+    /// Whether an on-disk multi-pack-index chain drives reads for this `objects/` tree.
+    pub(crate) fn midx_reads_active(&self) -> bool {
+        self.midx_pack_filter_active()
+    }
+
     fn midx_read_should_fallback_to_packs(err: &Error) -> bool {
         err.is_damaged_object()
     }

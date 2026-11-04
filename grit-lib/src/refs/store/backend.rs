@@ -20,7 +20,7 @@
 //! `MemoryRefStore` is implemented exactly this way. Run the
 //! `grit_test_support::refstore_conformance` suite to check a backend against the built-ins.
 
-use std::collections::BTreeMap;
+use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
 use crate::objects::{ObjectId, ObjectKind};
 use crate::refs::SYMREF_MAXDEPTH;
@@ -125,12 +125,13 @@ pub(crate) fn verify_direct_targets(
     updates: &[RefUpdate],
     mut kind_of: impl FnMut(&ObjectId) -> crate::error::Result<Option<ObjectKind>>,
 ) -> Result<(), RefStoreError> {
+    let mut kind_cache: HashMap<ObjectId, Option<ObjectKind>> = HashMap::new();
     for update in updates {
         if update.flags.skip_oid_verification {
             continue;
         }
         for oid in oids_to_verify_for_update(update) {
-            verify_stored_oid_for_ref(&update.name, oid, &mut kind_of)?;
+            verify_stored_oid_for_ref(&update.name, oid, &mut kind_of, &mut kind_cache)?;
         }
     }
     Ok(())
@@ -169,12 +170,20 @@ fn verify_stored_oid_for_ref(
     name: &str,
     oid: ObjectId,
     kind_of: &mut impl FnMut(&ObjectId) -> crate::error::Result<Option<ObjectKind>>,
+    kind_cache: &mut HashMap<ObjectId, Option<ObjectKind>>,
 ) -> Result<(), RefStoreError> {
-    let kind = kind_of(&oid).map_err(|err| RefStoreError::ObjectLookup {
-        name: name.to_owned(),
-        oid,
-        source: BackendError::new(err),
-    })?;
+    let kind = match kind_cache.entry(oid) {
+        Entry::Occupied(entry) => *entry.get(),
+        Entry::Vacant(entry) => {
+            let kind = kind_of(entry.key()).map_err(|err| RefStoreError::ObjectLookup {
+                name: name.to_owned(),
+                oid,
+                source: BackendError::new(err),
+            })?;
+            entry.insert(kind);
+            kind
+        }
+    };
     match kind {
         None => Err(RefStoreError::MissingObject {
             name: name.to_owned(),
@@ -674,6 +683,43 @@ mod tests {
             Some(crate::error::Error::CorruptObject(_))
         ));
         assert_eq!(seen, vec![oid(1), oid(2)]);
+    }
+
+    #[test]
+    fn verify_direct_targets_memoizes_kind_lookup_by_oid() {
+        const N: usize = 512;
+        let shared = oid(1);
+        let updates: Vec<_> = (0..N)
+            .map(|i| {
+                put(
+                    &format!("refs/heads/b/{i}"),
+                    RawRef::Direct(shared),
+                    Expected::Any,
+                )
+            })
+            .collect();
+        let mut probes = 0;
+        verify_direct_targets(&updates, |id| {
+            probes += 1;
+            assert_eq!(*id, shared);
+            Ok(Some(ObjectKind::Commit))
+        })
+        .expect("all commits");
+        assert_eq!(probes, 1, "one oid must cost one kind lookup");
+
+        probes = 0;
+        let updates = [
+            put("refs/heads/x/a", RawRef::Direct(oid(1)), Expected::Any),
+            put("refs/heads/x/b", RawRef::Direct(oid(1)), Expected::Any),
+            put("refs/heads/y/a", RawRef::Direct(oid(2)), Expected::Any),
+            put("refs/heads/y/b", RawRef::Direct(oid(2)), Expected::Any),
+        ];
+        verify_direct_targets(&updates, |_| {
+            probes += 1;
+            Ok(Some(ObjectKind::Commit))
+        })
+        .expect("two oids");
+        assert_eq!(probes, 2);
     }
 
     #[test]

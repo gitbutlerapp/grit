@@ -100,9 +100,11 @@ impl LooseNegativeCache {
 
     fn record_absent(&mut self, objects_dir: &Path, path: &Path) {
         self.sync_root(objects_dir);
-        self.absent_paths.insert(path.to_path_buf());
         if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
             self.sync_fanout(objects_dir, &prefix);
+        }
+        self.absent_paths.insert(path.to_path_buf());
+        if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
             let fanout_dir = objects_dir.join(&prefix);
             if !fanout_dir.is_dir() {
                 self.absent_fanout.insert(prefix);

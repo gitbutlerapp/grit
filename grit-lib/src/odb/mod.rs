@@ -1644,6 +1644,15 @@ impl Odb {
         self.core_multi_pack_index_enabled()
     }
 
+    /// When MIDX is configured but no chain is on disk, still use the fast pack-index path.
+    fn skip_batch_packed_read_for_active_midx(&self) -> bool {
+        self.multi_pack_index_reads_enabled()
+            && self
+                .primary()
+                .ok()
+                .is_some_and(|files| files.midx_reads_active())
+    }
+
     fn ensure_midx_prepared(&self) {
         if !self.multi_pack_index_reads_enabled() {
             return;
@@ -1666,7 +1675,7 @@ impl Odb {
     fn try_read_packed_in_batch_context(&self, oid: &ObjectId) -> Result<Option<Object>> {
         if self.custom_primary.is_some()
             || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
-            || self.multi_pack_index_reads_enabled()
+            || self.skip_batch_packed_read_for_active_midx()
         {
             return Ok(None);
         }
@@ -1685,7 +1694,7 @@ impl Odb {
     fn try_read_info_packed_in_batch_context(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         if self.custom_primary.is_some()
             || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
-            || self.multi_pack_index_reads_enabled()
+            || self.skip_batch_packed_read_for_active_midx()
         {
             return Ok(None);
         }
@@ -2901,7 +2910,7 @@ impl Odb {
     ) -> Result<Option<ObjectKind>> {
         if self.custom_primary.is_some()
             || !PackStore::read_context_matches_objects_dir(&self.objects_dir)
-            || self.multi_pack_index_reads_enabled()
+            || self.skip_batch_packed_read_for_active_midx()
         {
             return Ok(None);
         }
@@ -5867,6 +5876,58 @@ mod tests {
             0,
             "packed objects must not attempt a loose-path open"
         );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn initial_clone_ref_batch_hits_packed_commit_once_for_many_refs() {
+        use std::sync::Arc;
+
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+        use crate::pack::clear_pack_cache;
+        use crate::refs::commit_initial_clone_ref_updates_on_store;
+        use crate::refs::store::{Expected, ObjectCheckedRefStore, RawRef, RefUpdate};
+
+        const N: usize = 4096;
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        git_in(dir.path(), &["config", "user.email", "t@example.com"]);
+        git_in(dir.path(), &["config", "user.name", "T"]);
+        fs::write(dir.path().join("packed.txt"), b"payload").unwrap();
+        git_in(dir.path(), &["add", "packed.txt"]);
+        git_in(dir.path(), &["commit", "-m", "pack"]);
+        git_in(dir.path(), &["repack", "-a", "-d"]);
+        let git_dir = dir.path().join(".git");
+        let objects = git_dir.join("objects");
+        let head = git_rev_parse_oid(dir.path(), "HEAD");
+
+        clear_pack_cache();
+        let odb = Odb::new(&objects).with_config_git_dir(git_dir.clone());
+        odb.hot_path_metrics().set_loose_open_counting(true);
+        odb.hot_path_metrics().reset_loose_path_open_attempts();
+        let metrics = odb.hot_path_metrics_arc();
+        let _scope = HotPathMetricsScope::install(Arc::clone(&metrics));
+        let inner = crate::refs::store::open_ref_store(&git_dir).expect("refs");
+        let store = ObjectCheckedRefStore::new(inner, odb);
+        let updates: Vec<RefUpdate> = (0..N)
+            .map(|i| RefUpdate {
+                name: format!("refs/remotes/origin/b/{i}"),
+                new_value: Some(RawRef::Direct(head)),
+                expected: Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .collect();
+        commit_initial_clone_ref_updates_on_store(&store, updates).expect("initial refs");
+        assert!(
+            metrics.loose_path_open_attempts() <= 1,
+            "many refs at one packed oid must not open a loose path per ref (got {})",
+            metrics.loose_path_open_attempts()
+        );
+        git_in(dir.path(), &["fsck"]);
     }
 
     #[cfg_attr(

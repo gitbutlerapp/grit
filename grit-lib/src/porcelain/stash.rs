@@ -2590,7 +2590,7 @@ fn untracked_on_disk_matches_stash(
     if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
         return Ok(false);
     }
-    let abs = crate::repo_relpath::worktree_abs(work_tree, path);
+    let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
     let meta = match fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(_) => return Ok(false),
