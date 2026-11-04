@@ -996,6 +996,76 @@ fn glob_push_roundtrip_fsck_with_git() {
     assert!(fsck.ok(), "git fsck: {}", fsck.stderr);
 }
 
+#[test]
+fn prune_single_branch_push_does_not_delete_sibling_remote() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main", "feature"]);
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["branch", "-D", "feature"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["main".into()],
+            remote: Some("origin".into()),
+            prune: true,
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        !specs.iter().any(|s| s.delete),
+        "single-ref push must not plan prune deletes: {specs:?}"
+    );
+    compare_with_git(&fx.local, &["origin", "--prune", "main"], &specs, &fx.bare);
+}
+
+#[test]
+fn prune_custom_wildcard_destination_namespace() {
+    let fx = setup_feature_and_main();
+    git(
+        &fx.local,
+        &["push", "-q", "origin", "refs/heads/*:refs/tmp/*"],
+    );
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["branch", "-D", "feature"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["refs/heads/*:refs/tmp/*".into()],
+            remote: Some("origin".into()),
+            prune: true,
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        specs
+            .iter()
+            .any(|s| s.delete && s.dst == "refs/tmp/feature"),
+        "stale refs/tmp/feature should be pruned"
+    );
+    assert!(
+        !specs
+            .iter()
+            .any(|s| s.delete && s.dst.starts_with("refs/heads/")),
+        "must not prune refs/heads when dst namespace is refs/tmp/*"
+    );
+    compare_with_git(
+        &fx.local,
+        &["origin", "--prune", "refs/heads/*:refs/tmp/*"],
+        &specs,
+        &fx.bare,
+    );
+}
+
 fn list_remote_refs(bare: &Path) -> HashSet<String> {
     push_plan_context(bare).remote_ref_names
 }

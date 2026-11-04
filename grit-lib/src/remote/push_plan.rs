@@ -80,8 +80,9 @@ pub struct PushRequest {
     /// Mirror the repository: push all refs under `refs/*`, force updates, and delete remote
     /// refs under `refs/` with no local counterpart (implies [`Self::prune`] and force).
     pub mirror: bool,
-    /// Delete remote refs in the same namespace as the refs being pushed when there is no
-    /// matching local ref (for example `grit push --all --prune`).
+    /// Delete remote refs in the destination namespace of a wildcard or matching refspec when
+    /// there is no matching update in this push (for example `grit push --all --prune` or
+    /// `refs/heads/*:refs/heads/* --prune`). A single-branch push does not prune siblings.
     pub prune: bool,
 }
 
@@ -271,7 +272,8 @@ pub fn resolve_push(
     };
 
     if request.prune && !request.mirror {
-        append_prune_deletes_for_planned_heads(&mut resolved.specs, ctx);
+        let scopes = collect_prune_scopes(config, &remote, request);
+        apply_prune_scopes(&mut resolved.specs, ctx, &scopes);
     }
 
     if follow_tags {
@@ -390,21 +392,103 @@ fn resolve_cli_refspecs_push(
     })
 }
 
-fn append_prune_deletes_for_planned_heads(specs: &mut Vec<PushRefSpec>, ctx: &PushPlanContext) {
-    let pushed: HashSet<&str> = specs
+fn positive_prune_scopes_from_refspec_strings(specs: &[String]) -> Vec<RefspecItem> {
+    specs
         .iter()
-        .filter(|s| !s.delete && s.dst.starts_with("refs/heads/"))
-        .map(|s| s.dst.as_str())
-        .collect();
-    if pushed.is_empty() {
+        .filter_map(|spec| {
+            let item = parse_push_refspec(spec).ok()?;
+            if item.negative || (!item.pattern && !item.matching) {
+                return None;
+            }
+            Some(item)
+        })
+        .collect()
+}
+
+/// Wildcard or matching refspecs that define `--prune` destination namespaces.
+fn collect_prune_scopes(
+    config: &ConfigSet,
+    remote: &str,
+    request: &PushRequest,
+) -> Vec<RefspecItem> {
+    if request.all {
+        return parse_push_refspec("refs/heads/*:refs/heads/*")
+            .ok()
+            .into_iter()
+            .collect();
+    }
+    if !request.refspecs.is_empty() {
+        return positive_prune_scopes_from_refspec_strings(&request.refspecs);
+    }
+    let configured = remote_push_refspec_strings(config, remote);
+    let mut scopes = positive_prune_scopes_from_refspec_strings(&configured);
+    if scopes.is_empty() {
+        let push_default = config
+            .get("push.default")
+            .unwrap_or_else(|| "simple".to_owned());
+        if push_default == "matching" {
+            if let Ok(item) = parse_push_refspec(":") {
+                scopes.push(item);
+            }
+        }
+    }
+    scopes
+}
+
+fn apply_prune_scopes(specs: &mut Vec<PushRefSpec>, ctx: &PushPlanContext, scopes: &[RefspecItem]) {
+    for scope in scopes {
+        append_prune_deletes_for_scope(specs, ctx, scope);
+    }
+}
+
+fn prune_destination_patterns(scope: &RefspecItem) -> Vec<String> {
+    if scope.matching {
+        return vec!["refs/heads/*".to_owned()];
+    }
+    if scope.pattern {
+        if let Some(dst) = scope.dst.as_deref().filter(|d| d.contains('*')) {
+            return vec![dst.to_owned()];
+        }
+        if let Some(src) = scope.src.as_deref().filter(|s| s.contains('*')) {
+            return vec![src.to_owned()];
+        }
+    }
+    Vec::new()
+}
+
+fn remote_ref_in_prune_destination_namespace(remote_ref: &str, dst_pattern: &str) -> bool {
+    if !dst_pattern.contains('*') {
+        return remote_ref == dst_pattern;
+    }
+    match_refname_with_pattern(dst_pattern, remote_ref, dst_pattern).is_some()
+}
+
+fn append_prune_deletes_for_scope(
+    specs: &mut Vec<PushRefSpec>,
+    ctx: &PushPlanContext,
+    scope: &RefspecItem,
+) {
+    let patterns = prune_destination_patterns(scope);
+    if patterns.is_empty() {
         return;
     }
+    let pushed_dst: HashSet<&str> = specs
+        .iter()
+        .filter(|s| !s.delete)
+        .map(|s| s.dst.as_str())
+        .collect();
     let mut to_delete = Vec::new();
     for remote_ref in &ctx.remote_ref_names {
-        if !remote_ref.starts_with("refs/heads/") {
+        if remote_ref == "HEAD" {
             continue;
         }
-        if pushed.contains(remote_ref.as_str()) {
+        if !patterns
+            .iter()
+            .any(|pat| remote_ref_in_prune_destination_namespace(remote_ref, pat))
+        {
+            continue;
+        }
+        if pushed_dst.contains(remote_ref.as_str()) {
             continue;
         }
         if specs.iter().any(|s| s.dst == *remote_ref) {

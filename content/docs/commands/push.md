@@ -44,7 +44,7 @@ A push to a local path or `file://` URL runs the remote repository's `pre-receiv
 
 Explicit refspecs follow Git push rules: any revision on the left (`HEAD`, tags, branches), optional `+` for force, `:dst` to delete, and a bare branch name DWIMs to the matching local ref (then through configured push refspecs when present). Wildcard refspecs such as `refs/heads/*:refs/heads/*` or `refs/remotes/origin/*:refs/heads/*` expand against local refs the same way as `remote.<name>.push` entries in config.
 
-`--all` pushes every local branch (`refs/heads/*:refs/heads/*`), including branches the remote does not have yet. `--mirror` pushes all refs under `refs/*`, forces updates, and deletes remote refs under `refs/` with no local counterpart (it implies `--prune` and force). `--prune` alone deletes remote branch refs that are not part of the push plan (for example with `--all` or a `refs/heads/*:refs/heads/*` refspec). `--all`, `--mirror`, and `--delete` cannot be combined with each other or with positional refspecs.
+`--all` pushes every local branch (`refs/heads/*:refs/heads/*`), including branches the remote does not have yet. `--mirror` pushes all refs under `refs/*`, forces updates, and deletes remote refs under `refs/` with no local counterpart (it implies `--prune` and force). `--prune` deletes stale refs only in the destination namespace of a wildcard or matching refspec (for example with `--all` or `refs/heads/*:refs/heads/*`, including `refs/heads/*:refs/tmp/*`). Pushing a single branch with `--prune` does not remove other remote branches. `--all`, `--mirror`, and `--delete` cannot be combined with each other or with positional refspecs.
 
 `--dry-run` negotiates with the remote and reports what would change without updating refs or sending objects.
 
@@ -93,7 +93,7 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `--delete` | Delete the remote refs named by the positionals instead of pushing (plain names only). |
 | `--all` | Push every local branch (`refs/heads/*:refs/heads/*`). |
 | `--mirror` | Mirror all refs under `refs/` (force + prune remote-only refs). |
-| `--prune` | Delete remote branches not updated by this push. |
+| `--prune` | Delete stale refs in the wildcard refspec destination namespace (not on single-ref pushes). |
 | `--dry-run` | Contact the remote but do not update refs or send objects. |
 | `-f`, `--force` | Overwrite remote refs when the update is not a fast-forward. |
 | `--force-with-lease` | Push only if the remote ref matches the local remote-tracking ref (or is absent when there is no tracking ref). |
