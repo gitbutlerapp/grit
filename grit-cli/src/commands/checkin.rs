@@ -346,6 +346,20 @@ pub struct IntegrateOutcome {
     /// branch) failed. The merge stands on the server; the exit status is 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_error: Option<String>,
+    /// In a clone of a hosted project: the project merged into,
+    /// `<owner>/<project>` (an organization's, for a copy in your space).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// The pull request the merge went through, for a copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull: Option<u64>,
+    /// The pull request's web page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// In a clone: the target branch here, brought up to the project's after
+    /// the merge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local: Option<crate::commands::sync::SyncTarget>,
 }
 
 impl IntegrateOutcome {
@@ -366,23 +380,37 @@ impl HumanRender for IntegrateOutcome {
         if let Some(c) = &self.checkin {
             c.render_human(w, ctx)?;
         }
+        let into = match (&self.project, self.pull) {
+            (Some(project), Some(pull)) => {
+                format!("{project} {} (pull request {pull})", self.target)
+            }
+            (Some(project), None) => format!("{project} {}", self.target),
+            _ => self.target.clone(),
+        };
         match self.status.as_str() {
             "merged" => outln!(
                 w,
-                "✓ Merged {} into {} on the server: {} → {} ({} commit{})",
+                "✓ Merged {} into {into} on the server: {} → {} ({} commit{})",
                 self.name,
-                self.target,
                 short_hex(&self.previous),
                 short_hex(&self.head),
                 self.commits,
                 if self.commits == 1 { "" } else { "s" }
             ),
-            _ => outln!(
+            "started" => outln!(
                 w,
-                "· {} already has every commit of {}",
-                self.target,
-                self.name
+                "✓ {into} starts at {}: {}",
+                self.name,
+                short_hex(&self.head)
             ),
+            _ => outln!(w, "· {into} already has every commit of {}", self.name),
+        }
+        if let Some(url) = &self.url {
+            outln!(w, "  {url}");
+        }
+        if let Some(local) = &self.local {
+            let tip = local.tip.as_deref().map(short_hex).unwrap_or_default();
+            outln!(w, "· {} here: {} ({tip})", local.name, local.action.word());
         }
         if let Some(follows) = &self.follows {
             outln!(
@@ -432,6 +460,15 @@ impl MarkdownRender for IntegrateOutcome {
         outln!(w, "- **previous**: `{}`", self.previous);
         outln!(w, "- **head**: `{}`", self.head);
         outln!(w, "- **commits**: {}", self.commits);
+        if let Some(project) = &self.project {
+            outln!(w, "- **project**: `{project}`");
+        }
+        if let Some(pull) = self.pull {
+            outln!(w, "- **pull request**: {pull}");
+        }
+        if let Some(url) = &self.url {
+            outln!(w, "- **url**: {url}");
+        }
         if let Some(follows) = &self.follows {
             outln!(
                 w,
@@ -538,6 +575,9 @@ fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode)
 /// branch it moves to the new snapshot, keeping uncommitted changes, and onto
 /// a fresh work branch ([`land_integration`] decides).
 pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
+    if crate::commands::checkout::open_checkout_here()?.is_none() {
+        return integrate_hosted(name, mode);
+    }
     let co = require_checkout()?;
     if same_branch_name(name, &co.marker.branch) {
         bail!(
@@ -605,5 +645,107 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
         moved_to: follow.moved_to,
         follows,
         refresh_error: follow.error,
+        project: None,
+        pull: None,
+        url: None,
+        local: None,
+    })
+}
+
+/// `grit integrate <branch>` in a clone of a project on a grit hosting
+/// server: push the branch to your space, have the server merge it into the
+/// target (the organization's main, through a pull request, for a copy; the
+/// project's own main otherwise), then bring the target here up to date.
+fn integrate_hosted(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
+    use crate::commands::sync::{ensure_space, fetch, push, sync_target, tips};
+    use grit_lib::config::ConfigSet;
+    use grit_lib::remote::grit_server_space::{
+        integrate_branch, IntegrateBranchRequest, IntegrateBranchStatus,
+    };
+    use grit_lib::remote::HttpClientFactory as _;
+
+    let repo = crate::context::discover()?;
+    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)?;
+    let Some(setup) = ensure_space(&repo, &config, "origin")? else {
+        bail!(
+            "grit integrate works in a snapshot checkout (`grit checkout`), or in a clone of a project on a grit hosting server such as grithub"
+        );
+    };
+    let target = setup
+        .space
+        .target_branch
+        .clone()
+        .unwrap_or_else(|| "main".to_owned());
+    if same_branch_name(name, &target) || setup.space.followed.iter().any(|f| f == name) {
+        bail!("{name} is the target branch; name the branch to merge into it (`grit branch` lists them)");
+    }
+    let Some(tip) = tips(&repo, "refs/heads/")?.get(name).copied() else {
+        bail!("there is no branch {name} here");
+    };
+    if let Some(Some(why)) = push(&setup.remote, &[name.to_owned()], mode)?.get(name) {
+        bail!(
+            "{name} could not be pushed to {}: {why}; run `grit sync`, then integrate again",
+            setup.space.project
+        );
+    }
+    let http = crate::context::http_client_factory().create(&config)?;
+    let reply = integrate_branch(
+        http.as_ref(),
+        &setup.server,
+        &setup.space.project,
+        &IntegrateBranchRequest {
+            branch: name.to_owned(),
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let status = match reply.status {
+        IntegrateBranchStatus::Merged => "merged",
+        IntegrateBranchStatus::AlreadyIntegrated => "already_integrated",
+        IntegrateBranchStatus::Started => "started",
+        IntegrateBranchStatus::Refused => {
+            let why = reply
+                .message
+                .unwrap_or_else(|| "the server refused".to_owned());
+            match reply.url {
+                Some(url) => bail!("{why}\n  {url}"),
+                None => bail!("{why}"),
+            }
+        }
+    };
+    fetch("origin", mode)?;
+    let local = sync_target(&repo, "origin", &reply.target_branch)?;
+    let commits = match reply
+        .previous
+        .as_deref()
+        .and_then(|p| ObjectId::from_hex(p).ok())
+    {
+        Some(previous) => {
+            grit_lib::revwalk::merge_base::walk_commits_reachable_excluding_ancestors_of(
+                &repo,
+                &[tip],
+                &[previous],
+                grit_lib::revwalk::merge_base::ReachableWalkLimit::CountAllRetainNewest(0),
+            )
+            .map(|(count, _)| count)
+            .unwrap_or(0)
+        }
+        None => 0,
+    };
+    Ok(IntegrateOutcome {
+        name: name.to_owned(),
+        target: reply.target_branch,
+        status: status.to_owned(),
+        previous: reply.previous.unwrap_or_default(),
+        head: reply.head.unwrap_or_default(),
+        commits,
+        checkin: None,
+        refresh: None,
+        moved_to: None,
+        follows: None,
+        refresh_error: None,
+        project: Some(reply.project),
+        pull: reply.pull,
+        url: reply.url,
+        local,
     })
 }

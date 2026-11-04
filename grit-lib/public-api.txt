@@ -22392,6 +22392,114 @@ pub const grit_lib::remote::grit_server_auth::LOGIN_PATH: &str
 pub const grit_lib::remote::grit_server_auth::LOGIN_POLL_PATH: &str
 pub fn grit_lib::remote::grit_server_auth::credential_for_url(&str, &grit_lib::config::ConfigSet, &str, &str) -> core::result::Result<grit_lib::remote::credentials::Credential, grit_lib::remote::grit_server_auth::ServerAuthError>
 pub fn grit_lib::remote::grit_server_auth::fetch_identity(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl) -> core::result::Result<grit_lib::remote::grit_server_auth::ServerIdentity, grit_lib::remote::grit_server_auth::ServerAuthError>
+pub mod grit_lib::remote::grit_server_space
+pub enum grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub grit_lib::remote::grit_server_space::IntegrateBranchStatus::AlreadyIntegrated
+pub grit_lib::remote::grit_server_space::IntegrateBranchStatus::Merged
+pub grit_lib::remote::grit_server_space::IntegrateBranchStatus::Refused
+pub grit_lib::remote::grit_server_space::IntegrateBranchStatus::Started
+impl core::clone::Clone for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchStatus::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchStatus::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchStatus::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchStatus::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::marker::Send for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::marker::Sync for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::marker::Unpin for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub struct grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::head: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::message: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::previous: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::project: alloc::string::String
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::pull: core::option::Option<u64>
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::status: grit_lib::remote::grit_server_space::IntegrateBranchStatus
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::target_branch: alloc::string::String
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::url: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchReply::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchReply::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchReply::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchReply::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchReply::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::marker::Send for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::marker::Sync for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::marker::Unpin for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchReply
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchReply
+pub struct grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub grit_lib::remote::grit_server_space::IntegrateBranchRequest::branch: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchRequest::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchRequest::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchRequest::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub fn grit_lib::remote::grit_server_space::IntegrateBranchRequest::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::marker::Send for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::marker::Sync for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::marker::Unpin for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchRequest
+pub struct grit_lib::remote::grit_server_space::Space
+pub grit_lib::remote::grit_server_space::Space::can_integrate: bool
+pub grit_lib::remote::grit_server_space::Space::created: bool
+pub grit_lib::remote::grit_server_space::Space::followed: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::grit_server_space::Space::project: alloc::string::String
+pub grit_lib::remote::grit_server_space::Space::target_branch: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::Space::upstream: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::Space::upstream_url: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::Space::url: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::grit_server_space::Space
+pub fn grit_lib::remote::grit_server_space::Space::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_space::Space
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_space::Space
+pub fn grit_lib::remote::grit_server_space::Space::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_space::Space
+pub fn grit_lib::remote::grit_server_space::Space::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_space::Space
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_space::Space
+pub fn grit_lib::remote::grit_server_space::Space::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_space::Space
+pub fn grit_lib::remote::grit_server_space::Space::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_space::Space
+impl core::marker::Send for grit_lib::remote::grit_server_space::Space
+impl core::marker::Sync for grit_lib::remote::grit_server_space::Space
+impl core::marker::Unpin for grit_lib::remote::grit_server_space::Space
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_space::Space
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_space::Space
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::Space
+pub const grit_lib::remote::grit_server_space::INTEGRATE_PATH: &str
+pub const grit_lib::remote::grit_server_space::SPACE_PATH: &str
+pub fn grit_lib::remote::grit_server_space::fetch_space(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &str) -> core::result::Result<grit_lib::remote::grit_server_space::Space, grit_lib::remote::grit_server_auth::ServerAuthError>
+pub fn grit_lib::remote::grit_server_space::hosted_project(&str) -> core::option::Option<(grit_lib::remote::grit_server_auth::ServerUrl, alloc::string::String)>
+pub fn grit_lib::remote::grit_server_space::integrate_branch(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &str, &grit_lib::remote::grit_server_space::IntegrateBranchRequest) -> core::result::Result<grit_lib::remote::grit_server_space::IntegrateBranchReply, grit_lib::remote::grit_server_auth::ServerAuthError>
 pub mod grit_lib::remote::http_client
 pub struct grit_lib::remote::http_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient

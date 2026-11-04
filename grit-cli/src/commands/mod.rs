@@ -54,6 +54,7 @@ pub mod slice;
 pub mod stash;
 pub mod status;
 pub mod switch;
+pub mod sync;
 pub mod tag;
 pub mod update;
 pub mod worktree;

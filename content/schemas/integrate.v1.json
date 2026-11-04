@@ -578,6 +578,70 @@
         "to"
       ],
       "type": "object"
+    },
+    "SyncTarget": {
+      "description": "What `grit sync` did with the target branch.",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/TargetAction"
+        },
+        "name": {
+          "description": "The branch, such as `main`.",
+          "type": "string"
+        },
+        "tip": {
+          "description": "Its tip here afterwards.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "type": "object"
+    },
+    "TargetAction": {
+      "description": "What happened to the target branch.",
+      "oneOf": [
+        {
+          "description": "It was already the project's.",
+          "enum": [
+            "up_to_date"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Moved forward to the project's.",
+          "enum": [
+            "fast_forwarded"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Made here at the project's.",
+          "enum": [
+            "created"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It has commits the project doesn't; left alone.",
+          "enum": [
+            "ahead"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It and the project's both have commits the other lacks; left alone.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        }
+      ]
     }
   },
   "description": "Result of `grit integrate`.",
@@ -610,6 +674,17 @@
       "description": "Where it is now.",
       "type": "string"
     },
+    "local": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SyncTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "In a clone: the target branch here, brought up to the project's after the merge."
+    },
     "moved_to": {
       "description": "The new work branch you are on, when the branch you were on was the one merged: that branch is gone here (it stays on the server).",
       "type": [
@@ -624,6 +699,22 @@
     "previous": {
       "description": "Where the target was.",
       "type": "string"
+    },
+    "project": {
+      "description": "In a clone of a hosted project: the project merged into, `<owner>/<project>` (an organization's, for a copy in your space).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pull": {
+      "description": "The pull request the merge went through, for a copy.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "refresh": {
       "anyOf": [
@@ -650,6 +741,13 @@
     "target": {
       "description": "The server's target branch.",
       "type": "string"
+    },
+    "url": {
+      "description": "The pull request's web page.",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

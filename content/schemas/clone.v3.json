@@ -368,6 +368,13 @@
       "description": "Whether only one branch was fetched (`git clone --single-branch` semantics).",
       "type": "boolean"
     },
+    "space": {
+      "description": "Your space's project, `<you>/<project>`, when this is a clone of an organization's project on grithub (the default grit host): pushes from the clone go there (`remote.<remote>.pushurl`), and the `space` remote fetches from it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "stored_fields": {
       "description": "Remote fields stored from the advertisement (`promisor.storeFields`).",
       "items": {

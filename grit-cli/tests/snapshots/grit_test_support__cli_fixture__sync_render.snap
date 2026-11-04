@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Syncing alice/widget (a copy of example.com/widget)\n· Pushes from this clone now go to alice/widget (remote `space`)\n✓ main fast-forwarded to 7f51f16\n✓ feature pushed 538e7ad\n✓ docs pulled 1c3e9a0\n✓ from-laptop created 9a0b1c2\n✗ spike diverged 2b12f15\n  spike and space/spike each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"space\":\"alice/widget\",\"upstream\":\"example.com/widget\",\"remote\":\"space\",\"configured\":true,\"target\":{\"name\":\"main\",\"action\":\"fast_forwarded\",\"tip\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\"},\"branches\":[{\"name\":\"feature\",\"action\":\"pushed\",\"tip\":\"538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8\"},{\"name\":\"docs\",\"action\":\"pulled\",\"tip\":\"1c3e9a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c\"},{\"name\":\"from-laptop\",\"action\":\"created\",\"tip\":\"9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b\"},{\"name\":\"spike\",\"action\":\"diverged\",\"tip\":\"2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a\",\"message\":\"spike and space/spike each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Sync `alice/widget`\n\n- **upstream**: `example.com/widget`\n- **remote**: `space`\n- **main**: fast-forwarded\n- `feature`: pushed\n- `docs`: pulled\n- `from-laptop`: created\n- `spike`: diverged — spike and space/spike each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again\n",
+    "stderr": ""
+  }
+}

@@ -1,6 +1,6 @@
 ---
 title: grit integrate
-summary: Merge a branch into the server's target branch from a snapshot checkout, then refresh.
+summary: Merge a branch into the server's target branch, from a snapshot checkout or a clone of a hosted project.
 group: Remotes
 order: 9
 ---
@@ -38,6 +38,16 @@ These are refused, and the target is left alone:
 - **a merge that would overwrite uncommitted changes in the server's worktree**, when the server's repository has the target checked out: the server's worktree moves with each integration (keeping uncommitted changes there, as `git reset --keep` does), so commit or stash those changes on the server first.
 
 Integrations, and [slice](../slice/) changes, take turns on the server: several at once all merge, each onto the target the one before left. Each is merged again if the target moves while it is made, so none is lost or refused for coming second.
+
+### In a clone of a hosted project
+
+In a clone (not a snapshot checkout) of a project on a grit hosting server such as [grithub](https://grithub.dev), `grit integrate <branch>`:
+
+1. **pushes the branch to your space** (`<you>/<project>`), as [`grit sync`](../sync/) would, setting the clone up for it first when it isn't yet;
+2. **asks the server to merge it into the target**. For your copy of an organization's project, that is the organization's target branch (usually `main`): the server opens a pull request from the branch, or uses the open one, and integrates it at once. Only members of the organization may; anyone else is told to propose the branch instead, with the link. For a project of your own, it is the project's own target branch. A branch that conflicts is refused with the conflicting files, and nothing changes;
+3. **fetches `origin` and fast-forwards the target branch here** to the new tip (`local`).
+
+The branch you are on stays as it is; once merged, [`grit sync`](../sync/) stops pushing it.
 
 ## Options
 
@@ -101,6 +111,10 @@ Schema: [v1](/schemas/integrate/v1.json)
 | `moved_to` | string or omitted | The new work branch you are on, when you were on the branch merged (it is gone here and stays on the server). |
 | `follows` | string or omitted | The branch this checkout follows, when the server merged into another one (`target`, the branch its `HEAD` names now): the merge is not in this checkout's snapshots, so the branch keeps its commits here and you stay on it. |
 | `refresh_error` | string or omitted | Why refreshing this checkout after the merge, or moving you to a new branch, failed. The merge stands; the exit status is `1`. |
+| `project` | string or omitted | In a clone: the project merged into, `<owner>/<project>` (the organization's, for your copy of one). |
+| `pull` | integer or omitted | In a clone: the pull request the merge went through, for a copy of an organization's project. |
+| `url` | string or omitted | In a clone: the pull request's web page. |
+| `local` | object or omitted | In a clone: the target branch here after the merge, as [`grit sync`](../sync/)'s `target` reports it (`name`, `action`, `tip`). |
 
 ```json
 {
@@ -193,7 +207,7 @@ A failed refresh:
 | Code | Meaning |
 | --- | --- |
 | `0` | The branch was merged, or the target already had it, and the checkout was refreshed. |
-| `1` | The branch was merged (or the target had it), but the refresh after failed (`refresh_error`) or stopped (`refresh.result` is `rebase_stopped`, `conflicts`, `refused_not_ff` or `autostash_conflict`): the output says so and what to do. Or nothing was merged: the branch conflicts with the target, shares no history with it, is the target, is not a valid branch name, could not be checked in, or does not exist on the server; uncommitted changes in the server's worktree block the merge; or this is not a snapshot checkout. |
+| `1` | The branch was merged (or the target had it), but the refresh after failed (`refresh_error`) or stopped (`refresh.result` is `rebase_stopped`, `conflicts`, `refused_not_ff` or `autostash_conflict`): the output says so and what to do. Or nothing was merged: the branch conflicts with the target, shares no history with it, is the target, is not a valid branch name, could not be checked in, or does not exist on the server; uncommitted changes in the server's worktree block the merge; in a clone, you aren't a member of the organization, or the branch couldn't be pushed to your space; or this is neither a snapshot checkout nor a clone of a hosted project. |
 
 ## See also
 

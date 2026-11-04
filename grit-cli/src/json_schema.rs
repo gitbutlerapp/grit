@@ -165,6 +165,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<CheckoutOutcome>("checkout"),
         entry::<CheckinOutcome>("checkin"),
         entry::<IntegrateOutcome>("integrate"),
+        entry::<crate::commands::sync::SyncOutcome>("sync"),
         entry::<SliceListOutcome>("slice.list"),
         entry::<SliceChangeOutcome>("slice.new"),
         entry::<SliceChangeOutcome>("slice.edit"),
@@ -768,6 +769,7 @@ pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "integrate_elsewhere_render",
     "integrate_refresh_failed_render",
     "slice_render",
+    "sync_render",
     "serve_render",
     "update_render",
 ];

@@ -132,6 +132,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "sync",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "slice.list",
         CommandContract {
             kind: CommandKind::Query,
@@ -994,6 +1002,12 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "clone-remote",
         "integrate has no `--dry-run` yet",
+    ),
+    (
+        "sync",
+        ContractRule::DryRun,
+        "clone-remote",
+        "sync has no `--dry-run` yet",
     ),
     (
         "slice.new",

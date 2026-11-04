@@ -888,6 +888,8 @@ enum Command {
         #[arg(value_name = "BRANCH")]
         branch: String,
     },
+    /// Push and pull every active branch between this clone and your space on the server (grithub).
+    Sync,
     /// Named sets of paths to check out together, kept on the server's target branch.
     Slice {
         #[command(subcommand)]
@@ -2562,6 +2564,7 @@ fn talks_to_remotes(command: &Command) -> bool {
             | Command::Checkout { .. }
             | Command::Checkin { .. }
             | Command::Integrate { .. }
+            | Command::Sync
             | Command::Slice { .. }
     )
 }
@@ -2799,6 +2802,12 @@ fn dispatch(
         Command::Integrate { branch } => {
             let outcome = commands::checkin::integrate(&branch, opts.mode)?;
             let status = ExitStatus::from_integrate(&outcome);
+            emit_success(outcome, opts, ctx)?;
+            Ok(status)
+        }
+        Command::Sync => {
+            let outcome = commands::sync::run(opts.mode)?;
+            let status = ExitStatus::from_push_rejected(outcome.needs_attention());
             emit_success(outcome, opts, ctx)?;
             Ok(status)
         }
@@ -4651,6 +4660,7 @@ mod tests {
         ("checkout", "checkout_render"),
         ("integrate", "integrate_render"),
         ("slice", "slice_render"),
+        ("sync", "sync_render"),
         ("serve", "serve_render"),
         ("update", "update_render"),
     ];

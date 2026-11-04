@@ -237,6 +237,12 @@ pub struct CloneOutcome {
     /// one. `objects` and `bytes` include what it brought.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle: Option<CloneBundleJson>,
+    /// Your space's project, `<you>/<project>`, when this is a clone of an
+    /// organization's project on grithub (the default grit host): pushes from
+    /// the clone go there (`remote.<remote>.pushurl`), and the `space` remote
+    /// fetches from it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space: Option<String>,
     /// Timing and transfer totals for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -345,6 +351,13 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
                 ],
                 color
             )
+        );
+    }
+    if let Some(space) = &o.space {
+        outln!(
+            w,
+            "  {}  pushes go to your space, {space}; `grit sync` keeps the two in step",
+            label("space")
         );
     }
     Ok(())
@@ -809,6 +822,11 @@ fn clone_into(
         CloneHead::Detached { tag, .. } => (None, true, Some(tag.clone())),
     };
 
+    let space = if outcome.bare {
+        None
+    } else {
+        space_for_clone(dir, &run.url, &remote_name)
+    };
     Ok(CloneOutcome {
         url: run.url.clone(),
         path: dir.to_owned(),
@@ -854,7 +872,34 @@ fn clone_into(
         bare_gitlink_paths,
         bare: outcome.bare,
         bundle,
+        space,
     })
+}
+
+/// For a clone of an organization's project on the default grit host
+/// (grithub): set the clone up to push to your space
+/// ([`crate::commands::sync::ensure_space`]) and name it. Best effort: when
+/// you aren't signed in, or anything else fails, the clone stays as it is and
+/// `grit sync` sets it up later.
+fn space_for_clone(dir: &str, url: &str, remote: &str) -> Option<String> {
+    use grit_lib::remote::grit_server_auth::ServerUrl;
+    use grit_lib::remote::grit_server_space::hosted_project;
+    let host = ServerUrl::parse(&crate::commands::auth::default_grit_host_url()).ok()?;
+    let (server, _) = hosted_project(url)?;
+    if server != host {
+        return None;
+    }
+    let (options, _sink) = crate::diagnostics::repository_options(false);
+    let repo =
+        grit_lib::repo::Repository::discover(Some(std::path::Path::new(dir)), &options).ok()?;
+    let config = grit_lib::config::ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        true,
+    )
+    .ok()?;
+    let setup = crate::commands::sync::ensure_space(&repo, &config, remote).ok()??;
+    (setup.remote != remote).then_some(setup.space.project)
 }
 
 /// Where clone keeps bundle downloads between attempts:
@@ -904,6 +949,7 @@ mod tests {
             tags: 0,
         });
         CloneOutcome {
+            space: None,
             url: "https://example.com/r.git".to_owned(),
             path: "r".to_owned(),
             remote: "origin".to_owned(),

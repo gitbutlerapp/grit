@@ -66,6 +66,10 @@ pub mod grit_server_auth {
     //! grit_server_auth API (re-exported at this path).
     pub use crate::grit_server_auth::*;
 }
+pub mod grit_server_space {
+    //! grit_server_space API (re-exported at this path).
+    pub use crate::grit_server_space::*;
+}
 pub mod url_rewrite {
     //! url_rewrite API (re-exported at this path).
     pub use crate::url_rewrite::*;

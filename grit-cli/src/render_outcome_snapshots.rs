@@ -360,6 +360,10 @@ fn integrate_render() {
         moved_to: Some("alice/maple-elm".to_owned()),
         follows: None,
         refresh_error: None,
+        project: None,
+        pull: None,
+        url: None,
+        local: None,
     };
     snapshot_modes("integrate_render", &outcome);
 }
@@ -391,6 +395,10 @@ fn integrate_elsewhere_render() {
         moved_to: None,
         follows: Some("main".to_owned()),
         refresh_error: None,
+        project: None,
+        pull: None,
+        url: None,
+        local: None,
     };
     snapshot_modes("integrate_elsewhere_render", &outcome);
 }
@@ -410,6 +418,10 @@ fn integrate_refresh_failed_render() {
         moved_to: None,
         follows: None,
         refresh_error: Some("local changes would be overwritten: src/deep/b.rs".to_owned()),
+        project: None,
+        pull: None,
+        url: None,
+        local: None,
     };
     snapshot_modes("integrate_refresh_failed_render", &outcome);
 }
@@ -465,4 +477,40 @@ fn serve_render() {
     let markdown = render_to_string(&outcome, OutputMode::Markdown, &ctx).expect("markdown");
 
     CliFixture::snapshot_rendered_modes("serve_render", snapshot_dir(), &human, &json, &markdown);
+}
+
+/// A sync of a clone of an organization's project: the target fast-forwarded,
+/// branches pushed, pulled, created, and one diverged.
+#[test]
+fn sync_render() {
+    use crate::commands::sync::{SyncAction, SyncBranch, SyncOutcome, SyncTarget, TargetAction};
+    let branch = |name: &str, action, tip: &str, message: Option<&str>| SyncBranch {
+        name: name.to_owned(),
+        action,
+        tip: Some(tip.to_owned()),
+        message: message.map(str::to_owned),
+    };
+    let outcome = SyncOutcome {
+        space: "alice/widget".to_owned(),
+        upstream: Some("example.com/widget".to_owned()),
+        remote: "space".to_owned(),
+        configured: true,
+        target: Some(SyncTarget {
+            name: "main".to_owned(),
+            action: TargetAction::FastForwarded,
+            tip: Some("7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned()),
+        }),
+        branches: vec![
+            branch("feature", SyncAction::Pushed, "538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8", None),
+            branch("docs", SyncAction::Pulled, "1c3e9a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c", None),
+            branch("from-laptop", SyncAction::Created, "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b", None),
+            branch(
+                "spike",
+                SyncAction::Diverged,
+                "2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a",
+                Some("spike and space/spike each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again"),
+            ),
+        ],
+    };
+    snapshot_modes("sync_render", &outcome);
 }

@@ -349,7 +349,7 @@ pub fn fetch_identity(
 /// [`ServerAuthError::NotGritServer`] when `err` is a client-error status (`404`,
 /// `405`, `422`, …) from one of the `.grit/` endpoints, which every `grit serve`
 /// host answers; otherwise [`ServerAuthError::Http`].
-fn not_grit_server_or_http(server: &ServerUrl, err: Error) -> ServerAuthError {
+pub(crate) fn not_grit_server_or_http(server: &ServerUrl, err: Error) -> ServerAuthError {
     match err {
         Error::RemoteUnreadable {
             reason: RemoteUnreadableReason::HttpStatus { status },

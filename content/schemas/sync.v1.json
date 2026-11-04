@@ -1,0 +1,195 @@
+{
+  "$id": "https://grit-scm.com/schemas/sync/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "SyncAction": {
+      "description": "What happened to one branch.",
+      "oneOf": [
+        {
+          "description": "Pushed to your space.",
+          "enum": [
+            "pushed"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Fast-forwarded here to your space's.",
+          "enum": [
+            "pulled"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Made here from your space's.",
+          "enum": [
+            "created"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The same here and in your space.",
+          "enum": [
+            "up_to_date"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Here and in your space, each with commits the other lacks.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The server refused the push.",
+          "enum": [
+            "refused"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SyncBranch": {
+      "description": "One branch `grit sync` looked at.",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/SyncAction"
+        },
+        "message": {
+          "description": "Why it was refused, or what to do about a divergence.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "tip": {
+          "description": "Its tip afterwards.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "type": "object"
+    },
+    "SyncTarget": {
+      "description": "What `grit sync` did with the target branch.",
+      "properties": {
+        "action": {
+          "$ref": "#/definitions/TargetAction"
+        },
+        "name": {
+          "description": "The branch, such as `main`.",
+          "type": "string"
+        },
+        "tip": {
+          "description": "Its tip here afterwards.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "name"
+      ],
+      "type": "object"
+    },
+    "TargetAction": {
+      "description": "What happened to the target branch.",
+      "oneOf": [
+        {
+          "description": "It was already the project's.",
+          "enum": [
+            "up_to_date"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Moved forward to the project's.",
+          "enum": [
+            "fast_forwarded"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Made here at the project's.",
+          "enum": [
+            "created"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It has commits the project doesn't; left alone.",
+          "enum": [
+            "ahead"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It and the project's both have commits the other lacks; left alone.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "description": "Result of `grit sync`.",
+  "properties": {
+    "branches": {
+      "description": "What happened to each active branch.",
+      "items": {
+        "$ref": "#/definitions/SyncBranch"
+      },
+      "type": "array"
+    },
+    "configured": {
+      "description": "Whether this run set the clone up to push to your space.",
+      "type": "boolean"
+    },
+    "remote": {
+      "description": "The remote branches are pushed to and pulled from.",
+      "type": "string"
+    },
+    "space": {
+      "description": "Your space's project, `<you>/<project>`.",
+      "type": "string"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SyncTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What happened to the target branch."
+    },
+    "upstream": {
+      "description": "The project it follows, `<owner>/<project>`, for a copy.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "branches",
+    "configured",
+    "remote",
+    "space"
+  ],
+  "title": "SyncOutcome",
+  "type": "object"
+}
