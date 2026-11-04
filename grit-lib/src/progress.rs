@@ -213,6 +213,52 @@ pub(crate) const OBJECT_PROGRESS_STRIDE: u64 = 256;
 /// How often worktree blob stat scans and similar loops poll [`poll_watch`].
 pub(crate) const CANCEL_POLL_STRIDE: usize = 256;
 
+/// Wraps a [`Write`] and reports bytes written to a [`ProgressSink`] as
+/// [`ProgressPhase::SendingObjects`].
+pub(crate) struct ProgressWrite<'a, W: ?Sized> {
+    inner: &'a mut W,
+    sink: &'a mut dyn ProgressSink,
+    started: bool,
+}
+
+impl<'a, W: ?Sized + std::io::Write> ProgressWrite<'a, W> {
+    /// Create a wrapper that forwards writes to `inner` and counts them on `sink`.
+    pub fn new(inner: &'a mut W, sink: &'a mut dyn ProgressSink) -> Self {
+        Self {
+            inner,
+            sink,
+            started: false,
+        }
+    }
+
+    /// End the sending phase when one was started.
+    pub fn finish(&mut self) {
+        if self.started {
+            self.sink.finish();
+            self.started = false;
+        }
+    }
+}
+
+impl<W: ?Sized + std::io::Write> std::io::Write for ProgressWrite<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        if n > 0 {
+            if !self.started {
+                self.sink
+                    .start_with_unit(ProgressPhase::SendingObjects, ProgressUnit::Bytes, None);
+                self.started = true;
+            }
+            self.sink.inc(n as u64);
+        }
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 /// Report monotonic object progress at [`OBJECT_PROGRESS_STRIDE`] boundaries.
 ///
 /// `done` is the absolute number of objects processed so far; `last_reported` is

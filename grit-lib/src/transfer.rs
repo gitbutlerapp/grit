@@ -1027,6 +1027,9 @@ pub struct PushOutcome {
     /// For a local-path or `file://` push, the output of the destination's receive hooks.
     /// Empty when the server did not use side-band or no hook wrote anything.
     pub remote_messages: Vec<String>,
+    /// Objects and pack bytes sent when this push copied or streamed a pack.
+    #[cfg_attr(feature = "serde-models", serde(default))]
+    pub sent: TransferStats,
 }
 
 impl PushOutcome {
@@ -1448,8 +1451,9 @@ fn copy_objects_for_local_push(
     source_shallow: &HashSet<ObjectId>,
     have_shallow: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
+    progress: &mut dyn Progress,
     cancel: &dyn crate::progress::Cancel,
-) -> Result<()> {
+) -> Result<TransferStats> {
     use crate::local_object_copy::{
         link_loose_objects_for_oids, link_packs_within, refresh_local_odb_after_link,
     };
@@ -1459,8 +1463,8 @@ fn copy_objects_for_local_push(
     let stop = crate::progress::CancelSignal::new(cancel);
 
     let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
+    progress.start(ProgressPhase::EnumeratingObjects, None);
     let mut enum_last = 0u64;
-    let mut enum_sink = crate::progress::NullProgress;
     let send_set = collect_reachable_excluding_peer(
         local_odb,
         wants,
@@ -1469,39 +1473,55 @@ fn copy_objects_for_local_push(
         false,
         source_shallow,
         &stop,
-        &mut enum_sink,
+        progress,
         &mut enum_last,
     )?;
     let send = &send_set.objects;
+    let send_len = send.len() as u64;
+    progress.set(send_len);
+    progress.finish();
 
-    let mut progress = crate::progress::NullProgress;
+    let mut copy = LocalCopyProgress::new(send_len);
     let dest_has = |oid: &ObjectId| dest_odb.exists_materialized_local_without_rescan(oid);
-    if local_odb.uses_files_primary()
-        && !opts.thin
-        && link_packs_within(
+    if local_odb.uses_files_primary() && !opts.thin {
+        let mut link_sink = CopyingLooseLink {
+            copy: &mut copy,
+            progress,
+        };
+        if link_packs_within(
             local_objects,
             dest_objects,
             send,
             &dest_has,
-            &mut progress,
+            &mut link_sink,
             cancel,
             None,
         )? > 0
-    {
-        refresh_local_odb_after_link(dest_odb);
+        {
+            refresh_local_odb_after_link(dest_odb);
+        }
     }
 
     let mut still_missing = objects_missing_from_peer(dest_odb, send)?;
     if still_missing.is_empty() {
-        return Ok(());
+        copy.finish(progress);
+        return Ok(TransferStats {
+            objects: send_len,
+            bytes: 0,
+            kinds: None,
+        });
     }
 
     if local_odb.uses_files_primary() && !haves.is_empty() {
+        let mut link_sink = CopyingLooseLink {
+            copy: &mut copy,
+            progress,
+        };
         let linked_loose = link_loose_objects_for_oids(
             local_objects,
             dest_objects,
             &still_missing,
-            &mut progress,
+            &mut link_sink,
             cancel,
         )?;
         if linked_loose > 0 {
@@ -1509,7 +1529,12 @@ fn copy_objects_for_local_push(
             still_missing = dest_odb.missing_oids(still_missing)?;
         }
         if still_missing.is_empty() {
-            return Ok(());
+            copy.finish(progress);
+            return Ok(TransferStats {
+                objects: send_len,
+                bytes: 0,
+                kinds: None,
+            });
         }
     }
 
@@ -1526,13 +1551,20 @@ fn copy_objects_for_local_push(
         &pack_opts,
         &stop,
         &mut spool,
-        None,
+        Some((&mut copy, progress)),
     )?;
     let Some(pack_path) = spool.finish()? else {
-        return Ok(());
+        copy.finish(progress);
+        return Ok(TransferStats {
+            objects: send_len,
+            bytes: 0,
+            kinds: None,
+        });
     };
+    let pack_bytes = std::fs::metadata(&pack_path).map(|m| m.len()).unwrap_or(0);
     drop(send_set);
     local_odb.clear_delta_base_cache();
+    copy.finish(progress);
     let trusted_rows = trusted_index_rows.filter(|rows| !rows.is_empty());
     // Locally built pack: trailer checked at write time; trusted rows skip a body rescan.
     crate::index_pack::ingest_received_pack_path_with_progress(
@@ -1544,11 +1576,24 @@ fn copy_objects_for_local_push(
             trusted_index_rows: trusted_rows,
             ..Default::default()
         },
-        None,
+        Some(progress),
         Some(cancel),
     )?;
     refresh_local_odb_after_link(dest_odb);
-    Ok(())
+    if pack_bytes > 0 {
+        progress.start_with_unit(
+            ProgressPhase::SendingObjects,
+            crate::progress::ProgressUnit::Bytes,
+            Some(pack_bytes),
+        );
+        progress.set(pack_bytes);
+        progress.finish();
+    }
+    Ok(TransferStats {
+        objects: send_len,
+        bytes: pack_bytes,
+        kinds: None,
+    })
 }
 
 /// The objects of `send` that `peer_odb` does not store on disk.
@@ -2531,8 +2576,7 @@ pub(crate) fn push_local_from(
     pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
     let local_git_dir = local.git_dir();
-    let mut progress_sink = crate::progress::NullProgress;
-    crate::progress::poll_cancel(&mut progress_sink, cancel)?;
+    crate::progress::poll_cancel(progress, cancel)?;
     ensure_local_remote_repository(remote_git_dir)?;
     let remote_repo =
         crate::repo::Repository::open(remote_git_dir, &local.peer_repository_options())?;
@@ -2576,8 +2620,9 @@ pub(crate) fn push_local_from(
     // Pushed objects wait in a quarantine until the receive hooks accept the push, so a
     // declined or refused push leaves nothing behind in the remote's object store.
     let mut quarantine = None;
+    let mut sent = TransferStats::default();
     if !push_wants.is_empty() {
-        crate::progress::poll_cancel(&mut progress_sink, cancel)?;
+        crate::progress::poll_cancel(progress, cancel)?;
         let local_cfg = config_for_git_dir(local_git_dir);
         let pack_opts = if remote_have_tips.is_empty() {
             PackBuildOptions::for_local_copy(local_cfg.as_ref())
@@ -2590,7 +2635,7 @@ pub(crate) fn push_local_from(
             remote_git_dir,
         )?;
         let q_odb = q.odb();
-        copy_objects_for_local_push(
+        sent = copy_objects_for_local_push(
             local_odb,
             remote_repo.odb(),
             &q_odb,
@@ -2599,6 +2644,7 @@ pub(crate) fn push_local_from(
             &local_shallow,
             &remote_shallow,
             &pack_opts,
+            progress,
             cancel,
         )?;
         quarantine = Some((q, q_odb));
@@ -2693,6 +2739,7 @@ pub(crate) fn push_local_from(
         return Ok(PushOutcome {
             results: decisions.into_iter().map(|d| d.result).collect(),
             remote_messages: Vec::new(),
+            sent,
         });
     }
 
@@ -2865,6 +2912,7 @@ pub(crate) fn push_local_from(
     Ok(PushOutcome {
         results,
         remote_messages,
+        sent,
     })
 }
 
@@ -5069,6 +5117,74 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn local_push_reports_copy_progress() {
+        let remote = tempfile::tempdir().expect("remote");
+        assert!(git_ok(
+            remote.path(),
+            &["init", "-q", "-b", "main", "--bare"]
+        ));
+        let src = tempfile::tempdir().expect("src");
+        assert!(git_ok(src.path(), &["init", "-q", "-b", "main"]));
+        std::fs::write(src.path().join("f.txt"), "payload\n").unwrap();
+        assert!(git_ok(src.path(), &["add", "f.txt"]));
+        assert!(git_ok(src.path(), &["commit", "-qm", "c1"]));
+        std::fs::write(src.path().join("g.txt"), "more\n").unwrap();
+        assert!(git_ok(src.path(), &["add", "g.txt"]));
+        assert!(git_ok(src.path(), &["commit", "-qm", "c2"]));
+
+        let local_git = src.path().join(".git");
+        let tip = ObjectId::from_hex(&git_stdout(src.path(), &["rev-parse", "HEAD"])).unwrap();
+        let local = crate::repo::Repository::open(&local_git, &RepositoryOptions::empty()).unwrap();
+
+        let mut rec = PhaseRecorder::default();
+        let outcome = push_local_from(
+            &local,
+            remote.path(),
+            &[PushRefSpec {
+                src: Some(tip),
+                dst: "refs/heads/main".to_owned(),
+                ..Default::default()
+            }],
+            &PushOptions::default(),
+            &mut rec,
+            &crate::progress::NeverCancel,
+            None,
+        )
+        .expect("push_local_from");
+
+        assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+        assert!(
+            outcome.sent.objects > 0,
+            "expected sent object count: {:?}",
+            outcome.sent
+        );
+        assert!(
+            rec.started
+                .iter()
+                .any(|(p, _)| *p == ProgressPhase::EnumeratingObjects),
+            "expected EnumeratingObjects: {:?}",
+            rec.started
+        );
+        assert!(
+            rec.started
+                .iter()
+                .any(|(p, _)| *p == ProgressPhase::CopyingObjects),
+            "expected CopyingObjects: {:?}",
+            rec.started
+        );
+        assert!(
+            rec.finished.contains(&ProgressPhase::CopyingObjects),
+            "expected CopyingObjects finish"
+        );
+        assert!(!rec.counts.is_empty(), "expected progress counts");
+        assert_copy_progress_within_total(&rec, outcome.sent.objects);
+    }
+
     #[test]
     fn transfer_stats_add_up_and_keep_kinds_only_when_known() {
         use crate::index_pack::ObjectKindCounts;
@@ -5253,6 +5369,7 @@ mod tests {
         let outcome = |statuses: Vec<PushRefStatus>| PushOutcome {
             results: statuses.into_iter().map(result).collect(),
             remote_messages: Vec::new(),
+            sent: TransferStats::default(),
         };
 
         let empty = PushOutcome::default();

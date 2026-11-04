@@ -540,7 +540,7 @@ pub fn run(
     }
 
     let mut transfer = TransferSummary::new(
-        push_transfer_stats(progress.phases()),
+        push_transfer_stats(progress.phases(), &report.sent),
         progress.phases().to_vec(),
         progress.elapsed(),
     );
@@ -565,7 +565,10 @@ fn plan_error(err: PushPlanError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
-fn push_transfer_stats(records: &[crate::progress::PhaseRecord]) -> TransferStats {
+fn push_transfer_stats(
+    records: &[crate::progress::PhaseRecord],
+    sent: &TransferStats,
+) -> TransferStats {
     use grit_lib::progress::{ProgressPhase, ProgressUnit};
     let mut objects = 0u64;
     let mut bytes = 0u64;
@@ -581,9 +584,9 @@ fn push_transfer_stats(records: &[crate::progress::PhaseRecord]) -> TransferStat
         }
     }
     TransferStats {
-        objects,
-        bytes,
-        kinds: None,
+        objects: objects.max(sent.objects),
+        bytes: bytes.max(sent.bytes),
+        kinds: sent.kinds,
     }
 }
 

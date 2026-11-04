@@ -691,6 +691,30 @@ mod tests {
     }
 
     #[test]
+    fn data_row_uses_sent_for_push() {
+        let summary = TransferSummary {
+            milestones: Vec::new(),
+            elapsed: Duration::from_secs(1),
+            records: vec![rec(
+                ProgressPhase::SendingObjects,
+                ProgressUnit::Bytes,
+                0,
+                500,
+                4096,
+            )],
+            objects: 12,
+            bytes: 4096,
+            object_types: None,
+            transfer_sent: true,
+        };
+        let mut out = Vec::new();
+        summary.render_rows(&mut out, false).expect("render");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(text.contains("4.00 KiB sent"), "{text}");
+        assert!(!text.contains("received"), "{text}");
+    }
+
+    #[test]
     fn header_names_the_remote_and_its_url_once() {
         assert_eq!(
             transfer_header(
