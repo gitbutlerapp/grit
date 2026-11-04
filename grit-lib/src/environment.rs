@@ -1037,6 +1037,28 @@ fn is_typed_environment_var(key: &str) -> bool {
         || key.starts_with("GIT_CONFIG_VALUE_")
 }
 
+/// The reflink checkout's reference tree from the process environment.
+///
+/// `GRIT_CHECKOUT_REFERENCE_TREE` wins over the git-compatible
+/// `GIT_CHECKOUT_REFERENCE_TREE`; an empty value counts as unset. A binary calls this once
+/// while assembling [`RepositoryOptions`]; library code reads
+/// [`RepositoryOptions::checkout_reference_tree`] instead.
+#[must_use]
+pub fn checkout_reference_tree_from_process() -> Option<std::path::PathBuf> {
+    for key in [
+        "GRIT_CHECKOUT_REFERENCE_TREE",
+        "GIT_CHECKOUT_REFERENCE_TREE",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            // hygiene: embedder boundary, see `from_process`
+            if !value.is_empty() {
+                return Some(std::path::PathBuf::from(value));
+            }
+        }
+    }
+    None
+}
+
 fn git_optional_locks_from_env(raw: Option<&str>) -> bool {
     match raw {
         None => true,
@@ -1078,6 +1100,15 @@ pub struct RepositoryOptions {
     pub thread_policy: crate::parallel::ThreadPolicy,
     /// Work tree path for [`crate::repo::Repository::open`] (non-bare repos).
     pub work_tree: Option<std::path::PathBuf>,
+    /// Working tree a checkout clones files out of instead of writing blob bytes.
+    ///
+    /// The reflink path in [`crate::porcelain::checkout`] `FICLONE`s a file of the
+    /// same path out of this tree and keeps it only after hashing it against the
+    /// blob, so a stale or dirty reference tree costs a syscall, never a wrong
+    /// file. `None` disables it. [`Self::from_process`] fills it from
+    /// `GRIT_CHECKOUT_REFERENCE_TREE` (or the git-compatible
+    /// `GIT_CHECKOUT_REFERENCE_TREE`); embedders set it directly.
+    pub checkout_reference_tree: Option<std::path::PathBuf>,
     /// When false, skip [`crate::repo::validate_repo_format`] during open.
     pub validate_repository_format: bool,
     /// When true, [`crate::repo::Repository::open`] resolves `path` like wire-protocol serving.
@@ -1110,6 +1141,7 @@ impl Default for RepositoryOptions {
             reference_unix_time: None,
             thread_policy: crate::parallel::ThreadPolicy::default(),
             work_tree: None,
+            checkout_reference_tree: None,
             validate_repository_format: true,
             open_for_serving: false,
             promisor_fetcher: None,
@@ -1141,6 +1173,7 @@ impl RepositoryOptions {
     pub fn from_process() -> Self {
         // hygiene: embedder boundary — the documented way to snapshot the process environment.
         Self::with_environment(Environment::capture_process())
+            .with_checkout_reference_tree(checkout_reference_tree_from_process())
     }
 
     /// Options around an explicit [`Environment`] snapshot.
@@ -1159,6 +1192,16 @@ impl RepositoryOptions {
     #[must_use]
     pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
         self.command_runner = runner;
+        self
+    }
+
+    /// Override the working tree a checkout clones files out of.
+    ///
+    /// `None` turns reflink checkout off; see
+    /// [`Self::checkout_reference_tree`](RepositoryOptions::checkout_reference_tree).
+    #[must_use]
+    pub fn with_checkout_reference_tree(mut self, root: Option<std::path::PathBuf>) -> Self {
+        self.checkout_reference_tree = root;
         self
     }
 

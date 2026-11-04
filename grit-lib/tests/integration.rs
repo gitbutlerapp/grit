@@ -1431,6 +1431,8 @@ mod ref_update_kinds_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "reference_transaction_hook.rs"]
 mod reference_transaction_hook;
+#[path = "reflink_checkout.rs"]
+mod reflink_checkout;
 #[cfg(feature = "full-tests")]
 #[path = "reflog_expire_dry_run.rs"]
 mod reflog_expire_dry_run;

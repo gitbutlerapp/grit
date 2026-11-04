@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use crate::worktree::reflink;
+
 use crate::config::ConfigSet;
 use crate::crlf::{self, ConversionConfig};
 use crate::diff::{diff_tree_path_change_count, diff_trees, zero_oid, DiffEntry, DiffStatus};
@@ -4788,6 +4790,25 @@ fn apply_tree_changes(
                 }
             }
             let file_attrs = Arc::new(rules.file_attrs(path, false));
+            // A configured reference tree lets this path be cloned instead of read
+            // and written. The clone is verified against the blob, so the gate on
+            // conversion only spares a hopeless attempt; a stale tree fails the check
+            // and falls through to the job below either way.
+            if crlf::worktree_conversion_is_identity(rules.conversion(), &file_attrs) {
+                if let Some(entry) = try_reflink_checkout_path(
+                    repo,
+                    work_tree,
+                    path,
+                    mode,
+                    change.new_oid,
+                    &mut dir_cache,
+                )? {
+                    journal.record_write(change);
+                    plan.push(CheckoutPlanSlot::Ready(entry));
+                    progress.inc(1);
+                    continue;
+                }
+            }
             let job_smudge =
                 if file_attrs.filter_process.is_some() || file_attrs.filter_smudge.is_some() {
                     if smudge_context.is_none() {
@@ -5431,6 +5452,50 @@ pub(crate) fn stream_checkout_entry(
         .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
 }
 
+/// Clone `rel_path` out of the repository's reference tree when the clone hashes to `oid`.
+///
+/// Returns the index row for the file when it is in place, or `None` when the caller must write
+/// the blob as usual. Only a regular file is cloned, and the clone is verified against `oid`, so
+/// a path whose content would be converted on the way out (CRLF, `ident`, a smudge filter, a
+/// working-tree encoding) fails that check and falls through to the ordinary write. Nothing is
+/// left behind on `None`.
+pub(crate) fn try_reflink_checkout_path(
+    repo: &Repository,
+    work_tree: &Path,
+    rel_path: &str,
+    mode: u32,
+    oid: ObjectId,
+    dir_cache: &mut LeadingDirCache,
+) -> Result<Option<IndexEntry>> {
+    let Some(ref_root) = repo.checkout_reference_tree() else {
+        return Ok(None);
+    };
+    if !is_regular_git_mode(mode) {
+        return Ok(None);
+    }
+    dir_cache.ensure_parents(work_tree, rel_path)?;
+    let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
+    if !reflink::try_reflink(
+        &abs_path,
+        rel_path,
+        &oid,
+        ref_root,
+        repo.odb().hash_algo(),
+        git_create_mode_for_index_mode(mode),
+    )? {
+        return Ok(None);
+    }
+    let meta = written_file_symlink_metadata(&abs_path)?;
+    let index_path = crate::repo_relpath::storage_bytes(rel_path);
+    Ok(Some(index_entry_from_worktree_write(
+        &meta,
+        &index_path,
+        oid,
+        mode,
+        None,
+    )))
+}
+
 /// Write blob `oid` to `rel_path` with checkout conversion, replacing whatever is there.
 ///
 /// Large blobs copied verbatim are streamed from the object database (see
@@ -5447,6 +5512,30 @@ pub(crate) fn write_blob_to_worktree(
 ) -> Result<Option<fs::Metadata>> {
     let has_symlinks = dir_cache.has_symlinks();
     let attrs = rules.file_attrs(rel_path, false);
+    // The gate is required, not an optimisation: a clone is verified against the
+    // *blob*, so it is only the file the checkout wants when nothing would
+    // rewrite the content on the way out (CRLF injection, ident, a smudge
+    // filter, a working-tree encoding). Same test the git patch applies through
+    // `entry_content_will_be_converted()`.
+    if is_regular_git_mode(mode)
+        && crlf::worktree_conversion_is_identity(rules.conversion(), &attrs)
+    {
+        if let Some(ref_root) = repo.checkout_reference_tree() {
+            dir_cache.ensure_parents(work_tree, rel_path)?;
+            let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
+            if reflink::try_reflink(
+                &abs_path,
+                rel_path,
+                oid,
+                ref_root,
+                repo.odb().hash_algo(),
+                git_create_mode_for_index_mode(mode),
+            )? {
+                let meta = written_file_symlink_metadata(&abs_path)?;
+                return Ok(Some(meta));
+            }
+        }
+    }
     let Some(blob) = read_blob_unless_streamed(repo, rules.conversion(), &attrs, mode, oid, false)?
     else {
         return repo

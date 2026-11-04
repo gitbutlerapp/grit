@@ -2060,6 +2060,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::environment::
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::environment::Environment
 #[non_exhaustive] pub struct grit_lib::config::environment::RepositoryOptions
 pub grit_lib::config::environment::RepositoryOptions::change_id_generator: alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
+pub grit_lib::config::environment::RepositoryOptions::checkout_reference_tree: core::option::Option<std::path::PathBuf>
 pub grit_lib::config::environment::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::config::environment::RepositoryOptions::diagnostics: grit_lib::diagnostics::DiagnosticsHandle
 pub grit_lib::config::environment::RepositoryOptions::environment: grit_lib::config::environment::Environment
@@ -2077,6 +2078,7 @@ pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_checkout_reference_tree(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_environment(grit_lib::config::environment::Environment) -> Self
@@ -2098,6 +2100,7 @@ impl core::marker::Unpin for grit_lib::config::environment::RepositoryOptions
 impl core::marker::UnsafeUnpin for grit_lib::config::environment::RepositoryOptions
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::environment::RepositoryOptions
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::config::environment::RepositoryOptions
+pub fn grit_lib::config::environment::checkout_reference_tree_from_process() -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::environment::offset_from_epoch_and_tz(i64, core::option::Option<&str>) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::config::environment::wall_clock_unix_timestamp_nanos() -> u64
 pub mod grit_lib::config::git_date
@@ -18699,6 +18702,7 @@ pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::Mid
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
+pub fn grit_lib::repo::Repository::checkout_reference_tree(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -18801,6 +18805,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuil
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
 #[non_exhaustive] pub struct grit_lib::prelude::RepositoryOptions
 pub grit_lib::prelude::RepositoryOptions::change_id_generator: alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
+pub grit_lib::prelude::RepositoryOptions::checkout_reference_tree: core::option::Option<std::path::PathBuf>
 pub grit_lib::prelude::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::prelude::RepositoryOptions::diagnostics: grit_lib::diagnostics::DiagnosticsHandle
 pub grit_lib::prelude::RepositoryOptions::environment: grit_lib::config::environment::Environment
@@ -18818,6 +18823,7 @@ pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_checkout_reference_tree(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_environment(grit_lib::config::environment::Environment) -> Self
@@ -26449,6 +26455,7 @@ pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::Mid
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
+pub fn grit_lib::repo::Repository::checkout_reference_tree(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>

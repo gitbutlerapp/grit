@@ -187,6 +187,8 @@ pub fn repository_options(
     options.environment = crate::context::environment();
     options.thread_policy = crate::context::thread_policy_for_repo();
     options.hook_stdio = crate::context::hook_stdio_for_repo();
+    options.checkout_reference_tree =
+        grit_lib::config::environment::checkout_reference_tree_from_process();
     options.diagnostics = sink.clone();
     options.network_trace = network_trace;
     options.reference_unix_time = std::time::SystemTime::now()
