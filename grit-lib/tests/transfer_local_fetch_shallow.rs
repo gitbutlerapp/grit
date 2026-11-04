@@ -427,3 +427,80 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
         git(&client, &["fsck", "--strict"]);
     }
 }
+
+/// Shallow local fetch then `--unshallow` over a repacked remote with on-disk deltas must
+/// stay fsck-clean (thin pack + `fix_thin` ingest), matching system `git`.
+#[test]
+fn unshallow_from_repacked_remote_with_deltas_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote_wt = tmp.path().join("remote-wt");
+    std::fs::create_dir_all(&remote_wt).unwrap();
+    git(&remote_wt, &["init", "-q", "-b", "main", "."]);
+    for i in 0..8 {
+        let mut body = String::from("shared prefix for delta reuse\n");
+        body.push_str(&"x".repeat(2048));
+        body.push_str(&format!("-{i}\n"));
+        std::fs::write(remote_wt.join(format!("f{i}.txt")), body).unwrap();
+    }
+    git(&remote_wt, &["add", "."]);
+    git(&remote_wt, &["commit", "-qm", "similar blobs"]);
+    git(
+        &remote_wt,
+        &[
+            "repack",
+            "-q",
+            "-a",
+            "-d",
+            "-f",
+            "--window=10",
+            "--depth=50",
+        ],
+    );
+    let remote_git = remote_wt.join(".git");
+
+    let shallow = tmp.path().join("shallow");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            &format!("file://{}", remote_git.display()),
+            shallow.to_str().unwrap(),
+        ],
+    );
+    let shallow_git = shallow.join(".git");
+    assert!(shallow_git.join("shallow").is_file());
+
+    let comparison = tmp.path().join("comparison");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            &format!("file://{}", remote_git.display()),
+            comparison.to_str().unwrap(),
+        ],
+    );
+    git(&comparison, &["fetch", "--unshallow"]);
+
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+    fetch_opts.fetch_depth = Some(FetchDepth::Unshallow);
+    fetch_local(&shallow_git, &remote_git, &fetch_opts).expect("unshallow fetch_local");
+
+    assert!(
+        !shallow_git.join("shallow").exists(),
+        "unshallow must remove shallow boundaries"
+    );
+    assert_eq!(
+        git(&shallow, &["rev-list", "--count", "HEAD"]).trim(),
+        git(&comparison, &["rev-list", "--count", "HEAD"]).trim(),
+        "history depth must match git after unshallow"
+    );
+    git_fsck_clean(&shallow);
+    git_fsck_clean(&comparison);
+}

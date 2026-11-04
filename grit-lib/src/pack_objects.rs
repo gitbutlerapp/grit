@@ -112,6 +112,28 @@ impl PackBuildOptions {
         }
     }
 
+    /// Pack settings for an incremental in-process local fetch (destination already has objects).
+    ///
+    /// Same window, depth, and reuse flags as [`Self::for_local_copy`], but builds a thin pack
+    /// so on-disk deltas whose bases live in the peer can stay ref-delta instead of being
+    /// inflated. The received pack is ingested with `fix_thin` (see [`crate::index_pack`]).
+    #[must_use]
+    pub fn for_local_fetch(cfg: Option<&crate::config::ConfigSet>) -> Self {
+        let (window, max_depth) = Self::window_and_depth_from_config(cfg);
+        Self {
+            thin: true,
+            delta: true,
+            window,
+            max_depth,
+            use_ofs_delta: true,
+            reuse_deltas: max_depth > 0,
+            reuse_objects: true,
+            use_bitmaps: true,
+            window_memory: Some(Self::window_memory_from_config(cfg)),
+            ..Default::default()
+        }
+    }
+
     /// Copy stored pack entries (whole objects and deltas) without a new delta search
     /// (`window` 0), for rebuilding a pack from objects that are already packed.
     #[must_use]

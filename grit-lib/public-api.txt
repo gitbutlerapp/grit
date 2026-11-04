@@ -12322,6 +12322,7 @@ pub grit_lib::objects::pack_objects::PackBuildOptions::window: usize
 pub grit_lib::objects::pack_objects::PackBuildOptions::window_memory: core::option::Option<u64>
 impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
+pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_fetch(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_serve(core::option::Option<&grit_lib::config::ConfigSet>, bool, bool) -> Self
@@ -25912,6 +25913,7 @@ pub grit_lib::remote::transfer::PackBuildOptions::window: usize
 pub grit_lib::remote::transfer::PackBuildOptions::window_memory: core::option::Option<u64>
 impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
+pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_fetch(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_serve(core::option::Option<&grit_lib::config::ConfigSet>, bool, bool) -> Self
