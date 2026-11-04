@@ -997,6 +997,73 @@ fn glob_push_roundtrip_fsck_with_git() {
 }
 
 #[test]
+fn prune_negative_refspec_preserves_excluded_remote_branch() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main", "feature"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec![
+                "refs/heads/*:refs/heads/*".into(),
+                "^refs/heads/feature".into(),
+            ],
+            remote: Some("origin".into()),
+            prune: true,
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        !specs
+            .iter()
+            .any(|s| s.delete && s.dst == "refs/heads/feature"),
+        "negative refspec must keep remote feature out of prune deletes"
+    );
+    compare_with_git(
+        &fx.local,
+        &[
+            "origin",
+            "--prune",
+            "refs/heads/*:refs/heads/*",
+            "^refs/heads/feature",
+        ],
+        &specs,
+        &fx.bare,
+    );
+}
+
+#[test]
+fn configured_negative_with_prune_does_not_delete_excluded_remote() {
+    for negative_first in [false, true] {
+        let fx = setup_main_and_private_with_negative_push_config(negative_first);
+        let repo = open_repo(&fx.local);
+        let config = load_config(&repo);
+        let ctx = push_plan_context(&fx.bare);
+        let specs = plan_specs(
+            &repo,
+            &config,
+            PushRequest {
+                remote: Some("origin".into()),
+                prune: true,
+                ..Default::default()
+            },
+            &ctx,
+        );
+        assert!(
+            !specs
+                .iter()
+                .any(|s| s.delete && s.dst == "refs/heads/private"),
+            "configured ^ must exclude private from prune (negative_first={negative_first})"
+        );
+        compare_with_git(&fx.local, &["origin", "--prune"], &specs, &fx.bare);
+    }
+}
+
+#[test]
 fn prune_single_branch_push_does_not_delete_sibling_remote() {
     let fx = setup_feature_and_main();
     git(&fx.local, &["push", "-q", "origin", "main", "feature"]);

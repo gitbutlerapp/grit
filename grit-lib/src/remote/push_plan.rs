@@ -273,7 +273,8 @@ pub fn resolve_push(
 
     if request.prune && !request.mirror {
         let scopes = collect_prune_scopes(config, &remote, request);
-        apply_prune_scopes(&mut resolved.specs, ctx, &scopes);
+        let negatives = collect_prune_negative_refspecs(config, &remote, request);
+        apply_prune_scopes(&mut resolved.specs, ctx, &scopes, &negatives);
     }
 
     if follow_tags {
@@ -435,9 +436,35 @@ fn collect_prune_scopes(
     scopes
 }
 
-fn apply_prune_scopes(specs: &mut Vec<PushRefSpec>, ctx: &PushPlanContext, scopes: &[RefspecItem]) {
+fn negative_refspecs_from_strings(specs: &[String]) -> Vec<RefspecItem> {
+    specs
+        .iter()
+        .filter_map(|spec| {
+            let item = parse_push_refspec(spec).ok()?;
+            item.negative.then_some(item)
+        })
+        .collect()
+}
+
+fn collect_prune_negative_refspecs(
+    config: &ConfigSet,
+    remote: &str,
+    request: &PushRequest,
+) -> Vec<RefspecItem> {
+    if !request.refspecs.is_empty() {
+        return negative_refspecs_from_strings(&request.refspecs);
+    }
+    negative_refspecs_from_strings(&remote_push_refspec_strings(config, remote))
+}
+
+fn apply_prune_scopes(
+    specs: &mut Vec<PushRefSpec>,
+    ctx: &PushPlanContext,
+    scopes: &[RefspecItem],
+    negatives: &[RefspecItem],
+) {
     for scope in scopes {
-        append_prune_deletes_for_scope(specs, ctx, scope);
+        append_prune_deletes_for_scope(specs, ctx, scope, negatives);
     }
 }
 
@@ -463,10 +490,46 @@ fn remote_ref_in_prune_destination_namespace(remote_ref: &str, dst_pattern: &str
     match_refname_with_pattern(dst_pattern, remote_ref, dst_pattern).is_some()
 }
 
+fn prune_scope_local_ref_for_remote_dst(remote_ref: &str, scope: &RefspecItem) -> Option<String> {
+    if scope.matching {
+        return remote_ref
+            .starts_with("refs/heads/")
+            .then(|| remote_ref.to_owned());
+    }
+    if scope.pattern {
+        let src_pat = scope.src.as_deref()?;
+        let dst_pat = scope.dst.as_deref()?;
+        return match_refname_with_pattern(dst_pat, remote_ref, src_pat);
+    }
+    None
+}
+
+fn negative_excludes_local_ref(negative: &RefspecItem, local_ref: &str) -> bool {
+    let Some(pat) = negative.src.as_deref() else {
+        return false;
+    };
+    if negative.pattern {
+        return match_refname_with_pattern(pat, local_ref, pat).is_some();
+    }
+    pat == local_ref || refname_match_one(pat, local_ref)
+}
+
+fn prune_dst_excluded_by_negative(
+    negative: &RefspecItem,
+    remote_ref: &str,
+    scope: &RefspecItem,
+) -> bool {
+    let Some(local) = prune_scope_local_ref_for_remote_dst(remote_ref, scope) else {
+        return false;
+    };
+    negative_excludes_local_ref(negative, &local)
+}
+
 fn append_prune_deletes_for_scope(
     specs: &mut Vec<PushRefSpec>,
     ctx: &PushPlanContext,
     scope: &RefspecItem,
+    negatives: &[RefspecItem],
 ) {
     let patterns = prune_destination_patterns(scope);
     if patterns.is_empty() {
@@ -492,6 +555,12 @@ fn append_prune_deletes_for_scope(
             continue;
         }
         if specs.iter().any(|s| s.dst == *remote_ref) {
+            continue;
+        }
+        if negatives
+            .iter()
+            .any(|n| prune_dst_excluded_by_negative(n, remote_ref, scope))
+        {
             continue;
         }
         to_delete.push(remote_ref.clone());
@@ -1727,9 +1796,6 @@ fn push_spec_excluded_by_negative(item: &RefspecItem, spec: &PushRefSpec) -> boo
     if !item.negative {
         return false;
     }
-    let Some(pat) = item.src.as_deref() else {
-        return false;
-    };
     let local = spec.src_ref.as_deref().or_else(|| {
         spec.dst
             .starts_with("refs/heads/")
@@ -1738,10 +1804,7 @@ fn push_spec_excluded_by_negative(item: &RefspecItem, spec: &PushRefSpec) -> boo
     let Some(local) = local else {
         return false;
     };
-    if item.pattern {
-        return match_refname_with_pattern(pat, local, pat).is_some();
-    }
-    pat == local || refname_match_one(pat, local)
+    negative_excludes_local_ref(item, local)
 }
 
 fn match_refname_with_pattern(pattern: &str, refname: &str, replacement: &str) -> Option<String> {
