@@ -25,6 +25,15 @@ On a grit hosting server such as [grithub](https://grithub.dev), your work on a 
 
 A branch that has commits here and in your space that the other lacks is left alone and reported as `diverged`: switch to it, run [`grit pull --rebase`](../pull/), and sync again. Nothing is ever force-pushed.
 
+### Shared branches
+
+A branch you [share](../share/) with other people works differently, because each member has their own head of it and only you move yours:
+
+- the other members' heads are fetched too, as `<remote>/shared/<branch>/<user>`, and reported under the branch with how each compares with yours;
+- when another member's head builds on yours, your branch is fast-forwarded to it (to the furthest such head, when they are on one line) and then pushed as your head (`took bob's head, which builds on yours`);
+- when your branch here and your head in your space have diverged (you amended or rebased here), your head is replaced: it is yours alone, and the server keeps the old one in the share's log;
+- a member's head that has diverged from yours is reported, with the command to rebase onto it.
+
 Sync works in a clone. In a [snapshot checkout](../checkout/), send branches with [`grit checkin`](../checkin/) and update with [`grit pull`](../pull/). You need to be signed in to the server ([`grit login`](../auth/)).
 
 ## Options
@@ -62,7 +71,7 @@ Schema: [v1](/schemas/sync/v1.json)
 | `remote` | string | The remote branches are pushed to and pulled from: `origin` when it is your space, else `space`. |
 | `configured` | boolean | Whether this run set the clone up to push to your space. |
 | `target` | object or omitted | The target branch: `name`, `action` (`up_to_date`, `fast_forwarded`, `created`, `ahead` or `diverged`) and `tip`. |
-| `branches` | array | Each active branch: `name`, `action` (`pushed`, `pulled`, `created`, `up_to_date`, `diverged` or `refused`), `tip`, and a `message` for a divergence or refusal. |
+| `branches` | array | Each active branch: `name`, `action` (`pushed`, `pulled`, `created`, `up_to_date`, `diverged` or `refused`), `tip`, a `message` for a divergence or refusal, and for a [shared](../share/) branch `shared`: each other member's head (`user`, `tip`, `relation`: `same`, `ahead`, `behind`, `diverged` or `unknown`). |
 
 ```json
 {

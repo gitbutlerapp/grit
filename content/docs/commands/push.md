@@ -49,6 +49,8 @@ With `--delete`, every positional after the remote names a remote branch or tag 
 
 `--force-with-lease` updates a remote ref only when it still matches the local remote-tracking ref mapped from the push destination (or when the ref is absent if there is no tracking ref). Use `--force-with-lease=<rev>` when pushing exactly one ref to compare against a specific commit. `--force` overwrites the remote ref unconditionally. The two flags cannot be combined.
 
+A branch you [share](../share/) (`branch.<name>.shared` is `true`) is pushed with `--force-with-lease` without your asking: your head of it is yours alone, so replacing it after an amend or rebase is safe, as long as the server's head is still the one you last fetched.
+
 `-u` / `--set-upstream` writes `branch.<name>.remote` and `branch.<name>.merge` for each successfully pushed branch (skipped with `--dry-run`).
 
 `--atomic` requires every ref update in the push to succeed or none are applied, including when a remote update hook rejects one ref. Over SSH, `git://`, and smart HTTP, the server must advertise the `atomic` capability. If it does not, grit fails before sending ref updates or objects; it never falls back to a non-atomic push. This capability check also applies to `--dry-run`.
