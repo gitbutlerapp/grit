@@ -288,11 +288,21 @@ pub fn run(args: &FetchArgs, mode: OutputMode) -> Result<FetchRunOutcome> {
 }
 
 fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
+    run_one_in(&repo, args, mode)
+}
+
+/// Fetch into `repo`, wherever the process is (one remote; `args.all` is
+/// not looked at).
+pub(crate) fn run_one_in(
+    repo: &grit_lib::repo::Repository,
+    args: &FetchArgs,
+    mode: OutputMode,
+) -> Result<FetchOutcome> {
+    let interrupt = crate::interrupt::InterruptCancel::install();
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
-    let head = resolve_head_for_repository(&repo).ok();
+    let head = resolve_head_for_repository(repo).ok();
     let invocation = resolve_fetch_invocation(
         &config,
         args.remote.as_deref(),
@@ -333,7 +343,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         );
     }
     let result = match fetch_once(
-        &repo,
+        repo,
         &config,
         &invocation,
         tags,
@@ -349,7 +359,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         Err(err) => {
             if auth::offer_reauth(&err, url.as_deref().unwrap_or_default())? {
                 fetch_once(
-                    &repo,
+                    repo,
                     &config,
                     &invocation,
                     tags,

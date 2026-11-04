@@ -140,6 +140,54 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "share.add",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "share.list",
+        CommandContract {
+            kind: CommandKind::Query,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "share.accept",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "share.remove",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "share.leave",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "share.revoke",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "slice.list",
         CommandContract {
             kind: CommandKind::Query,
@@ -1008,6 +1056,36 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "clone-remote",
         "sync has no `--dry-run` yet",
+    ),
+    (
+        "share.add",
+        ContractRule::DryRun,
+        "clone-remote",
+        "share add has no `--dry-run` yet",
+    ),
+    (
+        "share.accept",
+        ContractRule::DryRun,
+        "clone-remote",
+        "share accept has no `--dry-run` yet",
+    ),
+    (
+        "share.remove",
+        ContractRule::DryRun,
+        "clone-remote",
+        "share remove has no `--dry-run` yet",
+    ),
+    (
+        "share.leave",
+        ContractRule::DryRun,
+        "clone-remote",
+        "share leave has no `--dry-run` yet",
+    ),
+    (
+        "share.revoke",
+        ContractRule::DryRun,
+        "clone-remote",
+        "share revoke has no `--dry-run` yet",
     ),
     (
         "slice.new",

@@ -22,9 +22,10 @@ use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::config::{set_config_value, ConfigLocation};
+use grit_lib::config::{add_config_value, set_config_value, unset_config_value, ConfigLocation};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::remote::grit_server_auth::{ServerAuthError, ServerUrl};
+use grit_lib::remote::grit_server_share::SHARED_REFS;
 use grit_lib::remote::grit_server_space::{fetch_space, hosted_project, Space};
 use grit_lib::remote::HttpClientFactory as _;
 use grit_lib::repo::Repository;
@@ -114,6 +115,21 @@ pub struct SyncBranch {
     /// Why it was refused, or what to do about a divergence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// For a shared branch: the other members' heads, compared with yours
+    /// afterwards.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub shared: Vec<SharedHead>,
+}
+
+/// Another member's head of a shared branch.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct SharedHead {
+    /// Their user name.
+    pub user: String,
+    /// Their head's tip.
+    pub tip: String,
+    /// How it compares with your branch here.
+    pub relation: crate::commands::share::HeadRelation,
 }
 
 /// What happened to one branch.
@@ -228,6 +244,14 @@ pub(crate) fn ensure_space(
         }
         SPACE_REMOTE.to_owned()
     };
+    if configure_shared(repo, &space_remote, &space.shared)? {
+        configured = true;
+    }
+    for (name, _) in tips(repo, "refs/heads/")? {
+        if is_shared(config, &name) && !space.shared.contains(&name) {
+            unmark_shared(repo, &name)?;
+        }
+    }
     Ok(Some(SpaceSetup {
         server,
         space,
@@ -260,14 +284,128 @@ pub(crate) fn tips(repo: &Repository, prefix: &str) -> Result<BTreeMap<String, O
 }
 
 pub(crate) fn fetch(remote: &str, mode: OutputMode) -> Result<()> {
+    fetch_in(&context::discover()?, remote, mode)
+}
+
+/// Fetch `remote` into `repo`, and the other members' heads of shared
+/// branches when the clone is set up for them.
+pub(crate) fn fetch_in(repo: &Repository, remote: &str, mode: OutputMode) -> Result<()> {
     let args = FetchArgs {
         remote: Some(remote.to_owned()),
         quiet: QuietArgs { quiet: true },
         ..FetchArgs::default()
     };
-    crate::commands::fetch::run(&args, mode)
-        .with_context(|| format!("fetching {remote}"))
-        .map(|_| ())
+    crate::commands::fetch::run_one_in(repo, &args, mode)
+        .with_context(|| format!("fetching {remote}"))?;
+    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
+    let refspec = shared_refspec(remote);
+    if config
+        .get_all(&format!("remote.{remote}.fetch"))
+        .contains(&refspec)
+    {
+        // Other members' heads come and go: drop the ones the server no
+        // longer has.
+        let args = FetchArgs {
+            remote: Some(remote.to_owned()),
+            refspecs: vec![refspec],
+            prune: true,
+            quiet: QuietArgs { quiet: true },
+            ..FetchArgs::default()
+        };
+        crate::commands::fetch::run_one_in(repo, &args, mode)
+            .with_context(|| format!("fetching shared heads from {remote}"))?;
+    }
+    Ok(())
+}
+
+/// The refspec that brings other members' heads of shared branches into
+/// `refs/remotes/<remote>/shared/<branch>/<user>`.
+pub(crate) fn shared_refspec(remote: &str) -> String {
+    format!("+{SHARED_REFS}*:refs/remotes/{remote}/shared/*")
+}
+
+/// The other members' heads of shared branch `branch` fetched from
+/// `remote`: user → tip.
+pub(crate) fn shared_heads(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+) -> Result<BTreeMap<String, ObjectId>> {
+    Ok(
+        tips(repo, &format!("refs/remotes/{remote}/shared/{branch}/"))?
+            .into_iter()
+            .filter(|(user, _)| !user.contains('/'))
+            .collect(),
+    )
+}
+
+/// Set the clone up for shared `branches` of `remote`: fetch the other
+/// members' heads, and mark each branch shared (`branch.<name>.shared`), so
+/// `grit push` replaces your head without `--force`. Whether config changed.
+pub(crate) fn configure_shared(
+    repo: &Repository,
+    remote: &str,
+    branches: &[String],
+) -> Result<bool> {
+    let env = context::environment();
+    let config =
+        ConfigSet::load(&env, Some(repo.git_dir()), true).context("could not load config")?;
+    let mut changed = false;
+    let refspec = shared_refspec(remote);
+    let fetch_key = format!("remote.{remote}.fetch");
+    if !branches.is_empty() && !config.get_all(&fetch_key).contains(&refspec) {
+        add_config_value(
+            ConfigLocation::Local,
+            &env,
+            Some(repo.git_dir()),
+            &fetch_key,
+            &refspec,
+            false,
+        )
+        .with_context(|| format!("adding {refspec} to {fetch_key}"))?;
+        changed = true;
+    }
+    for branch in branches {
+        let key = format!("branch.{branch}.shared");
+        if config.get(&key).as_deref() != Some("true") {
+            set_config_value(
+                ConfigLocation::Local,
+                &env,
+                Some(repo.git_dir()),
+                &key,
+                "true",
+                false,
+            )
+            .with_context(|| format!("setting {key}"))?;
+            changed = true;
+        }
+    }
+    Ok(changed)
+}
+
+/// Mark `branch` no longer shared here.
+pub(crate) fn unmark_shared(repo: &Repository, branch: &str) -> Result<()> {
+    let env = context::environment();
+    let config =
+        ConfigSet::load(&env, Some(repo.git_dir()), true).context("could not load config")?;
+    let key = format!("branch.{branch}.shared");
+    if config.get(&key).is_some() {
+        unset_config_value(
+            ConfigLocation::Local,
+            &env,
+            Some(repo.git_dir()),
+            &key,
+            false,
+        )
+        .with_context(|| format!("unsetting {key}"))?;
+    }
+    Ok(())
+}
+
+/// Whether `branch` is marked shared in `config`.
+pub(crate) fn is_shared(config: &ConfigSet, branch: &str) -> bool {
+    config.get(&format!("branch.{branch}.shared")).as_deref() == Some("true")
 }
 
 /// The branch `HEAD` is on, if any.
@@ -444,10 +582,36 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
     let merged = |oid: ObjectId| -> bool {
         base.is_some_and(|base| is_ancestor(&repo, oid, base).unwrap_or(false))
     };
+    let shared: BTreeSet<&str> = setup.space.shared.iter().map(String::as_str).collect();
     let mut branches = Vec::new();
     let mut to_push = Vec::new();
     for name in names {
-        let (ours, theirs) = (local.get(name).copied(), remote.get(name).copied());
+        let is_shared = shared.contains(name.as_str());
+        let (mut ours, theirs) = (local.get(name).copied(), remote.get(name).copied());
+        let mut pulled_from = None;
+        if let (true, Some(mine)) = (is_shared, ours) {
+            // Another member built on your head: take theirs, the furthest
+            // ahead, when every head ahead of yours is on one line.
+            let ahead: Vec<(String, ObjectId)> = shared_heads(&repo, &setup.remote, name)?
+                .into_iter()
+                .filter(|(_, tip)| *tip != mine && is_ancestor(&repo, mine, *tip).unwrap_or(false))
+                .collect();
+            let furthest = ahead.iter().find(|(_, tip)| {
+                ahead.iter().all(|(_, other)| {
+                    other == tip || is_ancestor(&repo, *other, *tip).unwrap_or(false)
+                })
+            });
+            if let Some((user, tip)) = furthest {
+                fast_forward(
+                    &repo,
+                    name,
+                    &format!("{}/shared/{name}/{user}", setup.remote),
+                    *tip,
+                )?;
+                ours = Some(*tip);
+                pulled_from = Some(user.clone());
+            }
+        }
         let action = match (ours, theirs) {
             (Some(ours), None) if merged(ours) => continue,
             (None, Some(theirs)) if merged(theirs) => continue,
@@ -474,20 +638,30 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
                 to_push.push(name.clone());
                 SyncAction::Pushed
             }
+            // Your head of a shared branch is yours alone: after an amend or
+            // rebase here, replace it (the server keeps the old one in the
+            // share's log).
+            (Some(_), Some(_)) if is_shared => {
+                to_push.push(name.clone());
+                SyncAction::Pushed
+            }
             (Some(_), Some(_)) => SyncAction::Diverged,
             (None, None) => continue,
         };
-        let message = (action == SyncAction::Diverged).then(|| {
-            format!(
+        let message = match (action, &pulled_from) {
+            (SyncAction::Diverged, _) => Some(format!(
                 "{name} and {}/{name} each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again",
                 setup.remote
-            )
-        });
+            )),
+            (_, Some(user)) => Some(format!("took {user}'s head, which builds on yours")),
+            _ => None,
+        };
         branches.push(SyncBranch {
             name: name.clone(),
             action,
             tip: None,
             message,
+            shared: Vec::new(),
         });
     }
 
@@ -499,6 +673,25 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
             branch.message = Some(why.clone());
         }
         branch.tip = local.get(&branch.name).map(ObjectId::to_hex);
+        if shared.contains(branch.name.as_str()) {
+            let ours = local.get(&branch.name).copied();
+            for (user, tip) in shared_heads(&repo, &setup.remote, &branch.name)? {
+                let relation = crate::commands::share::compare(&repo, ours, tip);
+                if relation == crate::commands::share::HeadRelation::Diverged
+                    && branch.message.is_none()
+                {
+                    branch.message = Some(format!(
+                        "{user}'s head and yours have diverged: rebase onto theirs with `grit rebase {}/shared/{}/{user}` (or have them rebase onto yours), then sync",
+                        setup.remote, branch.name
+                    ));
+                }
+                branch.shared.push(SharedHead {
+                    user,
+                    tip: tip.to_hex(),
+                    relation,
+                });
+            }
+        }
     }
 
     Ok(SyncOutcome {
@@ -557,6 +750,15 @@ impl HumanRender for SyncOutcome {
             if let Some(m) = &b.message {
                 outln!(w, "  {m}");
             }
+            for h in &b.shared {
+                outln!(
+                    w,
+                    "  {:<10} {}  {}",
+                    h.user,
+                    short_hex(&h.tip),
+                    h.relation.words()
+                );
+            }
         }
         Ok(())
     }
@@ -577,6 +779,15 @@ impl MarkdownRender for SyncOutcome {
             match &b.message {
                 Some(m) => outln!(w, "- `{}`: {} — {m}", b.name, b.action.word()),
                 None => outln!(w, "- `{}`: {}", b.name, b.action.word()),
+            }
+            for h in &b.shared {
+                outln!(
+                    w,
+                    "  - `{}`'s head `{}`: {}",
+                    h.user,
+                    short_hex(&h.tip),
+                    h.relation.words()
+                );
             }
         }
         Ok(())

@@ -47,6 +47,7 @@ pub mod revs;
 pub mod rm;
 pub mod serve;
 pub mod serve_http;
+pub mod share;
 pub mod shortlog;
 pub mod show;
 pub mod skill;

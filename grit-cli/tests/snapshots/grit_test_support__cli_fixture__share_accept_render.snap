@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "✓ Joined feature, shared by alice\n  your copy  bob/widget\n  cloned to  /home/bob/widget\nSwitch to it with `grit switch feature`; push your head with `grit push`, and `grit sync` brings the others' in.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"status\":\"accepted\",\"branch\":\"feature\",\"sharer\":\"alice\",\"origin\":\"alice/widget\",\"project\":\"bob/widget\",\"url\":\"https://grithub.dev/bob/widget.git\",\"path\":\"/home/bob/widget\",\"cloned\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Share `feature`\n\n- **status**: accepted\n- **shared by**: `alice`\n- **your copy**: `bob/widget`\n- **cloned to**: `/home/bob/widget`\n\nNext: `grit switch feature`, commit, `grit push`; `grit sync` brings in the other members' heads.\n",
+    "stderr": ""
+  }
+}

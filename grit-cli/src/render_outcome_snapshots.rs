@@ -483,12 +483,15 @@ fn serve_render() {
 /// branches pushed, pulled, created, and one diverged.
 #[test]
 fn sync_render() {
+    use crate::commands::share::HeadRelation;
+    use crate::commands::sync::SharedHead;
     use crate::commands::sync::{SyncAction, SyncBranch, SyncOutcome, SyncTarget, TargetAction};
     let branch = |name: &str, action, tip: &str, message: Option<&str>| SyncBranch {
         name: name.to_owned(),
         action,
         tip: Some(tip.to_owned()),
         message: message.map(str::to_owned),
+        shared: Vec::new(),
     };
     let outcome = SyncOutcome {
         space: "alice/widget".to_owned(),
@@ -510,7 +513,117 @@ fn sync_render() {
                 "2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a",
                 Some("spike and space/spike each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again"),
             ),
+            SyncBranch {
+                shared: vec![
+                    SharedHead {
+                        user: "bob".to_owned(),
+                        tip: "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e".to_owned(),
+                        relation: HeadRelation::Same,
+                    },
+                    SharedHead {
+                        user: "carol".to_owned(),
+                        tip: "8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d".to_owned(),
+                        relation: HeadRelation::Diverged,
+                    },
+                ],
+                ..branch(
+                    "pairing",
+                    SyncAction::Pulled,
+                    "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e",
+                    Some("took bob's head, which builds on yours"),
+                )
+            },
         ],
     };
     snapshot_modes("sync_render", &outcome);
+}
+
+/// `grit share`: sharing a branch with a link, listing it with each
+/// member's head, and accepting a link.
+#[test]
+fn share_render() {
+    use crate::commands::share::{
+        HeadRelation, ShareAcceptOutcome, ShareBranchJson, ShareLinkJson, ShareMemberJson,
+        ShareOutcome,
+    };
+    let member = |user: &str, you: bool, head: Option<&str>, relation| ShareMemberJson {
+        user: user.to_owned(),
+        sharer: user == "alice",
+        you,
+        head: head.map(str::to_owned),
+        project: head.map(|_| format!("{user}/widget")),
+        relation,
+    };
+    let share = ShareBranchJson {
+        branch: "feature".to_owned(),
+        origin: "alice/widget".to_owned(),
+        sharer: "alice".to_owned(),
+        state: "active".to_owned(),
+        mode: "full".to_owned(),
+        base_branch: Some("main".to_owned()),
+        members: vec![
+            member(
+                "alice",
+                true,
+                Some("538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8"),
+                None,
+            ),
+            member(
+                "bob",
+                false,
+                Some("1c3e9a0b2d4f6a8c0e2b4d6f8a0c2e4b6d8f0a2c"),
+                Some(HeadRelation::Ahead),
+            ),
+            member(
+                "carol",
+                false,
+                Some("2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a"),
+                Some(HeadRelation::Diverged),
+            ),
+            member("dave", false, None, None),
+        ],
+        links: vec![ShareLinkJson {
+            id: "12".to_owned(),
+            url: None,
+            uses_left: Some(1),
+            expires_at: "2026-11-11T12:00:00Z".to_owned(),
+        }],
+        url: "https://grithub.dev/alice/widget".to_owned(),
+    };
+    let added = ShareOutcome {
+        action: "add".to_owned(),
+        project: "alice/widget".to_owned(),
+        shares: vec![share.clone()],
+        link: Some(ShareLinkJson {
+            id: "12".to_owned(),
+            url: Some("https://grithub.dev/share/0f3a9c".to_owned()),
+            uses_left: Some(1),
+            expires_at: "2026-11-11T12:00:00Z".to_owned(),
+        }),
+        added: vec!["dave".to_owned()],
+        removed: Vec::new(),
+        pushed: true,
+    };
+    snapshot_modes("share_add_render", &added);
+    let listed = ShareOutcome {
+        action: "list".to_owned(),
+        project: "alice/widget".to_owned(),
+        shares: vec![share],
+        link: None,
+        added: Vec::new(),
+        removed: Vec::new(),
+        pushed: false,
+    };
+    snapshot_modes("share_render", &listed);
+    let accepted = ShareAcceptOutcome {
+        status: "accepted".to_owned(),
+        branch: "feature".to_owned(),
+        sharer: "alice".to_owned(),
+        origin: "alice/widget".to_owned(),
+        project: "bob/widget".to_owned(),
+        url: "https://grithub.dev/bob/widget.git".to_owned(),
+        path: Some("/home/bob/widget".to_owned()),
+        cloned: true,
+    };
+    snapshot_modes("share_accept_render", &accepted);
 }

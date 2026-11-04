@@ -121,6 +121,10 @@ pub struct StatusOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub warnings: Vec<crate::diagnostics::WarningRecord>,
+    /// When the branch is shared (`grit share`): the other members' heads, as last fetched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub shared: Option<StatusSharedJson>,
 
     // Human-only state, not part of the JSON schema.
     #[serde(skip)]
@@ -255,6 +259,108 @@ fn operation_json(op: &grit_lib::state::Operation) -> OperationJson {
     }
 }
 
+/// A shared branch's other heads in `grit status`.
+#[derive(Serialize, JsonSchema)]
+pub struct StatusSharedJson {
+    /// The remote they were fetched from.
+    pub remote: String,
+    /// Each other member's head, compared with this branch.
+    pub heads: Vec<crate::commands::sync::SharedHead>,
+}
+
+/// The other members' heads of `branch`, when it is shared here.
+fn shared_status(repo: &grit_lib::repo::Repository, branch: &str) -> Option<StatusSharedJson> {
+    let config = grit_lib::config::ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        true,
+    )
+    .ok()?;
+    if !crate::commands::sync::is_shared(&config, branch) {
+        return None;
+    }
+    let ours = grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{branch}")).ok();
+    let mut remotes: Vec<String> = config
+        .get(&format!("branch.{branch}.remote"))
+        .into_iter()
+        .collect();
+    remotes.push(crate::commands::sync::SPACE_REMOTE.to_owned());
+    remotes.push("origin".to_owned());
+    for remote in remotes {
+        let heads = crate::commands::sync::shared_heads(repo, &remote, branch).ok()?;
+        if heads.is_empty() {
+            continue;
+        }
+        return Some(StatusSharedJson {
+            heads: heads
+                .into_iter()
+                .map(|(user, tip)| crate::commands::sync::SharedHead {
+                    relation: crate::commands::share::compare(repo, ours, tip),
+                    user,
+                    tip: tip.to_hex(),
+                })
+                .collect(),
+            remote,
+        });
+    }
+    Some(StatusSharedJson {
+        remote: "origin".to_owned(),
+        heads: Vec::new(),
+    })
+}
+
+impl StatusSharedJson {
+    fn render_human(&self, w: &mut dyn Write) -> Result<()> {
+        if self.heads.is_empty() {
+            outln!(w, "  shared; nobody else has pushed a head yet");
+            return Ok(());
+        }
+        let names: Vec<&str> = self.heads.iter().map(|h| h.user.as_str()).collect();
+        outln!(w, "  shared with {}", names.join(", "));
+        let width = names.iter().map(|n| n.len()).max().unwrap_or(0);
+        for h in &self.heads {
+            let hint = match h.relation {
+                crate::commands::share::HeadRelation::Ahead => "   grit sync",
+                _ => "",
+            };
+            outln!(
+                w,
+                "    {:<width$}  {}  {}{hint}",
+                h.user,
+                grit_lib::objects::short_hex(&h.tip),
+                h.relation.words()
+            );
+        }
+        Ok(())
+    }
+
+    fn render_markdown(&self, w: &mut dyn Write) -> Result<()> {
+        outln!(w);
+        if self.heads.is_empty() {
+            outln!(w, "Shared; nobody else has pushed a head yet.");
+            return Ok(());
+        }
+        outln!(
+            w,
+            "Shared. The other members' heads, from `{}`:",
+            self.remote
+        );
+        outln!(w);
+        outln!(w, "| Member | Head | Compared with yours |");
+        outln!(w, "| --- | --- | --- |");
+        for h in &self.heads {
+            outln!(
+                w,
+                "| `{}` | `{}` | {} |",
+                h.user,
+                grit_lib::objects::short_hex(&h.tip),
+                h.relation.words()
+            );
+        }
+        Ok(())
+    }
+}
+
 /// Upstream ahead/behind in `--json` / `--markdown` output.
 #[derive(Serialize, JsonSchema)]
 pub struct StatusUpstreamJson {
@@ -284,6 +390,9 @@ impl HumanRender for StatusOutcome {
             outln!(w);
         }
         self.render_header(w, ctx)?;
+        if let Some(shared) = &self.shared {
+            shared.render_human(w)?;
+        }
         self.render_changes(w)?;
         self.render_hints(w)?;
         self.render_stash_footer(w)?;
@@ -309,6 +418,9 @@ impl MarkdownRender for StatusOutcome {
             outln!(w);
         }
         self.render_markdown_header(w, ctx)?;
+        if let Some(shared) = &self.shared {
+            shared.render_markdown(w)?;
+        }
         self.render_markdown_changes(w)?;
         self.render_markdown_hints(w)?;
         self.render_stash_footer(w)?;
@@ -1065,7 +1177,11 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         .oid()
         .map(|oid| abbreviate_for_display(&repo, *oid, true))
         .transpose()?;
+    let shared = branch
+        .as_deref()
+        .and_then(|branch| shared_status(&repo, branch));
     Ok(StatusOutcome {
+        shared,
         warnings: sink.warnings(),
         branch,
         detached: matches!(model.head, HeadState::Detached { .. }),

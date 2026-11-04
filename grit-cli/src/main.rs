@@ -794,6 +794,58 @@ enum SliceAction {
     },
 }
 
+/// Subcommands of `grit share`.
+#[derive(Debug, Subcommand)]
+enum ShareAction {
+    /// Share a branch of your space with people, or make a share link.
+    Add {
+        /// The branch (pushed to your space first when it isn't there yet).
+        branch: String,
+        /// User names to share it with; each is emailed.
+        #[arg(value_name = "USER")]
+        users: Vec<String>,
+        /// Make a share link anyone signed in can accept.
+        #[arg(long)]
+        link: bool,
+        /// How many times the link can be accepted: a number, or `unlimited` (default 1).
+        #[arg(long, value_name = "N", requires = "link")]
+        uses: Option<String>,
+        /// How many days the link works, up to 30 (default 7).
+        #[arg(long, value_name = "DAYS", requires = "link")]
+        expires: Option<u32>,
+    },
+    /// List your shared branches, and where each member's head is.
+    List {
+        /// Only this branch.
+        branch: Option<String>,
+    },
+    /// Accept a share link, and fetch the branch (or clone your copy).
+    Accept {
+        /// The link, `https://<server>/share/<token>`.
+        link: String,
+    },
+    /// Remove people from a shared branch, or end its share when you name nobody.
+    Remove {
+        /// The shared branch.
+        branch: String,
+        /// User names to remove.
+        #[arg(value_name = "USER")]
+        users: Vec<String>,
+    },
+    /// Leave a shared branch; your head stays a branch in your space.
+    Leave {
+        /// The shared branch.
+        branch: String,
+    },
+    /// Revoke a share link.
+    Revoke {
+        /// The shared branch.
+        branch: String,
+        /// The link's id, from `grit share list`.
+        link: String,
+    },
+}
+
 /// Subcommands of `grit serve`.
 #[derive(Debug, Subcommand)]
 enum ServeAction {
@@ -890,6 +942,11 @@ enum Command {
     },
     /// Push and pull every active branch between this clone and your space on the server (grithub).
     Sync,
+    /// Work on a branch together with other users of the server: each has their own head of it.
+    Share {
+        #[command(subcommand)]
+        action: ShareAction,
+    },
     /// Named sets of paths to check out together, kept on the server's target branch.
     Slice {
         #[command(subcommand)]
@@ -2565,6 +2622,7 @@ fn talks_to_remotes(command: &Command) -> bool {
             | Command::Checkin { .. }
             | Command::Integrate { .. }
             | Command::Sync
+            | Command::Share { .. }
             | Command::Slice { .. }
     )
 }
@@ -2811,6 +2869,38 @@ fn dispatch(
             emit_success(outcome, opts, ctx)?;
             Ok(status)
         }
+        Command::Share { action } => match action {
+            ShareAction::Add {
+                branch,
+                users,
+                link,
+                uses,
+                expires,
+            } => emit_success(
+                commands::share::add(&branch, &users, link, uses.as_deref(), expires, opts.mode)?,
+                opts,
+                ctx,
+            ),
+            ShareAction::List { branch } => emit_success(
+                commands::share::list(branch.as_deref(), opts.mode)?,
+                opts,
+                ctx,
+            ),
+            ShareAction::Accept { link } => {
+                emit_success(commands::share::accept(&link, opts.mode)?, opts, ctx)
+            }
+            ShareAction::Remove { branch, users } => emit_success(
+                commands::share::remove(&branch, &users, opts.mode)?,
+                opts,
+                ctx,
+            ),
+            ShareAction::Leave { branch } => {
+                emit_success(commands::share::leave(&branch, opts.mode)?, opts, ctx)
+            }
+            ShareAction::Revoke { branch, link } => {
+                emit_success(commands::share::revoke(&branch, &link)?, opts, ctx)
+            }
+        },
         Command::Slice { action, url } => match action {
             SliceAction::List => emit_success(commands::slice::list(url.as_deref())?, opts, ctx),
             SliceAction::New {
@@ -4659,6 +4749,7 @@ mod tests {
         ("checkin", "checkin_render"),
         ("checkout", "checkout_render"),
         ("integrate", "integrate_render"),
+        ("share", "share_render"),
         ("slice", "slice_render"),
         ("sync", "sync_render"),
         ("serve", "serve_render"),

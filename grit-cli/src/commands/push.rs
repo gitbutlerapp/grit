@@ -273,7 +273,29 @@ pub fn run(
         set_upstream,
     };
 
-    let plan = resolve_push(&repo, &config, &push_request, &plan_ctx).map_err(plan_error)?;
+    let mut plan = resolve_push(&repo, &config, &push_request, &plan_ctx).map_err(plan_error)?;
+    // Your head of a shared branch is yours alone (grit share): replacing it
+    // after an amend or rebase needs no --force, only that it still be the
+    // head this clone last fetched.
+    for spec in plan.specs.iter_mut() {
+        let shared = spec
+            .dst
+            .strip_prefix("refs/heads/")
+            .is_some_and(|b| crate::commands::sync::is_shared(&config, b));
+        if shared && !spec.force && !spec.delete {
+            // A clone of an organization's project pushes `origin` to your
+            // space (its pushurl), which the `space` remote fetches.
+            let space = crate::commands::sync::SPACE_REMOTE;
+            let pushurl = config.get(&format!("remote.{}.pushurl", plan.remote));
+            let tracking =
+                if pushurl.is_some() && pushurl == config.get(&format!("remote.{space}.url")) {
+                    space
+                } else {
+                    plan.remote.as_str()
+                };
+            grit_lib::remote::push_plan::apply_tracking_lease(&repo, &config, tracking, spec);
+        }
+    }
 
     let wire = PushWireOptions {
         dry_run,
