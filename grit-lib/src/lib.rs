@@ -204,6 +204,7 @@ pub(crate) mod git_dir;
 pub mod gitbutler;
 pub(crate) mod github_auth;
 pub(crate) mod grit_server_auth;
+pub(crate) mod grit_server_share;
 pub(crate) mod grit_server_space;
 pub(crate) mod line_interner;
 pub mod line_range;

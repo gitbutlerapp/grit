@@ -55,6 +55,12 @@ pub struct Space {
     /// pushed to it.
     #[serde(default)]
     pub followed: Vec<String>,
+    /// Branches of the space shared with other users
+    /// ([`crate::grit_server_share`]): each member's head is theirs alone, so
+    /// a push replaces it without `--force`, and the other members' heads
+    /// are fetched from `refs/shared/<branch>/<user>`.
+    #[serde(default)]
+    pub shared: Vec<String>,
     /// Whether the user may integrate into the target.
     pub can_integrate: bool,
     /// Whether this request made the copy.

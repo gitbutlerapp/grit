@@ -1241,7 +1241,10 @@ fn apply_force_mode(
     Ok(())
 }
 
-fn apply_tracking_lease(
+/// Let `spec` replace the remote ref when it still holds what this clone's
+/// remote-tracking ref for it says (`--force-with-lease` for one ref), or
+/// is absent when there is none.
+pub fn apply_tracking_lease(
     repo: &Repository,
     config: &ConfigSet,
     remote: &str,
