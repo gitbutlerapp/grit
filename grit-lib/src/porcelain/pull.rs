@@ -512,7 +512,7 @@ where
     let merge_in_progress =
         || crate::state::read_merge_heads(repo.git_dir()).is_ok_and(|heads| !heads.is_empty());
     let merge_was_in_progress = merge_in_progress();
-    let stash_oid = if autostash {
+    let stash_oid = if autostash && head_oid.is_some() {
         push_operation_autostash(repo, &checkout_reflog_identity(repo))
             .map_err(PullError::Repository)?
     } else {
@@ -1424,6 +1424,114 @@ mod tests {
         assert_eq!(
             git(&local, &["reflog", "show", "--format=%H %gs", "-1", "main"]),
             format!("{} {INITIAL_PULL_REFLOG}", tip.to_hex())
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn pull_unborn_branch_skips_autostash_with_cli_flag() {
+        let tmp = TempDir::new().expect("tempdir");
+        let origin = tmp.path().join("origin");
+        std::fs::create_dir_all(&origin).expect("mkdir origin");
+        git(&origin, &["init", "-q", "-b", "main"]);
+        let tip = commit(&origin, "a.txt", "one");
+        let local = tmp.path().join("local");
+        std::fs::create_dir_all(&local).expect("mkdir local");
+        git(&local, &["init", "-q", "-b", "main"]);
+        git(&local, &["remote", "add", "origin", "../origin"]);
+
+        let repo = open(&local);
+        let mut options = pull_options(&repo);
+        options.autostash = true;
+        let outcome = pull(&repo, &options, &mut NoProgress, &NeverCancel, None)
+            .expect("pull with --autostash on unborn branch");
+        assert_eq!(outcome.result, PullResult::SetUpstream);
+        assert_eq!(outcome.oid, Some(tip));
+        assert!(
+            git_output(&local, &["rev-parse", "refs/stash"])
+                .status
+                .code()
+                == Some(128),
+            "autostash must not create refs/stash without a commit"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn pull_unborn_branch_skips_autostash_from_config() {
+        let tmp = TempDir::new().expect("tempdir");
+        let origin = tmp.path().join("origin");
+        std::fs::create_dir_all(&origin).expect("mkdir origin");
+        git(&origin, &["init", "-q", "-b", "main"]);
+        let tip = commit(&origin, "a.txt", "one");
+        let local = tmp.path().join("local");
+        std::fs::create_dir_all(&local).expect("mkdir local");
+        git(&local, &["init", "-q", "-b", "main"]);
+        git(&local, &["remote", "add", "origin", "../origin"]);
+        git(&local, &["config", "rebase.autoStash", "true"]);
+        git(&local, &["config", "pull.rebase", "true"]);
+
+        let repo = open(&local);
+        let outcome = pull(
+            &repo,
+            &pull_options(&repo),
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
+        .expect("pull with rebase.autoStash on unborn branch");
+        assert_eq!(outcome.result, PullResult::SetUpstream);
+        assert_eq!(outcome.oid, Some(tip));
+        assert!(
+            git_output(&local, &["rev-parse", "refs/stash"])
+                .status
+                .code()
+                == Some(128),
+            "config autostash must not run without a commit"
+        );
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn pull_unborn_branch_with_autostash_still_refuses_overlapping_paths() {
+        let tmp = TempDir::new().expect("tempdir");
+        let origin = tmp.path().join("origin");
+        std::fs::create_dir_all(&origin).expect("mkdir origin");
+        git(&origin, &["init", "-q", "-b", "main"]);
+        commit(&origin, "a.txt", "upstream");
+        let local = tmp.path().join("local");
+        std::fs::create_dir_all(&local).expect("mkdir local");
+        git(&local, &["init", "-q", "-b", "main"]);
+        git(&local, &["remote", "add", "origin", "../origin"]);
+        std::fs::write(local.join("a.txt"), "local\n").expect("write");
+
+        let repo = open(&local);
+        let mut options = pull_options(&repo);
+        options.autostash = true;
+        let err = pull(&repo, &options, &mut NoProgress, &NeverCancel, None)
+            .expect_err("checkout collision");
+        assert!(
+            matches!(
+                &err,
+                PullError::Repository(Error::WouldOverwrite { paths, .. }) if paths == &["a.txt"]
+            ),
+            "{err:?}"
+        );
+        assert!(
+            git_output(&local, &["rev-parse", "refs/stash"])
+                .status
+                .code()
+                == Some(128),
+            "must not stash when HEAD is unborn"
         );
     }
 

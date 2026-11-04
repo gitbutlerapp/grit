@@ -449,6 +449,66 @@ fn pull_unborn_adoption_matches_git() {
 }
 
 #[test]
+fn pull_unborn_adoption_with_autostash_matches_git() {
+    let root = unique_tmp("pull-git", "unborn-autostash");
+    let origin = root.join("origin");
+    fs::create_dir_all(&origin).expect("origin");
+    git(&origin, &["init", "-q", "-b", "main"]);
+    commit(&origin, "f", "seed");
+
+    let grit_dir = root.join("grit");
+    fs::create_dir_all(&grit_dir).expect("grit dir");
+    git(&grit_dir, &["init", "-q", "-b", "main"]);
+    git(
+        &grit_dir,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    git(&grit_dir, &["config", "branch.main.remote", "origin"]);
+    git(
+        &grit_dir,
+        &["config", "branch.main.merge", "refs/heads/main"],
+    );
+    git(&grit_dir, &["config", "rebase.autoStash", "true"]);
+    git(&grit_dir, &["config", "pull.rebase", "true"]);
+    grit_identity(&grit_dir);
+
+    let git_dir = root.join("git");
+    fs::create_dir_all(&git_dir).expect("git dir");
+    git(&git_dir, &["init", "-q", "-b", "main"]);
+    git(
+        &git_dir,
+        &["remote", "add", "origin", origin.to_str().unwrap()],
+    );
+    git(&git_dir, &["config", "branch.main.remote", "origin"]);
+    git(
+        &git_dir,
+        &["config", "branch.main.merge", "refs/heads/main"],
+    );
+    git(&git_dir, &["config", "rebase.autoStash", "true"]);
+    git(&git_dir, &["config", "pull.rebase", "true"]);
+    grit_identity(&git_dir);
+
+    let repo = open(&grit_dir);
+    let outcome = pull_grit(
+        &repo,
+        &PullOptions {
+            autostash: true,
+            fetch: fetch_opts(&Environment::empty()),
+            ..PullOptions::default()
+        },
+    );
+    assert_eq!(outcome.result, PullResult::SetUpstream);
+    assert!(resolve_head(repo.git_dir()).expect("head").oid().is_some());
+    git_allow_fail(&grit_dir, &["rev-parse", "refs/stash"]);
+
+    git(&git_dir, &["pull", "-q", "--autostash"]);
+    git_allow_fail(&git_dir, &["rev-parse", "refs/stash"]);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    git_fsck(&grit_dir, false);
+    git_fsck(&git_dir, false);
+}
+
+#[test]
 fn pull_explicit_remote_branch_via_fetch_head() {
     let root = unique_tmp("pull-git", "explicit-branch");
     let origin = root.join("origin");
