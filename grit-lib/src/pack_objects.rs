@@ -250,6 +250,61 @@ pub enum PackProgress {
     },
 }
 
+/// Forwards [`PackProgress`] to a [`crate::progress::ProgressSink`] while building a pack.
+pub(crate) struct PackBuildProgress<'a> {
+    sink: &'a mut dyn crate::progress::ProgressSink,
+    copying_started: bool,
+    write_total: usize,
+    written: usize,
+}
+
+impl<'a> PackBuildProgress<'a> {
+    /// Create a reporter writing to `sink`.
+    pub fn new(sink: &'a mut dyn crate::progress::ProgressSink) -> Self {
+        Self {
+            sink,
+            copying_started: false,
+            write_total: 0,
+            written: 0,
+        }
+    }
+
+    /// Apply one pack-build event to the sink.
+    pub fn report(&mut self, ev: PackProgress) {
+        use crate::progress::ProgressPhase;
+        match ev {
+            PackProgress::Enumerated { total } => {
+                self.write_total = total;
+                self.sink
+                    .start(ProgressPhase::EnumeratingObjects, Some(total as u64));
+                self.sink.set(total as u64);
+                self.sink.finish();
+            }
+            PackProgress::PlannedDeltas => {
+                self.sink.start(ProgressPhase::CopyingObjects, None);
+                self.copying_started = true;
+            }
+            PackProgress::WroteObject { written, total } => {
+                if !self.copying_started {
+                    self.sink
+                        .start(ProgressPhase::CopyingObjects, Some(total as u64));
+                    self.copying_started = true;
+                }
+                self.written = written;
+                self.sink.set(written as u64);
+            }
+        }
+    }
+
+    /// End the copying phase when one was started.
+    pub fn finish_copying(&mut self) {
+        if self.copying_started {
+            self.sink.finish();
+            self.copying_started = false;
+        }
+    }
+}
+
 /// Streaming pack-objects builder over an [`Odb`].
 pub struct PackObjects<'a> {
     odb: &'a Odb,
@@ -499,6 +554,7 @@ pub fn write_pack_for_push(
         opts,
         w,
         &CancelSignal::never(),
+        None,
     )
 }
 
@@ -513,6 +569,7 @@ pub(crate) fn write_pack_for_push_with_cancel(
     opts: &PackBuildOptions,
     w: &mut dyn Write,
     stop: &CancelSignal<'_>,
+    progress: Option<&mut dyn crate::progress::ProgressSink>,
 ) -> Result<PackStats> {
     // One pack read context for the walk, the reuse scan and the write, so the
     // source packs are mapped and indexed once rather than once per phase.
@@ -529,6 +586,7 @@ pub(crate) fn write_pack_for_push_with_cancel(
             &[],
             w,
             stop,
+            progress,
         )
     })
 }
@@ -582,6 +640,7 @@ fn build_pack_with_shallow_filter_and_boundary(
         &[],
         &mut pack,
         &CancelSignal::never(),
+        None,
     )?;
     Ok(pack)
 }
@@ -601,6 +660,7 @@ fn write_pack_with_shallow_and_filter(
     include_tags: &[TagCandidate],
     w: &mut dyn Write,
     stop: &CancelSignal<'_>,
+    progress: Option<&mut dyn crate::progress::ProgressSink>,
 ) -> Result<PackStats> {
     let mut selection = crate::pack_object_select::enumerate_pack_objects_naming(
         odb,
@@ -620,7 +680,7 @@ fn write_pack_with_shallow_and_filter(
         stop,
     )?;
     append_included_tags(odb, &mut selection.send, include_tags)?;
-    write_selected_pack(odb, &selection, opts, w, stop)
+    write_selected_pack(odb, &selection, opts, w, stop, progress)
 }
 
 /// Write a pack holding exactly `selection.send`, searching for deltas when `opts`
@@ -631,11 +691,26 @@ fn write_selected_pack(
     opts: &PackBuildOptions,
     w: &mut dyn Write,
     stop: &CancelSignal<'_>,
+    progress: Option<&mut dyn crate::progress::ProgressSink>,
 ) -> Result<PackStats> {
+    let mut reporter = progress.map(PackBuildProgress::new);
+    if let Some(r) = reporter.as_mut() {
+        r.report(PackProgress::Enumerated {
+            total: selection.send.len(),
+        });
+    }
     if !opts.delta {
         let bytes = serialize_pack(odb, &selection.send, opts)?;
         stop.poll()?;
         w.write_all(&bytes).map_err(Error::Io)?;
+        if let Some(r) = reporter.as_mut() {
+            r.report(PackProgress::PlannedDeltas);
+            r.report(PackProgress::WroteObject {
+                written: selection.send.len(),
+                total: selection.send.len(),
+            });
+            r.finish_copying();
+        }
         return Ok(PackStats {
             object_count: u32::try_from(selection.send.len()).unwrap_or(u32::MAX),
             pack_bytes: bytes.len() as u64,
@@ -652,7 +727,46 @@ fn write_selected_pack(
         None,
         stop,
     )?;
-    crate::pack_delta::write_pack_with_deltas(odb, &plan.entries, opts, None, w, None, stop, None)
+    if let Some(r) = reporter.as_mut() {
+        r.report(PackProgress::PlannedDeltas);
+    }
+    let total = selection.send.len();
+    let stats = if reporter.is_some() {
+        let mut on_objects = |batch: u64| {
+            if let Some(r) = reporter.as_mut() {
+                r.written = r.written.saturating_add(batch as usize);
+                r.report(PackProgress::WroteObject {
+                    written: r.written,
+                    total,
+                });
+            }
+        };
+        crate::pack_delta::write_pack_with_deltas(
+            odb,
+            &plan.entries,
+            opts,
+            None,
+            w,
+            None,
+            stop,
+            Some(&mut on_objects),
+        )?
+    } else {
+        crate::pack_delta::write_pack_with_deltas(
+            odb,
+            &plan.entries,
+            opts,
+            None,
+            w,
+            None,
+            stop,
+            None,
+        )?
+    };
+    if let Some(r) = reporter.as_mut() {
+        r.finish_copying();
+    }
+    Ok(stats)
 }
 
 /// Stream a pack for upload-pack: pack reuse when bitmaps allow, otherwise pack-objects.
@@ -769,6 +883,7 @@ fn write_upload_pack_stream_in_context(
         include_tags,
         w,
         stop,
+        None,
     )
 }
 
@@ -822,7 +937,7 @@ pub(crate) fn write_upload_pack_selection(
     stop: &CancelSignal<'_>,
 ) -> Result<PackStats> {
     repo.odb()
-        .with_pack_read_context(|| write_selected_pack(repo.odb(), selection, opts, w, stop))
+        .with_pack_read_context(|| write_selected_pack(repo.odb(), selection, opts, w, stop, None))
 }
 
 fn write_pack_header(w: &mut dyn Write, count: u32) -> Result<()> {

@@ -54,6 +54,8 @@ pub enum ProgressPhase {
     /// any bytes an earlier run already moved; the detailed events go to
     /// [`crate::fetch::Progress::resumable_transfer`].
     TransferringBundle,
+    /// Streaming a pack to a remote during push (counted in bytes).
+    SendingObjects,
 }
 
 impl ProgressPhase {
@@ -67,7 +69,7 @@ impl ProgressPhase {
             | Self::ResolvingDeltas
             | Self::CopyingObjects => ProgressUnit::Objects,
             Self::CheckingOutFiles | Self::StagingFiles => ProgressUnit::Files,
-            Self::TransferringBundle => ProgressUnit::Bytes,
+            Self::TransferringBundle | Self::SendingObjects => ProgressUnit::Bytes,
         }
     }
 }

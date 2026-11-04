@@ -20,9 +20,11 @@ use crate::commands::fetch::map_remote_error;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use crate::quiet_args::QuietArgs;
 use grit_lib::progress::Cancel;
+use grit_lib::remote::transfer::TransferStats;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
 #[derive(Serialize, JsonSchema)]
@@ -55,6 +57,10 @@ pub struct PushOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub shared: Vec<PushSharedBranch>,
+    /// Pack build and send timing, for the human summary after ref results.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub transfer: TransferSummary,
 }
 
 /// A shared branch a push replaced your head of.
@@ -235,6 +241,10 @@ impl HumanRender for PushOutcome {
                 }
             }
         }
+        if self.transfer.received_anything() {
+            outln!(w);
+            self.transfer.render_rows(w, stdout_color())?;
+        }
         Ok(())
     }
 }
@@ -369,7 +379,21 @@ pub fn run(
         no_verify,
     };
     let interrupt = crate::interrupt::InterruptCancel::install();
-    let mut progress = quiet.progress(mode);
+    let mut progress = quiet.progress(mode).with_overall(false);
+    let url = config
+        .get(&format!("remote.{}.url", plan.remote))
+        .or_else(|| shorthand_url.clone());
+    if progress.is_drawing() {
+        eprintln!(
+            "{}",
+            transfer_header(
+                "Pushing",
+                &plan.remote,
+                url.as_deref(),
+                progress.uses_color()
+            )
+        );
+    }
     let report = match push_once(
         &repo,
         &config,
@@ -515,6 +539,13 @@ pub fn run(
         }
     }
 
+    let mut transfer = TransferSummary::new(
+        push_transfer_stats(progress.phases()),
+        progress.phases().to_vec(),
+        progress.elapsed(),
+    );
+    transfer.transfer_sent = true;
+
     Ok(PushOutcome {
         remote: plan.remote,
         kind: plan.kind.into(),
@@ -526,11 +557,34 @@ pub fn run(
         origin_added,
         remote_messages: report.remote_messages,
         shared,
+        transfer,
     })
 }
 
 fn plan_error(err: PushPlanError) -> anyhow::Error {
     anyhow::Error::new(err)
+}
+
+fn push_transfer_stats(records: &[crate::progress::PhaseRecord]) -> TransferStats {
+    use grit_lib::progress::{ProgressPhase, ProgressUnit};
+    let mut objects = 0u64;
+    let mut bytes = 0u64;
+    for rec in records {
+        match (rec.phase, rec.unit) {
+            (ProgressPhase::CopyingObjects, ProgressUnit::Objects) => {
+                objects = objects.max(rec.count);
+            }
+            (ProgressPhase::SendingObjects, ProgressUnit::Bytes) => {
+                bytes = bytes.max(rec.count);
+            }
+            _ => {}
+        }
+    }
+    TransferStats {
+        objects,
+        bytes,
+        kinds: None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -609,6 +663,7 @@ mod tests {
                 origin_added: None,
                 remote_messages: Vec::new(),
                 shared: Vec::new(),
+                transfer: TransferSummary::default(),
             };
             let mut out = Vec::new();
             outcome.render_human(&mut out, &ctx).expect("render");

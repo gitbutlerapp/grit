@@ -61,6 +61,8 @@ A branch you [share](../share/) (`branch.<name>.shared` is `true`) is pushed wit
 
 In human output, messages the remote sends while it processes the push (hook output, CI links, policy text) are shown on stderr as `remote: …` lines, including when stderr is not a terminal. `-q` / `--quiet` hides them and the human summary, so a successful push prints nothing; a rejected push is still reported and exits `1`. With `--json` or `--markdown`, the same lines appear in `remote_messages` (omitted when empty).
 
+On a TTY, grit draws live progress on stderr while it builds and streams the pack (enumerating objects, then writing/compressing), then prints a short time/data summary after the ref results when anything was sent — the same style as [`grit fetch`](../fetch/) and [`grit pull`](../pull/). `--json` and `--markdown` omit the live lines and summary; phase timings are not exported in JSON today.
+
 Before anything is sent, grit runs the repository's `pre-push` hook (see [`grit hooks`](../hooks/)) once the remote's current refs are known, on every transport and with `--dry-run` too. The hook gets the remote name (or the URL, for an unnamed remote) and the push URL as arguments, and one line per ref update on stdin, `<local ref> <local oid> <remote ref> <remote oid>`, in Git's format: `(delete)` and a zero object id for deletions, a zero remote object id for new refs, and no line for refs that are up to date or already rejected. If the hook exits non-zero, the push stops, the remote is left untouched and grit exits `1`. The hook's stdout is sent to stderr so `--json` and `--markdown` output stays clean. `--no-verify` skips the hook.
 
 ### Large pushes

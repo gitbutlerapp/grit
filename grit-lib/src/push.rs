@@ -333,7 +333,7 @@ pub(crate) fn push_remote_with(
                 let mut haves: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
                 haves.extend_from_slice(&adv.advertised_haves);
                 match session.write_bundle(local.odb(), &haves, &tips, threshold, |w| {
-                    pack.write_to(local, w, &stop).map(drop)
+                    pack.write_to(local, w, &stop, None).map(drop)
                 })? {
                     crate::push_bundle::Spooled::Bundle => true,
                     crate::push_bundle::Spooled::Small(small) => {
@@ -386,7 +386,10 @@ pub(crate) fn push_remote_with(
         let mut out = std::io::BufWriter::with_capacity(PACK_SEND_BUFFER, conn.writer());
         let sent = match spooled_pack.take() {
             Some(spooled) => spooled.copy_to(&mut out)?,
-            None => pack.write_to(local, &mut out, &stop)?.pack_bytes,
+            None => {
+                pack.write_to(local, &mut out, &stop, Some(&mut sideband))?
+                    .pack_bytes
+            }
         };
         out.flush()?;
         drop(out);
@@ -771,11 +774,14 @@ impl PushPack {
     }
 
     /// Stream the pack to `w`, stopping with [`Error::Cancelled`] once `stop` fires.
+    ///
+    /// Reports pack-build phases to `progress` when provided.
     fn write_to(
         &self,
         local: &Repository,
         w: &mut dyn Write,
         stop: &crate::progress::CancelSignal<'_>,
+        progress: Option<&mut dyn crate::progress::ProgressSink>,
     ) -> Result<PackStats> {
         crate::pack_objects::write_pack_for_push_with_cancel(
             local.odb(),
@@ -786,6 +792,7 @@ impl PushPack {
             &self.opts,
             w,
             stop,
+            progress,
         )
     }
 }
@@ -1453,7 +1460,12 @@ mod tests {
         PushPack::for_plan(plan, repo, adv)?
             .map(|pack| {
                 let mut bytes = Vec::new();
-                pack.write_to(repo, &mut bytes, &crate::progress::CancelSignal::never())?;
+                pack.write_to(
+                    repo,
+                    &mut bytes,
+                    &crate::progress::CancelSignal::never(),
+                    None,
+                )?;
                 Ok(bytes)
             })
             .transpose()

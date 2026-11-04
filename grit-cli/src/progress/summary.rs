@@ -60,6 +60,8 @@ pub struct TransferSummary {
     pub bytes: u64,
     /// Objects received by type, when the pack was indexed locally.
     pub object_types: Option<ObjectTypes>,
+    /// When true, the data row says "sent" instead of "received" (push).
+    pub transfer_sent: bool,
 }
 
 impl TransferSummary {
@@ -73,6 +75,7 @@ impl TransferSummary {
             objects: stats.objects,
             bytes: stats.bytes,
             object_types: stats.kinds.map(ObjectTypes::from),
+            transfer_sent: false,
         }
     }
 
@@ -101,24 +104,36 @@ impl TransferSummary {
         // Report bytes off the wire, as the live Receiving lines did. The stored
         // pack can be larger: a thin fetch pack gets its missing delta bases
         // appended. Local copies have no Receiving phase, so use the pack size.
-        let receiving: Vec<&PhaseRecord> = self
+        let wire_phases = if self.transfer_sent {
+            [ProgressPhase::SendingObjects]
+        } else {
+            [ProgressPhase::ReceivingObjects]
+        };
+        let wire: Vec<&PhaseRecord> = self
             .records
             .iter()
             .filter(|r| {
-                r.phase == ProgressPhase::ReceivingObjects
-                    && r.unit == ProgressUnit::Bytes
-                    && r.count > 0
+                wire_phases.contains(&r.phase) && r.unit == ProgressUnit::Bytes && r.count > 0
             })
             .collect();
-        let wire: u64 = receiving.iter().map(|r| r.count).sum();
-        let received = if wire > 0 { wire } else { self.bytes };
-        if received > 0 {
-            let mut data = vec![format!("{} received", format_bytes(received))];
-            let busy: Duration = receiving.iter().map(|r| r.elapsed).sum();
+        let wire_bytes: u64 = wire.iter().map(|r| r.count).sum();
+        let payload = if wire_bytes > 0 {
+            wire_bytes
+        } else {
+            self.bytes
+        };
+        if payload > 0 {
+            let verb = if self.transfer_sent {
+                "sent"
+            } else {
+                "received"
+            };
+            let mut data = vec![format!("{} {verb}", format_bytes(payload))];
+            let busy: Duration = wire.iter().map(|r| r.elapsed).sum();
             // A small pack can land in one read; its rate would be meaningless.
             if busy >= MIN_TIMED_RECEIVE {
-                let avg = rate(wire, busy);
-                let peak = receiving.iter().map(|r| r.peak_rate).fold(0.0, f64::max);
+                let avg = rate(wire_bytes, busy);
+                let peak = wire.iter().map(|r| r.peak_rate).fold(0.0, f64::max);
                 data.push(format!("{} avg", format_rate(avg)));
                 // Sampling can miss the burst entirely; a peak under the average says nothing.
                 if peak >= avg {
@@ -512,6 +527,7 @@ mod tests {
                 blobs: 734,
                 tags: 0,
             }),
+            transfer_sent: false,
         };
         let mut out = Vec::new();
         summary.render_rows(&mut out, false).expect("render");
@@ -551,6 +567,7 @@ mod tests {
             // The stored pack grew when its delta bases were appended.
             bytes: 3 * 1024 * 1024,
             object_types: None,
+            transfer_sent: false,
         };
         let mut out = Vec::new();
         summary.render_rows(&mut out, false).expect("render");
@@ -588,6 +605,7 @@ mod tests {
             objects: 20,
             bytes: 4 * 1024 * 1024,
             object_types: None,
+            transfer_sent: false,
         };
         let mut out = Vec::new();
         summary.render_rows(&mut out, false).expect("render");
@@ -615,6 +633,7 @@ mod tests {
             objects: 249,
             bytes: 201 * 1024,
             object_types: None,
+            transfer_sent: false,
         };
         let mut out = Vec::new();
         summary.render_rows(&mut out, false).expect("render");
@@ -639,6 +658,7 @@ mod tests {
             objects: 5,
             bytes: 2 * 1024 * 1024,
             object_types: None,
+            transfer_sent: false,
         };
         let mut out = Vec::new();
         summary.render_rows(&mut out, false).expect("render");
@@ -662,6 +682,7 @@ mod tests {
             objects: 3,
             bytes: 293,
             object_types: None,
+            transfer_sent: false,
         };
         let mut out = Vec::new();
         summary.render_rows(&mut out, false).expect("render");
