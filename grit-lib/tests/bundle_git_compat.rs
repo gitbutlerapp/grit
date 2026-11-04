@@ -397,6 +397,51 @@ fn verify_prerequisites_not_connected_when_dangling() {
 }
 
 #[test]
+fn prerequisites_reachable_from_any_ref_are_connected() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    let (c1, c2) = init_repo_with_two_commits(src);
+    let inc = src.join("inc.bundle");
+    git_ok(
+        src,
+        &[
+            "bundle",
+            "create",
+            inc.to_str().unwrap(),
+            &format!("{c1}..{c2}"),
+            "main",
+        ],
+    );
+    git_ok(src, &["branch", "old", &c1.to_hex()]);
+
+    // The prerequisite is reachable only from a ref outside heads, tags
+    // and remotes, as `git bundle verify` accepts (it walks `--all`).
+    let consumer = tempfile::tempdir().expect("consumer");
+    git_ok(
+        consumer.path(),
+        &["init", "-q", "--bare", "-b", "main", "."],
+    );
+    git_ok(
+        consumer.path(),
+        &[
+            "fetch",
+            "-q",
+            src.to_str().unwrap(),
+            "refs/heads/old:refs/pull/1/head",
+        ],
+    );
+    git_ok(consumer.path(), &["bundle", "verify", inc.to_str().unwrap()]);
+
+    let repo = grit_repo(consumer.path());
+    let bundle = Bundle::open(&inc).expect("open");
+    let report = bundle.verify(&repo).expect("verify");
+    assert!(report.is_ok(), "{report:?}");
+    let refs = bundle.unbundle(&repo).expect("unbundle");
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].oid, c2);
+}
+
+#[test]
 fn unbundle_promisor_marks_installed_pack_not_preexisting() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let src = tmp.path();

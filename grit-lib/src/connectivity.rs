@@ -15,16 +15,9 @@ use crate::repo::Repository;
 fn commit_closure_from_all_refs(repo: &Repository) -> Result<HashSet<ObjectId>> {
     let mut seeds = Vec::new();
 
-    for prefix in &[
-        "refs/heads/",
-        "refs/tags/",
-        "refs/remotes/",
-        "refs/bundles/",
-    ] {
-        if let Ok(entries) = refs::list_refs(repo.git_dir(), prefix) {
-            for (_, oid) in entries {
-                seeds.push(oid);
-            }
+    if let Ok(entries) = refs::list_refs(repo.git_dir(), "refs/") {
+        for (_, oid) in entries {
+            seeds.push(oid);
         }
     }
 
@@ -61,8 +54,8 @@ fn commit_closure_from_all_refs(repo: &Repository) -> Result<HashSet<ObjectId>> 
 /// Returns whether every bundle prerequisite commit is already reachable from existing refs.
 ///
 /// Matches Git's `verify_bundle` connectivity check: prerequisite OIDs may exist loose in the ODB
-/// but must still lie in the commit closure of `refs/heads/`, `refs/tags/`, `refs/remotes/`, and
-/// `refs/bundles/` (so dangling objects do not satisfy prerequisites).
+/// but must still lie in the commit closure of the refs under `refs/` (so dangling objects do not
+/// satisfy prerequisites, while a commit only another namespace such as `refs/pull/` keeps does).
 pub fn bundle_prerequisites_connected_to_refs(
     repo: &Repository,
     prerequisites: &[ObjectId],
