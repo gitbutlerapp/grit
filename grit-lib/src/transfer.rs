@@ -1279,7 +1279,7 @@ fn copy_objects_for_local_fetch(
         progress.start(ProgressPhase::EnumeratingObjects, None);
     }
     let mut enum_last = 0u64;
-    let send_set = collect_reachable_excluding_peer(
+    let mut send_set = collect_reachable_excluding_peer(
         remote_odb,
         wants,
         local_odb,
@@ -1382,8 +1382,12 @@ fn copy_objects_for_local_fetch(
 
     let pack_opts = pack_build_options_for_send(remote_odb, &still_missing, pack_build);
     crate::progress::poll_cancel(progress, cancel)?;
-    remote_odb.clear_delta_base_cache();
     let send_oids: HashSet<ObjectId> = send.iter().copied().collect();
+    if !have_shallow.is_empty() {
+        remote_odb.clear_delta_base_cache();
+        send_set.objects.clear();
+        send_set.name_hashes.clear();
+    }
     // Stream the pack into a spool in `objects/pack` rather than memory, as a local push
     // does; a cancelled or failed copy removes the spool.
     let mut spool = crate::pack_receive::TempPackReceive::create_in_pack_dir(local_objects)?;
@@ -2221,11 +2225,7 @@ pub(crate) fn fetch_local_into(
         }
 
         let remote_cfg = config_for_git_dir(remote_git_dir);
-        let pack_opts = if haves.is_empty() && local_shallow.is_empty() {
-            PackBuildOptions::for_local_copy(remote_cfg.as_ref())
-        } else {
-            PackBuildOptions::for_local_fetch(remote_cfg.as_ref())
-        };
+        let pack_opts = PackBuildOptions::for_local_copy(remote_cfg.as_ref());
         let (oids, fetch_transfer) = copy_objects_for_local_fetch(
             local_git_dir,
             &remote_odb,
