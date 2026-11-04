@@ -1279,7 +1279,7 @@ fn copy_objects_for_local_fetch(
         progress.start(ProgressPhase::EnumeratingObjects, None);
     }
     let mut enum_last = 0u64;
-    let mut send_set = collect_reachable_excluding_peer(
+    let send_set = collect_reachable_excluding_peer(
         remote_odb,
         wants,
         local_odb,
@@ -1383,11 +1383,6 @@ fn copy_objects_for_local_fetch(
     let pack_opts = pack_build_options_for_send(remote_odb, &still_missing, pack_build);
     crate::progress::poll_cancel(progress, cancel)?;
     let send_oids: HashSet<ObjectId> = send.iter().copied().collect();
-    if !have_shallow.is_empty() {
-        remote_odb.clear_delta_base_cache();
-        send_set.objects.clear();
-        send_set.name_hashes.clear();
-    }
     // Stream the pack into a spool in `objects/pack` rather than memory, as a local push
     // does; a cancelled or failed copy removes the spool.
     let mut spool = crate::pack_receive::TempPackReceive::create_in_pack_dir(local_objects)?;
