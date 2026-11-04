@@ -572,7 +572,13 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
 
     let followed: BTreeSet<&str> = setup.space.followed.iter().map(String::as_str).collect();
     let local = tips(&repo, "refs/heads/")?;
-    let remote = tips(&repo, &format!("refs/remotes/{}/", setup.remote))?;
+    // Other members' heads of shared branches (`<remote>/shared/...`) are
+    // theirs, not branches of your space.
+    let remote: BTreeMap<String, ObjectId> =
+        tips(&repo, &format!("refs/remotes/{}/", setup.remote))?
+            .into_iter()
+            .filter(|(name, _)| !name.starts_with("shared/"))
+            .collect();
     let names: BTreeSet<&String> = local
         .keys()
         .chain(remote.keys())
