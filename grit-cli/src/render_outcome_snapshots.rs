@@ -582,6 +582,7 @@ fn share_render() {
             ),
             member("dave", false, None, None),
         ],
+        invited: vec!["erin@example.net".to_owned()],
         links: vec![ShareLinkJson {
             id: "12".to_owned(),
             url: None,
@@ -600,7 +601,7 @@ fn share_render() {
             uses_left: Some(1),
             expires_at: "2026-11-11T12:00:00Z".to_owned(),
         }),
-        added: vec!["dave".to_owned()],
+        added: vec!["dave".to_owned(), "erin@example.net".to_owned()],
         removed: Vec::new(),
         pushed: true,
     };

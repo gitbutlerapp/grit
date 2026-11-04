@@ -22694,6 +22694,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_shar
 pub struct grit_lib::remote::grit_server_share::SharedBranch
 pub grit_lib::remote::grit_server_share::SharedBranch::base_branch: core::option::Option<alloc::string::String>
 pub grit_lib::remote::grit_server_share::SharedBranch::branch: alloc::string::String
+pub grit_lib::remote::grit_server_share::SharedBranch::invited: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::grit_server_share::SharedBranch::links: alloc::vec::Vec<grit_lib::remote::grit_server_share::ShareLinkInfo>
 pub grit_lib::remote::grit_server_share::SharedBranch::members: alloc::vec::Vec<grit_lib::remote::grit_server_share::ShareMember>
 pub grit_lib::remote::grit_server_share::SharedBranch::mode: grit_lib::remote::grit_server_share::ShareMode

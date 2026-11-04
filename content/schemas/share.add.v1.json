@@ -56,6 +56,13 @@
           "description": "The branch.",
           "type": "string"
         },
+        "invited": {
+          "description": "Email addresses invited who haven't accepted yet.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "links": {
           "description": "Open share links.",
           "items": {

@@ -120,6 +120,10 @@ pub struct ShareBranchJson {
     pub base_branch: Option<String>,
     /// Everyone on it, the sharer first.
     pub members: Vec<ShareMemberJson>,
+    /// Email addresses invited who haven't accepted yet.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub invited: Vec<String>,
     /// Open share links.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
@@ -252,6 +256,7 @@ fn branch_json(repo: Option<&Repository>, share: SharedBranch) -> ShareBranchJso
                 expires_at: l.expires_at,
             })
             .collect(),
+        invited: share.invited,
         branch: share.branch,
         origin: share.origin,
         sharer: share.sharer,
@@ -609,6 +614,9 @@ fn render_branch_human(w: &mut dyn Write, s: &ShareBranchJson) -> Result<()> {
         let line = format!("  {name:<width$}  {head:<7}  {note}");
         outln!(w, "{}", line.trim_end());
     }
+    for email in &s.invited {
+        outln!(w, "  {email}  invited by email; hasn't accepted yet");
+    }
     for l in &s.links {
         let uses = match l.uses_left {
             Some(n) => format!("{n} use{} left", if n == 1 { "" } else { "s" }),
@@ -629,12 +637,20 @@ impl HumanRender for ShareOutcome {
         match self.action.as_str() {
             "add" => {
                 for user in &self.added {
-                    outln!(w, "✓ shared with {user}, who is emailed");
+                    if user.contains('@') {
+                        outln!(w, "✓ invited {user} by email, to sign up and join");
+                    } else {
+                        outln!(w, "✓ shared with {user}, who is emailed");
+                    }
                 }
             }
             "remove" | "leave" => {
                 for user in &self.removed {
-                    outln!(w, "✓ removed {user}");
+                    if user.contains('@') {
+                        outln!(w, "✓ withdrew the invitation to {user}");
+                    } else {
+                        outln!(w, "✓ removed {user}");
+                    }
                 }
                 if self.shares.is_empty() && self.action == "remove" {
                     outln!(
@@ -683,10 +699,18 @@ impl MarkdownRender for ShareOutcome {
             outln!(w, "- Pushed the branch to your space first.");
         }
         for user in &self.added {
-            outln!(w, "- Shared with `{user}`, who is emailed.");
+            if user.contains('@') {
+                outln!(w, "- Invited `{user}` by email, to sign up and join.");
+            } else {
+                outln!(w, "- Shared with `{user}`, who is emailed.");
+            }
         }
         for user in &self.removed {
-            outln!(w, "- Removed `{user}`.");
+            if user.contains('@') {
+                outln!(w, "- Withdrew the invitation to `{user}`.");
+            } else {
+                outln!(w, "- Removed `{user}`.");
+            }
         }
         if let Some(link) = &self.link {
             let uses = match link.uses_left {
@@ -736,6 +760,9 @@ impl MarkdownRender for ShareOutcome {
                     .unwrap_or_else(|| "not fetched yet".to_owned());
                 let rel = m.relation.map(HeadRelation::words).unwrap_or("-");
                 outln!(w, "| {name} | {head} | {rel} |");
+            }
+            for email in &s.invited {
+                outln!(w, "| {email} | invited by email, hasn't accepted | - |");
             }
             if !s.links.is_empty() {
                 outln!(w);

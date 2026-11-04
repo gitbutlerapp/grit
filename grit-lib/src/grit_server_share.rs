@@ -125,7 +125,9 @@ pub enum ShareRequest {
     Share {
         /// The branch, in the caller's space.
         branch: String,
-        /// User names to add.
+        /// People to add: user names, or email addresses. An address that
+        /// belongs to an account adds that account; any other is emailed an
+        /// invitation to sign up and join.
         #[serde(default)]
         users: Vec<String>,
         /// Make a share link with these options.
@@ -139,7 +141,8 @@ pub enum ShareRequest {
     Unshare {
         /// The shared branch.
         branch: String,
-        /// User names to remove; none ends the share.
+        /// User names to remove, or email addresses whose invitations to
+        /// withdraw; none ends the share.
         #[serde(default)]
         users: Vec<String>,
     },
@@ -238,6 +241,10 @@ pub struct SharedBranch {
     pub base_branch: Option<String>,
     /// Everyone on it, the sharer first.
     pub members: Vec<ShareMember>,
+    /// Email addresses invited who haven't accepted yet (people without an
+    /// account when they were invited), for members.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub invited: Vec<String>,
     /// Open share links, for members.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<ShareLinkInfo>,
@@ -266,10 +273,11 @@ pub struct ShareReply {
     /// The link a `share` request with `link` made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<NewShareLink>,
-    /// Users the request added, who were notified.
+    /// Users the request added, who were notified, and email addresses it
+    /// invited.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub added: Vec<String>,
-    /// Users the request removed.
+    /// Users the request removed, and invitations it withdrew.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub removed: Vec<String>,
     /// Why nothing changed, when the request was refused.

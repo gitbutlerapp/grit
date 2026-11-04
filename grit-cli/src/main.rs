@@ -801,8 +801,9 @@ enum ShareAction {
     Add {
         /// The branch (pushed to your space first when it isn't there yet).
         branch: String,
-        /// User names to share it with; each is emailed.
-        #[arg(value_name = "USER")]
+        /// User names or email addresses to share it with; each is emailed. An address
+        /// without an account is invited to sign up and join.
+        #[arg(value_name = "USER|EMAIL")]
         users: Vec<String>,
         /// Make a share link anyone signed in can accept.
         #[arg(long)]
@@ -828,8 +829,8 @@ enum ShareAction {
     Remove {
         /// The shared branch.
         branch: String,
-        /// User names to remove.
-        #[arg(value_name = "USER")]
+        /// User names to remove, or email addresses whose invitations to withdraw.
+        #[arg(value_name = "USER|EMAIL")]
         users: Vec<String>,
     },
     /// Leave a shared branch; your head stays a branch in your space.

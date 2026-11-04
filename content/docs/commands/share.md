@@ -8,10 +8,10 @@ order: 11
 ## Synopsis
 
 ```text
-grit share add <branch> [<user>...] [--link [--uses <n>|unlimited] [--expires <days>]]
+grit share add <branch> [<user>|<email>...] [--link [--uses <n>|unlimited] [--expires <days>]]
 grit share list [<branch>]
 grit share accept <link>
-grit share remove <branch> [<user>...]
+grit share remove <branch> [<user>|<email>...]
 grit share leave <branch>
 grit share revoke <branch> <link-id>
 ```
@@ -22,11 +22,11 @@ On a grit hosting server such as [grithub](https://grithub.dev), your branches a
 
 The other members' heads are fetched beside yours as `<remote>/shared/<branch>/<user>` (from the server's `refs/shared/<branch>/<user>`, which nobody pushes to). [`grit status`](../status/) shows them under your branch, [`grit sync`](../sync/) fast-forwards your branch to a member's head that builds on yours, and [`grit push`](../push/) replaces your head after an amend or rebase without `--force` (it still checks that the server's head is the one you last fetched).
 
-- **`grit share add <branch> <user>...`** shares a branch of your space with people, each of whom is emailed. A branch that isn't in your space yet, or differs there, is pushed first. Anyone on the branch can add people. Someone added by name gets their copy of the project (with the branch in it) the first time they fetch from their space: `grit clone https://<server>/<them>/<project>`, or `grit sync` in a clone they have.
+- **`grit share add <branch> <user>...`** shares a branch of your space with people, each of whom is emailed. Name them by user name or email address: an address that belongs to an account adds that account, and any other address is emailed an invitation. The invitation's link asks them to create an account, then shows them how to work on the branch with grit or plain git; it works once, for 30 days. A branch that isn't in your space yet, or differs there, is pushed first. Anyone on the branch can add people. Someone added by name gets their copy of the project (with the branch in it) the first time they fetch from their space: `grit clone https://<server>/<them>/<project>`, or `grit sync` in a clone they have.
 - **`--link`** makes a share link instead (or as well): a URL anyone signed in can accept, in the browser or with `grit share accept`. A link works once and for 7 days unless you pass `--uses` (a number or `unlimited`) and `--expires` (1 to 30 days). The URL is shown only now; the server keeps only its hash.
 - **`grit share list`** shows your shared branches: who is on each, where each head is, and how it compares with your branch here (`same as yours`, `has commits you don't`, `behind yours`, `diverged from yours`), and any open links.
 - **`grit share accept <link>`** accepts a link: you are on the branch, and your copy of the project is made in your space. In a clone of the project it fetches the branch into it; anywhere else it clones your copy into a new directory.
-- **`grit share remove <branch> <user>...`** removes people. Only the person who shared the branch (or, for a copy of an organization's project, someone who can integrate into it) can remove people, and nobody can remove the person who shared it. With no users, it ends the share. Nobody loses work: each member's head stays a branch in their own space.
+- **`grit share remove <branch> <user>...`** removes people, and withdraws invitations to the email addresses you name. Only the person who shared the branch (or, for a copy of an organization's project, someone who can integrate into it) can remove people, and nobody can remove the person who shared it. With no users, it ends the share. Nobody loses work: each member's head stays a branch in their own space.
 - **`grit share leave <branch>`** takes you off a branch; your head stays a branch in your space.
 - **`grit share revoke <branch> <link-id>`** stops a link from working. Link ids are in `grit share list`.
 
@@ -98,10 +98,10 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
 | ----- | ---- | ------- |
 | `action` | string | `add`, `list`, `remove`, `leave` or `revoke`. |
 | `project` | string | Your project the shares are in, `<you>/<project>`. |
-| `shares` | array | Each shared branch: `branch`, `origin`, `sharer`, `state` (`active`, `integrated`, `ended`), `mode` (`full`), `base_branch`, `members` (`user`, `sharer`, `you`, `head`, `project`, and `relation` to your branch: `same`, `ahead`, `behind`, `diverged`, `unknown`), `links` (`id`, `uses_left`, `expires_at`) and `url`. |
+| `shares` | array | Each shared branch: `branch`, `origin`, `sharer`, `state` (`active`, `integrated`, `ended`), `mode` (`full`), `base_branch`, `members` (`user`, `sharer`, `you`, `head`, `project`, and `relation` to your branch: `same`, `ahead`, `behind`, `diverged`, `unknown`), `invited` (email addresses that haven't accepted yet), `links` (`id`, `uses_left`, `expires_at`) and `url`. |
 | `link` | object or omitted | The link `add --link` made: `id`, `url`, `uses_left` and `expires_at`. |
-| `added` | array or omitted | People added, who were emailed. |
-| `removed` | array or omitted | People removed (or you, when leaving). |
+| `added` | array or omitted | People added, who were emailed: user names, and the email addresses invited. |
+| `removed` | array or omitted | People removed (or you, when leaving), and the email addresses whose invitations were withdrawn. |
 | `pushed` | boolean or omitted | Whether the branch was pushed to your space first. |
 
 <!-- schema: share.list -->
