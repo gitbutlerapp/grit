@@ -118,6 +118,45 @@ fn bare_fixture_with_version_tags() -> (tempfile::TempDir, PathBuf) {
     (tmp, bare)
 }
 
+fn bare_fixture_with_custom_refs() -> (tempfile::TempDir, PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(Some(&work), &["init", "-q", "-b", "main", "."]);
+    git(
+        Some(&work),
+        &[
+            "-c",
+            "user.email=t@e.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "init",
+        ],
+    );
+    git(
+        Some(&work),
+        &["-c", "user.email=t@e.com", "-c", "user.name=T", "tag", "v1"],
+    );
+    let bare = tmp.path().join("upstream.git");
+    git(
+        Some(&work),
+        &["clone", "-q", "--bare", ".", bare.to_str().unwrap()],
+    );
+    git(
+        Some(&work),
+        &[
+            "push",
+            bare.to_str().unwrap(),
+            "HEAD:refs/pull/1/head",
+            "HEAD:refs/custom/x",
+        ],
+    );
+    (tmp, bare)
+}
+
 fn bare_fixture_with_annotated_tag() -> (tempfile::TempDir, PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
     let work = tmp.path().join("work");
@@ -234,6 +273,23 @@ fn remote_refs_file_url_matches_git_ls_remote_human() {
         grit_map.keys().any(|k| k.ends_with("^{}")),
         "expected annotated tag peel line in output"
     );
+}
+
+#[test]
+fn remote_refs_custom_namespaces_match_git_ls_remote() {
+    let (_tmp, bare) = bare_fixture_with_custom_refs();
+    let path_url = bare.to_str().unwrap();
+    let file_url = format!("file://{}", bare.display());
+    for url in [path_url, file_url.as_str()] {
+        let git_map = parse_git_ls_remote(&git(None, &["ls-remote", url]));
+        let (stdout, _) = grit(&["remote", "refs", url]);
+        assert_eq!(parse_git_ls_remote(&stdout), git_map, "full list for {url}");
+    }
+    for pattern in ["refs/pull/1/head", "refs/custom/x", "HEAD"] {
+        let git_map = parse_git_ls_remote(&git(None, &["ls-remote", path_url, pattern]));
+        let (stdout, _) = grit(&["remote", "refs", path_url, pattern]);
+        assert_eq!(parse_git_ls_remote(&stdout), git_map, "pattern {pattern}");
+    }
 }
 
 #[test]

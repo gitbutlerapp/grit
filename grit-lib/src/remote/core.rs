@@ -1253,9 +1253,6 @@ fn build_list_refs_v2_request(
     if opts.peel {
         pkt_line::write_line(&mut req, "peel").map_err(Error::Io)?;
     }
-    if list_refs_includes_head(opts) {
-        pkt_line::write_line(&mut req, "ref-prefix HEAD").map_err(Error::Io)?;
-    }
     for prefix in list_ref_prefixes(opts) {
         pkt_line::write_line(&mut req, &format!("ref-prefix {prefix}")).map_err(Error::Io)?;
     }
@@ -1264,28 +1261,27 @@ fn build_list_refs_v2_request(
 }
 
 fn list_refs_includes_head(opts: &ListRefsOptions) -> bool {
-    !opts.heads && !opts.tags && opts.prefixes.is_empty()
+    !opts.heads && !opts.tags
 }
 
 fn list_ref_prefixes(opts: &ListRefsOptions) -> Vec<String> {
-    if !opts.prefixes.is_empty() {
-        if opts.heads && !opts.tags {
-            return vec!["refs/heads/".to_owned()];
-        }
-        if opts.tags && !opts.heads {
-            return vec!["refs/tags/".to_owned()];
-        }
-        return vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()];
-    }
     let mut out = Vec::new();
-    let all = !opts.heads && !opts.tags;
-    if all || opts.heads {
+    if opts.heads {
         out.push("refs/heads/".to_owned());
     }
-    if all || opts.tags {
+    if opts.tags {
         out.push("refs/tags/".to_owned());
     }
     out
+}
+
+fn list_refs_scan_prefixes(opts: &ListRefsOptions) -> Vec<String> {
+    let wire = list_ref_prefixes(opts);
+    if wire.is_empty() {
+        vec!["refs/".to_owned()]
+    } else {
+        wire
+    }
 }
 
 fn parse_list_refs_v2_response(
@@ -1408,14 +1404,16 @@ fn finalize_list_refs_output(
         }
         entries.extend(peel_lines);
     }
-    if list_refs_includes_head(opts) {
+    if list_refs_includes_head(opts) && ref_matches_list_opts("HEAD", opts) {
         if let Some(sym) = head_symref {
             if let Some(oid) = entries.iter().find(|e| e.name == sym).map(|e| e.oid) {
-                entries.push(RemoteRef {
-                    name: "HEAD".to_owned(),
-                    oid,
-                    symref_target: if opts.symrefs { Some(sym) } else { None },
-                });
+                if !entries.iter().any(|e| e.name == "HEAD") {
+                    entries.push(RemoteRef {
+                        name: "HEAD".to_owned(),
+                        oid,
+                        symref_target: if opts.symrefs { Some(sym) } else { None },
+                    });
+                }
             }
         }
     }
@@ -1561,7 +1559,7 @@ pub fn list_refs_from_git_dir(
     odb: Option<&Odb>,
     opts: &ListRefsOptions,
 ) -> RemoteResult<Vec<RemoteRef>> {
-    list_refs_from_git_dir_with_scan_prefixes(git_dir, odb, opts, &list_ref_prefixes(opts))
+    list_refs_from_git_dir_with_scan_prefixes(git_dir, odb, opts, &list_refs_scan_prefixes(opts))
 }
 
 fn list_refs_from_git_dir_with_scan_prefixes(
@@ -1856,17 +1854,60 @@ mod tests {
     }
 
     #[test]
-    fn list_ref_prefixes_broad_for_ls_remote_patterns() {
+    fn list_ref_prefixes_unrestricted_for_ls_remote_patterns() {
         let opts = super::ListRefsOptions {
             prefixes: vec!["main".to_owned()],
             ..Default::default()
         };
-        let prefixes = super::list_ref_prefixes(&opts);
+        assert!(super::list_ref_prefixes(&opts).is_empty());
         assert_eq!(
-            prefixes,
-            vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()]
+            super::list_refs_scan_prefixes(&opts),
+            vec!["refs/".to_owned()]
         );
         assert!(super::ref_matches_list_opts("refs/heads/main", &opts));
         assert!(!super::ref_matches_list_opts("refs/heads/topic", &opts));
+    }
+
+    #[test]
+    fn list_ref_prefixes_heads_and_tags_only_when_requested() {
+        assert_eq!(
+            super::list_ref_prefixes(&super::ListRefsOptions {
+                heads: true,
+                ..Default::default()
+            }),
+            vec!["refs/heads/".to_owned()]
+        );
+        assert_eq!(
+            super::list_ref_prefixes(&super::ListRefsOptions {
+                tags: true,
+                ..Default::default()
+            }),
+            vec!["refs/tags/".to_owned()]
+        );
+        assert_eq!(
+            super::list_ref_prefixes(&super::ListRefsOptions {
+                heads: true,
+                tags: true,
+                ..Default::default()
+            }),
+            vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()]
+        );
+        assert!(super::list_ref_prefixes(&super::ListRefsOptions::default()).is_empty());
+    }
+
+    #[test]
+    fn list_refs_includes_head_with_explicit_pattern() {
+        let opts = super::ListRefsOptions {
+            prefixes: vec!["HEAD".to_owned()],
+            ..Default::default()
+        };
+        assert!(super::list_refs_includes_head(&opts));
+        assert!(super::ref_matches_list_opts("HEAD", &opts));
+        let opts = super::ListRefsOptions {
+            prefixes: vec!["refs/pull/1/head".to_owned()],
+            ..Default::default()
+        };
+        assert!(super::list_refs_includes_head(&opts));
+        assert!(!super::ref_matches_list_opts("HEAD", &opts));
     }
 }

@@ -71,6 +71,7 @@ fn git(dir: Option<&Path>, args: &[&str]) -> String {
 fn git_ls_remote(
     url: &str,
     git_args: &[&str],
+    patterns: &[&str],
     extra: &[(&str, &str)],
     protocol_version: Option<u8>,
 ) -> BTreeMap<String, ObjectId> {
@@ -81,6 +82,7 @@ fn git_ls_remote(
     cmd.arg("ls-remote")
         .args(git_args)
         .arg(url)
+        .args(patterns)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null");
     for (k, v) in extra {
@@ -126,7 +128,7 @@ fn assert_refs_match_git(
     extra: &[(&str, &str)],
 ) {
     let git_args = git_args_for_list_opts(opts);
-    let mut git_map = git_ls_remote(url, &git_args, extra, opts.protocol_version);
+    let mut git_map = git_ls_remote(url, &git_args, &[], extra, opts.protocol_version);
     assert!(
         !git_map.is_empty(),
         "git ls-remote must return refs for {url}"
@@ -273,6 +275,21 @@ fn bare_fixture() -> (tempfile::TempDir, PathBuf) {
     (tmp, bare)
 }
 
+fn bare_fixture_with_custom_refs() -> (tempfile::TempDir, PathBuf) {
+    let (tmp, bare) = bare_fixture();
+    let work = tmp.path().join("work");
+    git(
+        Some(&work),
+        &[
+            "push",
+            bare.to_str().unwrap(),
+            "HEAD:refs/pull/1/head",
+            "HEAD:refs/custom/x",
+        ],
+    );
+    (tmp, bare)
+}
+
 #[test]
 fn remote_url_parsing_and_config() {
     assert!(matches!(
@@ -334,6 +351,55 @@ fn list_refs_file_url_matches_git_ls_remote() {
 }
 
 #[test]
+fn list_refs_custom_namespaces_match_git_ls_remote() {
+    let (_tmp, bare) = bare_fixture_with_custom_refs();
+    let path_url = bare.to_str().unwrap();
+    let file_url = format!("file://{}", bare.display());
+    for url in [path_url, file_url.as_str()] {
+        let remote = Remote::from_url(url).unwrap();
+        let opts = ListRefsOptions::default();
+        let refs = remote.list_refs(None, &opts, None).unwrap();
+        assert_refs_match_git(url, &refs, &opts, &[]);
+        for name in [
+            "refs/heads/main",
+            "refs/tags/v1",
+            "refs/pull/1/head",
+            "refs/custom/x",
+        ] {
+            assert!(
+                refs.iter().any(|r| r.name == name),
+                "missing {name} in list_refs for {url}"
+            );
+        }
+    }
+
+    let url = file_url.as_str();
+    for pattern in ["refs/pull/1/head", "refs/custom/x", "refs/pull/*", "HEAD"] {
+        let remote = Remote::from_url(url).unwrap();
+        let opts = ListRefsOptions {
+            prefixes: vec![pattern.to_owned()],
+            ..Default::default()
+        };
+        let refs = remote.list_refs(None, &opts, None).unwrap();
+        let git_map = git_ls_remote(url, &[], &[pattern], &[], None);
+        assert_eq!(grit_refs_map(&refs), git_map, "pattern {pattern}");
+    }
+
+    let remote = Remote::from_url(url).unwrap();
+    let opts = ListRefsOptions {
+        heads: true,
+        ..Default::default()
+    };
+    let refs = remote.list_refs(None, &opts, None).unwrap();
+    let git_map = git_ls_remote(url, &["--heads"], &[], &[], None);
+    assert_eq!(grit_refs_map(&refs), git_map);
+    assert!(
+        !refs.iter().any(|r| r.name.starts_with("refs/pull/")),
+        "heads-only must exclude pull refs"
+    );
+}
+
+#[test]
 fn list_refs_heads_only_matches_git() {
     let (_tmp, bare) = bare_fixture();
     let url = format!("file://{}", bare.display());
@@ -345,7 +411,7 @@ fn list_refs_heads_only_matches_git() {
     let refs = remote.list_refs(None, &opts, None).unwrap();
     assert!(!refs.iter().any(|r| r.name == "HEAD"));
 
-    let git_heads = git_ls_remote(&url, &["--heads"], &[], None);
+    let git_heads = git_ls_remote(&url, &["--heads"], &[], &[], None);
     let grit_map = grit_refs_map(&refs);
     assert_eq!(git_heads, grit_map);
 }
