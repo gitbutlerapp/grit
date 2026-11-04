@@ -74,6 +74,15 @@ pub struct PushRequest {
     pub follow_tags: bool,
     /// After a successful branch push, write `branch.<name>.remote` / `.merge` (`-u`).
     pub set_upstream: bool,
+    /// Push every local branch (`refs/heads/*:refs/heads/*`), including names the remote
+    /// does not advertise yet (unlike `push.default = matching` or a `:` refspec).
+    pub all: bool,
+    /// Mirror the repository: push all refs under `refs/*`, force updates, and delete remote
+    /// refs under `refs/` with no local counterpart (implies [`Self::prune`] and force).
+    pub mirror: bool,
+    /// Delete remote refs in the same namespace as the refs being pushed when there is no
+    /// matching local ref (for example `grit push --all --prune`).
+    pub prune: bool,
 }
 
 /// A fully resolved push target.
@@ -245,24 +254,25 @@ pub fn resolve_push(
 
     let follow_tags = request.follow_tags || push_follow_tags_config(config);
 
-    let mut resolved = if request.refspecs.is_empty() {
+    let force_mode = if request.mirror {
+        ForceMode::Force
+    } else {
+        request.force.clone()
+    };
+
+    let mut resolved = if request.mirror {
+        resolve_mirror_push(repo, &remote, ctx)?
+    } else if request.all && request.refspecs.is_empty() {
+        resolve_all_branches_push(repo, &remote, ctx)?
+    } else if request.refspecs.is_empty() {
         resolve_default_push(repo, config, &remote, ctx)?
     } else {
-        let local = LocalPushRefs::load(repo)?;
-        let mut specs = Vec::new();
-        for spec in &request.refspecs {
-            specs.extend(resolve_cli_refspec(
-                repo, config, &remote, spec, ctx, &local,
-            )?);
-        }
-        let branch_label = branch_label_from_specs(repo, &specs);
-        ResolvedPush {
-            remote,
-            specs,
-            branch_label,
-            kind: PushPlanKind::Refspecs,
-        }
+        resolve_cli_refspecs_push(repo, config, &remote, &request.refspecs, ctx)?
     };
+
+    if request.prune && !request.mirror {
+        append_prune_deletes_for_planned_heads(&mut resolved.specs, ctx);
+    }
 
     if follow_tags {
         let extra = follow_tag_push_specs(repo, &resolved.specs, ctx)?;
@@ -278,9 +288,156 @@ pub fn resolve_push(
         config,
         &resolved.remote,
         &mut resolved.specs,
-        &request.force,
+        &force_mode,
     )?;
     Ok(resolved)
+}
+
+fn resolve_all_branches_push(
+    repo: &Repository,
+    remote: &str,
+    ctx: &PushPlanContext,
+) -> PlanResult<ResolvedPush> {
+    let local = LocalPushRefs::load(repo)?;
+    let item = parse_push_refspec("refs/heads/*:refs/heads/*").map_err(|e| {
+        PushPlanError::InvalidRefspec {
+            spec: "refs/heads/*:refs/heads/*".into(),
+            reason: e.to_string(),
+        }
+    })?;
+    let specs = expand_wildcard_push_item(repo, &item, ctx, &local)?;
+    if specs.is_empty() {
+        return Err(PushPlanError::SrcRefspecNoMatch {
+            spec: "refs/heads/*".into(),
+        });
+    }
+    let branch_label = branch_label_from_specs(repo, &specs);
+    let kind = if specs.len() == 1 {
+        PushPlanKind::Branch
+    } else {
+        PushPlanKind::Refspecs
+    };
+    Ok(ResolvedPush {
+        remote: remote.to_owned(),
+        specs,
+        branch_label,
+        kind,
+    })
+}
+
+fn resolve_mirror_push(
+    repo: &Repository,
+    remote: &str,
+    ctx: &PushPlanContext,
+) -> PlanResult<ResolvedPush> {
+    let local = LocalPushRefs::load(repo)?;
+    let item = parse_push_refspec("refs/*:refs/*").map_err(|e| PushPlanError::InvalidRefspec {
+        spec: "refs/*:refs/*".into(),
+        reason: e.to_string(),
+    })?;
+    let mut specs = expand_wildcard_push_item(repo, &item, ctx, &local)?;
+    if specs.is_empty() {
+        return Err(PushPlanError::SrcRefspecNoMatch {
+            spec: "refs/*".into(),
+        });
+    }
+    let local_dst: HashSet<String> = specs.iter().map(|s| s.dst.clone()).collect();
+    append_mirror_prune_deletes(&mut specs, ctx, &local_dst);
+    Ok(ResolvedPush {
+        remote: remote.to_owned(),
+        specs,
+        branch_label: None,
+        kind: PushPlanKind::Refspecs,
+    })
+}
+
+fn resolve_cli_refspecs_push(
+    repo: &Repository,
+    config: &ConfigSet,
+    remote: &str,
+    refspecs: &[String],
+    ctx: &PushPlanContext,
+) -> PlanResult<ResolvedPush> {
+    let local = LocalPushRefs::load(repo)?;
+    let mut positive = Vec::new();
+    let mut negative = Vec::new();
+    for spec in refspecs {
+        let item = parse_push_refspec(spec).map_err(|e| PushPlanError::InvalidRefspec {
+            spec: spec.clone(),
+            reason: e.to_string(),
+        })?;
+        if item.negative {
+            negative.push(item);
+        } else {
+            positive.push(spec.as_str());
+        }
+    }
+    let mut specs = Vec::new();
+    for spec in positive {
+        specs.extend(resolve_cli_refspec(
+            repo, config, remote, spec, ctx, &local,
+        )?);
+    }
+    for item in negative {
+        specs.retain(|s| !push_spec_excluded_by_negative(&item, s));
+    }
+    let branch_label = branch_label_from_specs(repo, &specs);
+    Ok(ResolvedPush {
+        remote: remote.to_owned(),
+        specs,
+        branch_label,
+        kind: PushPlanKind::Refspecs,
+    })
+}
+
+fn append_prune_deletes_for_planned_heads(specs: &mut Vec<PushRefSpec>, ctx: &PushPlanContext) {
+    let pushed: HashSet<&str> = specs
+        .iter()
+        .filter(|s| !s.delete && s.dst.starts_with("refs/heads/"))
+        .map(|s| s.dst.as_str())
+        .collect();
+    if pushed.is_empty() {
+        return;
+    }
+    let mut to_delete = Vec::new();
+    for remote_ref in &ctx.remote_ref_names {
+        if !remote_ref.starts_with("refs/heads/") {
+            continue;
+        }
+        if pushed.contains(remote_ref.as_str()) {
+            continue;
+        }
+        if specs.iter().any(|s| s.dst == *remote_ref) {
+            continue;
+        }
+        to_delete.push(remote_ref.clone());
+    }
+    for remote_ref in to_delete {
+        specs.push(push_spec(None, None, remote_ref, false, true));
+    }
+}
+
+fn append_mirror_prune_deletes(
+    specs: &mut Vec<PushRefSpec>,
+    ctx: &PushPlanContext,
+    local_dst: &HashSet<String>,
+) {
+    let mut to_delete = Vec::new();
+    for remote_ref in &ctx.remote_ref_names {
+        if remote_ref == "HEAD" || !remote_ref.starts_with("refs/") {
+            continue;
+        }
+        if local_dst.contains(remote_ref) {
+            continue;
+        }
+        if specs.iter().any(|s| s.dst == *remote_ref) {
+            continue;
+        }
+        to_delete.push(remote_ref.clone());
+    }
+    for remote_ref in to_delete {
+        specs.push(push_spec(None, None, remote_ref, false, true));
+    }
 }
 
 /// Whether `push.followTags` is enabled in config (default false).
@@ -976,27 +1133,48 @@ fn expand_configured_push_refspec(
         return Ok(out);
     }
     if item.pattern {
-        let prefix = item.src.as_deref().unwrap_or("");
-        let refs = if prefix.starts_with("refs/tags/") {
-            local.tags()
-        } else {
-            local.heads()
-        };
-        let mut out = Vec::new();
-        for (name, oid) in refs {
-            if let Some(dst) = refspec_map_src(&item, name) {
-                out.push(push_spec(
-                    Some(*oid),
-                    Some(name.clone()),
-                    dst,
-                    item.force,
-                    false,
-                ));
-            }
-        }
-        return Ok(out);
+        return expand_wildcard_push_item(repo, &item, ctx, local);
     }
     resolve_parsed_refspec(repo, &item, ctx, local)
+}
+
+fn expand_wildcard_push_item(
+    repo: &Repository,
+    item: &RefspecItem,
+    _ctx: &PushPlanContext,
+    local: &LocalPushRefs,
+) -> PlanResult<Vec<PushRefSpec>> {
+    let refs = pattern_source_refs(repo, local, item.src.as_deref().unwrap_or(""))?;
+    let mut out = Vec::new();
+    for (name, oid) in refs {
+        if let Some(dst) = refspec_map_src(item, &name) {
+            out.push(push_spec(
+                Some(oid),
+                Some(name.clone()),
+                dst,
+                item.force,
+                false,
+            ));
+        }
+    }
+    Ok(out)
+}
+
+fn pattern_source_refs(
+    repo: &Repository,
+    local: &LocalPushRefs,
+    prefix: &str,
+) -> PlanResult<Vec<(String, ObjectId)>> {
+    Ok(if prefix.starts_with("refs/tags/") {
+        local.tags().to_vec()
+    } else if prefix.starts_with("refs/heads/") {
+        local.heads().to_vec()
+    } else {
+        list_local_refs(repo.git_dir(), "refs/")?
+            .into_iter()
+            .filter(|(name, _)| name != "HEAD")
+            .collect()
+    })
 }
 
 fn resolve_parsed_refspec(
@@ -1007,6 +1185,15 @@ fn resolve_parsed_refspec(
 ) -> PlanResult<Vec<PushRefSpec>> {
     if item.negative {
         return Ok(Vec::new());
+    }
+    if item.pattern {
+        let specs = expand_wildcard_push_item(repo, item, ctx, local)?;
+        if specs.is_empty() {
+            return Err(PushPlanError::SrcRefspecNoMatch {
+                spec: item.src.clone().unwrap_or_default(),
+            });
+        }
+        return Ok(specs);
     }
     if item.matching {
         return expand_configured_push_refspec(

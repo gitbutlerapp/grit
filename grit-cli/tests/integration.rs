@@ -478,6 +478,9 @@ mod promisor_remote_git_client;
 #[path = "pull_json.rs"]
 mod pull_json;
 #[cfg(feature = "full-tests")]
+#[path = "push_all_mirror.rs"]
+mod push_all_mirror;
+#[cfg(feature = "full-tests")]
 #[path = "push_delete_remote_branch.rs"]
 mod push_delete_remote_branch;
 #[cfg(feature = "full-tests")]

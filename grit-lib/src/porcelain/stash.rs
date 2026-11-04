@@ -77,6 +77,7 @@ use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref
 use crate::repo::Repository;
 use crate::repo_relpath::{
     as_utf8_for_matching, storage_bytes, storage_string, stored_path_is_directory_marker,
+    worktree_abs,
 };
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
@@ -2310,7 +2311,7 @@ fn materialize_raw_flat_entry_in_worktree(
     entry: &RawFlatTreeEntry,
 ) -> Result<()> {
     let stored = storage_string(&entry.path);
-    let file_path = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
+    let file_path = worktree_abs(work_tree, &stored);
     if let Some(parent) = file_path.parent() {
         if let Ok(rel) = parent.strip_prefix(work_tree) {
             let mut cur = work_tree.to_path_buf();
@@ -2589,8 +2590,7 @@ fn untracked_on_disk_matches_stash(
     if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
         return Ok(false);
     }
-    let stored = storage_string(&entry.path);
-    let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
+    let abs = crate::repo_relpath::worktree_abs(work_tree, path);
     let meta = match fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(_) => return Ok(false),
@@ -2603,7 +2603,7 @@ fn untracked_on_disk_matches_stash(
     let worktree_bytes = smudge_bytes_for_worktree_path(
         repo,
         &rules,
-        &stored,
+        path,
         entry.mode,
         &stash_blob.data,
         &entry.oid,

@@ -19,6 +19,9 @@ grit push -u [--set-upstream]
 grit push --atomic
 grit push -o <option> [--push-option <option>]
 grit push --follow-tags
+grit push --all
+grit push --mirror
+grit push --prune
 grit push -q [--quiet]
 grit push --remote <name>   # hidden alias for one release
 ```
@@ -39,7 +42,9 @@ From a shallow clone, grit announces each shallow boundary in the push command s
 
 A push to a local path or `file://` URL runs the remote repository's `pre-receive`, `update`, `post-receive` and `post-update` hooks just as [`grit receive-pack`](../receive-pack/) and Git do: the pushed objects wait in a quarantine that `pre-receive` can read, a non-zero `pre-receive` refuses every update (`pre-receive hook declined`) and keeps the objects out of the repository, a non-zero `update` refuses its own ref (`hook declined`), and `post-receive` and `post-update` run after the refs are written. Hook output is reported like any remote's messages. `--dry-run` runs none of these hooks, as with Git.
 
-Explicit refspecs follow Git push rules: any revision on the left (`HEAD`, tags, branches), optional `+` for force, `:dst` to delete, and a bare branch name DWIMs to the matching local ref (then through configured push refspecs when present).
+Explicit refspecs follow Git push rules: any revision on the left (`HEAD`, tags, branches), optional `+` for force, `:dst` to delete, and a bare branch name DWIMs to the matching local ref (then through configured push refspecs when present). Wildcard refspecs such as `refs/heads/*:refs/heads/*` or `refs/remotes/origin/*:refs/heads/*` expand against local refs the same way as `remote.<name>.push` entries in config.
+
+`--all` pushes every local branch (`refs/heads/*:refs/heads/*`), including branches the remote does not have yet. `--mirror` pushes all refs under `refs/*`, forces updates, and deletes remote refs under `refs/` with no local counterpart (it implies `--prune` and force). `--prune` alone deletes remote branch refs that are not part of the push plan (for example with `--all` or a `refs/heads/*:refs/heads/*` refspec). `--all`, `--mirror`, and `--delete` cannot be combined with each other or with positional refspecs.
 
 `--dry-run` negotiates with the remote and reports what would change without updating refs or sending objects.
 
@@ -86,6 +91,9 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `<refspec>...` | Push refspecs (`feature`, `HEAD:refs/heads/x`, `+main:main`, `:gone`, …). |
 | `-t`, `--tags` | Push all local tags instead of the current branch. |
 | `--delete` | Delete the remote refs named by the positionals instead of pushing (plain names only). |
+| `--all` | Push every local branch (`refs/heads/*:refs/heads/*`). |
+| `--mirror` | Mirror all refs under `refs/` (force + prune remote-only refs). |
+| `--prune` | Delete remote branches not updated by this push. |
 | `--dry-run` | Contact the remote but do not update refs or send objects. |
 | `-f`, `--force` | Overwrite remote refs when the update is not a fast-forward. |
 | `--force-with-lease` | Push only if the remote ref matches the local remote-tracking ref (or is absent when there is no tracking ref). |
