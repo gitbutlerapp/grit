@@ -2,6 +2,73 @@
   "$id": "https://grit-scm.com/schemas/sync/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "HeadRelation": {
+      "description": "How another member's head compares with your branch here.",
+      "oneOf": [
+        {
+          "description": "The same commit as yours.",
+          "enum": [
+            "same"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It has commits yours doesn't, and yours is in its history: `grit sync` fast-forwards to it.",
+          "enum": [
+            "ahead"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Yours has commits it doesn't, and it is in yours.",
+          "enum": [
+            "behind"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Each has commits the other lacks.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "You have no branch here, or its commits aren't fetched.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "SharedHead": {
+      "description": "Another member's head of a shared branch.",
+      "properties": {
+        "relation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HeadRelation"
+            }
+          ],
+          "description": "How it compares with your branch here."
+        },
+        "tip": {
+          "description": "Their head's tip.",
+          "type": "string"
+        },
+        "user": {
+          "description": "Their user name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation",
+        "tip",
+        "user"
+      ],
+      "type": "object"
+    },
     "SyncAction": {
       "description": "What happened to one branch.",
       "oneOf": [
@@ -64,6 +131,13 @@
         },
         "name": {
           "type": "string"
+        },
+        "shared": {
+          "description": "For a shared branch: the other members' heads, compared with yours afterwards.",
+          "items": {
+            "$ref": "#/definitions/SharedHead"
+          },
+          "type": "array"
         },
         "tip": {
           "description": "Its tip afterwards.",

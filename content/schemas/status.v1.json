@@ -167,6 +167,46 @@
       ],
       "type": "object"
     },
+    "HeadRelation": {
+      "description": "How another member's head compares with your branch here.",
+      "oneOf": [
+        {
+          "description": "The same commit as yours.",
+          "enum": [
+            "same"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It has commits yours doesn't, and yours is in its history: `grit sync` fast-forwards to it.",
+          "enum": [
+            "ahead"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Yours has commits it doesn't, and it is in yours.",
+          "enum": [
+            "behind"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Each has commits the other lacks.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "You have no branch here, or its commits aren't fetched.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "InterruptedRewriteJson": {
       "description": "Recovery of an interrupted rebase or history edit, in `--json` output.",
       "oneOf": [
@@ -239,6 +279,54 @@
         "date",
         "email",
         "name"
+      ],
+      "type": "object"
+    },
+    "SharedHead": {
+      "description": "Another member's head of a shared branch.",
+      "properties": {
+        "relation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HeadRelation"
+            }
+          ],
+          "description": "How it compares with your branch here."
+        },
+        "tip": {
+          "description": "Their head's tip.",
+          "type": "string"
+        },
+        "user": {
+          "description": "Their user name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation",
+        "tip",
+        "user"
+      ],
+      "type": "object"
+    },
+    "StatusSharedJson": {
+      "description": "A shared branch's other heads in `grit status`.",
+      "properties": {
+        "heads": {
+          "description": "Each other member's head, compared with this branch.",
+          "items": {
+            "$ref": "#/definitions/SharedHead"
+          },
+          "type": "array"
+        },
+        "remote": {
+          "description": "The remote they were fetched from.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "heads",
+        "remote"
       ],
       "type": "object"
     },
@@ -438,6 +526,17 @@
         }
       ],
       "description": "Primary paused operation and suggested next commands."
+    },
+    "shared": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StatusSharedJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "When the branch is shared (`grit share`): the other members' heads, as last fetched."
     },
     "staged": {
       "items": {

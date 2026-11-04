@@ -1,0 +1,53 @@
+{
+  "$id": "https://grit-scm.com/schemas/share.accept/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit share accept`.",
+  "properties": {
+    "branch": {
+      "description": "The shared branch.",
+      "type": "string"
+    },
+    "cloned": {
+      "description": "Whether this made a new clone.",
+      "type": "boolean"
+    },
+    "origin": {
+      "description": "The project it was shared from.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The clone it was fetched into, or cloned as.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "project": {
+      "description": "Your copy, `<you>/<project>`.",
+      "type": "string"
+    },
+    "sharer": {
+      "description": "Who shared it.",
+      "type": "string"
+    },
+    "status": {
+      "description": "`accepted` or `already_member`.",
+      "type": "string"
+    },
+    "url": {
+      "description": "Your copy's clone URL.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "branch",
+    "cloned",
+    "origin",
+    "project",
+    "sharer",
+    "status",
+    "url"
+  ],
+  "title": "ShareAcceptOutcome",
+  "type": "object"
+}

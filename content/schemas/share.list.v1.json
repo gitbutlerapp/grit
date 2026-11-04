@@ -1,0 +1,242 @@
+{
+  "$id": "https://grit-scm.com/schemas/share.list/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "HeadRelation": {
+      "description": "How another member's head compares with your branch here.",
+      "oneOf": [
+        {
+          "description": "The same commit as yours.",
+          "enum": [
+            "same"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It has commits yours doesn't, and yours is in its history: `grit sync` fast-forwards to it.",
+          "enum": [
+            "ahead"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Yours has commits it doesn't, and it is in yours.",
+          "enum": [
+            "behind"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Each has commits the other lacks.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "You have no branch here, or its commits aren't fetched.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "ShareBranchJson": {
+      "description": "A shared branch, as `grit share` reports it.",
+      "properties": {
+        "base_branch": {
+          "description": "The read-only branch members' copies follow for it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "branch": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "links": {
+          "description": "Open share links.",
+          "items": {
+            "$ref": "#/definitions/ShareLinkJson"
+          },
+          "type": "array"
+        },
+        "members": {
+          "description": "Everyone on it, the sharer first.",
+          "items": {
+            "$ref": "#/definitions/ShareMemberJson"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "description": "`full` or `snapshot`.",
+          "type": "string"
+        },
+        "origin": {
+          "description": "The project it was shared from, `<sharer>/<project>`.",
+          "type": "string"
+        },
+        "sharer": {
+          "description": "Who shared it.",
+          "type": "string"
+        },
+        "state": {
+          "description": "`active`, `integrated` or `ended`.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Its web page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "branch",
+        "members",
+        "mode",
+        "origin",
+        "sharer",
+        "state",
+        "url"
+      ],
+      "type": "object"
+    },
+    "ShareLinkJson": {
+      "description": "A share link, as `grit share` reports it.",
+      "properties": {
+        "expires_at": {
+          "description": "When it stops working (RFC 3339).",
+          "type": "string"
+        },
+        "id": {
+          "description": "Its id, for `grit share revoke`.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The URL to send: only when the link was just made.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uses_left": {
+          "description": "Uses left; omitted when it has no limit.",
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "expires_at",
+        "id"
+      ],
+      "type": "object"
+    },
+    "ShareMemberJson": {
+      "description": "A member of a share, as `grit share` reports it.",
+      "properties": {
+        "head": {
+          "description": "The tip of their head on the server.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project": {
+          "description": "Their copy, `<user>/<project>`, once they have one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HeadRelation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How their head compares with your branch here (for other members)."
+        },
+        "sharer": {
+          "description": "Whether they shared it first.",
+          "type": "boolean"
+        },
+        "user": {
+          "description": "Their user name.",
+          "type": "string"
+        },
+        "you": {
+          "description": "Whether this is you.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sharer",
+        "user",
+        "you"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit share add`, `list`, `remove`, `leave` and `revoke`.",
+  "properties": {
+    "action": {
+      "description": "`add`, `list`, `remove`, `leave` or `revoke`.",
+      "type": "string"
+    },
+    "added": {
+      "description": "People added, who were notified.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "link": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ShareLinkJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The link `grit share add --link` made."
+    },
+    "project": {
+      "description": "Your project the shares are in, `<you>/<project>`.",
+      "type": "string"
+    },
+    "pushed": {
+      "description": "Whether the branch was pushed to your space first.",
+      "type": "boolean"
+    },
+    "removed": {
+      "description": "People removed (or you, when leaving).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shares": {
+      "description": "The shares, as they are now.",
+      "items": {
+        "$ref": "#/definitions/ShareBranchJson"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "action",
+    "project",
+    "shares"
+  ],
+  "title": "ShareOutcome",
+  "type": "object"
+}
