@@ -712,7 +712,20 @@ pub(crate) mod pack_cache {
     }
 
     /// Seed thread-local pack caches from `store` (one catalog read lock; hot reads avoid the catalog).
+    ///
+    /// When this thread already holds `store`'s state but a rescan or pack load dropped
+    /// listing trust, re-seed from the catalog (which the rescan refreshed); otherwise every
+    /// later pack lookup in the context re-stats the pack directory.
     pub(crate) fn warm_thread_local_from_store(store: &crate::pack_store::PackStore) {
+        if crate::pack_store::PackStore::has_context()
+            && !PACK_DIR_LISTING_TRUSTED.get()
+            && ACTIVE_TLS_STORE_ID.get() == store.id()
+            && THREAD_WARM_STORE.get() == store.id()
+            && THREAD_WARM_EPOCH.get() == store.cache_epoch()
+        {
+            seed_tls_from_store_catalog(store);
+            return;
+        }
         switch_tls_for_store(store);
     }
 
@@ -1275,6 +1288,7 @@ pub(crate) mod pack_cache {
                     crate::hot_path_test_metrics::record_pack_dir_metadata_for_active_scope();
                 }
             }
+            crate::hot_path_test_metrics::record_pack_dir_stat_for_active_scope();
         }
         fs::metadata(path)
             .and_then(|m| m.modified())
@@ -9147,6 +9161,53 @@ mod cached_lookup_tests {
 
     fn oid_of(dir: &Path, rev: &str) -> ObjectId {
         ObjectId::from_hex(&git_stdout(dir, &["rev-parse", rev], None)).expect("oid")
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn cold_reads_trust_the_pack_listing_after_the_first_scan() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        for n in 0..40 {
+            fs::write(root.join("f"), format!("{n}\n")).unwrap();
+            git(root, &["add", "f"]);
+            git(root, &["commit", "-qm", &format!("c{n}")]);
+        }
+        git(root, &["gc", "-q"]);
+        let oids: Vec<ObjectId> = git_stdout(root, &["rev-list", "--objects", "--all"], None)
+            .lines()
+            .map(|line| ObjectId::from_hex(&line[..40]).expect("oid"))
+            .collect();
+        assert!(oids.len() >= 120);
+
+        let repo = crate::repo::Repository::open(
+            &root.join(".git"),
+            &crate::environment::RepositoryOptions::empty(),
+        )
+        .expect("open");
+        let metrics = repo.odb().hot_path_metrics_arc();
+        let _scope = HotPathMetricsScope::install(Arc::clone(&metrics));
+        metrics.reset_pack_dir_stats();
+        metrics.set_stamp_counting(true);
+        for oid in &oids {
+            repo.odb().read(oid).expect("read");
+        }
+        metrics.set_stamp_counting(false);
+        // The first read scans `objects/pack`; later reads must not re-check its mtime.
+        assert!(
+            metrics.pack_dir_stat_calls() <= 8,
+            "{} pack directory checks for {} reads",
+            metrics.pack_dir_stat_calls(),
+            oids.len()
+        );
     }
 
     #[cfg_attr(

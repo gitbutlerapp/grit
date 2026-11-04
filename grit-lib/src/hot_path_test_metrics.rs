@@ -309,7 +309,6 @@ impl HotPathTestMetrics {
             self.pack_dir_stats.fetch_add(1, Ordering::Relaxed);
         }
     }
-
     pub(crate) fn record_midx_stamp_stat(&self) {
         if self.stamp_counting.load(Ordering::Relaxed) {
             self.midx_stamp_stats.fetch_add(1, Ordering::Relaxed);
