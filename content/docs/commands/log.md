@@ -23,7 +23,7 @@ grit log [<REV>…] [-n <N>] [--cursor <token>] [--no-pager]
 
 ## Description
 
-Lists commits reachable from the selected revisions (default `HEAD`), newest first. Each line shows the short commit id, the change id, the author, when the commit was made and its subject (the first line of its message). Short ids follow `core.abbrev` (Git’s auto length from object count when unset) and extend when needed so they always resolve with `grit show` or `grit log <id>`. The author is the commit's author name when present, otherwise the part of their email address before the `@`.
+Lists commits reachable from the selected revisions (default `HEAD`), newest first. Each line shows the short commit id, the change id, the author, when the commit was made and its subject (the first line of its message). Short ids follow `core.abbrev` (Git’s auto length from the number of packed objects when unset) and extend when needed so they always resolve with `grit show` or `grit log <id>`. The author is the commit's author name when present, otherwise the part of their email address before the `@`.
 
 How much it shows depends on who is reading:
 

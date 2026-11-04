@@ -2084,11 +2084,11 @@ pub(crate) fn abbreviate_object_id_with_prefix_cache(
 
     crate::oid_abbrev::abbreviate_object_id_known(
         repo,
+        &crate::oid_abbrev::PackListing::load(repo)?,
         oid,
         min_len,
         prefix_ambiguous,
-        &mut [None; 256],
-        &mut None,
+        &mut crate::oid_abbrev::LooseFanouts::default(),
     )
 }
 

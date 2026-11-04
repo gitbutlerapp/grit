@@ -34,7 +34,8 @@ pub fn auto_abbrev_len_for_object_count(count: usize) -> usize {
     hex_min.max(FALLBACK)
 }
 
-/// Approximate object count for auto `core.abbrev` (local pack index sizes + loose files).
+/// Approximate object count for auto `core.abbrev` (local pack index sizes; loose objects are
+/// not counted, as in Git).
 ///
 /// # Errors
 ///
@@ -180,6 +181,19 @@ mod resolve_core_abbrev_tests {
         let config = repo.config()?.clone();
         let len = resolve_core_abbrev_len(&config, repo.odb())?;
         assert_eq!(len, auto_abbrev_len_for_object_count(0));
+        Ok(())
+    }
+
+    #[test]
+    fn approximate_object_count_ignores_loose_objects() -> crate::error::Result<()> {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        for n in 0..3 {
+            repo.odb()
+                .write(crate::objects::ObjectKind::Blob, format!("{n}").as_bytes())?;
+        }
+        assert_eq!(repo.odb().count_loose_objects()?, 3);
+        assert_eq!(super::approximate_object_count(repo.odb())?, 0);
         Ok(())
     }
 }

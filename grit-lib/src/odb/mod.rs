@@ -35,8 +35,8 @@ pub(crate) use stream::deflate_stream_to_writer;
 pub use builder::OdbBuilder;
 
 pub(crate) use store::loose::{
-    decompress_zlib_loose_bytes, for_each_loose_object_id, parse_object_bytes,
-    read_loose_object_info,
+    decompress_zlib_loose_bytes, for_each_loose_object_id, for_each_object_id_in_fanout_dir,
+    parse_object_bytes, read_loose_object_info,
 };
 #[doc(inline)]
 pub use store::LooseStore;
@@ -1264,11 +1264,15 @@ impl Odb {
 
     /// Whether abbreviation must consult the full read chain (not only the primary pack index).
     ///
-    /// True when [`OdbBuilder::push_read_source`] layers or alternate object directories
-    /// can hold additional objects beyond the primary `objects/` loose and pack stores.
+    /// True when [`OdbBuilder::push_read_source`] layers, an in-memory overlay, a custom
+    /// primary store or alternate object directories can hold objects beyond the primary
+    /// `objects/` loose and pack stores.
     #[must_use]
     pub(crate) fn has_secondary_object_stores(&self) -> bool {
-        if !self.extra_read_sources.is_empty() {
+        if !self.extra_read_sources.is_empty()
+            || self.custom_primary.is_some()
+            || self.overlay_store().is_some()
+        {
             return true;
         }
         self.alternates_enabled && self.alternate_object_lookup_needed()
@@ -3852,21 +3856,19 @@ impl Odb {
 
     /// Approximate object count for Git-style automatic `core.abbrev` sizing.
     ///
-    /// Sums object counts from cached pack indexes (no per-object scan) plus loose files under
-    /// this database's `objects/` directory. Matches Git's `ODB_COUNT_OBJECTS_APPROXIMATE` well
-    /// enough for abbreviation heuristics on typical repositories.
+    /// Sums object counts from cached pack indexes. Loose objects are not counted, as in Git's
+    /// approximate count, so the automatic abbreviation length matches Git's and never needs a
+    /// walk of the 256 loose fan-out directories. Use [`Self::count_loose_objects`] when loose
+    /// objects matter (for example to tell whether the database is empty).
     ///
     /// # Errors
     ///
-    /// Propagates pack index listing and loose enumeration failures.
+    /// Propagates pack index listing failures.
     pub fn approximate_object_count(&self) -> Result<usize> {
-        let pack_objects: Result<usize> = self.with_pack_read_context(|| {
+        self.with_pack_read_context(|| {
             let indexes = pack::read_local_pack_indexes_cached(self.objects_dir())?;
             Ok(indexes.iter().map(|idx| idx.len()).sum())
-        });
-        let mut count = pack_objects?;
-        count += self.count_loose_objects()?;
-        Ok(count)
+        })
     }
 
     /// Zlib-compress canonical loose store bytes using the repository's loose level.

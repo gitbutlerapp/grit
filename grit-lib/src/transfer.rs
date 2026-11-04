@@ -3557,7 +3557,7 @@ pub(crate) fn sync_empty_destination_object_format(
     if local_odb.hash_algo() == remote_algo {
         return Ok(false);
     }
-    if local_odb.approximate_object_count()? > 0 {
+    if local_odb.approximate_object_count()? > 0 || local_odb.count_loose_objects()? > 0 {
         return Err(Error::Message(format!(
             "unsupported object format: destination uses {} but remote uses {}; re-clone into an empty directory with a matching format",
             local_odb.hash_algo().name(),

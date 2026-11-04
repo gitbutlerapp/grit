@@ -1,10 +1,14 @@
 //! Fast object-id abbreviation using pack-index neighbors and cached loose fanout checks.
 
 use std::collections::HashMap;
+use std::ops::ControlFlow;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::error::Result;
 use crate::objects::ObjectId;
+use crate::odb::for_each_object_id_in_fanout_dir;
+use crate::pack::PackIndex;
 use crate::repo::Repository;
 
 /// Memoized collision-aware abbreviations for a batch of known-present object ids.
@@ -14,9 +18,32 @@ pub struct OidAbbrevBatch {
     min_len: usize,
     memo: HashMap<ObjectId, String>,
     prefix_ambiguous: HashMap<String, bool>,
-    fanout_has_loose: [Option<bool>; 256],
-    /// When `Some(false)`, the object directory has no loose objects (only packs).
-    any_loose: Option<bool>,
+    loose: LooseFanouts,
+    /// Pack listing taken on first use; a batch abbreviates ids that already exist.
+    packs: Option<PackListing>,
+}
+
+/// Local pack indexes and whether abbreviation must consult the whole database.
+#[derive(Clone)]
+pub(crate) struct PackListing {
+    indexes: Vec<Arc<PackIndex>>,
+    whole_odb: bool,
+}
+
+impl PackListing {
+    pub(crate) fn load(repo: &Repository) -> Result<Self> {
+        let odb = repo.odb();
+        let indexes = odb.pack_indexes_for_display()?;
+        let non_promisor = indexes.iter().filter(|idx| !idx.is_promisor).count();
+        let whole_odb = if non_promisor > 1 {
+            true
+        } else if odb.has_secondary_object_stores() {
+            !odb.local_pack_indexes()?.is_empty() || odb.alternates_may_hold_loose_objects()
+        } else {
+            false
+        };
+        Ok(Self { whole_odb, indexes })
+    }
 }
 
 impl Default for OidAbbrevBatch {
@@ -33,8 +60,8 @@ impl OidAbbrevBatch {
             min_len: min_len.clamp(4, 40),
             memo: HashMap::new(),
             prefix_ambiguous: HashMap::new(),
-            fanout_has_loose: [None; 256],
-            any_loose: None,
+            loose: LooseFanouts::default(),
+            packs: None,
         }
     }
 
@@ -66,13 +93,17 @@ impl OidAbbrevBatch {
                 return Ok(hit.clone());
             }
         }
+        let packs = match &mut self.packs {
+            Some(packs) => packs,
+            slot => slot.insert(PackListing::load(repo)?),
+        };
         let abbrev = abbreviate_object_id_known(
             repo,
+            packs,
             oid,
             min_len,
             &mut self.prefix_ambiguous,
-            &mut self.fanout_has_loose,
-            &mut self.any_loose,
+            &mut self.loose,
         )?;
         if min_len == self.min_len {
             self.memo.insert(oid, abbrev.clone());
@@ -81,15 +112,70 @@ impl OidAbbrevBatch {
     }
 }
 
+/// Loose object ids per `objects/<fanout>` directory, read once per directory on demand.
+#[derive(Clone, Default)]
+pub(crate) struct LooseFanouts {
+    /// `Some(false)` when the object directory holds no loose objects at all.
+    any: Option<bool>,
+    dirs: HashMap<u8, Vec<ObjectId>>,
+}
+
+impl LooseFanouts {
+    /// Longest prefix (in nibbles) that `oid` shares with another loose object, if any.
+    fn longest_shared_prefix(
+        &mut self,
+        repo: &Repository,
+        oid: &ObjectId,
+    ) -> Result<Option<usize>> {
+        let any = match self.any {
+            Some(any) => any,
+            None => *self
+                .any
+                .insert(objects_dir_has_loose(repo.odb().objects_dir())),
+        };
+        if !any {
+            return Ok(None);
+        }
+        let fanout = oid.as_bytes()[0];
+        let ids = match self.dirs.entry(fanout) {
+            std::collections::hash_map::Entry::Occupied(hit) => hit.into_mut(),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                let mut ids = Vec::new();
+                let hex = format!("{fanout:02x}");
+                for_each_object_id_in_fanout_dir(
+                    &repo.odb().objects_dir().join(&hex),
+                    &hex,
+                    repo.odb().hash_algo(),
+                    &mut |id| {
+                        ids.push(*id);
+                        ControlFlow::Continue(())
+                    },
+                )
+                .map(drop)?;
+                slot.insert(ids)
+            }
+        };
+        Ok(ids
+            .iter()
+            .filter(|other| *other != oid)
+            .map(|other| oid.common_prefix_nibbles(other))
+            .max())
+    }
+}
+
 /// Like [`abbreviate_object_id_with_prefix_cache`](crate::rev_parse::abbreviate_object_id_with_prefix_cache)
 /// but skips [`Odb::contains`](crate::odb::Odb::contains) and avoids full fanout scans.
+///
+/// With a single local pack and no other object source, the pack-index neighbours of `oid`
+/// and the loose ids in its fan-out directory are the only objects that can share a prefix
+/// with it, so no prefix lookup is needed.
 pub(crate) fn abbreviate_object_id_known(
     repo: &Repository,
+    packs: &PackListing,
     oid: ObjectId,
     min_len: usize,
     prefix_ambiguous: &mut HashMap<String, bool>,
-    fanout_has_loose: &mut [Option<bool>; 256],
-    any_loose: &mut Option<bool>,
+    loose: &mut LooseFanouts,
 ) -> Result<String> {
     let hex_len = oid.algo().hex_len();
     let min_len = min_len.clamp(4, hex_len);
@@ -101,7 +187,7 @@ pub(crate) fn abbreviate_object_id_known(
         return Ok(target);
     }
 
-    let Some(mut len) = disambiguation_len_from_packs(repo, oid, min_len, hex_len)? else {
+    let Some(mut len) = disambiguation_len_from_packs(&packs.indexes, oid, min_len, hex_len) else {
         let mut candidates = Vec::new();
         repo.odb().lookup_prefix(short, 0, &mut candidates)?;
         prefix_ambiguous.insert(short.to_owned(), candidates.len() > 1);
@@ -114,89 +200,39 @@ pub(crate) fn abbreviate_object_id_known(
         return Ok(target);
     };
 
-    let whole_odb = needs_whole_odb_disambiguation(repo)?;
-
-    if len > min_len {
-        if !whole_odb && !may_have_loose_objects(repo, any_loose)? {
-            target.truncate(len);
-            return Ok(target);
+    if !packs.whole_odb {
+        if let Some(shared) = loose.longest_shared_prefix(repo, &oid)? {
+            len = len.max((shared + 1).min(hex_len));
         }
-        let prefix = &target[..len];
-        if prefix_ambiguous.get(prefix) == Some(&false) {
-            target.truncate(len);
-            return Ok(target);
-        }
-        let mut candidates = Vec::new();
-        repo.odb().lookup_prefix(prefix, 2, &mut candidates)?;
-        prefix_ambiguous.insert(prefix.to_owned(), candidates.len() > 1);
-        let shared = candidates
-            .iter()
-            .filter(|other| **other != oid)
-            .map(|other| oid.common_prefix_nibbles(other))
-            .max();
-        len = shared.map_or(len, |n| (n + 1).clamp(min_len, hex_len));
         target.truncate(len);
         return Ok(target);
     }
 
-    if !whole_odb
-        && !may_have_loose_objects(repo, any_loose)?
-        && !fanout_may_have_loose(repo, oid.as_bytes()[0], fanout_has_loose)?
-    {
-        prefix_ambiguous.insert(short.to_owned(), false);
-        target.truncate(min_len);
+    let prefix = &target[..len];
+    if prefix_ambiguous.get(prefix) == Some(&false) {
+        target.truncate(len);
         return Ok(target);
     }
-
     let mut candidates = Vec::new();
-    repo.odb().lookup_prefix(short, 2, &mut candidates)?;
-    prefix_ambiguous.insert(short.to_owned(), candidates.len() > 1);
+    repo.odb().lookup_prefix(prefix, 2, &mut candidates)?;
+    prefix_ambiguous.insert(prefix.to_owned(), candidates.len() > 1);
     let shared = candidates
         .iter()
         .filter(|other| **other != oid)
         .map(|other| oid.common_prefix_nibbles(other))
         .max();
-    target.truncate(shared.map_or(min_len, |n| (n + 1).clamp(min_len, hex_len)));
+    len = shared.map_or(len, |n| (n + 1).clamp(len, hex_len));
+    target.truncate(len);
     Ok(target)
 }
 
-fn non_promisor_pack_count(repo: &Repository) -> Result<usize> {
-    Ok(repo
-        .odb()
-        .pack_indexes_for_display()?
-        .iter()
-        .filter(|idx| !idx.is_promisor)
-        .count())
-}
-
-fn needs_whole_odb_disambiguation(repo: &Repository) -> Result<bool> {
-    let odb = repo.odb();
-    if non_promisor_pack_count(repo)? > 1 {
-        return Ok(true);
-    }
-    if odb.has_secondary_object_stores() {
-        let local = odb.local_pack_indexes()?;
-        if !local.is_empty() {
-            return Ok(true);
-        }
-        // Empty primary: pack neighbors are enough only when alternates have no loose objects.
-        return Ok(odb.alternates_may_hold_loose_objects());
-    }
-    Ok(false)
-}
-
 fn disambiguation_len_from_packs(
-    repo: &Repository,
+    indexes: &[Arc<PackIndex>],
     oid: ObjectId,
     min_len: usize,
     hex_len: usize,
-) -> Result<Option<usize>> {
-    let odb = repo.odb();
+) -> Option<usize> {
     let mut len = min_len;
-    let indexes = odb.pack_indexes_for_display()?;
-    if indexes.is_empty() {
-        return Ok(None);
-    }
     for idx in indexes {
         if idx.is_promisor {
             continue;
@@ -214,23 +250,9 @@ fn disambiguation_len_from_packs(
                 len = len.max((oid.common_prefix_nibbles(&other) + 1).min(hex_len));
             }
         }
-        return Ok(Some(len));
+        return Some(len);
     }
-    Ok(None)
-}
-
-fn fanout_may_have_loose(
-    repo: &Repository,
-    fanout_byte: u8,
-    cache: &mut [Option<bool>; 256],
-) -> Result<bool> {
-    let slot = fanout_byte as usize;
-    if let Some(hit) = cache[slot] {
-        return Ok(hit);
-    }
-    let has = fanout_dir_has_loose(repo.odb().objects_dir(), fanout_byte);
-    cache[slot] = Some(has);
-    Ok(has)
+    None
 }
 
 #[cfg(test)]
@@ -317,6 +339,84 @@ PY"#;
             batch.abbrev_known(&repo, oid)?;
         }
         assert_eq!(repo.odb().exists_probe_count(), 0);
+        Ok(())
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn loose_objects_sharing_a_packed_commit_prefix_lengthen_its_abbrev_like_git() -> Result<()> {
+        let root = TempDir::new().expect("tempdir");
+        let dir = root.path();
+        git(dir, &["init", "-q", "-b", "main"]);
+        for n in 0..6 {
+            std::fs::write(dir.join("f.txt"), format!("{n}\n")).expect("write");
+            git(dir, &["add", "f.txt"]);
+            git(
+                dir,
+                &[
+                    "-c",
+                    "user.name=A",
+                    "-c",
+                    "user.email=a@e.t",
+                    "commit",
+                    "-q",
+                    "-m",
+                    &format!("c{n}"),
+                ],
+            );
+        }
+        git(dir, &["gc", "--quiet"]);
+
+        let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");
+        let mut commits = Vec::new();
+        repo.odb().for_each_object(&mut |oid| {
+            if repo
+                .odb()
+                .read(oid)
+                .is_ok_and(|o| o.kind == ObjectKind::Commit)
+            {
+                commits.push(*oid);
+            }
+            std::ops::ControlFlow::Continue(())
+        })?;
+        assert_eq!(commits.len(), 6);
+        // Loose blobs sharing the first two bytes with three of the packed commits.
+        let targets: Vec<[u8; 2]> = commits
+            .iter()
+            .take(3)
+            .map(|c| [c.as_bytes()[0], c.as_bytes()[1]])
+            .collect();
+        let mut found = vec![false; targets.len()];
+        for n in 0_u64.. {
+            let data = format!("loose {n}\n").into_bytes();
+            let oid = crate::hash::hash_object(repo.odb().hash_algo(), ObjectKind::Blob, &data)?;
+            if let Some(i) = targets.iter().position(|t| oid.as_bytes()[..2] == t[..]) {
+                if !found[i] {
+                    repo.odb().write(ObjectKind::Blob, &data)?;
+                    found[i] = true;
+                }
+            }
+            if found.iter().all(|f| *f) {
+                break;
+            }
+        }
+
+        let mut batch = OidAbbrevBatch::new(4);
+        for oid in &commits {
+            let git_short = Command::new("git")
+                .current_dir(dir)
+                .args(["rev-parse", "--short=4", &oid.to_hex()])
+                .output()
+                .expect("git");
+            let git_short = String::from_utf8_lossy(&git_short.stdout).trim().to_owned();
+            assert_eq!(batch.abbrev_known(&repo, *oid)?, git_short, "{oid}");
+        }
+        for oid in commits.iter().take(3) {
+            assert!(batch.abbrev_known(&repo, *oid)?.len() > 4);
+        }
         Ok(())
     }
 
@@ -430,15 +530,6 @@ PY"#;
     }
 }
 
-fn may_have_loose_objects(repo: &Repository, cache: &mut Option<bool>) -> Result<bool> {
-    if let Some(hit) = cache {
-        return Ok(*hit);
-    }
-    let has = objects_dir_has_loose(repo.odb().objects_dir());
-    *cache = Some(has);
-    Ok(has)
-}
-
 fn objects_dir_has_loose(objects_dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(objects_dir) else {
         return false;
@@ -457,17 +548,4 @@ fn objects_dir_has_loose(objects_dir: &Path) -> bool {
         }
     }
     false
-}
-
-fn fanout_dir_has_loose(objects_dir: &Path, fanout_byte: u8) -> bool {
-    let fanout = format!("{:02x}", fanout_byte);
-    let dir = objects_dir.join(&fanout);
-    let Ok(mut entries) = std::fs::read_dir(dir) else {
-        return false;
-    };
-    entries.any(|e| {
-        e.as_ref()
-            .ok()
-            .is_some_and(|ent| ent.file_type().is_ok_and(|t| t.is_file()))
-    })
 }

@@ -634,7 +634,7 @@ pub fn for_each_loose_object_id(
 
 /// Visit the loose ids in one `objects/<fanout>` directory; a missing directory (or a
 /// non-directory at that path) holds no objects.
-fn for_each_object_id_in_fanout_dir(
+pub(crate) fn for_each_object_id_in_fanout_dir(
     fanout_dir: &Path,
     fanout: &str,
     hash_algo: HashAlgo,
