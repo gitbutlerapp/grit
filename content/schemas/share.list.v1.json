@@ -2,6 +2,94 @@
   "$id": "https://grit-scm.com/schemas/share.list/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "DivergenceChangeJson": {
+      "description": "One commit of a divergence: what each side did to it.",
+      "properties": {
+        "change": {
+          "description": "Its change id, or `patch:<patch id>` for a commit without one.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "The paths its versions change.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "description": "Its subject line.",
+          "type": "string"
+        },
+        "them": {
+          "description": "What they did to it, in the same words.",
+          "type": "string"
+        },
+        "you": {
+          "description": "What you did to it: `unchanged`, `moved`, `reworded`, `amended`, `dropped`, `squashed`, `split`, `new`, `split_piece` or `absent`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "change",
+        "paths",
+        "subject",
+        "them",
+        "you"
+      ],
+      "type": "object"
+    },
+    "DivergenceJson": {
+      "description": "How another member's head diverged from yours ([`grit_lib::divergence`]).",
+      "properties": {
+        "also": {
+          "description": "Other scenarios that also apply, most pressing first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base": {
+          "description": "The last head you both had, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changes": {
+          "description": "The commits either side changed or added, oldest first.",
+          "items": {
+            "$ref": "#/definitions/DivergenceChangeJson"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "description": "Paths where the two heads' changes conflict.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "needs_decision": {
+          "description": "Whether someone has to decide what to do. When `false`, the heads can be put together without losing anything.",
+          "type": "boolean"
+        },
+        "scenario": {
+          "description": "The scenario's stable code, such as `amended_both_conflicting`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "What happened, in a sentence.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changes",
+        "needs_decision",
+        "scenario",
+        "summary"
+      ],
+      "type": "object"
+    },
     "HeadRelation": {
       "description": "How another member's head compares with your branch here.",
       "oneOf": [
@@ -146,6 +234,17 @@
     "ShareMemberJson": {
       "description": "A member of a share, as `grit share` reports it.",
       "properties": {
+        "divergence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DivergenceJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When their head diverged from yours: what happened."
+        },
         "head": {
           "description": "The tip of their head on the server.",
           "type": [

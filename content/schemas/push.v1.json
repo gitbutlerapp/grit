@@ -2,6 +2,134 @@
   "$id": "https://grit-scm.com/schemas/push/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "DivergenceChangeJson": {
+      "description": "One commit of a divergence: what each side did to it.",
+      "properties": {
+        "change": {
+          "description": "Its change id, or `patch:<patch id>` for a commit without one.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "The paths its versions change.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subject": {
+          "description": "Its subject line.",
+          "type": "string"
+        },
+        "them": {
+          "description": "What they did to it, in the same words.",
+          "type": "string"
+        },
+        "you": {
+          "description": "What you did to it: `unchanged`, `moved`, `reworded`, `amended`, `dropped`, `squashed`, `split`, `new`, `split_piece` or `absent`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "change",
+        "paths",
+        "subject",
+        "them",
+        "you"
+      ],
+      "type": "object"
+    },
+    "DivergenceJson": {
+      "description": "How another member's head diverged from yours ([`grit_lib::divergence`]).",
+      "properties": {
+        "also": {
+          "description": "Other scenarios that also apply, most pressing first.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base": {
+          "description": "The last head you both had, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "changes": {
+          "description": "The commits either side changed or added, oldest first.",
+          "items": {
+            "$ref": "#/definitions/DivergenceChangeJson"
+          },
+          "type": "array"
+        },
+        "conflicts": {
+          "description": "Paths where the two heads' changes conflict.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "needs_decision": {
+          "description": "Whether someone has to decide what to do. When `false`, the heads can be put together without losing anything.",
+          "type": "boolean"
+        },
+        "scenario": {
+          "description": "The scenario's stable code, such as `amended_both_conflicting`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "What happened, in a sentence.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "changes",
+        "needs_decision",
+        "scenario",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "HeadRelation": {
+      "description": "How another member's head compares with your branch here.",
+      "oneOf": [
+        {
+          "description": "The same commit as yours.",
+          "enum": [
+            "same"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "It has commits yours doesn't, and yours is in its history: `grit sync` fast-forwards to it.",
+          "enum": [
+            "ahead"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Yours has commits it doesn't, and it is in yours.",
+          "enum": [
+            "behind"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Each has commits the other lacks.",
+          "enum": [
+            "diverged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "You have no branch here, or its commits aren't fetched.",
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "PushKind": {
       "description": "JSON classification for [`PushOutcome`].",
       "enum": [
@@ -71,6 +199,65 @@
         "status"
       ],
       "type": "object"
+    },
+    "PushSharedBranch": {
+      "description": "A shared branch a push replaced your head of.",
+      "properties": {
+        "branch": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "heads": {
+          "description": "The other members' heads, compared with yours.",
+          "items": {
+            "$ref": "#/definitions/SharedHead"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "branch",
+        "heads"
+      ],
+      "type": "object"
+    },
+    "SharedHead": {
+      "description": "Another member's head of a shared branch.",
+      "properties": {
+        "divergence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/DivergenceJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For a head that diverged from yours: what happened, and whether someone has to decide what to do."
+        },
+        "relation": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/HeadRelation"
+            }
+          ],
+          "description": "How it compares with your branch here."
+        },
+        "tip": {
+          "description": "Their head's tip.",
+          "type": "string"
+        },
+        "user": {
+          "description": "Their user name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "relation",
+        "tip",
+        "user"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit push`: the per-ref outcomes for the remote.",
@@ -117,6 +304,13 @@
     "results": {
       "items": {
         "$ref": "#/definitions/PushRefResult"
+      },
+      "type": "array"
+    },
+    "shared": {
+      "description": "For each shared branch pushed (`grit share`): the other members' heads, fetched after the push and compared with yours.",
+      "items": {
+        "$ref": "#/definitions/PushSharedBranch"
       },
       "type": "array"
     },
