@@ -76,8 +76,7 @@ use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store
 use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
 use crate::repo::Repository;
 use crate::repo_relpath::{
-    as_utf8_for_matching, storage_bytes, storage_string, stored_directory_marker_parent,
-    stored_path_is_directory_marker, worktree_abs,
+    as_utf8_for_matching, storage_bytes, storage_string, stored_path_is_directory_marker,
 };
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
@@ -2310,7 +2309,8 @@ fn materialize_raw_flat_entry_in_worktree(
     rules: &WorktreeRules,
     entry: &RawFlatTreeEntry,
 ) -> Result<()> {
-    let file_path = crate::repo_relpath::worktree_abs(work_tree, &entry.path);
+    let stored = storage_string(&entry.path);
+    let file_path = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
     if let Some(parent) = file_path.parent() {
         if let Ok(rel) = parent.strip_prefix(work_tree) {
             let mut cur = work_tree.to_path_buf();
@@ -2318,7 +2318,7 @@ fn materialize_raw_flat_entry_in_worktree(
                 cur.push(comp);
                 if cur.exists() && !cur.is_dir() {
                     let path = crate::repo_relpath::strip_worktree_prefix_stored(&cur, work_tree)
-                        .unwrap_or_else(|| entry.path.clone());
+                        .unwrap_or_else(|| stored.clone());
                     return Err(Error::StashCouldNotRestoreUntracked { path });
                 }
             }
@@ -2589,7 +2589,8 @@ fn untracked_on_disk_matches_stash(
     if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
         return Ok(false);
     }
-    let abs = crate::repo_relpath::worktree_abs(work_tree, path);
+    let stored = storage_string(&entry.path);
+    let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
     let meta = match fs::symlink_metadata(&abs) {
         Ok(m) => m,
         Err(_) => return Ok(false),
