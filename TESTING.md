@@ -228,6 +228,28 @@ make public-api-check
 
 The first run may install the pinned nightly toolchain and `cargo-public-api` (OpenSSL development headers are required to build the tool on Linux). The check is **not** part of **`make gate`** because installing nightly is slow; CI runs it in the dedicated **public-api** job.
 
+## API ratchet
+
+[`scripts/api_ratchet.py`](scripts/api_ratchet.py) tracks public API quality metrics that must not grow without an intentional fix (and must ratchet down when you improve the API). Counts live in [`grit-lib/api-ratchet.toml`](grit-lib/api-ratchet.toml) next to the hygiene baseline. Inputs are the committed [`grit-lib/public-api.txt`](grit-lib/public-api.txt) and rustdoc JSON for `grit-lib` built with the pinned nightly from [`scripts/public-api.sh`](scripts/public-api.sh), `--features http-ureq` (same surface as the public API snapshot; no `unstable-bench-helpers`).
+
+**Regenerate after intentional metric reductions:**
+
+```bash
+make api-ratchet
+```
+
+Commit `grit-lib/api-ratchet.toml` with the code change.
+
+**Check locally (same as CI public-api job):**
+
+```bash
+make api-ratchet-check
+```
+
+The check fails if any count **increases**, or **decreases** without updating the baseline (same ratchet rule as hygiene). When the pinned nightly is not installed, **`make gate`** prints a skip line instead of running the check; CI always runs it in the **public-api** job after **`make public-api-check`**.
+
+Unit tests: `python3 -m unittest scripts/tests/test_api_ratchet.py` (also covered by the **scripts** CI job).
+
 ## Continuous integration
 
 GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It runs on push to **`main`**, on **pull requests**, nightly (**schedule**), and via **workflow_dispatch**. Superseded PR runs are cancelled via workflow **`concurrency`**.
@@ -246,7 +268,7 @@ Pushes and pull requests run only the fast jobs, the merge status. The nightly j
 | **fmt** | `cargo fmt --all --check` | `cargo fmt --all --check` |
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
-| **public-api** | `make public-api-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`) | `make public-api-check` |
+| **public-api** | `make public-api-check` then `make api-ratchet-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`; API quality counts vs `grit-lib/api-ratchet.toml`) | `make public-api-check` and `make api-ratchet-check` |
 | **coverage** | Nightly and on demand only: `make coverage` (llvm-cov over every `grit-lib` test, `full-tests` included, floor ratchet) | `make coverage` |
 | **test** | The fast run: `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc` | `make test` |
 | **test-full** | Nightly and on demand only: the same with `full-tests` on every crate (system `git` comparisons, heavy fixtures, `grit-bench` scenarios), the transport tests and Criterion smoke runs | `make test-full`; see [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |

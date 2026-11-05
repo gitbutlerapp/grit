@@ -22040,6 +22040,27 @@ pub fn grit_lib::remote::credentials::redact_embedded_url_credentials(&str) -> a
 pub fn grit_lib::remote::credentials::url_without_userinfo(&str) -> alloc::string::String
 pub fn grit_lib::remote::credentials::use_http_path(&grit_lib::config::ConfigSet, core::option::Option<&str>) -> bool
 pub mod grit_lib::remote::fetch
+#[non_exhaustive] pub enum grit_lib::remote::fetch::FetchMilestone
+pub grit_lib::remote::fetch::FetchMilestone::Connected
+pub grit_lib::remote::fetch::FetchMilestone::PackRequested
+impl core::clone::Clone for grit_lib::remote::fetch::FetchMilestone
+pub fn grit_lib::remote::fetch::FetchMilestone::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::fetch::FetchMilestone
+impl core::cmp::PartialEq for grit_lib::remote::fetch::FetchMilestone
+pub fn grit_lib::remote::fetch::FetchMilestone::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::fetch::FetchMilestone
+pub fn grit_lib::remote::fetch::FetchMilestone::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::remote::fetch::FetchMilestone
+pub fn grit_lib::remote::fetch::FetchMilestone::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::remote::fetch::FetchMilestone
+impl core::marker::StructuralPartialEq for grit_lib::remote::fetch::FetchMilestone
+impl core::marker::Freeze for grit_lib::remote::fetch::FetchMilestone
+impl core::marker::Send for grit_lib::remote::fetch::FetchMilestone
+impl core::marker::Sync for grit_lib::remote::fetch::FetchMilestone
+impl core::marker::Unpin for grit_lib::remote::fetch::FetchMilestone
+impl core::marker::UnsafeUnpin for grit_lib::remote::fetch::FetchMilestone
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch::FetchMilestone
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch::FetchMilestone
 pub struct grit_lib::remote::fetch::NoProgress
 impl grit_lib::progress::ProgressSink for grit_lib::remote::fetch::NoProgress
 pub fn grit_lib::remote::fetch::NoProgress::finish(&mut self)
@@ -22050,6 +22071,7 @@ pub fn grit_lib::remote::fetch::NoProgress::start(&mut self, grit_lib::progress:
 pub fn grit_lib::remote::fetch::NoProgress::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, grit_lib::progress::ProgressUnit, core::option::Option<u64>)
 impl grit_lib::remote::fetch::Progress for grit_lib::remote::fetch::NoProgress
 pub fn grit_lib::remote::fetch::NoProgress::message(&mut self, &[u8])
+pub fn grit_lib::remote::fetch::NoProgress::milestone(&mut self, grit_lib::remote::fetch::FetchMilestone)
 pub fn grit_lib::remote::fetch::NoProgress::received_objects(&mut self, grit_lib::progress::ReceivedObjects)
 pub fn grit_lib::remote::fetch::NoProgress::remote_sideband_progress(&self) -> bool
 pub fn grit_lib::remote::fetch::NoProgress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
@@ -22063,12 +22085,14 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch::NoProg
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch::NoProgress
 pub trait grit_lib::remote::fetch::Progress: grit_lib::progress::ProgressSink
 pub fn grit_lib::remote::fetch::Progress::message(&mut self, &[u8])
+pub fn grit_lib::remote::fetch::Progress::milestone(&mut self, grit_lib::remote::fetch::FetchMilestone)
 pub fn grit_lib::remote::fetch::Progress::received_objects(&mut self, grit_lib::progress::ReceivedObjects)
 pub fn grit_lib::remote::fetch::Progress::remote_sideband_progress(&self) -> bool
 pub fn grit_lib::remote::fetch::Progress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
 pub fn grit_lib::remote::fetch::Progress::wants_received_objects(&self) -> bool
 impl grit_lib::remote::fetch::Progress for grit_lib::remote::fetch::NoProgress
 pub fn grit_lib::remote::fetch::NoProgress::message(&mut self, &[u8])
+pub fn grit_lib::remote::fetch::NoProgress::milestone(&mut self, grit_lib::remote::fetch::FetchMilestone)
 pub fn grit_lib::remote::fetch::NoProgress::received_objects(&mut self, grit_lib::progress::ReceivedObjects)
 pub fn grit_lib::remote::fetch::NoProgress::remote_sideband_progress(&self) -> bool
 pub fn grit_lib::remote::fetch::NoProgress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
@@ -23478,16 +23502,16 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::push_plan::PushPlanContext
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::push_plan::PushPlanContext
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_plan::PushPlanContext
 pub struct grit_lib::remote::push_plan::PushRequest
+pub grit_lib::remote::push_plan::PushRequest::all: bool
 pub grit_lib::remote::push_plan::PushRequest::delete: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::push_plan::PushRequest::delete_refs: bool
 pub grit_lib::remote::push_plan::PushRequest::follow_tags: bool
 pub grit_lib::remote::push_plan::PushRequest::force: grit_lib::remote::push_plan::ForceMode
+pub grit_lib::remote::push_plan::PushRequest::mirror: bool
+pub grit_lib::remote::push_plan::PushRequest::prune: bool
 pub grit_lib::remote::push_plan::PushRequest::refspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::push_plan::PushRequest::remote: core::option::Option<alloc::string::String>
 pub grit_lib::remote::push_plan::PushRequest::set_upstream: bool
-pub grit_lib::remote::push_plan::PushRequest::all: bool
-pub grit_lib::remote::push_plan::PushRequest::mirror: bool
-pub grit_lib::remote::push_plan::PushRequest::prune: bool
 pub grit_lib::remote::push_plan::PushRequest::tags: bool
 impl core::clone::Clone for grit_lib::remote::push_plan::PushRequest
 pub fn grit_lib::remote::push_plan::PushRequest::clone(&self) -> Self

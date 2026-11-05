@@ -55,21 +55,34 @@ class PublicFn:
     path: str
 
 
-def rustdoc_json_command(*, nightly: str, output: Path) -> list[str]:
+def rustdoc_json_command(
+    *,
+    nightly: str,
+    output: Path,
+    features: str | None = None,
+) -> list[str]:
     """Command argv to emit rustdoc JSON for grit-lib."""
-    return [
+    cmd: list[str] = [
         "cargo",
         f"+nightly-{nightly}",
         "doc",
         "-p",
         "grit-lib",
-        "--all-features",
-        "--no-deps",
-        "-Z",
-        "unstable-options",
-        "--output-format",
-        "json",
     ]
+    if features is None:
+        cmd.append("--all-features")
+    else:
+        cmd.extend(["--features", features])
+    cmd.extend(
+        [
+            "--no-deps",
+            "-Z",
+            "unstable-options",
+            "--output-format",
+            "json",
+        ]
+    )
+    return cmd
 
 
 def ensure_rustdoc_json(
@@ -77,6 +90,7 @@ def ensure_rustdoc_json(
     nightly: str,
     output: Path,
     env: dict[str, str] | None = None,
+    features: str | None = None,
 ) -> None:
     """Build rustdoc JSON if missing or stale relative to grit-lib sources."""
     src_root = GRIT_LIB / "src"
@@ -88,7 +102,7 @@ def ensure_rustdoc_json(
     run_env["RUSTDOCFLAGS"] = ""
     if env:
         run_env.update(env)
-    cmd = rustdoc_json_command(nightly=nightly, output=output)
+    cmd = rustdoc_json_command(nightly=nightly, output=output, features=features)
     result = subprocess.run(
         cmd,
         cwd=ROOT,

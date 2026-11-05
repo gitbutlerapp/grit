@@ -195,6 +195,7 @@ jobs:
           cache-on-failure: true
 
       - run: make public-api-check
+      - run: make api-ratchet-check
 
   rustdoc:
     name: rustdoc
