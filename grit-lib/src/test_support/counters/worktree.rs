@@ -84,7 +84,3 @@ pub(crate) fn record_path_resolve(path: &Path) {
         WORKTREE_PATH_RESOLVE_PROBE.fetch_add(1, Ordering::Relaxed);
     }
 }
-
-pub(crate) fn metadata_active() -> bool {
-    WORKTREE_PROBE_ACTIVE.load(Ordering::Acquire) != 0
-}
