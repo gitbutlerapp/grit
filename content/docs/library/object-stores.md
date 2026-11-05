@@ -128,7 +128,7 @@ Graph files under `objects/info/` describe the files layout, not your store, so 
 
 1. Build the graph through any `Odb` with [`build_commit_graph`](rustdoc:grit_lib::maintenance::build_commit_graph) (or `Repository::build_commit_graph`). It walks every commit reachable from the repository's refs and returns a [`CommitGraphBuild`](rustdoc:grit_lib::maintenance::CommitGraphBuild): either a [`BuiltCommitGraph`](rustdoc:grit_lib::maintenance::BuiltCommitGraph) or, in a shallow repository or one with grafts or replace refs, the [`CommitGraphSkipReason`](rustdoc:grit_lib::maintenance::CommitGraphSkipReason) no graph may be built.
 2. Store `BuiltCommitGraph::bytes` wherever your backend keeps its data. They are byte for byte the file Git writes to `objects/info/commit-graph`, and `git commit-graph verify` accepts them.
-3. When you open the repository, parse the bytes with [`CommitGraphChain::from_bytes`](rustdoc:grit_lib::objects::commit_graph::CommitGraphChain::from_bytes) and attach them with [`OdbBuilder::commit_graph`](rustdoc:grit_lib::objects::odb::OdbBuilder::commit_graph).
+3. When you open the repository, turn stored bytes into a chain with [`BuiltCommitGraph::to_chain`](rustdoc:grit_lib::maintenance::BuiltCommitGraph::to_chain) (or build fresh from step 1 and call `to_chain` on the result) and attach it with [`OdbBuilder::commit_graph`](rustdoc:grit_lib::objects::odb::OdbBuilder::commit_graph).
 
 ```rust
 use std::sync::Arc;
@@ -138,7 +138,7 @@ use grit_lib::maintenance::{CommitGraphBuild, CommitGraphOptions};
 use grit_lib::objects::odb::store::WritableObjectStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::repo::{Repository, RepositoryBuilder};
-use grit_lib::objects::commit_graph::CommitGraphChain;
+use grit_lib::maintenance::BuiltCommitGraph;
 
 fn open(
     git_dir: &std::path::Path,
@@ -149,7 +149,8 @@ fn open(
         .primary(store)
         .alternates(false);
     if let Some(bytes) = graph {
-        odb = odb.commit_graph(Arc::new(CommitGraphChain::from_bytes(bytes)?));
+        let built = BuiltCommitGraph { bytes };
+        odb = odb.commit_graph(Arc::new(built.to_chain()?));
     }
     RepositoryBuilder::new(RepositoryOptions::empty())
         .odb_builder(odb)

@@ -21,15 +21,15 @@ describe("resolveRustdocPath associated items", () => {
   });
 
   it("links methods (not struct fields)", () => {
-    expect(resolveRustdocPath("grit_lib::revwalk::history::RewritePlan::ref_update_lines")).toBe(
-      "revwalk/history/struct.RewritePlan.html#method.ref_update_lines",
+    expect(resolveRustdocPath("grit_lib::revwalk::history::RewritePlan::rewritten_pairs")).toBe(
+      "revwalk/history/struct.RewritePlan.html#method.rewritten_pairs",
     );
   });
 
   it("follows re-exports of items that are public elsewhere", () => {
     expect(resolveRustdocPath("grit_lib::config::ConfigHandle")).toBe("config/struct.ConfigHandle.html");
-    expect(resolveRustdocPath("grit_lib::porcelain::branch_error::DeleteMode::Safe")).toBe(
-      "porcelain/branch_error/enum.DeleteMode.html#variant.Safe",
+    expect(resolveRustdocPath("grit_lib::porcelain::branch::DeleteMode::Safe")).toBe(
+      "porcelain/branch/enum.DeleteMode.html#variant.Safe",
     );
   });
 
