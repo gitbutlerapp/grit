@@ -696,7 +696,7 @@ fn plan_rewrite_with_order_impl(
 ///
 /// Same as [`plan_rewrite`], including [`HistoryError::MergeCommitInReplay`] when the segment
 /// contains a merge commit.
-pub fn plan_replay_linear_segment(
+pub(crate) fn plan_replay_linear_segment(
     repo: &Repository,
     oldest: ObjectId,
     replay_order: &[ObjectId],
@@ -1899,7 +1899,7 @@ pub(crate) fn head_effect(
 ///
 /// Used by [`super::squash::squash`](crate::history::squash::squash) when the range sits at the
 /// branch tip and only `HEAD` moves.
-pub fn plan_fold_range_at_head(
+pub(crate) fn plan_fold_range_at_head(
     repo: &Repository,
     commits: &[ObjectId],
     oldest: ObjectId,

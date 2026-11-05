@@ -28,8 +28,8 @@ impl LineStat {
     ///
     /// # Returns
     ///
-    /// Insertions ([`StructuredLineKind::Add`]) and deletions
-    /// ([`StructuredLineKind::Del`]); context lines are not counted.
+    /// Insertions (`StructuredLineKind::Add`) and deletions
+    /// (`StructuredLineKind::Del`); context lines are not counted.
     #[must_use]
     pub fn from_hunks(hunks: &[StructuredHunk]) -> Self {
         hunks

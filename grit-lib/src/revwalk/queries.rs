@@ -258,7 +258,7 @@ fn merge_filter_to_parent_bounds(merges: MergeFilter) -> (Option<usize>, Option<
 /// # Errors
 ///
 /// Returns [`RevListError::FollowRequiresSinglePath`] or [`RevListError::FollowRequiresLiteralPath`].
-pub fn validate_follow_pathspecs(paths: &[String]) -> Result<()> {
+pub(crate) fn validate_follow_pathspecs(paths: &[String]) -> Result<()> {
     if paths.len() != 1 {
         return Err(crate::rev_list_error::RevListError::FollowRequiresSinglePath.into());
     }

@@ -110,7 +110,7 @@ pub struct TreeDiffStructured {
 pub struct TreeDiffContent {
     /// Tree diff metadata (paths, modes, oids, status).
     pub entry: DiffEntry,
-    /// Old-side bytes prepared for [`super::structured::structured_text_diff`].
+    /// Old-side bytes prepared for structured text diffing.
     pub old_bytes: SideBytes,
     /// New-side bytes prepared for structured diffing.
     pub new_bytes: SideBytes,
@@ -477,7 +477,7 @@ pub(crate) fn side_bytes_after_blob_read(
 
 /// Load ODB blob bytes for diffing, skipping inflation when over `core.bigFileThreshold`.
 ///
-/// Returns empty [`SideBytes`] with `binary = true` when content is not read. When
+/// Returns empty side bytes with `binary = true` when content is not read. When
 /// `force_read_content` is true, large blobs are inflated and binary payload bytes are retained
 /// (for `GIT binary patch` / `git apply`).
 ///

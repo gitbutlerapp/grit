@@ -169,7 +169,7 @@ impl FilePatch {
     /// For deletions, use old_path (new is /dev/null).
     /// For additions, use new_path (old is /dev/null).
     /// Otherwise prefer new_path.
-    pub fn effective_path(&self) -> Option<&str> {
+    pub(crate) fn effective_path(&self) -> Option<&str> {
         if self.is_deleted {
             return self
                 .old_path
@@ -194,7 +194,7 @@ impl FilePatch {
     ///
     /// For rename/copy patches this is the old path, otherwise this is the
     /// effective path.
-    pub fn source_path(&self) -> Option<&str> {
+    pub(crate) fn source_path(&self) -> Option<&str> {
         if self.is_rename || self.is_copy {
             self.old_path
                 .as_deref()
@@ -216,7 +216,7 @@ impl FilePatch {
     ///
     /// For additions/renames/copies this is the new path, otherwise this is
     /// the effective path.
-    pub fn target_path(&self) -> Option<&str> {
+    pub(crate) fn target_path(&self) -> Option<&str> {
         if self.is_new || self.is_rename || self.is_copy {
             self.new_path
                 .as_deref()
@@ -228,7 +228,7 @@ impl FilePatch {
     }
 
     /// True when this patch touches a gitlink/submodule (mode `160000`).
-    pub fn involves_gitlink(&self) -> bool {
+    pub(crate) fn involves_gitlink(&self) -> bool {
         self.old_mode.as_deref() == Some("160000") || self.new_mode.as_deref() == Some("160000")
     }
 }
@@ -1203,7 +1203,7 @@ fn append_binary_literal_section(out: &mut String, uncompressed: &[u8]) -> Resul
 ///
 /// Forward literal is `new`; reverse literal is `old`, matching Git's `git diff --binary`.
 /// The `index` line and `diff --git` header are the caller's responsibility.
-pub fn write_git_binary_patch_sections<W: std::io::Write>(
+pub(crate) fn write_git_binary_patch_sections<W: std::io::Write>(
     out: &mut W,
     old: &[u8],
     new: &[u8],
@@ -1262,7 +1262,7 @@ pub fn inflate_binary_payload(compressed: &[u8]) -> Result<Vec<u8>> {
 /// Expand one binary patch section to uncompressed bytes.
 ///
 /// Delta sections require `base` (the preimage blob Git applies the delta against).
-pub fn materialize_binary_patch_section(
+pub(crate) fn materialize_binary_patch_section(
     section: &BinaryPatchSection,
     base: Option<&[u8]>,
 ) -> Result<Vec<u8>> {

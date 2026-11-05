@@ -12,12 +12,28 @@
 //! # Ok(())
 //! # }
 //! ```
+<<<<<<< New base: Refresh public-api snapshot after read_loose_object_info re-export.
 pub(crate) mod describe;
 pub(crate) mod filter;
 pub(crate) mod graph;
 pub(crate) mod group_by;
 pub(crate) mod handle;
 pub(crate) mod queries;
+||||||| Common ancestor
+pub mod describe;
+pub mod filter;
+pub mod graph;
+pub mod group_by;
+pub mod handle;
+pub mod queries;
+=======
+pub(crate) mod describe;
+pub mod filter;
+pub mod graph;
+pub mod group_by;
+pub mod handle;
+pub mod queries;
+>>>>>>> Current commit: Visibility sweep: revwalk, diff, porcelain, commit, blame, apply
 
 pub use crate::rev_list::CommitExtent;
 pub use describe::{DescribeOptions, DescribedCommit};
@@ -55,18 +71,17 @@ pub mod log_walk {
     //! Log-order revision walking helpers re-exported at this path.
     pub use crate::log_walk::*;
 }
-pub mod commit_graph {
-    //! Commit-graph read and write helpers.
-    pub use crate::commit_graph_file::*;
-    pub use crate::commit_graph_write::*;
+pub(crate) mod commit_graph {
+    pub(crate) use crate::commit_graph_file::*;
+    pub(crate) use crate::commit_graph_write::*;
 }
 pub mod rev_list_error {
-    //! rev_list_error API (re-exported at this path).
-    pub use crate::rev_list_error::*;
+    //! Typed `rev-list` failures surfaced on [`crate::revwalk::RevWalk`].
+    pub use crate::rev_list_error::RevListError;
 }
 pub mod rev_parse_error {
-    //! rev_parse_error API (re-exported at this path).
-    pub use crate::rev_parse_error::*;
+    //! Typed revision parsing failures.
+    pub use crate::rev_parse_error::{AmbiguousChangeIdHint, AmbiguousObjectHint, RevParseError};
 }
 pub mod object_inspect {
     //! Typed revision resolution and object display payloads.

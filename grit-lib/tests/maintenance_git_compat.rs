@@ -7,7 +7,6 @@ use std::process::Command;
 
 use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::{self, issue_msg_id, FsckOptions, FsckReport};
@@ -16,6 +15,7 @@ use grit_lib::maintenance::{
     AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcOptions, PackRefsOptions, PruneOptions,
     RepackOptions,
 };
+use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{build_commit_graph_bytes, CommitGraphChain};
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -2150,7 +2150,7 @@ fn gc_on_single_fresh_pack_skips_reachability_walk() {
 }
 
 fn top_commit_graph_has_bloom_filters(repo: &Repository) -> bool {
-    grit_lib::revwalk::commit_graph::CommitGraphChain::try_load(repo.odb().objects_dir())
+    grit_lib::objects::commit_graph::CommitGraphChain::try_load(repo.odb().objects_dir())
         .expect("load commit-graph")
         .expect("commit-graph written")
         .top_layer_bloom_settings()

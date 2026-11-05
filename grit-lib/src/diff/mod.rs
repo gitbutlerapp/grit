@@ -17,6 +17,7 @@ mod changes;
 mod commit_files_many;
 mod core;
 pub(crate) use core::myers_rediff_changed_masks_for_region;
+pub(crate) use core::*;
 pub(crate) use core::{
     intern_merge_compare_three_way, merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
 };
@@ -47,7 +48,25 @@ mod whitespace_mode;
 
 pub use changes::{load_object_changes, FileChange, UncommittedDiff};
 pub use commit_files_many::{CommitFilesManyInput, CommitFilesManyOptions, CommitFilesResult};
-pub use core::*;
+pub use core::structured;
+pub use core::{
+    anchored_unified_diff, annotate_unified_diff_no_newline_at_eof, count_changes_with_algorithm,
+    count_git_lines, detect_copies_with_policy, detect_renames_with_policy, diff_commits,
+    diff_commits_with_renames, diff_index_to_tree, diff_index_to_worktree,
+    diff_index_to_worktree_for_staging, diff_index_to_worktree_with_options,
+    diff_index_to_worktree_with_renames, diff_tree_to_worktree, diff_tree_to_worktree_with_git_dir,
+    diff_tree_to_worktree_with_git_dir_and_rules, diff_trees, diff_trees_show_tree_entries,
+    diff_trees_with_renames, empty_blob_oid, format_raw, format_raw_abbrev, hash_worktree_file,
+    index_mtime_for_diff, mode_from_metadata, normalize_ignore_space_change,
+    parse_diff_rename_threshold_percent, postprocess_diff_entries,
+    read_worktree_side_bytes_for_diff, refresh_index_stat_content_verified,
+    rename_similarity_score, resolve_indent_heuristic, sort_entries_by_path, stat_matches,
+    submodule_porcelain_flags, tree_oid_of_commit, unified_diff_histogram_hunks_only,
+    unified_diff_histogram_ignore_with_prefix_and_funcname, unified_diff_with_prefix_and_funcname,
+    unified_diff_with_prefix_and_funcname_and_algorithm, zero_oid, DetectRenamesOptions,
+    DiffEntriesResult, DiffEntry, DiffIndexToWorktreeOptions, DiffPostprocessOptions,
+    DiffPostprocessWorktree, DiffStatus, InexactRenameDetectionSkipped,
+};
 pub use detail::FileDiff as ListedFileDiff;
 pub use detail::{line_change_counts, DiffDetail, DiffTotals, LineStat};
 pub use files::{build_file_diffs, build_file_diffs_streaming, name_status_line, DiffFilesOutput};
@@ -99,16 +118,15 @@ pub use tree_content::{
     tree_diff_structured_entry, tree_diff_structured_parallel, TreeDiffContent, TreeDiffStructured,
 };
 
-pub mod bloom {
-    //! bloom API (re-exported at this path).
-    pub use crate::bloom::*;
+pub(crate) mod bloom {
+    pub(crate) use crate::bloom::*;
 }
 pub mod combined_diff_patch {
     //! combined_diff_patch API (re-exported at this path).
     pub use crate::combined_diff_patch::*;
 }
 pub mod combined_tree_diff {
-    //! combined_tree_diff API (re-exported at this path).
+    //! Combined tree diff helpers for merge commits.
     pub use crate::combined_tree_diff::*;
 }
 pub mod patch_ids {
@@ -116,11 +134,11 @@ pub mod patch_ids {
     pub use crate::patch_ids::*;
 }
 pub mod userdiff {
-    //! userdiff API (re-exported at this path).
+    //! Per-path diff driver (funcname) matching.
     pub use crate::userdiff::*;
 }
 pub mod merge_diff {
-    //! merge_diff API (re-exported at this path).
+    //! Combined diff content for octopus merges.
     pub use crate::merge_diff::*;
 }
 pub mod merge_file {
@@ -135,9 +153,8 @@ pub mod rerere {
     //! rerere API (re-exported at this path).
     pub use crate::rerere::*;
 }
-pub mod fmt_merge_msg {
-    //! fmt_merge_msg API (re-exported at this path).
-    pub use crate::fmt_merge_msg::*;
+pub(crate) mod fmt_merge_msg {
+    pub(crate) use crate::fmt_merge_msg::*;
 }
 pub mod ws {
     //! ASCII whitespace helpers used by the diff engine.

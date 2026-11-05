@@ -35,7 +35,7 @@ pub struct HistoryLastRecord {
 impl HistoryLastRecord {
     /// Build a record from a rewrite plan that was just applied.
     #[must_use]
-    pub fn from_applied_plan(operation: &str, plan: &RewritePlan) -> Self {
+    pub(crate) fn from_applied_plan(operation: &str, plan: &RewritePlan) -> Self {
         Self {
             operation: operation.into(),
             head_ref: plan.head.head_ref.clone(),
@@ -52,7 +52,7 @@ impl HistoryLastRecord {
 
     /// Inverse ref updates suitable for undo.
     #[must_use]
-    pub fn inverse_ref_updates(&self) -> Vec<PlannedRefUpdate> {
+    pub(crate) fn inverse_ref_updates(&self) -> Vec<PlannedRefUpdate> {
         self.ref_updates
             .iter()
             .map(|u| PlannedRefUpdate {
@@ -65,7 +65,7 @@ impl HistoryLastRecord {
 
     /// [`RewritePlan`] describing an undo checkout (refs and `HEAD` trees swapped).
     #[must_use]
-    pub fn undo_plan(&self) -> RewritePlan {
+    pub(crate) fn undo_plan(&self) -> RewritePlan {
         RewritePlan {
             commits: Vec::new(),
             ref_updates: self.inverse_ref_updates(),

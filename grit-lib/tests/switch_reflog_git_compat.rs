@@ -5,8 +5,8 @@ use grit_lib::error::Error;
 use grit_lib::index::entry_from_stat;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
-use grit_lib::porcelain::branch_error::BranchError;
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,

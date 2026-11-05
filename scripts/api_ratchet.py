@@ -29,6 +29,7 @@ DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
 
 METRIC_KEYS = (
     "public_api_lines",
+    "pub_fn_impl_suffix",
     "pub_fn_with_in_name",
     "pub_fn_too_many_arguments_allow",
     "pub_fn_two_plus_bare_bool",
@@ -500,6 +501,7 @@ def compute_metrics(
 
     api_lines = [line for line in public_api_text.splitlines() if line.strip()]
 
+    impl_suffix: list[str] = []
     with_in_name: list[str] = []
     too_many_args: list[str] = []
     two_plus_bool: list[str] = []
@@ -514,6 +516,8 @@ def compute_metrics(
         path = public_path_for_item(index, paths_map, item_id)
         name = item.get("name") or "?"
 
+        if name.endswith("_impl"):
+            impl_suffix.append(f"{path} :: {name}")
         if "_with_" in name:
             with_in_name.append(f"{path} :: {name}")
 
@@ -570,6 +574,7 @@ def compute_metrics(
 
     metrics = {
         "public_api_lines": MetricResult(len(api_lines)),
+        "pub_fn_impl_suffix": MetricResult(len(impl_suffix), impl_suffix),
         "pub_fn_with_in_name": MetricResult(len(with_in_name), with_in_name),
         "pub_fn_too_many_arguments_allow": MetricResult(len(too_many_args), too_many_args),
         "pub_fn_two_plus_bare_bool": MetricResult(len(two_plus_bool), two_plus_bool),

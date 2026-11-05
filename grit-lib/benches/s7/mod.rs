@@ -10,9 +10,9 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
 
-use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::index::write_tree::{write_tree_from_index, write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{
     build_commit_graph_bytes, collect_reachable_commit_oids, load_commit_graph_commit_info,
     CommitGraphCommitInfo,

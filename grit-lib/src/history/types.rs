@@ -200,7 +200,7 @@ impl RewritePlan {
     /// Dropped commits, [reused](RewrittenCommit::reused) commits and commits whose replacement
     /// is the original object are left out; this is the list `post-rewrite` receives on stdin.
     #[must_use]
-    pub fn rewritten_pairs(&self) -> Vec<(ObjectId, ObjectId)> {
+    pub(crate) fn rewritten_pairs(&self) -> Vec<(ObjectId, ObjectId)> {
         self.commits
             .iter()
             .filter(|c| !c.reused)
@@ -214,7 +214,7 @@ impl RewritePlan {
     ///
     /// Returns [`super::HistoryError`] when a subject must be loaded from the object database and
     /// the commit is missing or corrupt.
-    pub fn subjects(
+    pub(crate) fn subjects(
         &self,
         repo: &crate::repo::Repository,
     ) -> Result<Vec<Option<String>>, super::HistoryError> {
@@ -226,7 +226,7 @@ impl RewritePlan {
 
     /// Tip OID after rewrite when a ref update moves `old_tip`, if any.
     #[must_use]
-    pub fn mapped_tip(&self, old_tip: ObjectId) -> Option<ObjectId> {
+    pub(crate) fn mapped_tip(&self, old_tip: ObjectId) -> Option<ObjectId> {
         self.ref_updates
             .iter()
             .find(|u| u.old == old_tip)
@@ -264,7 +264,7 @@ impl RewritePlan {
 
     /// `update <ref> <new> <old>` lines accepted by `git update-ref --stdin`.
     #[must_use]
-    pub fn ref_update_lines(&self) -> Vec<String> {
+    pub(crate) fn ref_update_lines(&self) -> Vec<String> {
         self.ref_updates
             .iter()
             .map(|u| format!("update {} {} {}", u.name, u.new.to_hex(), u.old.to_hex()))

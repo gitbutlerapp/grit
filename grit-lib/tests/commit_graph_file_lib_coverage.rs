@@ -4,10 +4,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{build_commit_graph_bytes, load_commit_graph_commit_info};
 use grit_lib::objects::commit_graph::{
     commit_tree_has_high_bit_paths, dump_bloom_filters, parse_graph_file, BloomPrecheck,

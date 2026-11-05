@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{
     bloom_filter_for_commit_write, commit_tree_has_high_bit_paths, dump_bloom_filters,
     CommitGraphChain,

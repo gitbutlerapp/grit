@@ -30,7 +30,7 @@ const WORKTREE_FROM_TREE: &str = "from-tree";
 
 /// Which apply path created a pending journal (controls recovery).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RewriteApplyKind {
+pub(crate) enum RewriteApplyKind {
     /// Standard [`super::apply_rewrite`] checkout.
     Standard,
     /// [`super::apply_fixup_rewrite`]: recovery rolls back instead of a generic checkout.
@@ -80,7 +80,7 @@ pub fn rewrite_apply_journal_active(git_dir: &Path) -> bool {
 /// # Errors
 ///
 /// Returns [`HistoryError::UndoRecordWrite`] on I/O failures.
-pub fn write_rewrite_apply_journal(
+pub(crate) fn write_rewrite_apply_journal(
     repo: &Repository,
     plan: &RewritePlan,
     opts: &ApplyOptions,
@@ -126,7 +126,7 @@ pub fn write_rewrite_apply_journal(
 /// # Errors
 ///
 /// Returns [`HistoryError::UndoRecordWrite`] when the directory cannot be removed.
-pub fn clear_rewrite_apply_journal(repo: &Repository) -> Result<(), HistoryError> {
+pub(crate) fn clear_rewrite_apply_journal(repo: &Repository) -> Result<(), HistoryError> {
     let dir = journal_dir(repo.git_dir());
     if dir.is_dir() {
         fs::remove_dir_all(&dir).map_err(journal_write_err)?;

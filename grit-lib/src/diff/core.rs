@@ -1644,7 +1644,7 @@ where
 
 /// `diff.indentHeuristic` from config (Git defaults to true when unset).
 #[must_use]
-pub fn indent_heuristic_from_config(config: &ConfigSet) -> bool {
+pub(crate) fn indent_heuristic_from_config(config: &ConfigSet) -> bool {
     config.bool_or("diff.indentHeuristic", true)
 }
 
@@ -2139,7 +2139,11 @@ mod git_xdiff {
     /// `ids1`/`ids2` are dense interned token ids from one [`crate::line_interner::LineInterner`]
     /// (equal id <=> equal token); per-id tables are sized by the largest id.
     /// Returns `(changed1, changed2)`, one bool per original token.
-    pub fn changed_flags(ids1: &[u32], ids2: &[u32], need_min: bool) -> (Vec<bool>, Vec<bool>) {
+    pub(crate) fn changed_flags(
+        ids1: &[u32],
+        ids2: &[u32],
+        need_min: bool,
+    ) -> (Vec<bool>, Vec<bool>) {
         changed_flags_with_shared(ids1, ids2, &[], 0, need_min)
     }
 
@@ -2149,7 +2153,7 @@ mod git_xdiff {
     /// Git classifies each record by how often it occurs in the whole other file, so the
     /// records left out still count: `shared_counts[id]` is how many of them have token `id`
     /// (ids past its end have none), and `shared_records` is how many there are on each side.
-    pub fn changed_flags_with_shared(
+    pub(crate) fn changed_flags_with_shared(
         ids1: &[u32],
         ids2: &[u32],
         shared_counts: &[u32],
@@ -2346,13 +2350,16 @@ mod git_xdiff {
     }
 
     /// Patience diff: match unique lines, then recurse on gaps with xdiff Myers.
-    pub fn patience_changed_flags(lines1: &[&str], lines2: &[&str]) -> (Vec<bool>, Vec<bool>) {
+    pub(crate) fn patience_changed_flags(
+        lines1: &[&str],
+        lines2: &[&str],
+    ) -> (Vec<bool>, Vec<bool>) {
         let b1: Vec<&[u8]> = lines1.iter().map(|l| l.as_bytes()).collect();
         let b2: Vec<&[u8]> = lines2.iter().map(|l| l.as_bytes()).collect();
         patience_changed_flags_bytes(&b1, &b2)
     }
 
-    pub fn patience_changed_flags_bytes(
+    pub(crate) fn patience_changed_flags_bytes(
         lines1: &[&[u8]],
         lines2: &[&[u8]],
     ) -> (Vec<bool>, Vec<bool>) {
@@ -2680,7 +2687,7 @@ fn changed_flags_to_ops(
 
 /// Line-diff ops for string slices after Git `xdl_change_compact` (and optional indent heuristic).
 #[must_use]
-pub fn diff_slice_ops_compacted(
+pub(crate) fn diff_slice_ops_compacted(
     old_lines: &[&str],
     new_lines: &[&str],
     algorithm: similar::Algorithm,
@@ -2787,7 +2794,7 @@ pub enum DiffStatus {
 
 /// Unstaged status letter for a worktree diff entry (gitlink `m` vs `M` for submodules).
 #[must_use]
-pub fn gitlink_unstaged_status_letter(entry: &DiffEntry) -> char {
+pub(crate) fn gitlink_unstaged_status_letter(entry: &DiffEntry) -> char {
     if entry.old_mode.is_gitlink() && entry.status == DiffStatus::Modified {
         if entry.new_oid.is_zero() {
             return 'm';
@@ -3149,7 +3156,7 @@ impl DiffTreesWalkHint<'_> {
 /// # Errors
 ///
 /// Returns errors from object database reads.
-pub fn diff_tree_path_change_count(
+pub(crate) fn diff_tree_path_change_count(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -3204,7 +3211,7 @@ pub fn diff_trees_with_renames(
 /// # Errors
 ///
 /// Propagates errors from [`diff_trees`].
-pub fn diff_trees_with_renames_and_policy(
+pub(crate) fn diff_trees_with_renames_and_policy(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -3230,7 +3237,7 @@ pub fn diff_trees_with_renames_and_policy(
 /// # Errors
 ///
 /// Propagates errors from [`diff_trees`] and rename detection.
-pub fn diff_trees_with_renames_and_policy_result(
+pub(crate) fn diff_trees_with_renames_and_policy_result(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -3364,7 +3371,7 @@ pub(crate) fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<Object
 /// # Errors
 ///
 /// Returns object read/parse errors when `commit_oid` is missing or not a commit.
-pub fn tree_oid_of_commit_in_repo(
+pub(crate) fn tree_oid_of_commit_in_repo(
     repo: &crate::repo::Repository,
     commit_oid: &ObjectId,
 ) -> Result<ObjectId> {
@@ -3414,7 +3421,7 @@ pub fn diff_commits_with_renames(
 /// # Errors
 ///
 /// Propagates object read errors and tree diff failures.
-pub fn diff_commits_with_renames_and_policy(
+pub(crate) fn diff_commits_with_renames_and_policy(
     odb: &Odb,
     base: &ObjectId,
     tip: &ObjectId,
@@ -4045,7 +4052,7 @@ pub fn diff_index_to_tree(
 /// # Errors
 ///
 /// Propagates errors from [`diff_index_to_tree`].
-pub fn diff_index_to_tree_with_renames(
+pub(crate) fn diff_index_to_tree_with_renames(
     odb: &Odb,
     index: &Index,
     tree_oid: Option<&ObjectId>,
@@ -4073,7 +4080,7 @@ pub fn diff_index_to_tree_with_renames(
 /// # Errors
 ///
 /// Propagates object read failures while scoring renames.
-pub fn apply_rename_detection_to_diff_entries(
+pub(crate) fn apply_rename_detection_to_diff_entries(
     odb: &Odb,
     entries: Vec<DiffEntry>,
     work_root: Option<&Path>,
@@ -4117,7 +4124,7 @@ pub fn apply_rename_detection_to_diff_entries(
 
 /// Diff the index against the working tree and pair deleted/added paths as renames when similar.
 ///
-/// Runs [`diff_index_to_worktree_with_options`], then [`apply_rename_detection_to_diff_entries`]
+/// Runs `diff_index_to_worktree_with_options`, then `apply_rename_detection_to_diff_entries`
 /// with `work_root` set to `work_tree`. Untracked worktree paths are not diff entries (see
 /// [`crate::porcelain::status`]); they are never fed into rename detection here.
 ///
@@ -5376,9 +5383,9 @@ pub fn diff_index_to_worktree(
 }
 
 /// Predicate over stored index path bytes for [`DiffIndexToWorktreeOptions::skip_index_path`].
-pub type IndexPathSkipPredicate = std::sync::Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
+pub(crate) type IndexPathSkipPredicate = std::sync::Arc<dyn Fn(&[u8]) -> bool + Send + Sync>;
 
-/// Additional inputs for [`diff_index_to_worktree_with_options`].
+/// Additional inputs for `diff_index_to_worktree_with_options`.
 #[derive(Clone)]
 pub struct DiffIndexToWorktreeOptions {
     /// Optional index mtime pair `(sec, nsec)` sampled when the index was read.
@@ -5486,7 +5493,7 @@ impl Default for DiffIndexToWorktreeOptions {
 
 /// Optional worktree access policy for [`diff_tree_to_worktree_with_git_dir_and_rules`]'s slow path.
 #[derive(Clone, Default)]
-pub struct DiffTreeToWorktreeExtras {
+pub(crate) struct DiffTreeToWorktreeExtras {
     /// When true with [`Self::diagnostics`], skip permission-denied paths with a warning.
     pub skip_inaccessible_paths: bool,
     /// Warning sink paired with [`Self::skip_inaccessible_paths`].
@@ -7190,7 +7197,7 @@ impl SymlinkDirCache {
 /// within the same second the index was written. Callers pass the index file mtime sampled when
 /// the index was read (before any rewrite). When `index_mtime` is `None`, returns `false`.
 #[must_use]
-pub fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
+pub(crate) fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
     entry_is_racy_with_policy(ie, index_mtime, crate::index::StatMatchPolicy::default())
 }
 
@@ -7200,7 +7207,7 @@ pub fn entry_is_racy(ie: &IndexEntry, index_mtime: Option<(u32, u32)>) -> bool {
 /// (`core.usenanosec` with `core.checkstat=default`); otherwise a same-second, same-size edit
 /// would be neither racy nor a stat mismatch.
 #[must_use]
-pub fn entry_is_racy_with_policy(
+pub(crate) fn entry_is_racy_with_policy(
     ie: &IndexEntry,
     index_mtime: Option<(u32, u32)>,
     policy: crate::index::StatMatchPolicy,
@@ -7235,7 +7242,7 @@ pub fn entry_is_racy_with_policy(
 /// so the repository hash algorithm and clean (CRLF/filter) conversion match index OIDs.
 ///
 /// Returns `true` when at least one entry was smudged.
-pub fn smudge_racily_clean_entries(
+pub(crate) fn smudge_racily_clean_entries(
     odb: &Odb,
     git_dir: &Path,
     index: &mut Index,
@@ -7319,7 +7326,7 @@ pub fn smudge_racily_clean_entries(
 /// Symlinks and submodules are compared in a Git-compatible way.
 ///
 /// `ignore_submodule_untracked` mirrors [`diff_index_to_worktree`]'s same flag for gitlinks.
-pub fn worktree_differs_from_index_entry(
+pub(crate) fn worktree_differs_from_index_entry(
     odb: &Odb,
     repository_git_dir: &Path,
     work_tree: &Path,
@@ -7550,7 +7557,7 @@ pub(crate) fn index_entry_skips_worktree_content_hash_after_stat_match(
 /// # Errors
 ///
 /// Returns [`Error::Io`] when the worktree file cannot be read for content verification.
-pub fn classify_worktree_entry_for_add(
+pub(crate) fn classify_worktree_entry_for_add(
     params: &WorktreeAddRefreshParams<'_>,
 ) -> Result<WorktreeAddRefresh> {
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
@@ -7663,7 +7670,7 @@ pub(crate) fn stat_matches_blob_stat(
 
 /// Like [`stat_matches`], honoring `core.trustctime`, `core.checkstat`, and `core.usenanosec`.
 #[must_use]
-pub fn stat_matches_with_policy(
+pub(crate) fn stat_matches_with_policy(
     ie: &IndexEntry,
     meta: &fs::Metadata,
     policy: crate::index::StatMatchPolicy,
@@ -7765,7 +7772,7 @@ pub fn refresh_index_stat_content_verified(
 ///
 /// Propagates I/O errors from the directory-grouped worktree scan.
 #[allow(clippy::too_many_arguments)]
-pub fn refresh_index_stat_content_verified_with_rules(
+pub(crate) fn refresh_index_stat_content_verified_with_rules(
     odb: &Odb,
     git_dir: &Path,
     index: &mut Index,
@@ -8355,7 +8362,7 @@ fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
 /// # Errors
 ///
 /// Returns [`std::io::Error`] when the path cannot be read.
-pub fn read_worktree_bytes_for_mode(path: &Path, mode: u32) -> std::io::Result<Vec<u8>> {
+pub(crate) fn read_worktree_bytes_for_mode(path: &Path, mode: u32) -> std::io::Result<Vec<u8>> {
     if mode == MODE_SYMLINK && fs::symlink_metadata(path)?.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         return Ok(symlink_target_bytes(&target));
@@ -8405,7 +8412,7 @@ pub fn read_worktree_side_bytes_for_diff(
 ///
 /// Returns I/O errors from the worktree path or [`Error`] from filter conversion.
 #[allow(clippy::too_many_arguments)]
-pub fn load_worktree_side_for_diff(
+pub(crate) fn load_worktree_side_for_diff(
     odb: &Odb,
     work_tree: &Path,
     rel_path: &str,
@@ -8855,7 +8862,7 @@ pub(crate) fn hash_worktree_file_with_mode(
 /// `filter.<driver>.required` clean filter fails or cannot be started; content is never
 /// stored or hashed unfiltered in that case.
 #[allow(clippy::too_many_arguments)]
-pub fn materialize_worktree_blob(
+pub(crate) fn materialize_worktree_blob(
     odb: &Odb,
     path: &Path,
     meta: &fs::Metadata,
@@ -9485,7 +9492,7 @@ fn read_added_entry_bytes(
 /// uncached `diff-index` when the work tree diverged from the index) load content from disk
 /// under that root instead of the object database.
 #[allow(clippy::expect_used)]
-pub fn detect_renames(
+pub(crate) fn detect_renames(
     odb: &Odb,
     work_root: Option<&Path>,
     entries: Vec<DiffEntry>,
@@ -9517,7 +9524,7 @@ fn poll_rename_cancel(
     Ok(())
 }
 
-/// Like [`detect_renames`], but honors `index.threads` / `--threads` via `thread_policy`.
+/// Like `detect_renames`, but honors `index.threads` / `--threads` via `thread_policy`.
 ///
 /// A list without both an added and a deleted entry has nothing to pair. When its paths
 /// are also unique and in [`sort_entries_by_path`] order, as tree diffs return them, the
@@ -9995,7 +10002,7 @@ pub fn detect_renames_with_policy(
 ///
 /// Returns [`Error::HashCollision`] when hashing worktree blob content for copy detection
 /// would produce a known-bad SHA-1 object id.
-pub fn detect_copies(
+pub(crate) fn detect_copies(
     odb: &Odb,
     work_root: Option<&Path>,
     entries: Vec<DiffEntry>,
@@ -10017,11 +10024,11 @@ pub fn detect_copies(
     )
 }
 
-/// Like [`detect_copies`], but honors parallel thread policy and rename limits.
+/// Like `detect_copies`, but honors parallel thread policy and rename limits.
 ///
 /// # Errors
 ///
-/// Same as [`detect_copies`].
+/// Same as `detect_copies`.
 #[expect(clippy::too_many_arguments)]
 pub fn detect_copies_with_policy(
     odb: &Odb,
@@ -10362,7 +10369,7 @@ pub fn detect_copies_with_policy(
 /// Options for Git-style rename, copy, and break-rewrite post-processing on tree diffs.
 #[derive(Debug, Clone, Copy)]
 pub struct DiffPostprocessOptions {
-    /// When set, `--break-rewrites` threshold on Git's internal 0–[`GIT_DIFF_MAX_SCORE`] scale
+    /// When set, `--break-rewrites` threshold on Git's internal 0–the internal max score (60_000) scale
     /// (`None` = off).
     pub break_score: Option<u64>,
     /// `-M` similarity threshold (0–100); `100` disables rename detection.
@@ -10664,7 +10671,7 @@ pub fn postprocess_diff_entries(
 }
 
 /// Depth-first list of `(path, mode, oid)` blob entries in a tree (for copy detection).
-pub fn flatten_tree_entries(
+pub(crate) fn flatten_tree_entries(
     odb: &Odb,
     tree_oid: &ObjectId,
 ) -> Result<Vec<(String, FileMode, ObjectId)>> {
@@ -10707,7 +10714,7 @@ pub fn flatten_tree_entries(
 ///
 /// Propagates errors from reading the `head_tree` object from `odb`.
 #[allow(clippy::too_many_arguments)]
-pub fn status_apply_rename_copy_detection(
+pub(crate) fn status_apply_rename_copy_detection(
     odb: &Odb,
     unstaged_raw: Vec<DiffEntry>,
     threshold: u32,
@@ -10910,7 +10917,7 @@ pub fn format_raw_abbrev(entry: &DiffEntry, abbrev_len: usize) -> String {
 /// # Returns
 ///
 /// The unified diff as a string.
-pub fn unified_diff(
+pub(crate) fn unified_diff(
     old_content: &str,
     new_content: &str,
     old_path: &str,
@@ -10938,7 +10945,7 @@ pub fn unified_diff(
 /// `inter_hunk_context` is Git's `--inter-hunk-context`: adjacent hunks merge when
 /// the unchanged gap between them is at most `2 * context_lines + inter_hunk_context` lines.
 #[allow(clippy::too_many_arguments)] // Mirrors Git-style unified diff parameters.
-pub fn unified_diff_with_prefix(
+pub(crate) fn unified_diff_with_prefix(
     old_content: &str,
     new_content: &str,
     old_path: &str,
@@ -10965,7 +10972,7 @@ pub fn unified_diff_with_prefix(
     )
 }
 
-/// Same as [`unified_diff_with_prefix`] with optional custom hunk-header
+/// Same as `unified_diff_with_prefix` with optional custom hunk-header
 /// function-name matching.
 #[allow(clippy::too_many_arguments)]
 pub fn unified_diff_with_prefix_and_funcname(
@@ -11005,7 +11012,7 @@ pub fn unified_diff_with_prefix_and_funcname(
 ///
 /// Returns I/O errors from `out`.
 #[allow(clippy::too_many_arguments)]
-pub fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Write>(
+pub(crate) fn write_unified_diff_with_prefix_and_funcname_and_algorithm<W: std::io::Write>(
     out: &mut W,
     old_content: &str,
     new_content: &str,
@@ -12593,7 +12600,7 @@ pub fn count_changes_with_algorithm(
 
 /// Count insertions and deletions using Git's histogram line-diff engine.
 #[must_use]
-pub fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
+pub(crate) fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
     count_changes_with_algorithm(old_content, new_content, similar::Algorithm::Myers, true)
 }
 
@@ -12623,12 +12630,12 @@ pub fn count_git_lines(data: &[u8]) -> usize {
 }
 
 /// Internal maximum diff score used by Git rename/break heuristics (`MAX_SCORE` in `diffcore.h`).
-pub const GIT_DIFF_MAX_SCORE: u64 = 60_000;
+pub(crate) const GIT_DIFF_MAX_SCORE: u64 = 60_000;
 const DIFF_MAX_SCORE: u64 = GIT_DIFF_MAX_SCORE;
 const DIFF_MINIMUM_BREAK_SIZE: usize = 400;
 const DIFF_DEFAULT_BREAK_SCORE: u64 = 30_000;
-/// Default break threshold (`DEFAULT_BREAK_SCORE` in `diffcore.h`), internal 0–[`GIT_DIFF_MAX_SCORE`] scale.
-pub const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
+/// Default break threshold (`DEFAULT_BREAK_SCORE` in `diffcore.h`), internal 0–the internal max score (60_000) scale.
+pub(crate) const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
 const DIFF_HASHBASE: u32 = 107_927;
 
 #[derive(Clone, Copy, Default)]
@@ -12790,7 +12797,7 @@ fn hash_blob_spans(buf: &[u8], is_text: bool) -> SpanHashTop {
 /// Returns `(copied_bytes_from_src, literal_added_bytes_in_dst)` matching Git's
 /// `diffcore_count_changes` semantics (used for `--dirstat=changes` damage).
 #[must_use]
-pub fn diffcore_count_changes(old: &[u8], new: &[u8]) -> (u64, u64) {
+pub(crate) fn diffcore_count_changes(old: &[u8], new: &[u8]) -> (u64, u64) {
     crate::trace::trace_span!("grit.diff.blob");
     let src_is_text = !crate::merge_file::is_binary(old);
     let dst_is_text = !crate::merge_file::is_binary(new);
@@ -12833,16 +12840,16 @@ pub fn diffcore_count_changes(old: &[u8], new: &[u8]) -> (u64, u64) {
 }
 
 /// Whether an in-place blob edit should be split into delete+create for rename/copy (`should_break`
-/// in `diffcore-break.c`). `break_score` is on the internal 0–[`GIT_DIFF_MAX_SCORE`] scale (default
+/// in `diffcore-break.c`). `break_score` is on the internal 0–the internal max score (60_000) scale (default
 /// `DIFF_DEFAULT_BREAK_SCORE`).
 #[must_use]
-pub fn should_break_rewrite_pair(old: &[u8], new: &[u8], break_score: u64) -> bool {
+pub(crate) fn should_break_rewrite_pair(old: &[u8], new: &[u8], break_score: u64) -> bool {
     should_break_rewrite_inner(old, new, break_score)
 }
 
 /// Drop entries that do not match `filter` (Git `--diff-filter`, after rename detection).
 #[must_use]
-pub fn apply_diff_filter(
+pub(crate) fn apply_diff_filter(
     entries: Vec<DiffEntry>,
     filter: Option<super::filter::DiffFilter>,
 ) -> Vec<DiffEntry> {
@@ -12861,8 +12868,8 @@ pub fn parse_diff_rename_threshold_percent(arg: &str) -> Option<u8> {
 }
 
 /// Parse a single Git `parse_rename_score` token (`50`, `50%`, decimal forms) into internal
-/// 0–[`GIT_DIFF_MAX_SCORE`] units.
-pub fn parse_diff_rename_score_token(arg: &str) -> Option<u64> {
+/// 0–the internal max score (60_000) units.
+pub(crate) fn parse_diff_rename_score_token(arg: &str) -> Option<u64> {
     let mut num: u64 = 0;
     let mut scale: u64 = 1;
     let mut dot = false;
@@ -12900,7 +12907,7 @@ pub fn parse_diff_rename_score_token(arg: &str) -> Option<u64> {
 /// Git `merge_score` from `diffcore-break.c` when a pair is considered broken: how much of the
 /// source blob was removed (0–`DIFF_MAX_SCORE` scale). Used for `dissimilarity index` metadata.
 #[must_use]
-pub fn rewrite_merge_score(old: &[u8], new: &[u8]) -> Option<u64> {
+pub(crate) fn rewrite_merge_score(old: &[u8], new: &[u8]) -> Option<u64> {
     if old.is_empty() {
         return None;
     }
@@ -12916,7 +12923,7 @@ pub fn rewrite_merge_score(old: &[u8], new: &[u8]) -> Option<u64> {
 
 /// Percentage shown in `dissimilarity index N%` for a rewrite (`similarity_index` in Git's diff.c).
 #[must_use]
-pub fn rewrite_dissimilarity_index_percent(old: &[u8], new: &[u8]) -> Option<u32> {
+pub(crate) fn rewrite_dissimilarity_index_percent(old: &[u8], new: &[u8]) -> Option<u32> {
     let score = rewrite_merge_score(old, new)?;
     Some((score * 100 / DIFF_MAX_SCORE).min(100) as u32)
 }
@@ -13117,7 +13124,7 @@ fn flatten_tree_with_index(
 }
 
 /// Paths present in `HEAD`'s tree with mode and blob/commit OID (for status porcelain v2).
-pub fn head_path_states(
+pub(crate) fn head_path_states(
     odb: &Odb,
     head_tree: Option<&ObjectId>,
 ) -> Result<std::collections::BTreeMap<String, (u32, ObjectId)>> {
@@ -13169,7 +13176,7 @@ pub fn sort_entries_by_path(entries: &mut [DiffEntry]) {
 }
 
 /// Format a numeric mode as a zero-padded octal string.
-pub fn format_mode(mode: u32) -> String {
+pub(crate) fn format_mode(mode: u32) -> String {
     format!("{mode:06o}")
 }
 
@@ -13177,7 +13184,7 @@ pub fn format_mode(mode: u32) -> String {
 ///
 /// Returns `None` if the path is missing, not a submodule checkout, or has no resolvable HEAD.
 #[must_use]
-pub fn read_submodule_head_for_checkout(sub_dir: &Path) -> Option<ObjectId> {
+pub(crate) fn read_submodule_head_for_checkout(sub_dir: &Path) -> Option<ObjectId> {
     read_submodule_head(sub_dir)
 }
 
@@ -13186,7 +13193,7 @@ pub fn read_submodule_head_for_checkout(sub_dir: &Path) -> Option<ObjectId> {
 /// Honors `encoding` in the commit object (Latin-1 vs UTF-8) using the same
 /// rules as Git's submodule summary.
 #[must_use]
-pub fn submodule_commit_subject_line(c: &CommitData) -> String {
+pub(crate) fn submodule_commit_subject_line(c: &CommitData) -> String {
     let enc = c.encoding.as_deref().unwrap_or("UTF-8");
     let is_latin1 = enc.eq_ignore_ascii_case("ISO8859-1")
         || enc.eq_ignore_ascii_case("ISO-8859-1")
@@ -13220,7 +13227,7 @@ fn read_submodule_head(sub_dir: &Path) -> Option<ObjectId> {
 
 /// Resolve the embedded git directory for a submodule work tree (`sub_dir/.git`).
 #[must_use]
-pub fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn submodule_embedded_git_dir(sub_dir: &Path) -> Option<PathBuf> {
     let sub_meta = fs::symlink_metadata(sub_dir).ok()?;
     if !sub_meta.is_dir() || sub_meta.file_type().is_symlink() {
         return None;
@@ -13379,7 +13386,7 @@ fn read_submodule_head_oid_from_git_dir(
 /// Handles both embedded `.git` directories and `gitdir:` gitfiles pointing at
 /// `.git/modules/...` (or other locations). Returns `None` if the path is not
 /// a checkout or has no resolvable HEAD.
-pub fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
+pub(crate) fn read_submodule_head_oid(sub_dir: &Path) -> Option<ObjectId> {
     let git_dir = submodule_git_dir_for_head_read(sub_dir)?;
     read_submodule_head_oid_from_git_dir(&git_dir, true)
 }
@@ -13403,7 +13410,7 @@ pub(crate) fn read_submodule_head_oid_for_stage(sub_dir: &Path) -> Option<Object
 /// Returns `false` when the submodule is not checked out, has no embedded git dir, or has an
 /// unresolvable HEAD (those are handled separately by the unpopulated/placeholder logic).
 #[must_use]
-pub fn submodule_head_object_broken(sub_dir: &Path) -> bool {
+pub(crate) fn submodule_head_object_broken(sub_dir: &Path) -> bool {
     let Some(sub_git_dir) = submodule_embedded_git_dir(sub_dir) else {
         return false;
     };

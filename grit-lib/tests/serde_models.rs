@@ -33,10 +33,14 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::porcelain::status::StatusModel>();
     assert_serialize::<grit_lib::porcelain::log::LoadedCommit>();
     assert_serialize::<grit_lib::diff::DiffEntry>();
-    assert_serialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
     assert_serialize::<grit_lib::porcelain::tag::TagSummary>();
     assert_serialize::<grit_lib::porcelain::tag::TagList>();
+<<<<<<< New base: Refresh public-api snapshot after read_loose_object_info re-export.
     assert_serialize::<grit_lib::revwalk::DescribedCommit>();
+||||||| Common ancestor
+    assert_serialize::<grit_lib::revwalk::describe::DescribedCommit>();
+=======
+>>>>>>> Current commit: Visibility sweep: revwalk, diff, porcelain, commit, blame, apply
     assert_serialize::<grit_lib::blame::BlameResult>();
     assert_serialize::<grit_lib::blame::BlameHunk>();
     assert_serialize::<grit_lib::blame::BlameCommitInfo>();
@@ -47,11 +51,6 @@ fn result_models_implement_serialize() {
 }
 
 fn assert_deserialize<T: serde::de::DeserializeOwned>() {}
-
-#[test]
-fn workspace_snapshot_implement_deserialize() {
-    assert_deserialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
-}
 
 fn sample_signature() -> grit_lib::ident::Signature {
     "Ada Lovelace <ada@example.com> 1700000000 -0800"

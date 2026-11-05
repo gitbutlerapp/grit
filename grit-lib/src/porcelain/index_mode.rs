@@ -1,7 +1,7 @@
 //! Explicit index file modes for paths where the worktree does not report executable bits.
 //!
-//! When `core.filemode` is false (typical on Windows), [`crate::diff::mode_from_metadata`]
-//! always yields a non-executable mode. Staging can still record `100755` in the index when
+//! When `core.filemode` is false (typical on Windows), worktree `lstat` modes are mapped without
+//! the executable bit. Staging can still record `100755` in the index when
 //! the caller sets an [`StageExecutableHint`], matching Git's `update-index --chmod` behavior.
 
 use crate::error::{Error, Result};

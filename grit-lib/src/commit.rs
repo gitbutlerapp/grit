@@ -39,7 +39,7 @@ pub use crate::commit_pretty::resolve_core_abbrev_len;
 /// approxidate-style strings handled by [`parse_date`]. Returns `None` when the
 /// input is already in `<epoch> <offset>` form (nothing to convert) or cannot
 /// be parsed; callers then fall back to using the raw string.
-pub fn parse_date_to_git_timestamp(date_str: &str) -> Option<String> {
+pub(crate) fn parse_date_to_git_timestamp(date_str: &str) -> Option<String> {
     let trimmed = date_str.trim();
 
     // ISO 8601 / RFC 3339, including forms Git accepts without an explicit offset
@@ -213,7 +213,7 @@ pub fn format_git_timestamp(dt: OffsetDateTime) -> String {
 /// [`parse_date_to_git_timestamp`] and used verbatim if parsing fails (matching
 /// Git's lenient behavior). When `None`, `now` is formatted instead.
 #[must_use]
-pub fn assemble_identity(
+pub(crate) fn assemble_identity(
     name: &str,
     email: &str,
     date_override: Option<&str>,

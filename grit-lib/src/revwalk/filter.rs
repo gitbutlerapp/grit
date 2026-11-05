@@ -50,7 +50,7 @@ impl Pattern {
 
     /// Borrow the raw pattern text.
     #[must_use]
-    pub fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -99,7 +99,7 @@ struct CommitFilterInner {
 impl CommitFilter {
     /// Start building a filter.
     #[must_use]
-    pub fn builder() -> CommitFilterBuilder {
+    pub(crate) fn builder() -> CommitFilterBuilder {
         CommitFilterBuilder::new()
     }
 
@@ -115,7 +115,7 @@ impl CommitFilter {
     /// # Errors
     ///
     /// Returns repository and object read errors from the ODB.
-    pub fn matches(&self, repo: &Repository, oid: ObjectId) -> Result<bool> {
+    pub(crate) fn matches(&self, repo: &Repository, oid: ObjectId) -> Result<bool> {
         let object = repo.odb().read(&oid)?;
         if object.kind != ObjectKind::Commit {
             return Err(Error::CorruptObject(format!(

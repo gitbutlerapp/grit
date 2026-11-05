@@ -56,7 +56,7 @@ impl WorktreeModePolicy {
     ///
     /// # Parameters
     ///
-    /// - `worktree_mode` — Git mode derived from `lstat` (see [`crate::diff::mode_from_metadata`]).
+    /// - `worktree_mode` — Git mode derived from `lstat` (same mapping as the diff worktree helpers).
     /// - `recorded_mode` — the index entry's mode, or `None` for a path not yet tracked (the
     ///   worktree mode is then returned unchanged).
     ///

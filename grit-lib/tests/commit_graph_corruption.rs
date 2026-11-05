@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::error::Error;
+use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{
     build_commit_graph_bytes, collect_reachable_commit_oids, load_commit_graph_commit_info,
 };

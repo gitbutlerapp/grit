@@ -197,7 +197,7 @@ impl DiffOptions {
         }
     }
 
-    /// u32 threshold for [`super::apply_rename_detection_to_diff_entries`] and related APIs.
+    /// u32 threshold for rename pairing (`apply_rename_detection_to_diff_entries`) and related APIs.
     #[must_use]
     pub fn rename_threshold_u32(&self) -> u32 {
         self.rename_similarity_threshold()

@@ -60,7 +60,7 @@
 
 pub mod add;
 pub mod branch;
-pub mod branch_error;
+pub(crate) mod branch_error;
 pub(crate) mod bulk_index;
 pub mod checkout;
 pub mod checkout_reflog;
@@ -88,7 +88,7 @@ pub mod status;
 pub mod switch;
 pub mod tag;
 pub(crate) mod tree_merge_checkout;
-pub mod workspace_snapshot;
+pub(crate) mod workspace_snapshot;
 pub mod worktree_guard;
 
 /// Terminal capability probes for porcelain output.

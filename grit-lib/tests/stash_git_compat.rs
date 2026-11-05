@@ -3,7 +3,7 @@
 use grit_lib::diff::DiffStatus;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch_error::BranchError;
+use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;

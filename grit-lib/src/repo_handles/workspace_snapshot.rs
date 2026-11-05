@@ -29,7 +29,7 @@ impl<'repo> RepositoryWorkspaceSnapshot<'repo> {
     ///
     /// # Errors
     ///
-    /// Propagates errors from [`capture_workspace_snapshot`].
+    /// Propagates errors from workspace capture.
     pub fn capture(&self, options: &WorkspaceCaptureOptions) -> Result<WorkspaceSnapshot> {
         capture_workspace_snapshot(self.repo, options)
     }
@@ -38,7 +38,7 @@ impl<'repo> RepositoryWorkspaceSnapshot<'repo> {
     ///
     /// # Errors
     ///
-    /// Propagates errors from [`restore_workspace_snapshot`].
+    /// Propagates errors from workspace restore.
     pub fn restore(
         &self,
         snapshot: &WorkspaceSnapshot,
@@ -53,7 +53,7 @@ impl<'repo> RepositoryWorkspaceSnapshot<'repo> {
     ///
     /// # Errors
     ///
-    /// Propagates errors from [`pin_workspace_snapshot`].
+    /// Propagates errors from workspace snapshot pinning.
     pub fn pin(&self, snapshot: &WorkspaceSnapshot, caller_id: &str) -> Result<()> {
         pin_workspace_snapshot(self.repo, snapshot, caller_id)
     }
@@ -62,7 +62,7 @@ impl<'repo> RepositoryWorkspaceSnapshot<'repo> {
     ///
     /// # Errors
     ///
-    /// Propagates errors from [`unpin_workspace_snapshot`].
+    /// Propagates errors from workspace snapshot unpinning.
     pub fn unpin(&self, caller_id: &str) -> Result<()> {
         unpin_workspace_snapshot(self.repo, caller_id)
     }

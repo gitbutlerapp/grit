@@ -45,7 +45,7 @@ pub enum BlameDiffAlgorithm {
 
 impl BlameDiffAlgorithm {
     /// Map this blame diff setting to a [`similar::Algorithm`] instance.
-    pub fn to_similar(self) -> SimilarAlgorithm {
+    pub(crate) fn to_similar(self) -> SimilarAlgorithm {
         match self {
             // The `similar` crate doesn't expose histogram/minimal directly.
             // These mappings are chosen to match expected blame behavior in
@@ -782,7 +782,7 @@ fn fill_exact_text_relocate_with_lookup<'a>(
 /// Recover line mappings by exact text match when Myers left a line unresolved.
 ///
 /// Used during blame to follow moved but unchanged lines without pairing rewrites.
-pub fn build_exact_relocate_line_map(
+pub(crate) fn build_exact_relocate_line_map(
     old: &[&str],
     new: &[&str],
     exact_map: &[Option<usize>],
@@ -1285,7 +1285,7 @@ use crate::wildmatch::wildmatch;
 /// promisor remote (partial clone). The lib does no transport itself; the CLI
 /// supplies a function that performs the fetch. Install via
 /// [`RepoCaches::set_promisor_hydrate_hook`](crate::repo_caches::RepoCaches::set_promisor_hydrate_hook).
-pub type PromisorHydrateHook = fn(&Repository, ObjectId);
+pub(crate) type PromisorHydrateHook = fn(&Repository, ObjectId);
 
 /// A single line attribution produced by [`compute_blame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1724,7 +1724,7 @@ pub struct BlameTextconvContext {
 
 impl BlameTextconvContext {
     /// Build textconv context from the open repository (config, attributes, filters).
-    pub fn new(repo: &Repository) -> Self {
+    pub(crate) fn new(repo: &Repository) -> Self {
         let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
         let parsed = load_attr_parsed(repo);
@@ -1813,7 +1813,7 @@ fn load_diff_attr_rules(repo: &Repository) -> Vec<DiffAttrRule> {
 }
 
 /// Read an object for blame, optionally invoking a promisor hydration hook on miss.
-pub fn read_object_for_blame(
+pub(crate) fn read_object_for_blame(
     odb: &Odb,
     oid: &ObjectId,
     repo: Option<&Repository>,
@@ -4774,7 +4774,7 @@ pub enum BlameFinalSource {
 }
 
 /// Email shown in the placeholder identity of uncommitted lines (Git's porcelain `author-mail`).
-pub const UNCOMMITTED_EMAIL: &str = "not.committed.yet";
+pub(crate) const UNCOMMITTED_EMAIL: &str = "not.committed.yet";
 
 impl BlameFinalSource {
     /// Author name Git's porcelain blame gives lines that exist only in this source:
@@ -4792,7 +4792,7 @@ impl BlameFinalSource {
     /// [`uncommitted_author_name`](Self::uncommitted_author_name) as author name and summary,
     /// [`UNCOMMITTED_EMAIL`] as email, and `author_time` at UTC.
     #[must_use]
-    pub fn uncommitted_commit_info(&self, author_time: i64) -> BlameCommitInfo {
+    pub(crate) fn uncommitted_commit_info(&self, author_time: i64) -> BlameCommitInfo {
         let label = self.uncommitted_author_name();
         BlameCommitInfo {
             author: format!("{label} <{UNCOMMITTED_EMAIL}> {author_time} +0000"),
@@ -4912,7 +4912,7 @@ impl BlameResult {
         out
     }
 
-    /// The lines of `hunk`, a hunk returned by [`Self::hunks`] on this result.
+    /// The lines of `hunk`, a hunk returned by `Self::hunks` on this result.
     ///
     /// Returns an empty slice when `hunk.lines` is out of range (a hunk from another result).
     #[must_use]
@@ -4929,7 +4929,7 @@ impl BlameResult {
     /// [`BlameOptions::final_source`] the result was computed with). The email is
     /// `not.committed.yet` for every source. An entry whose author is already set, or a
     /// result with no uncommitted lines, is left unchanged.
-    pub fn name_uncommitted_author(&mut self, source: &BlameFinalSource) {
+    pub(crate) fn name_uncommitted_author(&mut self, source: &BlameFinalSource) {
         let Some(info) = self.commits.get_mut(&ObjectId::zero()) else {
             return;
         };
