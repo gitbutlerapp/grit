@@ -133,6 +133,12 @@ pub enum ShareRequest {
         /// Make a share link with these options.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         link: Option<LinkOptions>,
+        /// Give the people added (and the link) a snapshot share: the
+        /// branch's history without the rest of the project's, cut down to
+        /// these paths. A member with a snapshot share can only add people
+        /// with the same one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view: Option<ShareView>,
     },
     /// Remove `users` from the share of `branch`, or end the share when
     /// `users` is empty. The sharer, or someone who can integrate, may
@@ -189,6 +195,17 @@ pub enum ShareMode {
     Snapshot,
 }
 
+/// What a member of a snapshot share sees: the branch's own commits on a
+/// snapshot of the base branch, without its history, cut down to `paths`
+/// (none: the whole tree). Their pushes are grafted back onto the real
+/// history as their head.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareView {
+    /// The paths, such as `src/rpc`; empty for the whole tree.
+    #[serde(default)]
+    pub paths: Vec<String>,
+}
+
 /// One member of a share.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShareMember {
@@ -207,6 +224,9 @@ pub struct ShareMember {
     /// by name gets it the first time they fetch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    /// For a member with a snapshot share: what they see.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<ShareView>,
 }
 
 /// An open share link, without its secret part.
@@ -222,6 +242,9 @@ pub struct ShareLinkInfo {
     /// The one user who may accept it, for an invitation by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub for_user: Option<String>,
+    /// For a snapshot share link: what accepting it gives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<ShareView>,
 }
 
 /// A shared branch.
@@ -465,6 +488,7 @@ mod tests {
             branch: "feature".into(),
             users: vec!["bob".into()],
             link: Some(LinkOptions::default()),
+            view: None,
         };
         let json = serde_json::to_value(&request).unwrap();
         assert_eq!(json["action"], "share");

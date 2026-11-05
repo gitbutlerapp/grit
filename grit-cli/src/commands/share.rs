@@ -424,6 +424,11 @@ pub struct ShareMemberJson {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(default)]
     pub divergence: Option<DivergenceJson>,
+    /// For a member with a snapshot share (`--no-history`): the paths they
+    /// see, empty for the whole tree. Omitted for a full share.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub snapshot: Option<Vec<String>>,
 }
 
 /// A share link, as `grit share` reports it.
@@ -439,6 +444,11 @@ pub struct ShareLinkJson {
     pub uses_left: Option<u32>,
     /// When it stops working (RFC 3339).
     pub expires_at: String,
+    /// For a snapshot share link: the paths it gives, empty for the whole
+    /// tree. Omitted for a full share.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub snapshot: Option<Vec<String>>,
 }
 
 /// A shared branch, as `grit share` reports it.
@@ -602,6 +612,7 @@ fn branch_json(here: Option<(&Repository, &str)>, share: SharedBranch) -> ShareB
                 you: m.you,
                 head: m.head,
                 project: m.project,
+                snapshot: m.view.map(|v| v.paths),
             })
             .collect(),
         links: share
@@ -612,6 +623,7 @@ fn branch_json(here: Option<(&Repository, &str)>, share: SharedBranch) -> ShareB
                 url: None,
                 uses_left: l.uses_left,
                 expires_at: l.expires_at,
+                snapshot: l.view.map(|v| v.paths),
             })
             .collect(),
         invited: share.invited,
@@ -696,6 +708,7 @@ fn outcome(here: &Here, action: &str, reply: ShareReply, pushed: bool) -> ShareO
             url: Some(l.url),
             uses_left: l.info.uses_left,
             expires_at: l.info.expires_at,
+            snapshot: l.info.view.map(|v| v.paths),
         }),
         shares: reply
             .shares
@@ -726,6 +739,7 @@ pub fn add(
     link: bool,
     uses: Option<&str>,
     expires: Option<u32>,
+    view: Option<api::ShareView>,
     mode: OutputMode,
 ) -> Result<ShareOutcome> {
     if !link && (uses.is_some() || expires.is_some()) {
@@ -767,6 +781,7 @@ pub fn add(
             branch: branch.to_owned(),
             users: users.to_vec(),
             link: options,
+            view,
         },
     )?;
     refresh(&here, &reply, mode)?;
@@ -1628,6 +1643,16 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
     })
 }
 
+/// How a snapshot share's paths read: `snapshot of src/rpc`, or `snapshot`
+/// for the whole tree.
+fn snapshot_words(paths: &[String]) -> String {
+    if paths.is_empty() {
+        "snapshot, no history".to_owned()
+    } else {
+        format!("snapshot of {}", paths.join(", "))
+    }
+}
+
 fn render_branch_human(w: &mut dyn Write, s: &ShareBranchJson) -> Result<()> {
     let others: Vec<&str> = s
         .members
@@ -1661,6 +1686,11 @@ fn render_branch_human(w: &mut dyn Write, s: &ShareBranchJson) -> Result<()> {
             }
             _ => String::new(),
         };
+        let note = match &m.snapshot {
+            Some(paths) if note.is_empty() => format!("({})", snapshot_words(paths)),
+            Some(paths) => format!("{note}  ({})", snapshot_words(paths)),
+            None => note,
+        };
         let line = format!("  {name:<width$}  {head:<7}  {note}");
         outln!(w, "{}", line.trim_end());
         if let Some(d) = &m.divergence {
@@ -1675,7 +1705,12 @@ fn render_branch_human(w: &mut dyn Write, s: &ShareBranchJson) -> Result<()> {
             Some(n) => format!("{n} use{} left", if n == 1 { "" } else { "s" }),
             None => "no use limit".to_owned(),
         };
-        outln!(w, "  link {}  {uses}, until {}", l.id, l.expires_at);
+        let view = l
+            .snapshot
+            .as_deref()
+            .map(|p| format!(", {}", snapshot_words(p)))
+            .unwrap_or_default();
+        outln!(w, "  link {}  {uses}, until {}{view}", l.id, l.expires_at);
     }
     Ok(())
 }
@@ -1723,7 +1758,12 @@ impl HumanRender for ShareOutcome {
                 Some(n) => format!("{n} use{}", if n == 1 { "" } else { "s" }),
                 None => "no use limit".to_owned(),
             };
-            outln!(w, "✓ share link ({uses}, until {}):", link.expires_at);
+            let view = link
+                .snapshot
+                .as_deref()
+                .map(|p| format!(", {}", snapshot_words(p)))
+                .unwrap_or_default();
+            outln!(w, "✓ share link ({uses}, until {}{view}):", link.expires_at);
             outln!(w, "  {}", link.url.as_deref().unwrap_or_default());
         }
         if self.shares.is_empty() && self.action == "list" {
@@ -1770,9 +1810,14 @@ impl MarkdownRender for ShareOutcome {
                 Some(n) => n.to_string(),
                 None => "unlimited".to_owned(),
             };
+            let view = link
+                .snapshot
+                .as_deref()
+                .map(|p| format!(", {}", snapshot_words(p)))
+                .unwrap_or_default();
             outln!(
                 w,
-                "- Share link (uses: {uses}, until {}): {}",
+                "- Share link (uses: {uses}, until {}{view}): {}",
                 link.expires_at,
                 link.url.as_deref().unwrap_or_default()
             );
@@ -1812,6 +1857,10 @@ impl MarkdownRender for ShareOutcome {
                     .map(|h| format!("`{}`", short_hex(h)))
                     .unwrap_or_else(|| "not fetched yet".to_owned());
                 let rel = m.relation.map(HeadRelation::words).unwrap_or("-");
+                let name = match &m.snapshot {
+                    Some(paths) => format!("{name} ({})", snapshot_words(paths)),
+                    None => name,
+                };
                 outln!(w, "| {name} | {head} | {rel} |");
             }
             for email in &s.invited {
@@ -1827,13 +1876,17 @@ impl MarkdownRender for ShareOutcome {
             }
             if !s.links.is_empty() {
                 outln!(w);
-                outln!(w, "| Link | Uses left | Expires |");
-                outln!(w, "| --- | --- | --- |");
+                outln!(w, "| Link | Uses left | Expires | Gives |");
+                outln!(w, "| --- | --- | --- | --- |");
                 for l in &s.links {
                     let uses = l
                         .uses_left
                         .map_or_else(|| "unlimited".to_owned(), |n| n.to_string());
-                    outln!(w, "| `{}` | {uses} | {} |", l.id, l.expires_at);
+                    let gives = l
+                        .snapshot
+                        .as_deref()
+                        .map_or_else(|| "the branch with history".to_owned(), snapshot_words);
+                    outln!(w, "| `{}` | {uses} | {} | {gives} |", l.id, l.expires_at);
                 }
             }
         }

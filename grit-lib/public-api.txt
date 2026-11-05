@@ -21949,6 +21949,7 @@ pub grit_lib::remote::grit_server_share::ShareRequest::Share
 pub grit_lib::remote::grit_server_share::ShareRequest::Share::branch: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareRequest::Share::link: core::option::Option<grit_lib::remote::grit_server_share::LinkOptions>
 pub grit_lib::remote::grit_server_share::ShareRequest::Share::users: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::grit_server_share::ShareRequest::Share::view: core::option::Option<grit_lib::remote::grit_server_share::ShareView>
 pub grit_lib::remote::grit_server_share::ShareRequest::Unshare
 pub grit_lib::remote::grit_server_share::ShareRequest::Unshare::branch: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareRequest::Unshare::users: alloc::vec::Vec<alloc::string::String>
@@ -22121,6 +22122,7 @@ pub grit_lib::remote::grit_server_share::ShareLinkInfo::expires_at: alloc::strin
 pub grit_lib::remote::grit_server_share::ShareLinkInfo::for_user: core::option::Option<alloc::string::String>
 pub grit_lib::remote::grit_server_share::ShareLinkInfo::id: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareLinkInfo::uses_left: core::option::Option<u32>
+pub grit_lib::remote::grit_server_share::ShareLinkInfo::view: core::option::Option<grit_lib::remote::grit_server_share::ShareView>
 impl core::clone::Clone for grit_lib::remote::grit_server_share::ShareLinkInfo
 pub fn grit_lib::remote::grit_server_share::ShareLinkInfo::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::grit_server_share::ShareLinkInfo
@@ -22145,6 +22147,7 @@ pub grit_lib::remote::grit_server_share::ShareMember::head: core::option::Option
 pub grit_lib::remote::grit_server_share::ShareMember::project: core::option::Option<alloc::string::String>
 pub grit_lib::remote::grit_server_share::ShareMember::sharer: bool
 pub grit_lib::remote::grit_server_share::ShareMember::user: alloc::string::String
+pub grit_lib::remote::grit_server_share::ShareMember::view: core::option::Option<grit_lib::remote::grit_server_share::ShareView>
 pub grit_lib::remote::grit_server_share::ShareMember::you: bool
 impl core::clone::Clone for grit_lib::remote::grit_server_share::ShareMember
 pub fn grit_lib::remote::grit_server_share::ShareMember::clone(&self) -> Self
@@ -22191,6 +22194,29 @@ impl core::marker::Unpin for grit_lib::remote::grit_server_share::ShareReply
 impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_share::ShareReply
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_share::ShareReply
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_share::ShareReply
+pub struct grit_lib::remote::grit_server_share::ShareView
+pub grit_lib::remote::grit_server_share::ShareView::paths: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::remote::grit_server_share::ShareView
+pub fn grit_lib::remote::grit_server_share::ShareView::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_share::ShareView
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_share::ShareView
+pub fn grit_lib::remote::grit_server_share::ShareView::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::grit_server_share::ShareView
+pub fn grit_lib::remote::grit_server_share::ShareView::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::grit_server_share::ShareView
+pub fn grit_lib::remote::grit_server_share::ShareView::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_share::ShareView
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_share::ShareView
+pub fn grit_lib::remote::grit_server_share::ShareView::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_share::ShareView
+pub fn grit_lib::remote::grit_server_share::ShareView::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_share::ShareView
+impl core::marker::Send for grit_lib::remote::grit_server_share::ShareView
+impl core::marker::Sync for grit_lib::remote::grit_server_share::ShareView
+impl core::marker::Unpin for grit_lib::remote::grit_server_share::ShareView
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_share::ShareView
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_share::ShareView
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_share::ShareView
 pub struct grit_lib::remote::grit_server_share::SharedBranch
 pub grit_lib::remote::grit_server_share::SharedBranch::base_branch: core::option::Option<alloc::string::String>
 pub grit_lib::remote::grit_server_share::SharedBranch::branch: alloc::string::String

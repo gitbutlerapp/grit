@@ -8,7 +8,7 @@ order: 11
 ## Synopsis
 
 ```text
-grit share add <branch> [<user>|<email>...] [--link [--uses <n>|unlimited] [--expires <days>]]
+grit share add <branch> [<user>|<email>...] [--link [--uses <n>|unlimited] [--expires <days>]] [--no-history] [--path <path>...]
 grit share list [<branch>]
 grit share accept <link>
 grit share remove <branch> [<user>|<email>...]
@@ -24,6 +24,7 @@ On a grit hosting server such as [grithub](https://grithub.dev), your branches a
 The other members' heads are fetched beside yours as `<remote>/shared/<branch>/<user>` (from the server's `refs/shared/<branch>/<user>`, which nobody pushes to). [`grit status`](../status/) shows them under your branch, [`grit sync`](../sync/) fast-forwards your branch to a member's head that builds on yours, and [`grit push`](../push/) replaces your head after an amend or rebase without `--force` (it still checks that the server's head is the one you last fetched).
 
 - **`grit share add <branch> <user>...`** shares a branch of your space with people, each of whom is emailed. Name them by user name or email address: an address that belongs to an account adds that account, and any other address is emailed an invitation. The invitation's link asks them to create an account, then shows them how to work on the branch with grit or plain git; it works once, for 30 days. A branch that isn't in your space yet, or differs there, is pushed first. Anyone on the branch can add people. Someone added by name gets their copy of the project (with the branch in it) the first time they fetch from their space: `grit clone https://<server>/<them>/<project>`, or `grit sync` in a clone they have.
+- **`--no-history`** and **`--path <path>`** make it a [snapshot share](#snapshot-shares) for the people added (and the link): the branch's own history, without the rest of the project's, cut down to those paths.
 - **`--link`** makes a share link instead (or as well): a URL anyone signed in can accept, in the browser or with `grit share accept`. A link works once and for 7 days unless you pass `--uses` (a number or `unlimited`) and `--expires` (1 to 30 days). The URL is shown only now; the server keeps only its hash.
 - **`grit share list`** shows your shared branches: who is on each, where each head is, and how it compares with your branch here (`same as yours`, `has commits you don't`, `behind yours`, `diverged from yours`), and any open links.
 - **`grit share accept <link>`** accepts a link: you are on the branch, and your copy of the project is made in your space. In a clone of the project it fetches the branch into it; anywhere else it clones your copy into a new directory.
@@ -97,6 +98,21 @@ Every divergence report lists its options, the recommended one first, each with 
 
 **Without asking.** When another member's head and yours can be put together without losing anything (any scenario that doesn't need a decision), `grit sync` and `grit push` do it themselves: they combine the two, move your branch, and push the result, and the other member's next `grit sync` fast-forwards to it. Only when someone has to decide do they stop, report the options, and exit `3`.
 
+### Snapshot shares
+
+`grit share add <branch> bob --path src/rpc` (or `--no-history` alone, for the whole tree) shares the branch without the project's history. bob's copy is a project of its own in his space that holds only what he may see:
+
+- its base branch (`main`) is a **snapshot**: one commit standing for the base where the branch starts, cut down to his paths. Each path brings everything under it, plus the files directly in each directory above it (as Git's cone-mode sparse checkout does);
+- the branch, and the other members' heads under `origin/shared/<branch>/<user>`, are their commits **projected** onto the snapshot, cut down the same way. So he has the branch's history, not the project's;
+- when the base moves, his next fetch brings a new snapshot of it on top of the last one, so `grit sync` (or a rebase) brings his branch up to it. His base branch is read-only.
+
+He works with grit or plain git as usual. What he pushes is grafted back onto the real history as his head, so everyone with the whole branch gets full commits, with the files outside his paths as they were. A push that would undo changes outside his paths stays in his space, unshared, and the push's `remote:` lines say why with the code `outside_paths`:
+
+- rewriting a commit (an amend, a rebase that drops it) that also changed files outside his paths. Add new commits on top instead;
+- a commit that changes a file the base now holds differently outside his paths. `grit sync` onto the newest snapshot first.
+
+A member with a snapshot share can add people only with the same view, and can't integrate the branch: someone with the whole branch does.
+
 ### After integrating
 
 [`grit integrate`](../integrate/) on a shared branch merges your head, once every other member's changes are in it (or the members whose aren't are left out with `--without`). Then the share is over: the branch is deleted from every member's copy and the server's `refs/shared/` heads with it, and everyone is told. Your clone keeps its local branch; [`grit sync`](../sync/) leaves it alone once its commits are on the target.
@@ -118,6 +134,8 @@ Plain git sees the same report as `remote:` lines on the push.
 | `--link` | `add`: make a share link anyone signed in can accept. |
 | `--uses <n>` | `add --link`: how many times it can be accepted, or `unlimited`. Default 1. |
 | `--expires <days>` | `add --link`: how many days it works, 1 to 30. Default 7. |
+| `--no-history` | `add`: a [snapshot share](#snapshot-shares), without the project's history. |
+| `--path <path>` | `add`: a snapshot share of only this path (implies `--no-history`). Repeatable. |
 
 ## Examples
 
@@ -167,8 +185,8 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
 | ----- | ---- | ------- |
 | `action` | string | `add`, `list`, `remove`, `leave` or `revoke`. |
 | `project` | string | Your project the shares are in, `<you>/<project>`. |
-| `shares` | array | Each shared branch: `branch`, `origin`, `sharer`, `state` (`active`, `integrated`, `ended`), `mode` (`full`), `base_branch`, `members` (`user`, `sharer`, `you`, `head`, `project`, `relation` to your branch: `same`, `ahead`, `behind`, `diverged`, `unknown`, and for a diverged head `divergence`, as in [`grit sync`](../sync/#json-output)), `invited` (email addresses that haven't accepted yet), `links` (`id`, `uses_left`, `expires_at`) and `url`. |
-| `link` | object or omitted | The link `add --link` made: `id`, `url`, `uses_left` and `expires_at`. |
+| `shares` | array | Each shared branch: `branch`, `origin`, `sharer`, `state` (`active`, `integrated`, `ended`), `mode` (`full`), `base_branch`, `members` (`user`, `sharer`, `you`, `head`, `project`, `relation` to your branch: `same`, `ahead`, `behind`, `diverged`, `unknown`, for a diverged head `divergence`, as in [`grit sync`](../sync/#json-output), and for a snapshot member `snapshot`, the paths they see, empty for the whole tree), `invited` (email addresses that haven't accepted yet), `links` (`id`, `uses_left`, `expires_at`, and `snapshot` for a snapshot share link) and `url`. |
+| `link` | object or omitted | The link `add --link` made: `id`, `url`, `uses_left`, `expires_at`, and `snapshot` (its paths) for a snapshot share link. |
 | `added` | array or omitted | People added, who were emailed: user names, and the email addresses invited. |
 | `removed` | array or omitted | People removed (or you, when leaving), and the email addresses whose invitations were withdrawn. |
 | `pushed` | boolean or omitted | Whether the branch was pushed to your space first. |
