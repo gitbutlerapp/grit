@@ -9,6 +9,7 @@ use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::filesystem_path_for_user;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -52,7 +53,7 @@ impl From<HookInfo> for HookEntryJson {
     fn from(info: HookInfo) -> Self {
         Self {
             name: info.name,
-            path: info.path.display().to_string(),
+            path: filesystem_path_for_user(&info.path),
             executable: info.executable,
             source: match info.source {
                 HookSource::HooksDir => "hooks_dir".to_owned(),

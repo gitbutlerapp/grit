@@ -18,6 +18,7 @@ use serde::Serialize;
 
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::filesystem_path_for_user;
 
 /// The database path for `--db`, defaulting next to (or inside) `root`.
 fn database_path(root: &Path, db: Option<&Path>) -> PathBuf {
@@ -29,10 +30,11 @@ fn open_existing(database: &Path) -> Result<AuthStore> {
     if !database.is_file() {
         bail!(
             "no server database at {}; run `grit serve --setup` first",
-            database.display()
+            filesystem_path_for_user(database)
         );
     }
-    AuthStore::open(database).with_context(|| format!("opening {}", database.display()))
+    AuthStore::open(database)
+        .with_context(|| format!("opening {}", filesystem_path_for_user(database)))
 }
 
 /// Run the server until interrupted.
@@ -55,8 +57,8 @@ pub fn run(
     limits: ServeLimits,
     shutdown: Shutdown,
 ) -> Result<()> {
-    let root =
-        std::fs::canonicalize(root).with_context(|| format!("cannot serve {}", root.display()))?;
+    let root = std::fs::canonicalize(root)
+        .with_context(|| format!("cannot serve {}", filesystem_path_for_user(root)))?;
     let database = database_path(&root, db);
     open_existing(&database)?;
     let config = ServeConfig {
@@ -89,7 +91,7 @@ pub fn run(
         } else {
             "repositories"
         },
-        root.display()
+        filesystem_path_for_user(&root)
     );
     for repo in &repositories {
         eprintln!("  http://{addr}/{}.git", repo.name);
@@ -246,12 +248,12 @@ pub fn setup(
     password: Option<String>,
 ) -> Result<ServeUserOutcome> {
     let database = database_path(root, db);
-    let mut store =
-        AuthStore::open(&database).with_context(|| format!("opening {}", database.display()))?;
+    let mut store = AuthStore::open(&database)
+        .with_context(|| format!("opening {}", filesystem_path_for_user(&database)))?;
     let (hash, generated, temporary) = new_password(password)?;
     let user = store.setup(email, &hash, temporary)?;
     Ok(ServeUserOutcome {
-        database: database.display().to_string(),
+        database: filesystem_path_for_user(&database),
         user: user.email,
         admin: user.admin,
         password: generated,
@@ -282,7 +284,7 @@ pub fn add_user(
     let (hash, generated, temporary) = new_password(password)?;
     let user = store.add_user(email, admin, &hash, temporary)?;
     Ok(ServeUserOutcome {
-        database: database.display().to_string(),
+        database: filesystem_path_for_user(&database),
         user: user.email,
         admin: user.admin,
         password: generated,
@@ -475,7 +477,7 @@ pub fn users(root: &Path, db: Option<&Path>) -> Result<ServeUsersOutcome> {
         })
         .collect();
     Ok(ServeUsersOutcome {
-        database: database.display().to_string(),
+        database: filesystem_path_for_user(&database),
         users,
     })
 }

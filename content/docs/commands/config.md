@@ -29,6 +29,8 @@ With just a key, `grit config` prints its value. By default, reads use the full 
 
 Keys are written as `section.name`, for example `user.email`.
 
+Path strings in human, `--json`, and `--markdown` output (the `file` field on reads and list entries) use forward slashes and no Windows `\\?\` verbatim prefix, matching other grit commands.
+
 ### Settings grit uses
 
 | Key | Used for |

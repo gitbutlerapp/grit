@@ -1580,8 +1580,8 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
             fetch(&setup.remote, mode)?;
             let dir = repo
                 .work_tree()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| repo.git_dir().display().to_string());
+                .map(grit_lib::config::git_path::user_display_path)
+                .unwrap_or_else(|| grit_lib::config::git_path::user_display_path(repo.git_dir()));
             (Some(dir), false)
         }
         None => {

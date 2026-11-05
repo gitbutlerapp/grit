@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::environment::Environment;
+use grit_lib::config::git_path::user_display_path;
 use grit_lib::config::{
     add_config_value, canonical_key, canonicalize_config_write_value, remove_config_section,
     rename_config_section, set_config_value, unset_all_config_values, unset_config_value,
@@ -589,7 +590,7 @@ fn map_origin(o: grit_lib::config::ConfigValueOrigin) -> ConfigValueWithOrigin {
     ConfigValueWithOrigin {
         value: o.value,
         scope: o.scope.to_string(),
-        file: o.file.as_ref().map(|p| p.display().to_string()),
+        file: o.file.as_ref().map(|p| user_display_path(p)),
         line: o.line.map(|l| l as u64),
     }
 }
@@ -635,7 +636,7 @@ fn get_value(
                 key: key.to_owned(),
                 value: Some(value),
                 scope: Some(o.scope.to_string()),
-                file: o.file.as_ref().map(|p| p.display().to_string()),
+                file: o.file.as_ref().map(|p| user_display_path(p)),
                 line: o.line.map(|l| l as u64),
             },
             None => ConfigOutcome::Get {
@@ -688,7 +689,7 @@ fn get_value(
             key: key.to_owned(),
             value: o.value,
             scope: Some(o.scope.to_string()),
-            file: o.file.as_ref().map(|p| p.display().to_string()),
+            file: o.file.as_ref().map(|p| user_display_path(p)),
             line: o.line.map(|l| l as u64),
         },
         None => ConfigOutcome::Get {
@@ -741,7 +742,7 @@ fn get_all_values(
                 Ok(ConfigValueWithOrigin {
                     value: Some(typed.to_canonical_string()),
                     scope: o.scope.to_string(),
-                    file: o.file.as_ref().map(|p| p.display().to_string()),
+                    file: o.file.as_ref().map(|p| user_display_path(p)),
                     line: o.line.map(|l| l as u64),
                 })
             })
@@ -772,8 +773,7 @@ fn list_values(
             key: entry.key.clone(),
             value: entry.value.clone(),
             scope: entry.scope.to_string(),
-            file: grit_lib::config::config_entry_origin_file(entry)
-                .map(|p| p.display().to_string()),
+            file: grit_lib::config::config_entry_origin_file(entry).map(user_display_path),
         })
         .collect();
     Ok(ConfigOutcome::List { entries })

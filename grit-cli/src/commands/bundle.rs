@@ -13,6 +13,7 @@ use serde::Serialize;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::ui::filesystem_path_for_user;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -295,7 +296,7 @@ pub fn run_create(
             .collect();
         let prerequisites = plan.prerequisites.iter().map(|p| p.oid.to_hex()).collect();
         return Ok(BundleCreateOutcome {
-            path: path.display().to_string(),
+            path: filesystem_path_for_user(&path),
             refs: plan.refs.len(),
             dry_run: true,
             object_count: Some(plan.object_count),
@@ -310,7 +311,7 @@ pub fn run_create(
         .create_with_options(&options, &path, &mut progress, &interrupt)
         .map_err(map_bundle_error)?;
     Ok(BundleCreateOutcome {
-        path: path.display().to_string(),
+        path: filesystem_path_for_user(&path),
         refs,
         dry_run: false,
         object_count: None,
@@ -361,7 +362,7 @@ pub fn run_unbundle(path: PathBuf, dry_run: bool) -> Result<BundleUnbundleOutcom
             .map(|(oid, _)| oid.to_hex())
             .collect();
         return Ok(BundleUnbundleOutcome {
-            path: path.display().to_string(),
+            path: filesystem_path_for_user(&path),
             dry_run: true,
             references,
             objects: None,
@@ -378,7 +379,7 @@ pub fn run_unbundle(path: PathBuf, dry_run: bool) -> Result<BundleUnbundleOutcom
         .unbundle_with_progress(&path, &mut grit_lib::progress::NullProgress, &interrupt)
         .map_err(map_bundle_error)?;
     Ok(BundleUnbundleOutcome {
-        path: path.display().to_string(),
+        path: filesystem_path_for_user(&path),
         dry_run: false,
         references: outcome
             .refs
@@ -408,7 +409,7 @@ pub fn run_list(path: PathBuf, limit: Option<usize>) -> Result<BundleListOutcome
         .collect();
     let listed = Limited::from_vec(refs, limit);
     Ok(BundleListOutcome {
-        path: path.display().to_string(),
+        path: filesystem_path_for_user(&path),
         references: listed.items,
         truncated: listed.truncated,
     })
@@ -421,7 +422,7 @@ fn report_to_outcome(
 ) -> BundleVerifyOutcome {
     let header = bundle.header();
     BundleVerifyOutcome {
-        path: path.display().to_string(),
+        path: filesystem_path_for_user(path),
         ok: report.is_ok(),
         hash_algorithm: header.object_format.name().to_owned(),
         references: header

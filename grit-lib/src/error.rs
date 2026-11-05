@@ -1191,7 +1191,7 @@ pub enum Error {
     /// Only reported by reads that verify the index trailer, such as
     /// [`crate::pack::read_pack_index`]; the checksum of the `.pack` the index
     /// describes is checked separately.
-    #[error("corrupt object: index checksum mismatch for {}: {mismatch}", .path.display())]
+    #[error("corrupt object: index checksum mismatch for {}: {mismatch}", crate::git_path::user_display_path(.path))]
     PackIndexChecksumMismatch {
         /// The `.idx` file that failed verification.
         path: std::path::PathBuf,
@@ -1311,7 +1311,7 @@ pub enum Error {
     Zlib(String),
 
     /// A loose object file is present but its stored bytes could not be decoded.
-    #[error("loose object {oid} at {} is unreadable: {source}", path.display())]
+    #[error("loose object {oid} at {} is unreadable: {source}", crate::git_path::user_display_path(.path))]
     #[non_exhaustive]
     CorruptLooseObject {
         /// Object id implied by the loose object path.
@@ -1596,7 +1596,7 @@ pub enum Error {
     /// Streaming fetch/clone temp pack disappeared before index-pack (often real-time antivirus).
     #[error(
         "received pack file missing: {}. If this persists, check real-time antivirus or disk cleanup for quarantined pack temp files.",
-        path.display()
+        crate::git_path::user_display_path(.path)
     )]
     ReceivedPackTempMissing {
         /// Path to the temp pack that was expected on disk.
@@ -2163,7 +2163,7 @@ pub enum Error {
 
     /// A manual notes merge was started while an earlier one still has conflict files in the
     /// notes merge worktree.
-    #[error("unfinished notes merge: conflict files remain in {}", path.display())]
+    #[error("unfinished notes merge: conflict files remain in {}", crate::git_path::user_display_path(.path))]
     NotesMergeInProgress {
         /// The notes merge worktree directory.
         path: std::path::PathBuf,

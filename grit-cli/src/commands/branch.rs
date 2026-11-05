@@ -659,7 +659,10 @@ fn summary_to_entry(row: BranchSummary, full_detail: bool) -> BranchEntry {
         entry.remote = remote;
         entry.subject = row.subject;
         entry.date = row.committer_time.and_then(|t| t.format(&Rfc3339).ok());
-        entry.worktree = row.worktree.map(|p| p.display().to_string());
+        entry.worktree = row
+            .worktree
+            .as_ref()
+            .map(|p| grit_lib::config::git_path::user_display_path(p));
     }
     entry
 }

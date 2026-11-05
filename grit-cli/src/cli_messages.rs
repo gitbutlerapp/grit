@@ -75,7 +75,10 @@ mod tests {
         }));
         assert!(err.downcast_ref::<LibError>().is_none());
         let human = human_error_message(&err);
-        assert!(human.contains(&path.display().to_string()), "{human}");
+        assert!(
+            human.contains(&grit_lib::config::git_path::user_display_path(&path)),
+            "{human}"
+        );
         assert!(human.contains("stale lock"), "{human}");
         assert!(human.contains("process 42"), "{human}");
     }
@@ -104,7 +107,10 @@ mod tests {
         let payload = structured_json_payload(&structured).expect("payload");
         assert_eq!(payload.kind, ErrorKind::LockHeld);
         assert_eq!(payload.error, human);
-        assert_eq!(payload.lock.expect("lock").path, path.display().to_string());
+        assert_eq!(
+            payload.lock.expect("lock").path,
+            grit_lib::config::git_path::user_display_path(&path)
+        );
     }
 }
 

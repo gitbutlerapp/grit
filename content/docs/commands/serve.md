@@ -35,6 +35,8 @@ Clients reach a repository at `http://<host>:<port>/<name>.git` (the `.git` is o
 
 A user is an email address with a password. Users, their access and their tokens live in a SQLite database, `grit-serve.db` in the root by default (or in the root's `.git` directory when the root is a working tree, so the file never shows up as untracked). Pick another path with `--db`.
 
+Path strings in the startup banner, errors, and `--json` fields such as `database` use forward slashes and no Windows `\\?\` verbatim prefix, matching other grit commands.
+
 - `grit serve --setup` creates the database and the first **admin** user. It asks for the admin's email (or takes `--email`) and a password. An admin can read and write every repository, and add users in the web view.
 - `grit serve add-user <email>` adds a user. Add `--admin` for another admin.
 - `grit serve grant <email> <repository>` gives a user read access (fetch and clone) to one repository; `--write` also allows pushing. Granting again replaces the earlier access.
