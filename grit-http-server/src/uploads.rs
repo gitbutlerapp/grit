@@ -397,7 +397,7 @@ pub async fn patch(
 /// report, as for `POST /<repo>/git-receive-pack`. `on_applied` runs after a
 /// push that receive-pack accepted (the server checks its bundle then).
 #[allow(clippy::too_many_arguments)]
-pub async fn receive(
+pub(crate) async fn receive(
     repo_path: PathBuf,
     id: &str,
     user: i64,
@@ -405,6 +405,7 @@ pub async fn receive(
     body: Body,
     options: RepositoryOptions,
     _git_slot: tokio::sync::OwnedSemaphorePermit,
+    rpc_cancels: &crate::rpc_cancel::RpcCancelRegistry,
     on_applied: impl FnOnce(),
 ) -> Response<Body> {
     let Some(meta) = load(&repo_path, id, user) else {
@@ -432,6 +433,11 @@ pub async fn receive(
         Ok(b) => b,
         Err(resp) => return *resp,
     };
+    let (cancel, guard) = rpc_cancels.register();
+    let session = grit_protocol::ServeSession {
+        cancel: Some(cancel),
+        ..grit_protocol::ServeSession::none()
+    };
     let applied = tokio::task::spawn_blocking({
         let repo_path = repo_path.clone();
         move || -> Result<Vec<u8>, String> {
@@ -440,11 +446,15 @@ pub async fn receive(
             pack.seek(SeekFrom::Start(bundle.pack_byte_offset()))
                 .map_err(|e| e.to_string())?;
             let mut input = std::io::Cursor::new(commands).chain(pack);
-            grit_protocol::receive_pack::stateless_rpc_from_reader(&repo_path, &mut input, &options)
-                .map_err(|e| e.to_string())
+            grit_protocol::receive_pack::stateless_rpc_with_session(
+                &repo_path, &mut input, &options, &session,
+            )
+            .map(|r| r.body)
+            .map_err(|e| e.to_string())
         }
     })
     .await;
+    guard.mark_finished();
     let report = match applied {
         Ok(Ok(report)) => report,
         Ok(Err(e)) => return status(StatusCode::UNPROCESSABLE_ENTITY, &e),

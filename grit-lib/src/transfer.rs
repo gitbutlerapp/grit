@@ -2701,12 +2701,18 @@ pub(crate) fn push_local_from(
         .map(|f| crate::shallow::git_shallow_hook_env(f.path()))
         .transpose()?
         .unwrap_or_default();
-    let scripts =
-        crate::serve::ReceiveHookScripts::new(&remote_repo, &opts.push_options, hook_extra);
+    let scripts = crate::serve::ReceiveHookScripts::new(
+        &remote_repo,
+        &opts.push_options,
+        hook_extra,
+        &crate::progress::NeverCancel,
+    );
     let mut remote_messages = Vec::new();
     if !received.is_empty() {
         let commands: Vec<&crate::serve::RefCommand> = received.iter().collect();
-        let pre = scripts.pre_receive(&commands, quarantine.as_ref().map(|(q, _)| q));
+        let pre = receive_hook_or_panic(
+            scripts.pre_receive(&commands, quarantine.as_ref().map(|(q, _)| q)),
+        );
         relay_hook_output(progress, &mut remote_messages, &pre);
         if !pre.is_ok() {
             for d in decisions.iter_mut().filter(|d| d.apply) {
@@ -2724,7 +2730,7 @@ pub(crate) fn push_local_from(
             let Some(cmd) = d.ref_command() else {
                 continue;
             };
-            let update = scripts.update(&cmd);
+            let update = receive_hook_or_panic(scripts.update(&cmd));
             relay_hook_output(progress, &mut remote_messages, &update);
             if !update.is_ok() {
                 d.refuse(&crate::serve::RefUpdateRefusal::UpdateHookDeclined);
@@ -2843,12 +2849,12 @@ pub(crate) fn push_local_from(
             relay_hook_output(
                 progress,
                 &mut remote_messages,
-                &scripts.post_receive(&applied),
+                &receive_hook_or_panic(scripts.post_receive(&applied)),
             );
             relay_hook_output(
                 progress,
                 &mut remote_messages,
-                &scripts.post_update(&applied),
+                &receive_hook_or_panic(scripts.post_update(&applied)),
             );
         }
     }
@@ -2882,6 +2888,18 @@ fn fail_atomic_push(decisions: &mut [PushDecision]) {
 /// Pass what a receive hook wrote (stdout, then stderr) to `progress` and append it to
 /// `messages`, one entry per non-empty line, as a wire push handles the remote's side-band
 /// hook output.
+fn receive_hook_or_panic(
+    result: std::result::Result<crate::hooks::HookResult, crate::remote::serve::ServeError>,
+) -> crate::hooks::HookResult {
+    match result {
+        Ok(r) => r,
+        Err(crate::remote::serve::ServeError::Cancelled) => {
+            unreachable!("receive hooks are not cancelled during push")
+        }
+        Err(e) => panic!("unexpected serve error during receive hook: {e}"),
+    }
+}
+
 fn relay_hook_output(
     progress: &mut dyn crate::fetch::Progress,
     messages: &mut Vec<String>,

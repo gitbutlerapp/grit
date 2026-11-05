@@ -241,6 +241,36 @@ pub async fn rpc_holding<H: Send + 'static>(
     idle_timeout: Duration,
     hold: H,
 ) -> (Response<Body>, RpcFollowUp) {
+    rpc_holding_with_cancel(
+        repo_path,
+        service,
+        protocol_version,
+        headers,
+        body,
+        options,
+        extensions,
+        session,
+        idle_timeout,
+        hold,
+        None,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn rpc_holding_with_cancel<H: Send + 'static>(
+    repo_path: PathBuf,
+    service: Service,
+    protocol_version: Option<u8>,
+    headers: &HeaderMap,
+    body: Body,
+    options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
+    session: grit_protocol::ServeSession,
+    idle_timeout: Duration,
+    hold: H,
+    mut cancel_guard: Option<crate::rpc_cancel::RpcCancelGuard>,
+) -> (Response<Body>, RpcFollowUp) {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
         Err(resp) => {
@@ -290,6 +320,9 @@ pub async fn rpc_holding<H: Send + 'static>(
                 )
             })
             .await;
+            if let Some(guard) = cancel_guard.take() {
+                guard.mark_finished();
+            }
             let force_discard = matches!(&result, Ok(Err(_)));
             let discard = bridge.finish(force_discard).await;
             match result {

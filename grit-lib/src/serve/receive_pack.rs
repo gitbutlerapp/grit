@@ -14,7 +14,7 @@ use super::{
 use crate::config::ConfigSet;
 use crate::fsck_msg_policy::{ObjectFsckPolicy, SkipListError};
 use crate::fsck_standalone::FsckError;
-use crate::hooks::{run_hook_in_git_dir, HookResult};
+use crate::hooks::{run_hook_in_git_dir_with_cancel, HookError, HookResult};
 use crate::index_pack::{install_pack_path, IngestPackOptions};
 use crate::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
 use crate::objects::odb::OdbBuilder;
@@ -933,6 +933,7 @@ pub fn receive_pack_with_hook_cancellable(
             &shallow,
             sideband.then_some(&mut *output),
             &mut hook_records,
+            cancel,
         )?;
         post_receive_callback_error = applied.post_receive_callback_error;
         post_update_callback_error = applied.post_update_callback_error;
@@ -1195,7 +1196,9 @@ fn apply_commands_with_hooks(
     shallow: &ShallowPlan,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
+    cancel: &dyn Cancel,
 ) -> Result<AppliedPush> {
+    let stop = CancelSignal::new(cancel);
     let lookup_odb = ingest.as_ref().map(|ing| ing.odb());
     let head_branch = ref_update_policy::head_branch(repo);
     let checked_out = ref_update_policy::checked_out_branch(repo);
@@ -1260,12 +1263,13 @@ fn apply_commands_with_hooks(
         }
     }
 
-    let scripts = ReceiveHookScripts::new(repo, &request.push_options, shallow.hook_env()?);
+    let scripts = ReceiveHookScripts::new(repo, &request.push_options, shallow.hook_env()?, cancel);
     let all_cmds: Vec<&RefCommand> = request.commands.iter().collect();
+    stop.poll().map_err(|_| ServeError::Cancelled)?;
     let pre_result = scripts.pre_receive(
         &all_cmds,
         ingest.as_ref().and_then(|i| i.files_quarantine()),
-    );
+    )?;
     relay_hook_sideband(&mut sideband_out, &pre_result)?;
     hook_records.push(hook_record("pre-receive", &pre_result));
     if !pre_result.is_ok() {
@@ -1291,7 +1295,8 @@ fn apply_commands_with_hooks(
             result.error = Some(refusal);
             continue;
         }
-        let update_result = scripts.update(cmd);
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        let update_result = scripts.update(cmd)?;
         relay_hook_sideband(&mut sideband_out, &update_result)?;
         hook_records.push(hook_record("update", &update_result));
         if !update_result.is_ok() {
@@ -1378,7 +1383,8 @@ fn apply_commands_with_hooks(
     let mut post_receive_callback_error = None;
     let mut post_update_callback_error = None;
     if !successful.is_empty() {
-        let post_result = scripts.post_receive(&successful);
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        let post_result = scripts.post_receive(&successful)?;
         relay_hook_sideband(&mut sideband_out, &post_result)?;
         hook_records.push(hook_record("post-receive", &post_result));
         post_receive_callback_error = hook
@@ -1391,7 +1397,8 @@ fn apply_commands_with_hooks(
             )
             .err();
 
-        let pu_result = scripts.post_update(&successful);
+        stop.poll().map_err(|_| ServeError::Cancelled)?;
+        let pu_result = scripts.post_update(&successful)?;
         relay_hook_sideband(&mut sideband_out, &pu_result)?;
         hook_records.push(hook_record("post-update", &pu_result));
         post_update_callback_error = hook.post_update(&successful, repo.odb()).err();
@@ -1431,6 +1438,7 @@ fn hook_record(name: &str, result: &HookResult) -> HookRunRecord {
 /// variables given to [`Self::new`] (such as `GIT_SHALLOW_FILE`).
 pub(crate) struct ReceiveHookScripts<'a> {
     repo: &'a Repository,
+    cancel: &'a dyn Cancel,
     /// Push options plus the extra variables, for `pre-receive` and `post-receive`.
     receive_env: Vec<(String, String)>,
     /// The extra variables alone, for `update` and `post-update`.
@@ -1444,6 +1452,7 @@ impl<'a> ReceiveHookScripts<'a> {
         repo: &'a Repository,
         push_options: &[String],
         extra_env: Vec<(String, String)>,
+        cancel: &'a dyn Cancel,
     ) -> Self {
         let mut receive_env = Vec::with_capacity(push_options.len() + 1 + extra_env.len());
         receive_env.push((
@@ -1459,6 +1468,7 @@ impl<'a> ReceiveHookScripts<'a> {
         receive_env.extend(extra_env.iter().cloned());
         Self {
             repo,
+            cancel,
             receive_env,
             update_env: extra_env,
         }
@@ -1472,7 +1482,7 @@ impl<'a> ReceiveHookScripts<'a> {
         &self,
         commands: &[&RefCommand],
         quarantine: Option<&ReceiveQuarantine>,
-    ) -> HookResult {
+    ) -> std::result::Result<HookResult, ServeError> {
         let mut env = self.receive_env.clone();
         if let Some(q) = quarantine {
             env.extend(q.hook_env());
@@ -1481,29 +1491,50 @@ impl<'a> ReceiveHookScripts<'a> {
     }
 
     /// Run `update` for one command, with `<ref> <old> <new>` as arguments.
-    pub(crate) fn update(&self, cmd: &RefCommand) -> HookResult {
+    pub(crate) fn update(&self, cmd: &RefCommand) -> std::result::Result<HookResult, ServeError> {
         let algo = self.repo.odb().hash_algo();
         let hex = |oid: Option<ObjectId>| oid.unwrap_or_else(|| ObjectId::null(algo)).to_hex();
         let (old, new) = (hex(cmd.old), hex(cmd.new));
         let args = [cmd.refname.as_str(), old.as_str(), new.as_str()];
-        run_hook_in_git_dir(self.repo, "update", &args, None, &pairs(&self.update_env))
+        self.run_git_dir_hook("update", &args, None, &pairs(&self.update_env))
     }
 
     /// Run `post-receive` over the applied `commands`.
-    pub(crate) fn post_receive(&self, commands: &[&RefCommand]) -> HookResult {
+    pub(crate) fn post_receive(
+        &self,
+        commands: &[&RefCommand],
+    ) -> std::result::Result<HookResult, ServeError> {
         self.run_with_commands("post-receive", commands, &self.receive_env)
     }
 
     /// Run `post-update` with the names of the applied `commands` as arguments.
-    pub(crate) fn post_update(&self, commands: &[&RefCommand]) -> HookResult {
+    pub(crate) fn post_update(
+        &self,
+        commands: &[&RefCommand],
+    ) -> std::result::Result<HookResult, ServeError> {
         let args: Vec<&str> = commands.iter().map(|c| c.refname.as_str()).collect();
-        run_hook_in_git_dir(
+        self.run_git_dir_hook("post-update", &args, None, &pairs(&self.update_env))
+    }
+
+    fn run_git_dir_hook(
+        &self,
+        hook_name: &str,
+        args: &[&str],
+        stdin_data: Option<&[u8]>,
+        env: &[(&str, &str)],
+    ) -> std::result::Result<HookResult, ServeError> {
+        match run_hook_in_git_dir_with_cancel(
             self.repo,
-            "post-update",
-            &args,
-            None,
-            &pairs(&self.update_env),
-        )
+            hook_name,
+            args,
+            stdin_data,
+            env,
+            self.cancel,
+        ) {
+            Ok(result) => Ok(result),
+            Err(HookError::Cancelled) => Err(ServeError::Cancelled),
+            Err(_) => Ok(hook_declined()),
+        }
     }
 
     fn run_with_commands(
@@ -1511,7 +1542,7 @@ impl<'a> ReceiveHookScripts<'a> {
         hook_name: &str,
         commands: &[&RefCommand],
         env: &[(String, String)],
-    ) -> HookResult {
+    ) -> std::result::Result<HookResult, ServeError> {
         let zero = ObjectId::null(self.repo.odb().hash_algo());
         let stdin: String = commands
             .iter()
@@ -1524,13 +1555,14 @@ impl<'a> ReceiveHookScripts<'a> {
                 )
             })
             .collect();
-        run_hook_in_git_dir(
-            self.repo,
-            hook_name,
-            &[],
-            Some(stdin.as_bytes()),
-            &pairs(env),
-        )
+        self.run_git_dir_hook(hook_name, &[], Some(stdin.as_bytes()), &pairs(env))
+    }
+}
+
+fn hook_declined() -> HookResult {
+    HookResult::Failed {
+        status: 1,
+        output: crate::hooks::HookOutput::default(),
     }
 }
 

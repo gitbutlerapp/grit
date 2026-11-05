@@ -15,6 +15,9 @@ mod git_smart_http;
 #[cfg(feature = "full-tests")]
 #[path = "serve.rs"]
 mod serve;
+#[cfg(feature = "full-tests")]
+#[path = "shutdown_slow_hook.rs"]
+mod shutdown_slow_hook;
 
 /// Fails when a file in `tests/` is neither a module above nor a `[[test]]`
 /// target in Cargo.toml: with `autotests = false` cargo would never build it.
