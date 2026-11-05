@@ -66,13 +66,13 @@ Use this checklist before merging a new or widened public API:
 
 ## Audit
 
-Snapshot date: **2026-11-05**, from committed [`public-api.txt`](public-api.txt) (**33 317** lines; `wc -l` on the file). Top-level modules match:
+Snapshot date: **2026-11-05**, from committed [`public-api.txt`](public-api.txt) (**33 397** lines; `wc -l` on the file). Top-level modules match:
 
 ```bash
 grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt
 ```
 
-**External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **432** repo-first and **157** `_with_` function names; the baseline still records **33 295** `public_api_lines` until the ratchet step lands, while the committed snapshot file is **33 317** lines today.
+**External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **432** repo-first and **157** `_with_` function names; the baseline still records **33 295** `public_api_lines` until the ratchet step lands, while the committed snapshot file is **33 397** lines today.
 
 ### Regenerating counts
 
@@ -132,7 +132,7 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `config` | 1204 | 688 (cli 42, utils 6, examples 48, protocol 6, http 2, ts 1, tests 583) | 4 / 11 | keep | One path for pathspec and ident | Config cascade is central; nested `ident_*` and date helpers consolidate under `config()` / `ident`. |
 | `diagnostics` | 132 | 16 (cli 1, examples 1, tests 14) | 0 / 0 | keep | — | Structured diagnostics sink wired from `Repository::diagnostics`. |
 | `diff` | 2378 | 181 (cli 26, utils 3, examples 7, tests 145) | 20 / 25 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Tree/content diff, merge, rerere, and patch-id helpers. |
-| `divergence` | 208 | 2 (cli 1, tests 1) | 4 / 0 | keep | — | Ahead/behind and divergence summaries for `grit shortlog` / `grit ahead`. |
+| `divergence` | 230 | 2 (cli 1, tests 1) | 7 / 0 | keep | — | Ahead/behind and divergence summaries for `grit shortlog` / `grit ahead`. |
 | `error` | 1173 | 369 (cli 36, utils 2, examples 44, protocol 1, http 2, ts 2, tests 282) | 0 / 0 | keep | Typed, per-area errors | Legacy umbrella `Error` shrinks as areas expose dedicated enums. |
 | `fsmonitor` | 58 | 0 | 0 / 0 | merge into `worktree::fsmonitor` | One path for everything else the ratchet flags | Duplicate of the worktree fsmonitor submodule; root crate has zero external imports. |
 | `gitbutler` | 62 | 4 (cli 3, tests 1) | 1 / 0 | keep | — | GitButler workspace integration markers and helpers. |
@@ -141,7 +141,7 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `line_range` | 45 | 1 (tests 1) | 0 / 0 | keep | — | Shared line-range parsing for blame and diff hunks. |
 | `list_limit` | 23 | 3 (cli 3) | 0 / 0 | keep | — | Shared `-n` limit parsing for list commands and library callers. |
 | `lockfile` | 146 | 11 (cli 3, examples 1, tests 7) | 0 / 1 | keep | — | Ref and index lock helpers exposed for embedding callers. |
-| `maintenance` | 1112 | 46 (cli 3, utils 2, examples 1, http 1, tests 39) | 20 / 3 | keep | Visibility sweep: objects, maintenance, bundle | Gc, repack, fsck, commit-graph, and MIDX maintenance. |
+| `maintenance` | 1112 | 47 (cli 3, utils 2, examples 1, http 1, tests 40) | 20 / 3 | keep | Visibility sweep: objects, maintenance, bundle | Gc, repack, fsck, commit-graph, and MIDX maintenance. |
 | `notes` | 136 | 14 (cli 1, utils 1, examples 1, tests 11) | 7 / 0 | keep | — | Git notes read/write on `Repository::notes`. |
 | `object_inspect` | 114 | 12 (cli 7, tests 5) | 1 / 0 | merge into `revwalk::object_inspect` | One path for everything else the ratchet flags | Root re-export duplicates revwalk object display/resolve helpers. |
 | `objects` | 4224 | 657 (cli 58, utils 9, examples 41, protocol 4, http 6, ts 3, tests 536) | 14 / 23 | keep | Pluggable object store on Repository | ODB, packs, MIDX, promisor, and hashing; primary object domain. |
@@ -151,12 +151,12 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `parallel` | 129 | 36 (cli 2, ts 1, tests 33) | 0 / 0 | keep | — | Thread policy and parallel helpers used across hot paths. |
 | `path_validate` | 142 | 5 (tests 5) | 0 / 0 | keep | — | Path component validation shared by index, worktree, and fsck. |
 | `pathspec` | 239 | 0 | 1 / 6 | keep | One path for pathspec and ident | Canonical root pathspec matcher; overlaps with `worktree::pathspec` and porcelain helpers. |
-| `porcelain` | 3142 | 326 (cli 38, utils 3, examples 7, http 1, ts 1, tests 276) | 117 / 17 | keep | Collapse function variant families | High-level command orchestration; many `Repository`-first free functions move onto handles. |
+| `porcelain` | 3142 | 327 (cli 39, utils 3, examples 7, http 1, ts 1, tests 276) | 117 / 17 | keep | Collapse function variant families | High-level command orchestration; many `Repository`-first free functions move onto handles. |
 | `prelude` | 1314 | 5 (cli 1, utils 1, tests 3) | 0 / 0 | keep | — | Curated import surface for embedders. |
 | `progress` | 291 | 376 (cli 29, examples 6, protocol 1, http 1, tests 339) | 0 / 7 | keep | One way to do each thing | Single progress/cancel traits; duplicate sinks merge here. |
 | `quote_path` | 5 | 3 (cli 1, tests 2) | 0 / 1 | merge into `porcelain::quote_path` | One path for everything else the ratchet flags | Root re-export only; CLI uses porcelain path. |
 | `refs` | 2265 | 303 (cli 16, utils 8, examples 18, protocol 3, http 2, ts 1, tests 255) | 35 / 13 | keep | Visibility sweep: refs, config, worktree, index and small root modules | Ref backends, reflog, refspec, reftable, and validation. |
-| `remote` | 5392 | 214 (cli 25, utils 3, examples 7, protocol 7, http 9, tests 163) | 48 / 19 | keep | Visibility sweep: remote | Fetch/push, transport, credentials, and protocol v2. |
+| `remote` | 5450 | 214 (cli 25, utils 3, examples 7, protocol 7, http 9, tests 163) | 48 / 19 | keep | Visibility sweep: remote | Fetch/push, transport, credentials, and protocol v2. |
 | `repo` | 250 | 737 (cli 56, utils 7, examples 51, protocol 3, http 4, tests 616) | 2 / 4 | keep | Collapse function variant families | `Repository` entry point; pathspec/patch-id/display helpers belong on handles. |
 | `repo_handles` | 774 | 31 (cli 7, examples 3, tests 21) | 0 / 5 | keep | One way to do each thing | Bundled domain handles; naming aligns with `objects`/`references` in a later pass. |
 | `revwalk` | 3181 | 180 (cli 25, utils 2, examples 14, tests 139) | 134 / 12 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Rev-parse, rev-list, merge-base, history edits, and object inspect. |
