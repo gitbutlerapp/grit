@@ -165,12 +165,7 @@ impl MarkdownRender for NotesOutcome {
                 let short = short_hex(object);
                 outln!(w, "Note on `{short}` (`{notes_ref}`):");
                 outln!(w);
-                outln!(w, "```text");
-                w.write_all(body.as_bytes())?;
-                if !body.ends_with('\n') {
-                    outln!(w);
-                }
-                outln!(w, "```");
+                markdown::print_fenced_text(w, body)?;
             }
             NotesOutcome::Add {
                 notes_ref,

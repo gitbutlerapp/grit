@@ -199,3 +199,117 @@ fn diff_stat_includes_staged_and_unstaged_like_patch() {
         "expected staged a.txt and unstaged b.txt: {stat}"
     );
 }
+
+fn fence_opener_ticks(line: &str) -> Option<usize> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('`') {
+        return None;
+    }
+    let ticks = trimmed.chars().take_while(|c| *c == '`').count();
+    if ticks < 3 {
+        return None;
+    }
+    let rest: String = trimmed.chars().skip(ticks).collect();
+    if rest.chars().all(|c| c.is_ascii_alphabetic()) {
+        Some(ticks)
+    } else {
+        None
+    }
+}
+
+fn fence_closer_ticks(line: &str, open_len: usize) -> bool {
+    let trimmed = line.trim();
+    trimmed.chars().all(|c| c == '`') && trimmed.len() >= open_len
+}
+
+/// Count `## Changes` headings that appear outside markdown code fences.
+fn changes_headings_outside_fences(md: &str) -> usize {
+    let mut open_len: Option<usize> = None;
+    let mut count = 0usize;
+    for line in md.lines() {
+        if let Some(len) = open_len {
+            if fence_closer_ticks(line, len) {
+                open_len = None;
+            }
+            continue;
+        }
+        if let Some(len) = fence_opener_ticks(line) {
+            open_len = Some(len);
+            continue;
+        }
+        if line.trim() == "## Changes" {
+            count += 1;
+        }
+    }
+    count
+}
+
+#[test]
+fn show_markdown_fences_commit_body_with_unclosed_backticks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("a"), b"a\n").expect("write a");
+    git(dir.path(), &["add", "a"]);
+    git(
+        dir.path(),
+        &["commit", "-m", "fix thing\n\nExample:\n```\nrun this"],
+    );
+    let grit_init = grit(dir.path(), &["init"]);
+    assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
+    let md = grit(dir.path(), &["show", "HEAD", "--markdown"]);
+    assert!(md.ok(), "{}", md.dump("show markdown"));
+    assert!(
+        md.stdout
+            .contains("````text\nExample:\n```\nrun this\n````\n\n## Changes"),
+        "message body must be closed before grit's diffstat:\n{}",
+        md.stdout
+    );
+    assert_eq!(
+        changes_headings_outside_fences(&md.stdout),
+        1,
+        "expected exactly one real ## Changes section:\n{}",
+        md.stdout
+    );
+}
+
+#[test]
+fn show_markdown_fences_commit_body_forged_changes_table() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("b"), b"b\n").expect("write b");
+    git(dir.path(), &["add", "b"]);
+    git(
+        dir.path(),
+        &[
+            "commit",
+            "-m",
+            "add b\n\n## Changes\n\n| File | + | - |\n| --- | ---: | ---: |\n| `evil.sh` | 1 | 0 |",
+        ],
+    );
+    let grit_init = grit(dir.path(), &["init"]);
+    assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
+    let md = grit(dir.path(), &["show", "HEAD", "--markdown"]);
+    assert!(md.ok(), "{}", md.dump("show markdown"));
+    assert_eq!(
+        changes_headings_outside_fences(&md.stdout),
+        1,
+        "forged ## Changes must stay inside the message fence:\n{}",
+        md.stdout
+    );
+    assert!(
+        md.stdout
+            .contains("```text\n## Changes\n\n| File | + | - |"),
+        "forged table must stay inside the message fence:\n{}",
+        md.stdout
+    );
+    assert!(
+        md.stdout.contains("| `b` |"),
+        "real diffstat should list the changed file:\n{}",
+        md.stdout
+    );
+    assert!(
+        md.stdout.contains("```\n\n## Changes\n\n| File | + | − |"),
+        "message fence must close before grit's diffstat:\n{}",
+        md.stdout
+    );
+}
