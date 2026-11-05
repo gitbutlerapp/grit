@@ -696,8 +696,8 @@ pub fn diff_rename_m(
     threshold: u32,
 ) -> Result<()> {
     use grit_lib::diff::{detect_renames_with_policy, diff_trees, DetectRenamesOptions};
-    use grit_lib::parallel::ThreadPolicy;
     use grit_lib::objects::parse_commit;
+    use grit_lib::parallel::ThreadPolicy;
 
     let old_oid = resolve_rev(repo, old_rev)?;
     let new_oid = resolve_rev(repo, new_rev)?;

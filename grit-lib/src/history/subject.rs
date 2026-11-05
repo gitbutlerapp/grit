@@ -64,9 +64,7 @@ pub fn rewritten_row_subject(
 
 #[cfg(test)]
 mod tests {
-    use crate::history::{
-        drop as history_drop, reword, EmptyPolicy, RefScope, RewriteOptions,
-    };
+    use crate::history::{drop as history_drop, reword, EmptyPolicy, RefScope, RewriteOptions};
     use crate::objects::{serialize_commit, CommitData};
     use crate::repo::init_repository;
     use crate::RefStorageFormat;

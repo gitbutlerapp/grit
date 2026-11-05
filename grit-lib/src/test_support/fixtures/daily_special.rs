@@ -6,12 +6,12 @@ use std::time::Instant;
 
 use crate::error::{Error, Result};
 use crate::index::{Index, IndexEntry, MODE_REGULAR};
-use crate::objects::ObjectId;
-use crate::objects::{serialize_commit, serialize_tag, CommitData, ObjectKind, TagData};
-use crate::odb::Odb;
 use crate::objects::pack_write::{
     install_pack_stream, whole_pack_uncompressed_size, InstallPackOptions,
 };
+use crate::objects::ObjectId;
+use crate::objects::{serialize_commit, serialize_tag, CommitData, ObjectKind, TagData};
+use crate::odb::Odb;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::refs::{write_packed_refs_file, PackedRefRecord};
