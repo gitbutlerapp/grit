@@ -17,12 +17,6 @@ use grit_lib::config::dotfile::{
     is_ntfs_dot_mailmap,
 };
 use grit_lib::config::environment::Environment;
-use grit_lib::config::git_date::show::{
-    show_date_relative, strbuf_addftime, DateMode, DateModeType,
-};
-use grit_lib::config::git_date::tm::{
-    empty_tm, init_tm_unknown, is_date_known, local_tzoffset, time_to_tm_local,
-};
 use grit_lib::config::git_path::{
     abspath_part_inside_repo, longest_ancestor_length, prefix_path_gently,
 };
@@ -156,22 +150,6 @@ fn diagnostics_dotfile_environment() {
     assert!(env.var("NO_SUCH_VAR").is_none());
     assert!(env.var_os("NO_SUCH_VAR").is_none());
     let _ = env.reftable_autocompaction_enabled();
-}
-
-#[test]
-fn git_date_helpers() {
-    let _ = show_date_relative(1_700_000_000, 1_700_000_100);
-    let _ = DateMode::from_type(DateModeType::Normal);
-    let mut t = init_tm_unknown();
-    assert!(!is_date_known(&t));
-    t.tm_year = 124;
-    t.tm_mon = 0;
-    t.tm_mday = 1;
-    assert!(is_date_known(&t));
-    let _ = strbuf_addftime(&t, 0, "%Y", true);
-    let _ = local_tzoffset(1_700_000_000);
-    let mut out = empty_tm();
-    let _ = unsafe { time_to_tm_local(1_700_000_000, std::ptr::addr_of_mut!(out)) };
 }
 
 #[test]

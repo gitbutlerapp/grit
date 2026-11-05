@@ -5,7 +5,8 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use grit_lib::commit::normalize_commit_date_override;
 use grit_lib::config::git_date::parse::parse_date_at;
-use grit_lib::config::git_date::tm::{process_wall_clock_sec, refresh_process_tz};
+use grit_lib::config::git_date::refresh_process_tz;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 static TZ_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -105,7 +106,10 @@ fn assert_commit_date_matches_git(spec: &str, exact: bool) {
     let grit_ts = normalize_commit_date_override(spec)
         .unwrap_or_else(|e| panic!("grit normalize_commit_date_override({spec:?}): {e}"));
     assert_timestamps_match(&git_ts, &grit_ts, spec, exact);
-    let now = process_wall_clock_sec();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     let parse_at =
         parse_date_at(spec, now).unwrap_or_else(|e| panic!("grit parse_date_at({spec:?}): {e}"));
     assert_timestamps_match(&git_ts, &parse_at, spec, exact);

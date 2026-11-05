@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use grit_lib::config::git_date::parse_date_cutoff;
-use grit_lib::config::git_date::tm::refresh_process_tz;
+use grit_lib::config::git_date::refresh_process_tz;
 
 const NOW: i64 = 1_700_100_000;
 

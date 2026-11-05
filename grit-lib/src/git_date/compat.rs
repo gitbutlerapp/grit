@@ -6,14 +6,14 @@
 // ── types ──────────────────────────────────────────────────────────
 
 #[cfg(unix)]
-pub use libc::time_t;
+pub(crate) use libc::time_t;
 
 #[cfg(not(unix))]
 #[allow(non_camel_case_types)] // mirror the C / `libc` spelling used on Unix
-pub type time_t = i64;
+pub(crate) type time_t = i64;
 
 #[cfg(unix)]
-pub use libc::tm;
+pub(crate) use libc::tm;
 
 /// C `struct tm` for Windows MSVC (same layout as the CRT definition).
 #[cfg(not(unix))]

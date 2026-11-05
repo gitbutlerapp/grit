@@ -5,20 +5,19 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use super::compat::{self, time_t, tm};
 
 /// Unix timestamp as used by Git (`timestamp_t` is typically `uintmax_t`).
-pub type Timestamp = u64;
-
 /// Timezone in Git's signed HHMM encoding (e.g. +200 for +02:00, -500 for -05:00).
 pub type TzHhmm = i32;
 
 /// `TIMESTAMP_MAX` constant.
-pub const TIMESTAMP_MAX: u64 = (((2100u64 - 1970) * 365 + 32) * 24 * 60 * 60).saturating_sub(1);
+pub(crate) const TIMESTAMP_MAX: u64 =
+    (((2100u64 - 1970) * 365 + 32) * 24 * 60 * 60).saturating_sub(1);
 
 /// Convert a calendar `tm` to a Unix timestamp using only the date/time fields.
 ///
 /// The `tm_wday` and `tm_yday` fields are ignored rather than recomputed, so the
 /// result depends purely on year/month/day/hour/minute/second. Produces the same
 /// values Git records for commit and author dates.
-pub fn tm_to_time_t(tm: &tm) -> time_t {
+pub(crate) fn tm_to_time_t(tm: &tm) -> time_t {
     const MDAYS: [i32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
     let year = tm.tm_year - 70;
     if !(0..=129).contains(&year) {
@@ -47,7 +46,7 @@ pub fn tm_to_time_t(tm: &tm) -> time_t {
 }
 
 /// `date_overflows` function.
-pub fn date_overflows(t: u64) -> bool {
+pub(crate) fn date_overflows(t: u64) -> bool {
     if t == u64::MAX {
         return true;
     }
@@ -56,7 +55,7 @@ pub fn date_overflows(t: u64) -> bool {
 }
 
 /// Apply Git's `tz` HHMM encoding to a UTC instant so `gmtime_r` yields wall-clock digits.
-pub fn gm_time_t(mut time: u64, tz: TzHhmm) -> Option<u64> {
+pub(crate) fn gm_time_t(mut time: u64, tz: TzHhmm) -> Option<u64> {
     let mut minutes = if tz < 0 { -tz } else { tz };
     minutes = (minutes / 100) * 60 + (minutes % 100);
     minutes = if tz < 0 { -minutes } else { minutes };
@@ -77,7 +76,7 @@ pub fn gm_time_t(mut time: u64, tz: TzHhmm) -> Option<u64> {
 }
 
 /// `time_to_tm` — UTC `tm` for display with explicit `tz` offset metadata.
-pub fn time_to_tm(time: u64, tz: TzHhmm, out: &mut tm) -> bool {
+pub(crate) fn time_to_tm(time: u64, tz: TzHhmm, out: &mut tm) -> bool {
     let Some(t) = gm_time_t(time, tz) else {
         return false;
     };
@@ -89,7 +88,7 @@ pub fn time_to_tm(time: u64, tz: TzHhmm, out: &mut tm) -> bool {
 /// # Safety
 ///
 /// `out` must point to a valid, writable `tm` for the duration of the call.
-pub unsafe fn time_to_tm_local(time: u64, out: *mut tm) -> Option<*mut tm> {
+pub(crate) unsafe fn time_to_tm_local(time: u64, out: *mut tm) -> Option<*mut tm> {
     let tt = time as time_t;
     let p = compat::localtime_r(&tt, out);
     if p.is_null() {
@@ -104,7 +103,7 @@ pub unsafe fn time_to_tm_local(time: u64, out: *mut tm) -> Option<*mut tm> {
 /// # Safety
 ///
 /// `tm_out` must point to a valid, writable `tm` for the duration of the call.
-pub unsafe fn local_time_tzoffset(t: time_t, tm_out: *mut tm) -> TzHhmm {
+pub(crate) unsafe fn local_time_tzoffset(t: time_t, tm_out: *mut tm) -> TzHhmm {
     let p = compat::localtime_r(&t, tm_out);
     if p.is_null() {
         return 0;
@@ -255,7 +254,7 @@ mod local_tz_tests {
 
 /// Process wall clock in whole seconds (real time; not repository-scoped).
 #[must_use]
-pub fn process_wall_clock_sec() -> i64 {
+pub(crate) fn process_wall_clock_sec() -> i64 {
     let now = SystemTime::now(); // hygiene: process wall clock when no repository handle supplies reference time
     now.duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -263,7 +262,7 @@ pub fn process_wall_clock_sec() -> i64 {
 }
 
 /// Parse leading digits as base-10 (`strtoumax` / Git's `parse_timestamp`).
-pub fn parse_timestamp_prefix(s: &[u8]) -> (u64, usize) {
+pub(crate) fn parse_timestamp_prefix(s: &[u8]) -> (u64, usize) {
     let mut i = 0usize;
     while i < s.len() && s[i].is_ascii_digit() {
         i += 1;
@@ -279,12 +278,12 @@ pub fn parse_timestamp_prefix(s: &[u8]) -> (u64, usize) {
 }
 
 /// `empty_tm` function.
-pub fn empty_tm() -> tm {
+pub(crate) fn empty_tm() -> tm {
     unsafe { std::mem::zeroed() }
 }
 
 /// `init_tm_unknown` function.
-pub fn init_tm_unknown() -> tm {
+pub(crate) fn init_tm_unknown() -> tm {
     let mut t = unsafe { std::mem::zeroed::<tm>() };
     t.tm_sec = -1;
     t.tm_min = -1;
@@ -299,22 +298,22 @@ pub fn init_tm_unknown() -> tm {
 }
 
 /// `nodate` function.
-pub fn nodate(tm: &tm) -> bool {
+pub(crate) fn nodate(tm: &tm) -> bool {
     (tm.tm_year & tm.tm_mon & tm.tm_mday & tm.tm_hour & tm.tm_min & tm.tm_sec) < 0
 }
 
 /// `maybeiso8601` function.
-pub fn maybeiso8601(tm: &tm) -> bool {
+pub(crate) fn maybeiso8601(tm: &tm) -> bool {
     tm.tm_hour == -1 && tm.tm_min == 0 && tm.tm_sec == 0
 }
 
 /// `is_date_known` function.
-pub fn is_date_known(tm: &tm) -> bool {
+pub(crate) fn is_date_known(tm: &tm) -> bool {
     tm.tm_year != -1 && tm.tm_mon != -1 && tm.tm_mday != -1
 }
 
 /// `match_string` function.
-pub fn match_string(date: &[u8], pat: &str) -> usize {
+pub(crate) fn match_string(date: &[u8], pat: &str) -> usize {
     let pb = pat.as_bytes();
     let mut i = 0usize;
     while i < date.len() && i < pb.len() {
@@ -337,10 +336,28 @@ pub fn match_string(date: &[u8], pat: &str) -> usize {
 }
 
 /// `skip_alpha` function.
-pub fn skip_alpha(date: &[u8]) -> usize {
+pub(crate) fn skip_alpha(date: &[u8]) -> usize {
     let mut i = 1usize;
     while i < date.len() && date[i].is_ascii_alphabetic() {
         i += 1;
     }
     i
+}
+
+#[cfg(test)]
+mod public_helper_coverage {
+    use super::*;
+
+    #[test]
+    fn tm_helpers_match_supporting_coverage() {
+        let _ = local_tzoffset(1_700_000_000);
+        let mut t = init_tm_unknown();
+        assert!(!is_date_known(&t));
+        t.tm_year = 124;
+        t.tm_mon = 0;
+        t.tm_mday = 1;
+        assert!(is_date_known(&t));
+        let mut out = empty_tm();
+        let _ = unsafe { time_to_tm_local(1_700_000_000, std::ptr::addr_of_mut!(out)) };
+    }
 }

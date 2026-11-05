@@ -1997,71 +1997,31 @@ pub fn grit_lib::config::git_date::parse::date_string(u64, i32) -> alloc::string
 pub fn grit_lib::config::git_date::parse::parse_date(&str) -> core::result::Result<alloc::string::String, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::config::git_date::parse::parse_date_at(&str, i64) -> core::result::Result<alloc::string::String, grit_lib::config::git_date::parse::DateParseError>
 pub fn grit_lib::config::git_date::parse::parse_date_basic_at(&str, i64) -> core::result::Result<(u64, i32), grit_lib::config::git_date::parse::DateParseError>
-pub mod grit_lib::config::git_date::show
-pub enum grit_lib::config::git_date::show::DateModeType
-pub grit_lib::config::git_date::show::DateModeType::Human
-pub grit_lib::config::git_date::show::DateModeType::Iso8601
-pub grit_lib::config::git_date::show::DateModeType::Iso8601Strict
-pub grit_lib::config::git_date::show::DateModeType::Normal
-pub grit_lib::config::git_date::show::DateModeType::Raw
-pub grit_lib::config::git_date::show::DateModeType::Relative
-pub grit_lib::config::git_date::show::DateModeType::Rfc2822
-pub grit_lib::config::git_date::show::DateModeType::Short
-pub grit_lib::config::git_date::show::DateModeType::Strftime
-pub grit_lib::config::git_date::show::DateModeType::Unix
-impl core::clone::Clone for grit_lib::config::git_date::show::DateModeType
-pub fn grit_lib::config::git_date::show::DateModeType::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::config::git_date::show::DateModeType
-impl core::cmp::PartialEq for grit_lib::config::git_date::show::DateModeType
-pub fn grit_lib::config::git_date::show::DateModeType::eq(&self, &Self) -> bool
-impl core::marker::Copy for grit_lib::config::git_date::show::DateModeType
-impl core::marker::StructuralPartialEq for grit_lib::config::git_date::show::DateModeType
-impl core::marker::Freeze for grit_lib::config::git_date::show::DateModeType
-impl core::marker::Send for grit_lib::config::git_date::show::DateModeType
-impl core::marker::Sync for grit_lib::config::git_date::show::DateModeType
-impl core::marker::Unpin for grit_lib::config::git_date::show::DateModeType
-impl core::marker::UnsafeUnpin for grit_lib::config::git_date::show::DateModeType
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::show::DateModeType
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::show::DateModeType
-pub struct grit_lib::config::git_date::show::DateMode
-pub grit_lib::config::git_date::show::DateMode::local: bool
-pub grit_lib::config::git_date::show::DateMode::strftime_fmt: core::option::Option<alloc::string::String>
-pub grit_lib::config::git_date::show::DateMode::ty: grit_lib::config::git_date::show::DateModeType
-impl grit_lib::config::git_date::show::DateMode
-pub fn grit_lib::config::git_date::show::DateMode::from_type(grit_lib::config::git_date::show::DateModeType) -> Self
-impl core::marker::Freeze for grit_lib::config::git_date::show::DateMode
-impl core::marker::Send for grit_lib::config::git_date::show::DateMode
-impl core::marker::Sync for grit_lib::config::git_date::show::DateMode
-impl core::marker::Unpin for grit_lib::config::git_date::show::DateMode
-impl core::marker::UnsafeUnpin for grit_lib::config::git_date::show::DateMode
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::show::DateMode
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::show::DateMode
-pub fn grit_lib::config::git_date::show::parse_date_format(&str) -> core::result::Result<grit_lib::config::git_date::show::DateMode, &'static str>
-pub fn grit_lib::config::git_date::show::show_date(u64, grit_lib::config::git_date::tm::TzHhmm, &mut grit_lib::config::git_date::show::DateMode) -> alloc::string::String
-pub fn grit_lib::config::git_date::show::show_date_relative(u64, i64) -> alloc::string::String
-pub fn grit_lib::config::git_date::show::strbuf_addftime(&libc::unix::linux_like::tm, grit_lib::config::git_date::tm::TzHhmm, &str, bool) -> alloc::string::String
-pub mod grit_lib::config::git_date::tm
-pub const grit_lib::config::git_date::tm::TIMESTAMP_MAX: u64
-pub fn grit_lib::config::git_date::tm::date_overflows(u64) -> bool
-pub fn grit_lib::config::git_date::tm::empty_tm() -> libc::unix::linux_like::tm
-pub fn grit_lib::config::git_date::tm::gm_time_t(u64, grit_lib::config::git_date::tm::TzHhmm) -> core::option::Option<u64>
-pub fn grit_lib::config::git_date::tm::init_tm_unknown() -> libc::unix::linux_like::tm
-pub fn grit_lib::config::git_date::tm::is_date_known(&libc::unix::linux_like::tm) -> bool
-pub unsafe fn grit_lib::config::git_date::tm::local_time_tzoffset(libc::unix::linux_like::linux::gnu::b64::time_t, *mut libc::unix::linux_like::tm) -> grit_lib::config::git_date::tm::TzHhmm
-pub fn grit_lib::config::git_date::tm::local_tzoffset(u64) -> grit_lib::config::git_date::tm::TzHhmm
-pub fn grit_lib::config::git_date::tm::local_tzoffset_with_tz(u64, core::option::Option<&str>) -> grit_lib::config::git_date::tm::TzHhmm
-pub fn grit_lib::config::git_date::tm::match_string(&[u8], &str) -> usize
-pub fn grit_lib::config::git_date::tm::maybeiso8601(&libc::unix::linux_like::tm) -> bool
-pub fn grit_lib::config::git_date::tm::nodate(&libc::unix::linux_like::tm) -> bool
-pub fn grit_lib::config::git_date::tm::parse_timestamp_prefix(&[u8]) -> (u64, usize)
-pub fn grit_lib::config::git_date::tm::process_wall_clock_sec() -> i64
-pub fn grit_lib::config::git_date::tm::refresh_process_tz()
-pub fn grit_lib::config::git_date::tm::skip_alpha(&[u8]) -> usize
-pub fn grit_lib::config::git_date::tm::time_to_tm(u64, grit_lib::config::git_date::tm::TzHhmm, &mut libc::unix::linux_like::tm) -> bool
-pub unsafe fn grit_lib::config::git_date::tm::time_to_tm_local(u64, *mut libc::unix::linux_like::tm) -> core::option::Option<*mut libc::unix::linux_like::tm>
-pub fn grit_lib::config::git_date::tm::tm_to_time_t(&libc::unix::linux_like::tm) -> libc::unix::linux_like::linux::gnu::b64::time_t
-pub type grit_lib::config::git_date::tm::Timestamp = u64
-pub type grit_lib::config::git_date::tm::TzHhmm = i32
+pub enum grit_lib::config::git_date::DateModeType
+pub grit_lib::config::git_date::DateModeType::Human
+pub grit_lib::config::git_date::DateModeType::Iso8601
+pub grit_lib::config::git_date::DateModeType::Iso8601Strict
+pub grit_lib::config::git_date::DateModeType::Normal
+pub grit_lib::config::git_date::DateModeType::Raw
+pub grit_lib::config::git_date::DateModeType::Relative
+pub grit_lib::config::git_date::DateModeType::Rfc2822
+pub grit_lib::config::git_date::DateModeType::Short
+pub grit_lib::config::git_date::DateModeType::Strftime
+pub grit_lib::config::git_date::DateModeType::Unix
+impl core::clone::Clone for grit_lib::config::git_date::DateModeType
+pub fn grit_lib::config::git_date::DateModeType::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::config::git_date::DateModeType
+impl core::cmp::PartialEq for grit_lib::config::git_date::DateModeType
+pub fn grit_lib::config::git_date::DateModeType::eq(&self, &Self) -> bool
+impl core::marker::Copy for grit_lib::config::git_date::DateModeType
+impl core::marker::StructuralPartialEq for grit_lib::config::git_date::DateModeType
+impl core::marker::Freeze for grit_lib::config::git_date::DateModeType
+impl core::marker::Send for grit_lib::config::git_date::DateModeType
+impl core::marker::Sync for grit_lib::config::git_date::DateModeType
+impl core::marker::Unpin for grit_lib::config::git_date::DateModeType
+impl core::marker::UnsafeUnpin for grit_lib::config::git_date::DateModeType
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::DateModeType
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::DateModeType
 pub enum grit_lib::config::git_date::DateSpecError
 pub grit_lib::config::git_date::DateSpecError::Unparseable
 pub grit_lib::config::git_date::DateSpecError::Unparseable::spec: alloc::string::String
@@ -2083,7 +2043,27 @@ impl core::marker::Unpin for grit_lib::config::git_date::DateSpecError
 impl core::marker::UnsafeUnpin for grit_lib::config::git_date::DateSpecError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::DateSpecError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::DateSpecError
+pub struct grit_lib::config::git_date::DateMode
+pub grit_lib::config::git_date::DateMode::local: bool
+pub grit_lib::config::git_date::DateMode::strftime_fmt: core::option::Option<alloc::string::String>
+pub grit_lib::config::git_date::DateMode::ty: grit_lib::config::git_date::DateModeType
+impl grit_lib::config::git_date::DateMode
+pub fn grit_lib::config::git_date::DateMode::from_type(grit_lib::config::git_date::DateModeType) -> Self
+impl core::marker::Freeze for grit_lib::config::git_date::DateMode
+impl core::marker::Send for grit_lib::config::git_date::DateMode
+impl core::marker::Sync for grit_lib::config::git_date::DateMode
+impl core::marker::Unpin for grit_lib::config::git_date::DateMode
+impl core::marker::UnsafeUnpin for grit_lib::config::git_date::DateMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::DateMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::DateMode
+pub fn grit_lib::config::git_date::local_tzoffset(u64) -> grit_lib::config::git_date::TzHhmm
+pub fn grit_lib::config::git_date::local_tzoffset_with_tz(u64, core::option::Option<&str>) -> grit_lib::config::git_date::TzHhmm
 pub fn grit_lib::config::git_date::parse_date_cutoff(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::DateSpecError>
+pub fn grit_lib::config::git_date::parse_date_format(&str) -> core::result::Result<grit_lib::config::git_date::DateMode, &'static str>
+pub fn grit_lib::config::git_date::refresh_process_tz()
+pub fn grit_lib::config::git_date::show_date(u64, grit_lib::config::git_date::TzHhmm, &mut grit_lib::config::git_date::DateMode) -> alloc::string::String
+pub fn grit_lib::config::git_date::show_date_relative(u64, i64) -> alloc::string::String
+pub type grit_lib::config::git_date::TzHhmm = i32
 pub mod grit_lib::config::git_path
 pub enum grit_lib::config::git_path::GitPathError
 pub grit_lib::config::git_path::GitPathError::EscapesRoot

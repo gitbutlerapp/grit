@@ -54,7 +54,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
 
     let saved_tz = std::env::var("TZ").ok();
     std::env::set_var("TZ", "UTC");
-    grit_lib::config::git_date::tm::refresh_process_tz();
+    grit_lib::config::git_date::refresh_process_tz();
 
     let td = tempfile::TempDir::new().expect("tempdir");
     let root = td.path();
@@ -178,5 +178,5 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
         Some(v) => std::env::set_var("TZ", v),
         None => std::env::remove_var("TZ"),
     }
-    grit_lib::config::git_date::tm::refresh_process_tz();
+    grit_lib::config::git_date::refresh_process_tz();
 }

@@ -341,7 +341,12 @@ fn strbuf_expand_step(munged: &mut String, fmt: &mut &str) -> bool {
 }
 
 /// `strbuf_addftime` function.
-pub fn strbuf_addftime(tm: &tm, tz_hhmm: TzHhmm, fmt: &str, suppress_tz_name: bool) -> String {
+pub(crate) fn strbuf_addftime(
+    tm: &tm,
+    tz_hhmm: TzHhmm,
+    fmt: &str,
+    suppress_tz_name: bool,
+) -> String {
     if fmt.is_empty() {
         return String::new();
     }
@@ -500,5 +505,21 @@ pub fn show_date(time: u64, mut tz: TzHhmm, mode: &mut DateMode) -> String {
             strbuf_addftime(&tmbuf, tz, fmt, !mode.local)
         }
         _ => show_date_normal(time, &tmbuf, tz, &human_tm, human_tz, mode.local),
+    }
+}
+
+#[cfg(test)]
+mod public_helper_coverage {
+    use super::*;
+
+    #[test]
+    fn show_helpers_match_supporting_coverage() {
+        let _ = show_date_relative(1_700_000_000, 1_700_000_100);
+        let _ = DateMode::from_type(DateModeType::Normal);
+        let mut t = init_tm_unknown();
+        t.tm_year = 124;
+        t.tm_mon = 0;
+        t.tm_mday = 1;
+        let _ = strbuf_addftime(&t, 0, "%Y", true);
     }
 }

@@ -3,8 +3,11 @@
 pub mod approx;
 pub(crate) mod compat;
 pub mod parse;
-pub mod show;
-pub mod tm;
+pub(crate) mod show;
+pub(crate) mod tm;
+
+pub use show::{parse_date_format, show_date, show_date_relative, DateMode, DateModeType};
+pub use tm::{local_tzoffset, local_tzoffset_with_tz, refresh_process_tz, TzHhmm};
 
 use thiserror::Error;
 
