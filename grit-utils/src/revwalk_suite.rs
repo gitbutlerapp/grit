@@ -263,6 +263,40 @@ pub fn run_revwalk_suite(
         )?);
     }
 
+    if !smoke {
+        use crate::real_repo_fixture::{ensure_git_git_bitmaps, ensure_worktree_clone};
+        let tag = std::env::var("GRIT_BENCH_GIT_GIT_TAG").unwrap_or_else(|_| "v2.43.0".to_owned());
+        let bare = ensure_git_git_bitmaps(git)?;
+        let worktree = ensure_worktree_clone(git, &bare, "revwalk-describe-git-git", &tag)?;
+        for id_suffix in ["no-graph", "commit-graph"] {
+            if id_suffix == "no-graph" {
+                ensure_commit_graph_absent(&worktree)?;
+            } else {
+                write_git_commit_graph_reachable(git, &worktree)?;
+                verify_git_commit_graph_in_repo(git, &worktree)?;
+            }
+            scenarios.push(run_scenario(
+                hyperfine,
+                git,
+                grit,
+                cfg,
+                &Scenario {
+                    id: format!("describe-head-git-git-{id_suffix}"),
+                    group: "describe".into(),
+                    fixture: bare.display().to_string(),
+                    description: format!("describe HEAD on pinned git.git worktree ({id_suffix})"),
+                    grit_argv: vec!["describe".into(), "HEAD".into()],
+                    git_argv: vec!["describe".into(), "HEAD".into()],
+                    driver: Driver::Cli,
+                    prepare_kind: None,
+                    grit_via_shell: false,
+                    git_via_shell: false,
+                },
+                &worktree,
+            )?);
+        }
+    }
+
     let spec = HotPathRepoSpec::for_size(if smoke { 80 } else { 10_000 });
     let (pick_repo, meta) = setup_pick_merge_fixture(git, spec, 4)?;
     scenarios.push(run_scenario(

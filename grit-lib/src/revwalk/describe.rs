@@ -194,9 +194,9 @@ fn dedupe_candidates_by_peel(
 
 /// Picks the nearest tag and exact distance from `commit`.
 ///
-/// With commit-graph generations, uses Git's one-pass backward walk and early exit. Without a
-/// graph, uses fixpoint within propagation over the reachable subgraph (one history pass, not
-/// one rev-list count per tag).
+/// With commit-graph generations, uses Git's one-pass backward walk and early exit, then one
+/// exact range count for the chosen tag. Without a graph, a single fixpoint pass yields exact
+/// distances (not a rev-list count per tag).
 fn nearest_tag_by_walk(
     repo: &Repository,
     commit: ObjectId,
@@ -209,7 +209,24 @@ fn nearest_tag_by_walk(
     if !generation_ranked {
         return nearest_tag_by_fixpoint(repo, commit, unique, peel_to_index, first_parent);
     }
+    nearest_tag_heap_walk(
+        repo,
+        &mut cache,
+        commit,
+        unique,
+        peel_to_index,
+        first_parent,
+    )
+}
 
+fn nearest_tag_heap_walk(
+    repo: &Repository,
+    cache: &mut CommitGraphCache<'_>,
+    commit: ObjectId,
+    unique: &[TagCandidate],
+    peel_to_index: &OidHashMap<usize>,
+    first_parent: bool,
+) -> Result<Option<(usize, usize)>> {
     let within_words = unique.len().max(1);
 
     let mut seen = oid_hash_set();
@@ -219,10 +236,9 @@ fn nearest_tag_by_walk(
     seen.insert(commit);
     let mut heap: BinaryHeap<PaintKey> = BinaryHeap::new();
     let mut seq = 0u64;
-    push_describe_heap_key(&mut cache, &mut heap, &mut seq, commit, None)?;
+    push_describe_heap_key(cache, &mut heap, &mut seq, commit, None)?;
 
     let mut matches: Vec<ActiveMatch> = Vec::new();
-    let mut annotated_match_count = 0usize;
     let mut seen_commits = 0usize;
 
     while let Some(key) = heap.pop() {
@@ -232,6 +248,8 @@ fn nearest_tag_by_walk(
         }
         processed.insert(cur);
         seen_commits += 1;
+        #[cfg(test)]
+        describe_test_hooks::record_describe_heap_processed();
 
         let mut active_within = commit_flags
             .get(&cur)
@@ -240,13 +258,7 @@ fn nearest_tag_by_walk(
 
         if let Some(&candidate_index) = peel_to_index.get(&cur) {
             let depth = seen_commits.saturating_sub(1);
-            register_tag_match(
-                &mut matches,
-                &mut annotated_match_count,
-                unique,
-                candidate_index,
-                depth,
-            );
+            register_tag_match(&mut matches, candidate_index, depth);
             active_within.set(candidate_index);
             commit_flags.insert(cur, active_within.clone());
         }
@@ -257,7 +269,7 @@ fn nearest_tag_by_walk(
             }
         }
 
-        if annotated_match_count > 0 {
+        if !matches.is_empty() {
             let (_, best_within) = best_match_within(&matches, unique.len());
             if describe_walk_can_stop(&active_within, &best_within, &heap, &commit_flags) {
                 break;
@@ -276,7 +288,7 @@ fn nearest_tag_by_walk(
                 .or_insert_with(|| WithinBits::with_candidates(within_words));
             entry.merge_from(&active_within);
             if seen.insert(parent) {
-                push_describe_heap_key(&mut cache, &mut heap, &mut seq, parent, None)?;
+                push_describe_heap_key(cache, &mut heap, &mut seq, parent, None)?;
             }
         }
     }
@@ -408,6 +420,7 @@ fn collect_describe_reachable(
     Ok((reachable_order, parents_of))
 }
 
+/// Picks the nearest tag by walk depth, then one exact range count for the winner only.
 fn pick_winner_and_distance(
     repo: &Repository,
     commit: ObjectId,
@@ -512,17 +525,8 @@ fn describe_walk_can_stop(
     })
 }
 
-fn register_tag_match(
-    matches: &mut Vec<ActiveMatch>,
-    annotated_match_count: &mut usize,
-    unique: &[TagCandidate],
-    candidate_index: usize,
-    depth: usize,
-) {
+fn register_tag_match(matches: &mut Vec<ActiveMatch>, candidate_index: usize, depth: usize) {
     let found_order = candidate_index + 1;
-    if unique[candidate_index].annotated {
-        *annotated_match_count += 1;
-    }
     matches.push(ActiveMatch {
         candidate_index,
         depth,
@@ -612,6 +616,7 @@ pub(crate) mod describe_test_hooks {
 
     thread_local! {
         static DESCRIBE_DISTANCE_COUNTS: Cell<usize> = const { Cell::new(0) };
+        static DESCRIBE_HEAP_PROCESSED: Cell<usize> = const { Cell::new(0) };
     }
 
     pub fn reset_describe_distance_counts() {
@@ -622,8 +627,20 @@ pub(crate) mod describe_test_hooks {
         DESCRIBE_DISTANCE_COUNTS.with(|c| c.get())
     }
 
+    pub fn reset_describe_heap_processed() {
+        DESCRIBE_HEAP_PROCESSED.with(|c| c.set(0));
+    }
+
+    pub fn describe_heap_processed() -> usize {
+        DESCRIBE_HEAP_PROCESSED.with(|c| c.get())
+    }
+
     pub(crate) fn record_describe_distance_count() {
         DESCRIBE_DISTANCE_COUNTS.with(|c| c.set(c.get().saturating_add(1)));
+    }
+
+    pub(crate) fn record_describe_heap_processed() {
+        DESCRIBE_HEAP_PROCESSED.with(|c| c.set(c.get().saturating_add(1)));
     }
 }
 
@@ -1287,6 +1304,133 @@ mod tests {
             describe_distance_counts(),
             0,
             "no-graph describe must not run a full rev-list count per tag candidate"
+        );
+        Ok(())
+    }
+
+    /// Many parallel branches with annotated tips merged into one head: incomparable tag cones
+    /// must not trigger a full rev-list count per discovered tag (issue #2461 wide merge).
+    #[test]
+    fn describe_wide_incomparable_tag_cones_no_per_tag_distance_walks() -> Result<()> {
+        use super::describe_test_hooks::{
+            describe_distance_counts, describe_heap_processed, reset_describe_distance_counts,
+            reset_describe_heap_processed,
+        };
+        use crate::maintenance::CommitGraphOptions;
+        use crate::merge_base::{
+            count_commits_reachable_excluding_ancestors_of, ReachableCountFilter,
+        };
+        use crate::refs;
+
+        const BRANCHES: usize = 80;
+        const DEPTH: usize = 50;
+
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let root = write_commit_at(odb, &[], "root", 1)?;
+        let mut tips: Vec<ObjectId> = Vec::with_capacity(BRANCHES);
+        for b in 0..BRANCHES {
+            let mut cur = root;
+            for step in 0..DEPTH {
+                cur = write_commit_at(
+                    odb,
+                    &[cur],
+                    &format!("b{b}-s{step}"),
+                    10 + b as i64 * 1_000 + step as i64,
+                )?;
+            }
+            tag_annotated(&repo, &format!("tag-{b:03}"), cur, "tip");
+            tips.push(cur);
+        }
+        while tips.len() > 1 {
+            let mut next = Vec::new();
+            let mut iter = tips.into_iter();
+            while let Some(left) = iter.next() {
+                match iter.next() {
+                    Some(right) => {
+                        let merge_time = 500_000 + next.len() as i64;
+                        next.push(write_commit_at(
+                            odb,
+                            &[left, right],
+                            &format!("merge-{}", next.len()),
+                            merge_time,
+                        )?);
+                    }
+                    None => next.push(left),
+                }
+            }
+            tips = next;
+        }
+        let head = tips.into_iter().next().expect("merge head");
+        refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
+        repo.write_commit_graph(&CommitGraphOptions::default())?;
+
+        reset_describe_distance_counts();
+        reset_describe_heap_processed();
+        let described = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert!(
+            describe_distance_counts() <= 1,
+            "commit-graph describe must not rev-list count every discovered tag (got {})",
+            describe_distance_counts()
+        );
+        let branch_commits = BRANCHES * DEPTH;
+        let merge_commits = BRANCHES.saturating_sub(1);
+        let max_reasonable_processed = branch_commits + merge_commits + 64;
+        assert!(
+            describe_heap_processed() <= max_reasonable_processed,
+            "processed {} commits, expected at most about {max_reasonable_processed} (not tags × history)",
+            describe_heap_processed()
+        );
+        let expected = count_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[head],
+            &[described.peeled],
+            ReachableCountFilter::default(),
+        )?;
+        assert_eq!(described.distance, expected);
+        Ok(())
+    }
+
+    /// Large chain with hundreds of tags: parent reads stay near walk depth, not tags × history.
+    #[test]
+    fn describe_many_tags_long_chain_parent_reads_bounded() -> Result<()> {
+        use crate::merge_base::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        let (_dir, repo) = init_repo();
+        let mut chain = Vec::new();
+        const COMMITS: usize = 800;
+        const TAG_EVERY: usize = 4;
+        for i in 0..COMMITS {
+            let parents = if i == 0 { vec![] } else { vec![chain[i - 1]] };
+            chain.push(write_commit_at(
+                repo.odb(),
+                &parents,
+                &format!("c{i}"),
+                100 + i as i64,
+            )?);
+        }
+        let tip = *chain.last().expect("tip");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        for (i, oid) in chain.iter().enumerate().step_by(TAG_EVERY) {
+            tag_annotated(&repo, &format!("t{i}"), *oid, "m");
+        }
+
+        reset_commit_parent_lookups();
+        let d = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .expect("described");
+        assert_eq!(d.distance, TAG_EVERY - 1);
+        let lookups = commit_parent_lookups();
+        assert!(
+            lookups <= 2500,
+            "describe on {COMMITS} commits / {} tags must not multiply parent reads ({lookups})",
+            COMMITS / TAG_EVERY,
         );
         Ok(())
     }

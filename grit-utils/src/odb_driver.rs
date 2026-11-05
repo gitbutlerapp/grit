@@ -17,7 +17,7 @@ use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions, RevListResult};
-use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::revwalk::{DescribeOptions, RevWalkListOptions};
 use std::sync::Arc;
 
 /// Parse one stdin line for `git cat-file --batch` / `--batch-check` (hex OID, optional trailing fields).
@@ -271,6 +271,27 @@ pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
         };
         let n = repo.rev_walk().count(&["HEAD"], &opts)?;
         println!("{n}");
+        Ok(())
+    })
+}
+
+/// Nearest annotated tag for `HEAD` ([`RevWalk::describe`]).
+pub fn rev_walk_describe_head(repo: &Repository) -> Result<()> {
+    repo.odb().with_pack_read_context(|| {
+        let described = repo
+            .rev_walk()
+            .describe("HEAD", &DescribeOptions::default())?
+            .ok_or_else(|| anyhow::anyhow!("no reachable tag"))?;
+        println!(
+            "{}-{}-{}",
+            described
+                .tag
+                .as_str()
+                .strip_prefix("refs/tags/")
+                .unwrap_or(described.tag.as_str()),
+            described.distance,
+            described.abbrev
+        );
         Ok(())
     })
 }
