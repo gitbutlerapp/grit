@@ -48,9 +48,16 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::worktree::WorktreeEntry>();
     assert_serialize::<grit_lib::refs::store::RefName>();
     assert_serialize::<grit_lib::objects::ObjectKind>();
+    assert_serialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
+    assert_serialize::<grit_lib::revwalk::DescribedCommit>();
 }
 
 fn assert_deserialize<T: serde::de::DeserializeOwned>() {}
+
+#[test]
+fn workspace_snapshot_implement_deserialize() {
+    assert_deserialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
+}
 
 fn sample_signature() -> grit_lib::ident::Signature {
     "Ada Lovelace <ada@example.com> 1700000000 -0800"

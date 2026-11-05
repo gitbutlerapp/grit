@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use crate::rev_list::{
     open_commit_stream, rev_list, split_revision_token, CommitExtent, CommitStream,
-    CommitStreamItem, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -468,12 +468,31 @@ pub fn rev_walk_list_supports_stream(walk: &RevWalkListOptions) -> bool {
         && !walk.cherry_mark
 }
 
+/// One commit from [`RevWalk::commits_stream`].
+#[derive(Debug, Clone)]
+pub struct RevWalkCommitStreamItem {
+    /// Listed commit id.
+    pub oid: ObjectId,
+    /// Raw commit object bytes when the walk retained them.
+    pub commit_bytes: Option<Vec<u8>>,
+}
+
 /// Lazy commit walk over the same tokens and [`RevWalkListOptions`] as [`RevWalk::rev_list_result`],
 /// for plain default-order reachable history.
-pub type RevWalkCommitStream<'repo> = CommitStream<'repo>;
+pub struct RevWalkCommitStream<'repo>(pub(crate) CommitStream<'repo>);
 
-/// One commit from [`RevWalk::commits_stream`].
-pub type RevWalkCommitStreamItem = CommitStreamItem;
+impl Iterator for RevWalkCommitStream<'_> {
+    type Item = Result<RevWalkCommitStreamItem>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next().map(|item| {
+            item.map(|row| RevWalkCommitStreamItem {
+                oid: row.oid,
+                commit_bytes: row.commit_bytes,
+            })
+        })
+    }
+}
 
 impl<'repo> RevWalk<'repo> {
     /// Lazy commit walk for plain default-order history (same tokens and [`RevWalkListOptions`] as
@@ -503,12 +522,12 @@ impl<'repo> RevWalk<'repo> {
             retain_commit_bytes: walk.retain_commit_data,
             retained_commit_extent: walk.retained_commit_extent,
         };
-        Ok(Some(open_commit_stream(
+        Ok(Some(RevWalkCommitStream(open_commit_stream(
             self.repository(),
             &tips,
             &hide,
             &params,
-        )?))
+        )?)))
     }
 
     /// List commit object ids reachable from `tokens` in default `rev-list` order.

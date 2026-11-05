@@ -782,14 +782,6 @@ fn fill_exact_text_relocate_with_lookup<'a>(
 /// Recover line mappings by exact text match when Myers left a line unresolved.
 ///
 /// Used during blame to follow moved but unchanged lines without pairing rewrites.
-pub(crate) fn build_exact_relocate_line_map(
-    old: &[&str],
-    new: &[&str],
-    exact_map: &[Option<usize>],
-) -> Vec<Option<usize>> {
-    build_exact_relocate_line_map_ws(old, new, exact_map, crate::diff::WhitespaceMode::default())
-}
-
 fn build_exact_relocate_line_map_ws(
     old: &[&str],
     new: &[&str],
@@ -1724,7 +1716,7 @@ pub struct BlameTextconvContext {
 
 impl BlameTextconvContext {
     /// Build textconv context from the open repository (config, attributes, filters).
-    pub(crate) fn new(repo: &Repository) -> Self {
+    pub fn new(repo: &Repository) -> Self {
         let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
         let parsed = load_attr_parsed(repo);
@@ -4929,7 +4921,8 @@ impl BlameResult {
     /// [`BlameOptions::final_source`] the result was computed with). The email is
     /// `not.committed.yet` for every source. An entry whose author is already set, or a
     /// result with no uncommitted lines, is left unchanged.
-    pub(crate) fn name_uncommitted_author(&mut self, source: &BlameFinalSource) {
+    #[allow(dead_code)]
+    fn name_uncommitted_author(&mut self, source: &BlameFinalSource) {
         let Some(info) = self.commits.get_mut(&ObjectId::zero()) else {
             return;
         };
@@ -5619,7 +5612,12 @@ mod tests {
             "}",
         ];
         let diff = build_line_map(&old, &new, BlameDiffAlgorithm::Myers, true);
-        let map = build_exact_relocate_line_map(&old, &new, &diff);
+        let map = build_exact_relocate_line_map_ws(
+            &old,
+            &new,
+            &diff,
+            crate::diff::WhitespaceMode::default(),
+        );
         let (_, flags) = build_line_map_with_changed_flags(
             &old,
             &new,
@@ -5942,7 +5940,12 @@ mod tests {
         let par = ["a", "b", "c", "d"];
         let cur = ["d", "a", "b", "c"];
         let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
-        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let map = build_exact_relocate_line_map_ws(
+            &par,
+            &cur,
+            &diff,
+            crate::diff::WhitespaceMode::default(),
+        );
         let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
         let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
         assert_eq!(blame, vec![true, false, false, false]);
@@ -5953,7 +5956,12 @@ mod tests {
         let par = ["alpha ONE", "inserted", " gamma three"];
         let cur = ["alpha ONE", " gamma three", "inserted"];
         let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
-        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let map = build_exact_relocate_line_map_ws(
+            &par,
+            &cur,
+            &diff,
+            crate::diff::WhitespaceMode::default(),
+        );
         let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
         let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
         assert_eq!(blame, vec![false, false, true]);
@@ -5964,7 +5972,12 @@ mod tests {
         let par = ["a", "b", "c", "d"];
         let cur = ["d", "a", "c", "b"];
         let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
-        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let map = build_exact_relocate_line_map_ws(
+            &par,
+            &cur,
+            &diff,
+            crate::diff::WhitespaceMode::default(),
+        );
         let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
         let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
         assert_eq!(blame, vec![true, false, false, true]);
@@ -5975,7 +5988,12 @@ mod tests {
         let par = ["a", "b", "c", "d"];
         let cur = ["a", "d", "c", "b"];
         let diff = build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false);
-        let map = build_exact_relocate_line_map(&par, &cur, &diff);
+        let map = build_exact_relocate_line_map_ws(
+            &par,
+            &cur,
+            &diff,
+            crate::diff::WhitespaceMode::default(),
+        );
         let xdiff = crate::diff::xdiff_new_line_changed_flags(&par, &cur, false);
         let blame = blame_stops_on_current_commit(&diff, &map, &xdiff);
         assert_eq!(blame, vec![false, false, true, true]);
@@ -5985,10 +6003,11 @@ mod tests {
     fn fuzzy_line_map_recovers_moved_unchanged_line() {
         let par = ["alpha ONE", "inserted", " gamma three"];
         let cur = ["alpha ONE", " gamma three", "inserted"];
-        let map = build_exact_relocate_line_map(
+        let map = build_exact_relocate_line_map_ws(
             &par,
             &cur,
             &build_line_map(&par, &cur, BlameDiffAlgorithm::Myers, false),
+            crate::diff::WhitespaceMode::default(),
         );
         assert_eq!(map[1], Some(2));
     }

@@ -36,7 +36,7 @@ When [`ApplyOptions::record_operation`](rustdoc:grit_lib::revwalk::history::Appl
 
 ## Inspecting a plan
 
-[`RewritePlan::ref_update_lines`](rustdoc:grit_lib::revwalk::history::RewritePlan::ref_update_lines) returns `update <ref> <new> <old>` lines suitable for `git update-ref --stdin`, so callers can preview ref motion without applying.
+[`RewritePlan::ref_updates`](rustdoc:grit_lib::revwalk::history::RewritePlan::ref_updates) lists each ref movement as a [`PlannedRefUpdate`](rustdoc:grit_lib::revwalk::history::PlannedRefUpdate) (`name`, `old`, `new`), so callers can preview ref motion without applying.
 
 [`RewritePlan::replacement`](rustdoc:grit_lib::revwalk::history::RewritePlan::replacement) maps one original commit to its rewritten OID (`None` when dropped), and [`RewritePlan::head_change`](rustdoc:grit_lib::revwalk::history::RewritePlan::head_change) reports `HEAD`'s commit before and after the rewrite, or `None` when `HEAD` does not move. `grit history` builds its `--json` `head` field from it.
 

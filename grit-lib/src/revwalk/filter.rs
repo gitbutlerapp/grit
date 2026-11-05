@@ -97,12 +97,6 @@ struct CommitFilterInner {
 }
 
 impl CommitFilter {
-    /// Start building a filter.
-    #[must_use]
-    pub(crate) fn builder() -> CommitFilterBuilder {
-        CommitFilterBuilder::new()
-    }
-
     /// Returns true when any author, committer, or grep pattern is configured.
     #[must_use]
     pub fn is_active(&self) -> bool {

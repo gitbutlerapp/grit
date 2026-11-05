@@ -71,10 +71,6 @@ pub mod log_walk {
     //! Log-order revision walking helpers re-exported at this path.
     pub use crate::log_walk::*;
 }
-pub(crate) mod commit_graph {
-    pub(crate) use crate::commit_graph_file::*;
-    pub(crate) use crate::commit_graph_write::*;
-}
 pub mod rev_list_error {
     //! Typed `rev-list` failures surfaced on [`crate::revwalk::RevWalk`].
     pub use crate::rev_list_error::RevListError;

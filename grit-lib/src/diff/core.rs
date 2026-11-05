@@ -2687,7 +2687,8 @@ fn changed_flags_to_ops(
 
 /// Line-diff ops for string slices after Git `xdl_change_compact` (and optional indent heuristic).
 #[must_use]
-pub(crate) fn diff_slice_ops_compacted(
+#[allow(dead_code)]
+fn diff_slice_ops_compacted(
     old_lines: &[&str],
     new_lines: &[&str],
     algorithm: similar::Algorithm,
@@ -7326,7 +7327,8 @@ pub(crate) fn smudge_racily_clean_entries(
 /// Symlinks and submodules are compared in a Git-compatible way.
 ///
 /// `ignore_submodule_untracked` mirrors [`diff_index_to_worktree`]'s same flag for gitlinks.
-pub(crate) fn worktree_differs_from_index_entry(
+#[allow(dead_code)]
+fn worktree_differs_from_index_entry(
     odb: &Odb,
     repository_git_dir: &Path,
     work_tree: &Path,
@@ -10002,7 +10004,8 @@ pub fn detect_renames_with_policy(
 ///
 /// Returns [`Error::HashCollision`] when hashing worktree blob content for copy detection
 /// would produce a known-bad SHA-1 object id.
-pub(crate) fn detect_copies(
+#[allow(dead_code)]
+fn detect_copies(
     odb: &Odb,
     work_root: Option<&Path>,
     entries: Vec<DiffEntry>,
@@ -12600,7 +12603,8 @@ pub fn count_changes_with_algorithm(
 
 /// Count insertions and deletions using Git's histogram line-diff engine.
 #[must_use]
-pub(crate) fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
+#[allow(dead_code)]
+fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
     count_changes_with_algorithm(old_content, new_content, similar::Algorithm::Myers, true)
 }
 
@@ -12633,9 +12637,11 @@ pub fn count_git_lines(data: &[u8]) -> usize {
 pub(crate) const GIT_DIFF_MAX_SCORE: u64 = 60_000;
 const DIFF_MAX_SCORE: u64 = GIT_DIFF_MAX_SCORE;
 const DIFF_MINIMUM_BREAK_SIZE: usize = 400;
+#[allow(dead_code)]
 const DIFF_DEFAULT_BREAK_SCORE: u64 = 30_000;
 /// Default break threshold (`DEFAULT_BREAK_SCORE` in `diffcore.h`), internal 0–the internal max score (60_000) scale.
-pub(crate) const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
+#[allow(dead_code)]
+const GIT_DIFF_DEFAULT_BREAK_SCORE: u64 = DIFF_DEFAULT_BREAK_SCORE;
 const DIFF_HASHBASE: u32 = 107_927;
 
 #[derive(Clone, Copy, Default)]
@@ -13184,7 +13190,8 @@ pub(crate) fn format_mode(mode: u32) -> String {
 ///
 /// Returns `None` if the path is missing, not a submodule checkout, or has no resolvable HEAD.
 #[must_use]
-pub(crate) fn read_submodule_head_for_checkout(sub_dir: &Path) -> Option<ObjectId> {
+#[allow(dead_code)]
+fn read_submodule_head_for_checkout(sub_dir: &Path) -> Option<ObjectId> {
     read_submodule_head(sub_dir)
 }
 
@@ -13193,7 +13200,8 @@ pub(crate) fn read_submodule_head_for_checkout(sub_dir: &Path) -> Option<ObjectI
 /// Honors `encoding` in the commit object (Latin-1 vs UTF-8) using the same
 /// rules as Git's submodule summary.
 #[must_use]
-pub(crate) fn submodule_commit_subject_line(c: &CommitData) -> String {
+#[allow(dead_code)]
+fn submodule_commit_subject_line(c: &CommitData) -> String {
     let enc = c.encoding.as_deref().unwrap_or("UTF-8");
     let is_latin1 = enc.eq_ignore_ascii_case("ISO8859-1")
         || enc.eq_ignore_ascii_case("ISO-8859-1")

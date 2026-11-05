@@ -405,8 +405,6 @@ pub mod fuzz;
 
 pub(crate) use crate::oid_abbrev::OidAbbrevBatch;
 pub(crate) use objects::pack_reuse;
-#[cfg(any(test, feature = "test-support"))]
-pub(crate) use objects::pack_write;
 pub(crate) use porcelain::quote_path;
 pub(crate) use ref_storage::RefStorageFormat;
 pub(crate) use revwalk::object_inspect;

@@ -232,7 +232,8 @@ impl ObjectFilter {
     }
 
     /// Check if a blob should be included given its size.
-    pub fn includes_blob(&self, size: u64) -> bool {
+    #[allow(dead_code)]
+    fn includes_blob(&self, size: u64) -> bool {
         match self {
             ObjectFilter::BlobNone => false,
             ObjectFilter::BlobLimit(limit) => size < *limit,
@@ -250,7 +251,7 @@ impl ObjectFilter {
     /// For `tree:<n>` filters, Git assigns blobs the traversal depth after entering the parent tree,
     /// which matches `parent_tree_depth + 1` in our walk where the commit root tree is depth `0`.
     #[must_use]
-    pub fn includes_blob_under_tree(&self, size: u64, parent_tree_depth: u64) -> bool {
+    pub(crate) fn includes_blob_under_tree(&self, size: u64, parent_tree_depth: u64) -> bool {
         match self {
             ObjectFilter::BlobNone => false,
             ObjectFilter::BlobLimit(limit) => size < *limit,
@@ -264,7 +265,7 @@ impl ObjectFilter {
     }
 
     /// Check if a tree at given depth should be included.
-    pub fn includes_tree(&self, depth: u64) -> bool {
+    pub(crate) fn includes_tree(&self, depth: u64) -> bool {
         match self {
             ObjectFilter::BlobNone => true,
             ObjectFilter::BlobLimit(_) => true,
@@ -310,7 +311,7 @@ impl ObjectFilter {
     }
 
     /// Whether a commit or tag object should appear in a flat object scan (e.g. `cat-file --batch-all-objects`).
-    pub fn includes_commit_or_tag_object(&self, kind: ObjectKind) -> bool {
+    pub(crate) fn includes_commit_or_tag_object(&self, kind: ObjectKind) -> bool {
         let expected = match kind {
             ObjectKind::Commit => Some(FilterObjectKind::Commit),
             ObjectKind::Tag => Some(FilterObjectKind::Tag),
@@ -328,7 +329,8 @@ impl ObjectFilter {
     }
 
     /// True if `kind` / `size` pass this filter when enumerating a single object (no tree path).
-    pub fn includes_loose_object(&self, kind: ObjectKind, size: u64) -> bool {
+    #[allow(dead_code)]
+    fn includes_loose_object(&self, kind: ObjectKind, size: u64) -> bool {
         match kind {
             ObjectKind::Blob => self.includes_blob(size),
             ObjectKind::Tree => self.includes_tree(0),
@@ -603,7 +605,7 @@ impl RevListOptions {
     /// Bloom filters for path-limited walks when the chain supports them. [`rev_list`] calls
     /// this automatically; with [`RevListOptions::default`], `-n` / `--count` use the same
     /// early-stop and commit-graph paths as the CLI.
-    pub fn normalize_for_walk(&mut self, cfg: &ConfigSet) {
+    pub(crate) fn normalize_for_walk(&mut self, cfg: &ConfigSet) {
         if self.use_commit_graph {
             self.use_commit_graph = repo_commit_graph_enabled(cfg);
         }
@@ -2391,7 +2393,7 @@ fn resolve_specs_with_options(
 
 /// Resolve revision tokens for [`open_commit_stream`] /
 /// [`RevWalk::commits_iter`](crate::revwalk::handle::RevWalk::commits_iter).
-pub fn resolve_specs_for_commit_stream(
+pub(crate) fn resolve_specs_for_commit_stream(
     repo: &Repository,
     specs: &[String],
 ) -> Result<Vec<ObjectId>> {
@@ -2415,7 +2417,7 @@ pub fn resolve_revision_specs_to_commits(
 /// # Errors
 ///
 /// Propagates ref listing and peel errors.
-pub fn all_ref_commit_tips_for_walk(repo: &Repository) -> Result<Vec<ObjectId>> {
+pub(crate) fn all_ref_commit_tips_for_walk(repo: &Repository) -> Result<Vec<ObjectId>> {
     all_ref_tips(repo)
 }
 
@@ -6241,7 +6243,7 @@ fn streaming_date_walk<'r>(
 
 /// Parameters for [`open_commit_stream`].
 #[derive(Debug, Clone, Default)]
-pub struct CommitStreamParams {
+pub(crate) struct CommitStreamParams {
     /// Skip this many matching commits before yielding.
     pub skip: usize,
     /// Maximum commits to yield (`None` = unbounded).
@@ -6273,7 +6275,7 @@ pub enum CommitExtent {
 
 /// One commit from [`CommitStream`]: its id and optional bytes read during the walk.
 #[derive(Debug, Clone)]
-pub struct CommitStreamItem {
+pub(crate) struct CommitStreamItem {
     /// Listed commit id.
     pub oid: ObjectId,
     /// Raw commit object bytes when [`CommitStreamParams::retain_commit_bytes`] was set.
@@ -6281,7 +6283,7 @@ pub struct CommitStreamItem {
 }
 
 /// Lazy commit-only walk in default date order (no object/cherry side tables).
-pub struct CommitStream<'repo> {
+pub(crate) struct CommitStream<'repo> {
     graph: CommitGraph<'repo>,
     heap: BinaryHeap<CommitDateKey>,
     excluded: RangeWalkHide,
@@ -6386,7 +6388,7 @@ impl Iterator for CommitStream<'_> {
 /// # Errors
 ///
 /// Propagates rev-list setup errors (for example invalid tips).
-pub fn open_commit_stream<'repo>(
+pub(crate) fn open_commit_stream<'repo>(
     repo: &'repo Repository,
     include: &[ObjectId],
     exclude: &[ObjectId],

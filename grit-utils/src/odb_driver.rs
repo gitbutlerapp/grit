@@ -695,7 +695,8 @@ pub fn diff_rename_m(
     new_rev: &str,
     threshold: u32,
 ) -> Result<()> {
-    use grit_lib::diff::{detect_renames, diff_trees};
+    use grit_lib::diff::{detect_renames_with_policy, diff_trees, DetectRenamesOptions};
+    use grit_lib::parallel::ThreadPolicy;
     use grit_lib::objects::parse_commit;
 
     let old_oid = resolve_rev(repo, old_rev)?;
@@ -710,7 +711,18 @@ pub fn diff_rename_m(
         Some(&new_commit.tree),
         "",
     )?;
-    let entries = detect_renames(repo.odb(), None, entries, threshold);
+    let config = repo.config().unwrap_or_default();
+    let entries = detect_renames_with_policy(
+        repo.odb(),
+        None,
+        entries,
+        threshold,
+        config.as_ref(),
+        &ThreadPolicy::default(),
+        None,
+        DetectRenamesOptions::default(),
+    )?
+    .entries;
     let mut out = io::stdout().lock();
     for entry in entries {
         let path = entry

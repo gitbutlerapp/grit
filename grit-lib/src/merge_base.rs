@@ -940,7 +940,7 @@ impl PartialOrd for WalkDateKey {
 /// waits for a commit's other children, so under clock skew a parent can print before one of
 /// its children, exactly as in Git.
 #[derive(Clone, Debug)]
-pub struct ReachableWalkState {
+pub(crate) struct ReachableWalkState {
     heap: BinaryHeap<WalkDateKey>,
     done: OidHashSet,
     queued: OidHashSet,
@@ -999,7 +999,7 @@ enum HidePaintStop {
 
 /// Serializable snapshot of [`ReachableWalkState`] for resuming a bounded walk.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReachableWalkSnapshot {
+pub(crate) struct ReachableWalkSnapshot {
     /// Pending heap entries (order does not matter).
     pub heap: Vec<(i64, u64, ObjectId)>,
     /// Commits already popped from the heap (emitted or skipped as duplicate/hidden).
@@ -1020,7 +1020,7 @@ impl ReachableWalkState {
     /// # Errors
     ///
     /// Propagates commit read errors while seeding the heap.
-    pub fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
+    pub(crate) fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
         Self::with_commit_graph(repo, tips, hide, true)
     }
 
@@ -1116,7 +1116,7 @@ impl ReachableWalkState {
 
     /// Restore walk state from a [`ReachableWalkSnapshot`].
     #[must_use]
-    pub fn from_snapshot(snapshot: ReachableWalkSnapshot) -> Self {
+    pub(crate) fn from_snapshot(snapshot: ReachableWalkSnapshot) -> Self {
         let ReachableWalkSnapshot {
             heap,
             done,
@@ -1144,7 +1144,7 @@ impl ReachableWalkState {
 
     /// Capture the current walk state for later resumption.
     #[must_use]
-    pub fn snapshot(&self) -> ReachableWalkSnapshot {
+    pub(crate) fn snapshot(&self) -> ReachableWalkSnapshot {
         ReachableWalkSnapshot {
             heap: self
                 .heap
@@ -1161,7 +1161,8 @@ impl ReachableWalkState {
 
     /// Whether the heap still holds commits that might be emitted.
     #[must_use]
-    pub fn has_pending(&self) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn has_pending(&self) -> bool {
         !self.heap.is_empty()
     }
 
@@ -1171,7 +1172,7 @@ impl ReachableWalkState {
     /// older commits remain on the heap), this returns `false` even though
     /// [`Self::has_pending`] is still true.
     #[must_use]
-    pub fn has_emittable_pending(&self, cutoffs: ReachableWalkCommitterCutoffs) -> bool {
+    pub(crate) fn has_emittable_pending(&self, cutoffs: ReachableWalkCommitterCutoffs) -> bool {
         if self.heap.is_empty() {
             return false;
         }
@@ -1306,7 +1307,7 @@ impl ReachableWalkState {
     /// # Errors
     ///
     /// Propagates object read and ancestry errors during traversal.
-    pub fn emit_until(
+    pub(crate) fn emit_until(
         &mut self,
         repo: &Repository,
         limit: Option<usize>,

@@ -3,11 +3,11 @@ use grit_lib::revwalk::rev_list::ObjectFilter;
 
 fn main() -> Result<(), String> {
     let filter = ObjectFilter::parse("blob:limit=1m")?;
-
-    println!("small blob included? {}", filter.includes_blob(512));
-    println!(
-        "large blob included? {}",
-        filter.includes_blob(2 * 1024 * 1024)
-    );
+    match filter {
+        ObjectFilter::BlobLimit(bytes) => {
+            println!("blob size limit: {bytes} bytes");
+        }
+        _ => println!("parsed filter: {filter:?}"),
+    }
     Ok(())
 }

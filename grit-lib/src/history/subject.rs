@@ -65,7 +65,7 @@ pub fn rewritten_row_subject(
 #[cfg(test)]
 mod tests {
     use crate::history::{
-        drop as history_drop, reword, EmptyPolicy, RefScope, RewriteOptions, RewritePlan,
+        drop as history_drop, reword, EmptyPolicy, RefScope, RewriteOptions,
     };
     use crate::objects::{serialize_commit, CommitData};
     use crate::repo::init_repository;
@@ -124,10 +124,6 @@ mod tests {
         }
     }
 
-    fn row_subjects(repo: &Repository, plan: &RewritePlan) -> Vec<Option<String>> {
-        plan.subjects(repo).expect("subjects")
-    }
-
     #[test]
     fn rewrite_row_subject_uses_replacement_message() {
         let (_dir, repo, middle, _tip) = linear_repo();
@@ -139,11 +135,6 @@ mod tests {
             .find(|r| r.old == middle)
             .expect("middle row");
         assert_eq!(row.subject.as_deref(), Some("reworded subject"));
-        let idx = plan.commits.iter().position(|r| r.old == middle).unwrap();
-        assert_eq!(
-            row_subjects(&repo, &plan)[idx].as_deref(),
-            Some("reworded subject")
-        );
         assert_eq!(
             rewritten_row_subject(&repo, row).expect("lookup"),
             Some("reworded subject".into())

@@ -230,7 +230,7 @@ pub fn restore_workspace_snapshot(
 /// # Errors
 ///
 /// Returns [`Error::Io`] when sentinel files cannot be removed.
-pub fn clear_in_progress(repo: &Repository) -> Result<Vec<InProgressOperation>> {
+pub(crate) fn clear_in_progress(repo: &Repository) -> Result<Vec<InProgressOperation>> {
     let git_dir = repo.git_dir();
     let ops = crate::state::detect_in_progress(git_dir);
     clear_managed_operation_sentinels(git_dir)?;

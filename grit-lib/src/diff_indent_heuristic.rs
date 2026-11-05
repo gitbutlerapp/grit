@@ -751,7 +751,7 @@ pub fn diff_lines_ops_compacted(
 }
 
 /// Like [`diff_lines_ops_compacted`] but for pre-split line slices (e.g. `--no-index` compare keys).
-pub fn diff_slice_ops_compacted(
+pub(crate) fn diff_slice_ops_compacted(
     old_lines: &[&str],
     new_lines: &[&str],
     algorithm: Algorithm,

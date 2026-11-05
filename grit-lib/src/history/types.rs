@@ -200,27 +200,11 @@ impl RewritePlan {
     /// Dropped commits, [reused](RewrittenCommit::reused) commits and commits whose replacement
     /// is the original object are left out; this is the list `post-rewrite` receives on stdin.
     #[must_use]
-    pub(crate) fn rewritten_pairs(&self) -> Vec<(ObjectId, ObjectId)> {
+    pub fn rewritten_pairs(&self) -> Vec<(ObjectId, ObjectId)> {
         self.commits
             .iter()
             .filter(|c| !c.reused)
             .filter_map(|c| c.new.filter(|new| *new != c.old).map(|new| (c.old, new)))
-            .collect()
-    }
-
-    /// Subject line for each row in [`Self::commits`], in the same order.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`super::HistoryError`] when a subject must be loaded from the object database and
-    /// the commit is missing or corrupt.
-    pub(crate) fn subjects(
-        &self,
-        repo: &crate::repo::Repository,
-    ) -> Result<Vec<Option<String>>, super::HistoryError> {
-        self.commits
-            .iter()
-            .map(|row| super::subject::rewritten_row_subject(repo, row))
             .collect()
     }
 
@@ -260,15 +244,6 @@ impl RewritePlan {
             .or_else(|| self.replacement(old))
             .unwrap_or(old);
         Some((old, new))
-    }
-
-    /// `update <ref> <new> <old>` lines accepted by `git update-ref --stdin`.
-    #[must_use]
-    pub(crate) fn ref_update_lines(&self) -> Vec<String> {
-        self.ref_updates
-            .iter()
-            .map(|u| format!("update {} {} {}", u.name, u.new.to_hex(), u.old.to_hex()))
-            .collect()
     }
 }
 

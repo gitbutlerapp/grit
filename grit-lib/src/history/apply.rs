@@ -3907,13 +3907,19 @@ mod ref_update_lines_tests {
             }],
             head: Default::default(),
         };
+        let update = &plan.ref_updates[0];
         assert_eq!(
-            plan.ref_update_lines(),
-            vec![format!(
+            format!(
+                "update {} {} {}",
+                update.name,
+                update.new.to_hex(),
+                update.old.to_hex()
+            ),
+            format!(
                 "update refs/heads/main {} {}",
                 oid(2).to_hex(),
                 oid(1).to_hex()
-            )]
+            )
         );
     }
 }

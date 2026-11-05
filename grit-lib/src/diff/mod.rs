@@ -49,6 +49,28 @@ mod whitespace_mode;
 pub use changes::{load_object_changes, FileChange, UncommittedDiff};
 pub use commit_files_many::{CommitFilesManyInput, CommitFilesManyOptions, CommitFilesResult};
 pub use core::structured;
+/// Unified diff for two text sides with default `a/` / `b/` path prefixes.
+#[must_use]
+pub fn unified_diff(
+    old_content: &str,
+    new_content: &str,
+    old_path: &str,
+    new_path: &str,
+    context_lines: usize,
+    indent_heuristic: bool,
+    quote_path_fully: bool,
+) -> String {
+    core::unified_diff(
+        old_content,
+        new_content,
+        old_path,
+        new_path,
+        context_lines,
+        indent_heuristic,
+        quote_path_fully,
+    )
+}
+
 pub use core::{
     anchored_unified_diff, annotate_unified_diff_no_newline_at_eof, count_changes_with_algorithm,
     count_git_lines, detect_copies_with_policy, detect_renames_with_policy, diff_commits,
@@ -153,8 +175,9 @@ pub mod rerere {
     //! rerere API (re-exported at this path).
     pub use crate::rerere::*;
 }
-pub(crate) mod fmt_merge_msg {
-    pub(crate) use crate::fmt_merge_msg::*;
+/// Merge commit message formatting from FETCH_HEAD-style input.
+pub mod fmt_merge_msg {
+    pub use crate::fmt_merge_msg::{fmt_merge_msg, FmtMergeMsgOptions};
 }
 pub mod ws {
     //! ASCII whitespace helpers used by the diff engine.

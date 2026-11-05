@@ -169,7 +169,7 @@ impl FilePatch {
     /// For deletions, use old_path (new is /dev/null).
     /// For additions, use new_path (old is /dev/null).
     /// Otherwise prefer new_path.
-    pub(crate) fn effective_path(&self) -> Option<&str> {
+    pub fn effective_path(&self) -> Option<&str> {
         if self.is_deleted {
             return self
                 .old_path
