@@ -814,6 +814,13 @@ enum ShareAction {
         /// How many days the link works, up to 30 (default 7).
         #[arg(long, value_name = "DAYS", requires = "link")]
         expires: Option<u32>,
+        /// Share the branch's own history only, on a snapshot of the base branch,
+        /// without the rest of the project's history.
+        #[arg(long)]
+        no_history: bool,
+        /// Share only this path of the tree (implies --no-history). Repeatable.
+        #[arg(long = "path", value_name = "PATH")]
+        paths: Vec<String>,
     },
     /// List your shared branches, and where each member's head is.
     List {
@@ -860,6 +867,11 @@ enum ShareAction {
         /// The link's id, from `grit share list`.
         link: String,
     },
+}
+
+/// The snapshot view `grit share add --no-history --path …` asks for.
+fn api_view(paths: Vec<String>) -> grit_lib::remote::grit_server_share::ShareView {
+    grit_lib::remote::grit_server_share::ShareView { paths }
 }
 
 /// Subcommands of `grit serve`.
@@ -2937,8 +2949,18 @@ fn dispatch(
                 link,
                 uses,
                 expires,
+                no_history,
+                paths,
             } => emit_success(
-                commands::share::add(&branch, &users, link, uses.as_deref(), expires, opts.mode)?,
+                commands::share::add(
+                    &branch,
+                    &users,
+                    link,
+                    uses.as_deref(),
+                    expires,
+                    (no_history || !paths.is_empty()).then(|| api_view(paths)),
+                    opts.mode,
+                )?,
                 opts,
                 ctx,
             ),

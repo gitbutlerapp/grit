@@ -658,6 +658,7 @@ fn share_render() {
         head: head.map(str::to_owned),
         project: head.map(|_| format!("{user}/widget")),
         relation,
+        snapshot: (user == "carol").then(|| vec!["src/rpc".to_owned()]),
     };
     let share = ShareBranchJson {
         branch: "feature".to_owned(),
@@ -693,6 +694,7 @@ fn share_render() {
             url: None,
             uses_left: Some(1),
             expires_at: "2026-11-11T12:00:00Z".to_owned(),
+            snapshot: None,
         }],
         url: "https://grithub.dev/alice/widget".to_owned(),
     };
@@ -705,6 +707,7 @@ fn share_render() {
             url: Some("https://grithub.dev/share/0f3a9c".to_owned()),
             uses_left: Some(1),
             expires_at: "2026-11-11T12:00:00Z".to_owned(),
+            snapshot: Some(vec!["src/rpc".to_owned()]),
         }),
         added: vec!["dave".to_owned(), "erin@example.net".to_owned()],
         removed: Vec::new(),

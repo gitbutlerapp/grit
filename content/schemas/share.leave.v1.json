@@ -245,6 +245,16 @@
           "description": "Its id, for `grit share revoke`.",
           "type": "string"
         },
+        "snapshot": {
+          "description": "For a snapshot share link: the paths it gives, empty for the whole tree. Omitted for a full share.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "url": {
           "description": "The URL to send: only when the link was just made.",
           "type": [
@@ -310,6 +320,16 @@
         "sharer": {
           "description": "Whether they shared it first.",
           "type": "boolean"
+        },
+        "snapshot": {
+          "description": "For a member with a snapshot share (`--no-history`): the paths they see, empty for the whole tree. Omitted for a full share.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "user": {
           "description": "Their user name.",
