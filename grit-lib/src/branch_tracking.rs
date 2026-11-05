@@ -29,7 +29,7 @@ struct FetchRefspecs {
 /// Whether `tracking_ref` is the destination of a positive fetch refspec for its remote.
 ///
 /// Returns `false` when `tracking_ref` is not under `refs/remotes/`.
-pub fn remote_tracking_ref_is_mapped(repo: &Repository, tracking_ref: &str) -> Result<bool> {
+pub(crate) fn remote_tracking_ref_is_mapped(repo: &Repository, tracking_ref: &str) -> Result<bool> {
     let Some(rest) = tracking_ref.strip_prefix("refs/remotes/") else {
         return Ok(false);
     };
@@ -44,7 +44,7 @@ pub fn remote_tracking_ref_is_mapped(repo: &Repository, tracking_ref: &str) -> R
 
 /// Map a resolved upstream ref to `branch.<name>.remote` / `.merge` values.
 #[must_use]
-pub fn upstream_config_for_branch_ref(upstream_full: &str) -> Option<(String, String)> {
+pub(crate) fn upstream_config_for_branch_ref(upstream_full: &str) -> Option<(String, String)> {
     if let Some(rest) = upstream_full.strip_prefix("refs/remotes/") {
         let (remote, branch) = rest.split_once('/')?;
         return Some((remote.to_owned(), format!("refs/heads/{branch}")));
@@ -59,7 +59,7 @@ pub fn upstream_config_for_branch_ref(upstream_full: &str) -> Option<(String, St
 /// Uses `remote.<name>.fetch` refspecs; when none are configured, branch refs map to
 /// `refs/remotes/<remote>/<branch>`.
 #[must_use]
-pub fn remote_tracking_ref_for_remote_ref(
+pub(crate) fn remote_tracking_ref_for_remote_ref(
     config: &ConfigSet,
     remote_name: &str,
     remote_ref: &str,
@@ -97,7 +97,7 @@ impl FetchRefspecs {
 /// Write `branch.<branch>.remote` and `branch.<branch>.merge` in the repository config.
 ///
 /// Used by `git push -u`, branch creation with tracking, and [`apply_push_set_upstream`].
-pub fn write_branch_upstream_config(
+pub(crate) fn write_branch_upstream_config(
     repo: &Repository,
     branch_short: &str,
     remote: &str,
@@ -114,7 +114,7 @@ pub fn write_branch_upstream_config(
 /// Only branch updates (`refs/heads/*` → `refs/heads/*`) with status [`PushRefStatus::Ok`] or
 /// [`PushRefStatus::UpToDate`] are considered. Returns the short names of branches whose upstream
 /// config was written.
-pub fn apply_push_set_upstream(
+pub(crate) fn apply_push_set_upstream(
     repo: &Repository,
     remote: &str,
     specs: &[PushRefSpec],
@@ -280,18 +280,18 @@ pub(crate) fn upstream_ref_for_merge(
     FetchRefspecs::load(config, remote).tracking_ref(remote, &merge_ref)
 }
 
-/// Where a [`ComparisonBase`] came from.
+/// Where a `ComparisonBase` came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BaseSource {
     /// The branch's configured upstream (`branch.<name>.remote` / `branch.<name>.merge`).
     Upstream,
-    /// Explicit comparison ref from [`TargetSpec`] (for example `grit shortlog --target`).
+    /// Explicit comparison ref from `TargetSpec` (for example `grit shortlog --target`).
     Explicit,
     /// The repository's target branch from the `target.branch` config value.
     ConfiguredTarget,
     /// A default target candidate ([`DEFAULT_TARGET_CANDIDATES`]).
     DefaultTarget,
-    /// The repository's target branch (see [`target_branch`]); covers configured and default.
+    /// The repository's target branch (see `target_branch`); covers configured and default.
     Target,
 }
 
@@ -316,7 +316,7 @@ pub const DEFAULT_TARGET_CANDIDATES: [&str; 4] = ["origin/master", "origin/main"
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TargetSpec(pub String);
 
-/// Options for [`compare_with_target`].
+/// Options for `compare_with_target`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TargetComparisonOptions {
     /// When set, compare against this ref or revision instead of discovering a target branch.
@@ -450,7 +450,8 @@ fn resolve_explicit_target(repo: &Repository, spec: &str) -> Result<ComparisonBa
 /// resolution errors when an explicit target does not resolve. Returns
 /// [`crate::error::Error::InvalidRef`] when no target branch can be discovered; use
 /// [`compare_with_target_optional`] to handle that case without an error.
-pub fn compare_with_target(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn compare_with_target(
     repo: &Repository,
     opts: &TargetComparisonOptions,
 ) -> Result<TargetComparison> {
@@ -458,13 +459,13 @@ pub fn compare_with_target(
         .ok_or_else(|| crate::error::Error::InvalidRef("no target branch".into()))
 }
 
-/// Like [`compare_with_target`], but returns `Ok(None)` when no target branch can be discovered
+/// Like `compare_with_target`, but returns `Ok(None)` when no target branch can be discovered
 /// (only when [`TargetComparisonOptions::target`] is [`None`]).
 ///
 /// # Errors
 ///
 /// Returns the same HEAD, revision-resolution, and object-read errors as
-/// [`compare_with_target`]. An explicit target that cannot be resolved is always an error.
+/// `compare_with_target`. An explicit target that cannot be resolved is always an error.
 pub fn compare_with_target_optional(
     repo: &Repository,
     opts: &TargetComparisonOptions,
@@ -542,7 +543,7 @@ fn target_candidate_refnames(candidate: &str) -> Vec<String> {
 /// # Errors
 ///
 /// Returns an error when the repository configuration cannot be loaded.
-pub fn target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
+pub(crate) fn target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
     Ok(discover_target_branch(repo)?.map(|mut base| {
         base.source = BaseSource::Target;
         base
@@ -564,7 +565,7 @@ pub fn target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
 /// The upstream with [`BaseSource::Upstream`], or `None` when no upstream is configured or
 /// its ref does not resolve (for example before the first fetch).
 #[must_use]
-pub fn upstream_branch(repo: &Repository, branch_short: &str) -> Option<ComparisonBase> {
+pub(crate) fn upstream_branch(repo: &Repository, branch_short: &str) -> Option<ComparisonBase> {
     let full_ref = upstream_tracking_full_ref(repo, branch_short)?;
     comparison_base_from_full_ref(repo, &full_ref, BaseSource::Upstream)
 }
@@ -584,7 +585,7 @@ fn fetch_head_integration_name(content: &str, remote_name: &str) -> String {
 
 /// For-merge tip recorded in [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) after an explicit fetch.
 #[must_use]
-pub fn pull_upstream_from_fetch_head(
+pub(crate) fn pull_upstream_from_fetch_head(
     repo: &Repository,
     remote_name: &str,
 ) -> Option<ComparisonBase> {
@@ -606,7 +607,7 @@ pub fn pull_upstream_from_fetch_head(
 /// Explicit command-line refspecs use [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion);
 /// otherwise the configured upstream of `branch_short` is used.
 #[must_use]
-pub fn resolve_pull_integration_base(
+pub(crate) fn resolve_pull_integration_base(
     repo: &Repository,
     branch_short: &str,
     remote_name: &str,
@@ -624,7 +625,7 @@ pub fn resolve_pull_integration_base(
 /// does not resolve after fetch, returns `None` (no implicit fallback). When merge is
 /// unset, uses Git's default `refs/remotes/<remote>/<branch_short>`.
 #[must_use]
-pub fn pull_upstream_branch(
+pub(crate) fn pull_upstream_branch(
     repo: &Repository,
     branch_short: &str,
     remote_name: &str,
@@ -664,7 +665,11 @@ fn comparison_base_from_full_ref(
 /// # Errors
 ///
 /// Returns an error when the repository configuration cannot be loaded.
-pub fn comparison_base(repo: &Repository, branch_short: &str) -> Result<Option<ComparisonBase>> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn comparison_base(
+    repo: &Repository,
+    branch_short: &str,
+) -> Result<Option<ComparisonBase>> {
     match upstream_branch(repo, branch_short) {
         Some(upstream) => Ok(Some(upstream)),
         None => target_branch(repo),
@@ -829,7 +834,9 @@ pub struct StatusIntegrationHint {
 
 /// Tracked comparison that is strictly behind its base (`ahead == 0`, `behind > 0`).
 #[must_use]
-pub fn integration_comparison_behind_only(standing: &BranchStanding) -> Option<&TrackedComparison> {
+pub(crate) fn integration_comparison_behind_only(
+    standing: &BranchStanding,
+) -> Option<&TrackedComparison> {
     if let Some(up) = &standing.upstream {
         if up.ahead == Some(0) && up.behind.is_some_and(|b| b > 0) {
             return Some(up);
@@ -845,7 +852,7 @@ pub fn integration_comparison_behind_only(standing: &BranchStanding) -> Option<&
 /// Resolve a status footer integration hint from branch standing and optional pull context.
 ///
 /// When `pull_context` is `Some((repo, branch_short))`, pull is suggested only when
-/// [`resolve_pull_integration_base`] would integrate the same ref the branch is behind.
+/// `resolve_pull_integration_base` would integrate the same ref the branch is behind.
 /// Without context, pull is assumed when the behind-only comparison is upstream-only.
 #[must_use]
 pub fn status_integration_hint(
@@ -1116,7 +1123,8 @@ impl Standing {
 
 /// Options for [`TargetTipLists::compute`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TargetTipListOptions {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) struct TargetTipListOptions {
     /// Maximum commits to retain on each listed side (`-n` / `--max-count`; default 100).
     pub list_limit: usize,
     /// When true, retain up to [`Self::list_limit`] newest behind commits as well as ahead.
@@ -1134,7 +1142,8 @@ impl Default for TargetTipListOptions {
 
 /// Symmetric comparison of two commit tips (counts plus bounded OID lists).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TargetTipLists {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) struct TargetTipLists {
     /// Commits reachable from the tip but not from the target.
     pub ahead: usize,
     /// Commits reachable from the target but not from the tip.
@@ -1151,6 +1160,7 @@ impl TargetTipLists {
     /// # Errors
     ///
     /// Propagates object read and parse errors from the commit walk.
+    #[allow(dead_code)] // integration / CLI coverage
     pub fn compute(
         repo: &Repository,
         tip: ObjectId,

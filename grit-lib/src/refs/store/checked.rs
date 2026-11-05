@@ -140,7 +140,7 @@ pub(crate) struct ObjectCheckedRefStore {
 
 impl ObjectCheckedRefStore {
     /// Wrap `inner`, checking transactions against `odb`.
-    pub(crate) fn new(inner: Arc<dyn RefStore>, odb: Odb) -> Self {
+    pub fn new(inner: Arc<dyn RefStore>, odb: Odb) -> Self {
         Self {
             inner,
             odb,

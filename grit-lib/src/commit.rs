@@ -36,7 +36,7 @@ pub use crate::commit_pretty::resolve_core_abbrev_len;
 /// Accepts the forms Git's `commit`/`--date` path understands: RFC 3339 / ISO
 /// 8601 (with or without an explicit zone, in which case UTC is assumed),
 /// `YYYY-MM-DD HH:MM:SS <tz>`, `@<epoch> <tz>`, and the looser
-/// approxidate-style strings handled by [`parse_date`]. Returns `None` when the
+/// approxidate-style strings handled by `parse_date`. Returns `None` when the
 /// input is already in `<epoch> <offset>` form (nothing to convert) or cannot
 /// be parsed; callers then fall back to using the raw string.
 pub(crate) fn parse_date_to_git_timestamp(date_str: &str) -> Option<String> {
@@ -181,7 +181,7 @@ pub fn parse_trailer_command_line_arg(raw: &str) -> Result<(String, String), Tra
 ///
 /// # Errors
 ///
-/// Returns [`DateParseError`] when the string cannot be interpreted as any date Git accepts.
+/// Returns `DateParseError` when the string cannot be interpreted as any date Git accepts.
 pub fn normalize_commit_date_override(raw: &str) -> Result<String, DateParseError> {
     let trimmed = raw.trim();
     if is_canonical_epoch_numeric_tz(trimmed) {

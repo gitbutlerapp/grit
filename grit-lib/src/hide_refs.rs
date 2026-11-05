@@ -29,7 +29,7 @@ fn normalize_patterns(mut pats: Vec<String>) -> Vec<String> {
 ///
 /// `patterns` are in config order; **later** entries win (matches Git's reverse scan).
 #[must_use]
-pub fn ref_is_hidden(refname: &str, refname_full: &str, patterns: &[String]) -> bool {
+pub(crate) fn ref_is_hidden(refname: &str, refname_full: &str, patterns: &[String]) -> bool {
     let mut i = patterns.len();
     while i > 0 {
         i -= 1;

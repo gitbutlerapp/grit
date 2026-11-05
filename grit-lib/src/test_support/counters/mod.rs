@@ -10,6 +10,8 @@ pub(crate) mod has_changes;
 pub(crate) mod worktree;
 
 #[cfg(any(test, feature = "test-support"))]
+pub use crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
+#[cfg(any(test, feature = "test-support"))]
 pub use checkout_spool::{
     checkout_spool_probe_count, reset_checkout_spool_probe, CheckoutSpoolProbeScope,
 };

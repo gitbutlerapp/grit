@@ -33,7 +33,7 @@ pub const AUTO_UNTRACKED_CACHE_MIN_ENTRIES: usize = 4096;
 
 /// Whether status may refresh and read the index UNTR extension for this repository.
 #[must_use]
-pub fn untracked_cache_enabled_for_status(config: &ConfigSet, index: &Index) -> bool {
+pub(crate) fn untracked_cache_enabled_for_status(config: &ConfigSet, index: &Index) -> bool {
     if index.untracked_cache.is_none() {
         return false;
     }
@@ -45,7 +45,11 @@ pub fn untracked_cache_enabled_for_status(config: &ConfigSet, index: &Index) -> 
 }
 
 /// Ensure a UNTR shell exists on large indices so the next status can populate it.
-pub fn ensure_untracked_cache_shell(index: &mut Index, work_tree: &Path, config: &ConfigSet) {
+pub(crate) fn ensure_untracked_cache_shell(
+    index: &mut Index,
+    work_tree: &Path,
+    config: &ConfigSet,
+) {
     if index.untracked_cache.is_some() {
         return;
     }
@@ -397,7 +401,7 @@ pub fn write_untracked_extension(uc: &UntrackedCache) -> Vec<u8> {
 }
 
 /// Parse UNTR body (after 4-byte signature + 4-byte size).
-pub fn parse_untracked_extension(data: &[u8]) -> Option<UntrackedCache> {
+pub(crate) fn parse_untracked_extension(data: &[u8]) -> Option<UntrackedCache> {
     if data.len() <= 1 || data[data.len() - 1] != 0 {
         return None;
     }
@@ -582,7 +586,7 @@ pub fn parse_untracked_extension(data: &[u8]) -> Option<UntrackedCache> {
 /// work tree path normalized like `git rev-parse --show-toplevel` (`user_display_path`: no
 /// `\\?\` prefix, forward slashes, no trailing slash). The system name is `uname().sysname`
 /// on Unix and `Windows` on Windows (Git's own uname, not MSYS `MINGW64_NT-…`).
-pub fn untracked_cache_ident(work_tree: &Path) -> Vec<u8> {
+pub(crate) fn untracked_cache_ident(work_tree: &Path) -> Vec<u8> {
     #[cfg(unix)]
     let sysname = match nix::sys::utsname::uname() {
         Ok(uts) => uts.sysname().to_string_lossy().into_owned(),
@@ -603,7 +607,7 @@ pub fn untracked_cache_ident(work_tree: &Path) -> Vec<u8> {
 }
 
 /// `dir_flags_from_config` function.
-pub fn dir_flags_from_config(config: &ConfigSet) -> u32 {
+pub(crate) fn dir_flags_from_config(config: &ConfigSet) -> u32 {
     if config
         .get("status.showUntrackedFiles")
         .is_some_and(|v| v.eq_ignore_ascii_case("all"))
@@ -698,7 +702,7 @@ fn invalidate_one_directory_for_path(uc: &mut UntrackedCache, dir: &mut Untracke
 }
 
 /// `invalidate_path` function.
-pub fn invalidate_path(uc: &mut UntrackedCache, path: &str) {
+pub(crate) fn invalidate_path(uc: &mut UntrackedCache, path: &str) {
     let Some(mut root) = uc.root.take() else {
         return;
     };
@@ -1102,7 +1106,7 @@ enum DirSource {
 }
 
 /// When the UNTR root still matches the work tree, return cached untracked paths without rescanning.
-pub fn try_untracked_from_valid_cache(
+pub(crate) fn try_untracked_from_valid_cache(
     repo: &Repository,
     work_tree: &Path,
     config: &ConfigSet,
@@ -1133,7 +1137,7 @@ pub fn try_untracked_from_valid_cache(
 }
 
 /// Refresh untracked cache tree and counters (for `git status`).
-pub fn refresh_untracked_cache_for_status(
+pub(crate) fn refresh_untracked_cache_for_status(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
@@ -1240,7 +1244,7 @@ fn collapse_tracked_only_untr_subtree(dir: &mut UntrackedCacheDir) {
 /// [`refresh_untracked_cache_for_status`], including collapsed `dir/` entries in
 /// normal untracked mode and fully expanded file paths in `-uall` mode.
 #[must_use]
-pub fn collect_untracked_from_cache(uc: &UntrackedCache) -> Vec<String> {
+pub(crate) fn collect_untracked_from_cache(uc: &UntrackedCache) -> Vec<String> {
     fn walk(dir: &UntrackedCacheDir, rel: &str, out: &mut Vec<String>) {
         if dir.check_only {
             return;

@@ -204,7 +204,7 @@ pub(crate) struct LazyReachable<'a> {
 impl<'a> LazyReachable<'a> {
     /// Closure of `roots` in `odb`, not following the parents of the `shallow` boundary
     /// commits; nothing is read until [`Self::get`].
-    pub(crate) fn new(odb: &'a Odb, roots: &'a [ObjectId], shallow: &'a HashSet<ObjectId>) -> Self {
+    pub fn new(odb: &'a Odb, roots: &'a [ObjectId], shallow: &'a HashSet<ObjectId>) -> Self {
         Self {
             odb,
             roots,
@@ -438,7 +438,7 @@ pub struct RefTransactionItem {
 ///
 /// * `new_oid = Some(oid)` writes (creates or updates) the ref to `oid` via
 ///   [`crate::refs::write_ref`].
-/// * `new_oid = None` deletes the ref via [`crate::refs::delete_ref`].
+/// * `new_oid = None` deletes the ref via `delete_ref`.
 ///
 /// This is a thin transactional wrapper over the [`crate::refs`] primitives,
 /// matching the in-process ref-update path jj built on `gix::refs::transaction`.

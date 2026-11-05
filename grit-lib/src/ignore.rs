@@ -84,12 +84,14 @@ pub struct IgnoreCheck {
 /// assert_eq!(list.is_ignored("build", false, false), None);
 /// ```
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)] // integration / re-export use only
 pub struct IgnorePatternList {
     rules: Vec<IgnoreRule>,
 }
 
 /// The pattern that decided an [`IgnorePatternList::last_match`] query.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // integration / re-export use only
 pub struct IgnorePatternMatch {
     /// Line number of the pattern in the parsed content (1-based).
     pub line_number: usize,
@@ -99,6 +101,7 @@ pub struct IgnorePatternMatch {
     pub negative: bool,
 }
 
+#[allow(dead_code)] // used from integration tests via `ignore` re-exports
 impl IgnorePatternList {
     /// Parse exclude-file `content` whose patterns are relative to `base_dir`.
     ///
@@ -1330,7 +1333,12 @@ fn sparse_list_last_match(
 /// each step uses last-match-wins over patterns; `UNDECIDED` falls back to the parent
 /// directory until the decision is made or the path is rejected at the top level.
 #[must_use]
-pub fn path_in_sparse_checkout(path: &str, lines: &[String], work_tree: Option<&Path>) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn path_in_sparse_checkout(
+    path: &str,
+    lines: &[String],
+    work_tree: Option<&Path>,
+) -> bool {
     ParsedSparsePatterns::parse(lines).includes(path, work_tree)
 }
 
@@ -1340,7 +1348,7 @@ pub(crate) struct ParsedSparsePatterns(Vec<SparsePattern>);
 
 impl ParsedSparsePatterns {
     /// Parse sparse-checkout lines; blank lines and comments are dropped.
-    pub(crate) fn parse(lines: &[String]) -> Self {
+    pub fn parse(lines: &[String]) -> Self {
         Self(
             lines
                 .iter()
@@ -1388,6 +1396,7 @@ impl ParsedSparsePatterns {
 ///
 /// Returns `None` if no pattern matched (`UNDECIDED`).
 #[must_use]
+#[allow(dead_code)] // integration / re-export use only
 pub fn path_matches_sparse_pattern_list(pathname: &str, lines: &[String]) -> Option<bool> {
     let parsed: Vec<SparsePattern> = lines
         .iter()
@@ -1411,7 +1420,8 @@ fn sparse_unanchored_basename_matches(pat: &str, path: &str) -> bool {
 
 /// Returns the submodule path if `repo_rel_path` names something inside a gitlink entry.
 #[must_use]
-pub fn submodule_containing_path(repo_rel_path: &str, index: &Index) -> Option<String> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn submodule_containing_path(repo_rel_path: &str, index: &Index) -> Option<String> {
     let bytes = repo_rel_path.as_bytes();
     if bytes.is_empty() {
         return None;

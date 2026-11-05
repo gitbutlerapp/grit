@@ -328,7 +328,7 @@ pub(crate) struct PreflightHttpClientFactory<'a> {
 
 impl<'a> PreflightHttpClientFactory<'a> {
     /// Preflight clients for `inner`, or for the default factory for `repo` when there is none.
-    pub(crate) fn new(inner: Option<&'a dyn HttpClientFactory>, repo: &Repository) -> Self {
+    pub fn new(inner: Option<&'a dyn HttpClientFactory>, repo: &Repository) -> Self {
         #[cfg(not(feature = "http-ureq"))]
         let _ = repo;
         Self {

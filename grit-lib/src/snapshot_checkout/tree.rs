@@ -34,7 +34,7 @@ fn entries(odb: &Odb, tree: Option<ObjectId>) -> Result<Vec<TreeEntry>> {
 }
 
 /// Every non-tree path that differs between `old` and `new`.
-pub(crate) fn diff(odb: &Odb, old: Option<ObjectId>, new: Option<ObjectId>) -> Result<Vec<Change>> {
+pub fn diff(odb: &Odb, old: Option<ObjectId>, new: Option<ObjectId>) -> Result<Vec<Change>> {
     let mut out = Vec::new();
     diff_into(odb, old, new, b"", &mut out)?;
     Ok(out)

@@ -129,8 +129,7 @@ impl GitButlerWorkspace {
     /// How the applied work stands against `target`, with the workspace commit left out.
     ///
     /// `target` is the comparison of `HEAD` (the workspace commit) with the target branch, as
-    /// [`BranchStanding::compute`](crate::refs::branch_tracking::BranchStanding::compute)
-    /// returns it. The workspace commit is bookkeeping, so it is dropped from the ahead count
+    /// `BranchStanding::compute` returns it. The workspace commit is bookkeeping, so it is dropped from the ahead count
     /// and the newest ahead commits, and each head is compared with the target on its own.
     /// When `target` was computed without counts, no head is compared either.
     ///

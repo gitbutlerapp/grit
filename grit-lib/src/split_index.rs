@@ -976,6 +976,7 @@ pub fn resolve_split_index_if_needed(
 
 /// Format output for `test-tool dump-split-index` (Git reads the index with `do_read_index` only,
 /// without merging the shared base — stubs and EWAH bitmaps stay intact).
+#[allow(dead_code)] // integration / re-export use only
 pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> Result<String> {
     use std::fmt::Write;
     let hash_len = index.hash_algo.len();

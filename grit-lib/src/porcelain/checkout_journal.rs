@@ -203,7 +203,7 @@ pub(crate) struct CheckoutJournal {
 
 impl CheckoutJournal {
     /// Start an empty journal for a checkout of `work_tree`.
-    pub(crate) fn new(work_tree: &Path) -> Result<Self> {
+    pub fn new(work_tree: &Path) -> Result<Self> {
         Ok(Self {
             work_tree: work_tree.to_path_buf(),
             spool: Arc::new(Mutex::new(CheckoutDeleteSpool::new()?)),
@@ -306,7 +306,7 @@ impl CheckoutJournal {
     }
 
     /// The checkout's index is on disk: keep every change and drop the spool.
-    pub(crate) fn commit(&mut self) {
+    pub fn commit(&mut self) {
         self.committed = true;
         self.created = PathList::default();
         self.replaced = Vec::new();

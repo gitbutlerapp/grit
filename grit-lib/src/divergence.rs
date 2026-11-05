@@ -666,7 +666,11 @@ fn extend_base(base: &mut Vec<Version>, ours: &[Version], theirs: &[Version]) {
             continue;
         }
         if let Some(t) = theirs.iter().find(|t| t.key == o.key) {
-            base.push(if t.time < o.time { t.clone() } else { o.clone() });
+            base.push(if t.time < o.time {
+                t.clone()
+            } else {
+                o.clone()
+            });
         }
     }
 }
@@ -680,12 +684,10 @@ fn holds_all(repo: &Repository, big: &mut [Version], small: &mut [Version]) -> R
     for v in big.iter_mut().chain(small.iter_mut()) {
         load_changes(repo, v)?;
     }
-    Ok(small
-        .iter()
-        .all(|s| {
-            big.iter()
-                .any(|b| b.key == s.key && b.patch == s.patch && b.message == s.message)
-        }))
+    Ok(small.iter().all(|s| {
+        big.iter()
+            .any(|b| b.key == s.key && b.patch == s.patch && b.message == s.message)
+    }))
 }
 
 /// When one head holds everything the other has, and the other added
@@ -719,7 +721,10 @@ fn rebase_on_held(
 /// accidental reset, say): at least two, and more than half.
 fn resets(base: &[Version], seq: &[Version]) -> bool {
     let kept: HashSet<&str> = seq.iter().map(|v| v.key.as_str()).collect();
-    let gone = base.iter().filter(|b| !kept.contains(b.key.as_str())).count();
+    let gone = base
+        .iter()
+        .filter(|b| !kept.contains(b.key.as_str()))
+        .count();
     gone >= 2 && gone * 2 > base.len()
 }
 
@@ -985,7 +990,13 @@ pub fn classify(
             d.scenarios = vec![Scenario::ResetOne, Scenario::MergeCommit];
             let has = |seq: &[Version], key: &str| seq.iter().any(|v| v.key == key);
             for b in &base_seq {
-                let did = |seq: &[Version]| if has(seq, &b.key) { Did::Unchanged } else { Did::Dropped };
+                let did = |seq: &[Version]| {
+                    if has(seq, &b.key) {
+                        Did::Unchanged
+                    } else {
+                        Did::Dropped
+                    }
+                };
                 let (o, t) = (did(&ours_seq), did(&theirs_seq));
                 if o.changed() || t.changed() {
                     d.changes.push(Change {
@@ -1005,8 +1016,16 @@ pub fn classify(
                         continue;
                     }
                     let other = if mine { &theirs_seq } else { &ours_seq };
-                    let there = if has(other, &v.key) { Did::New } else { Did::Absent };
-                    let (o, t) = if mine { (Did::New, there) } else { (there, Did::New) };
+                    let there = if has(other, &v.key) {
+                        Did::New
+                    } else {
+                        Did::Absent
+                    };
+                    let (o, t) = if mine {
+                        (Did::New, there)
+                    } else {
+                        (there, Did::New)
+                    };
                     d.changes.push(Change {
                         key: v.key.clone(),
                         subject: v.subject.clone(),

@@ -37,7 +37,7 @@ fn stale_index_repo(root: &TempDir) -> std::path::PathBuf {
     git(&repo, &["config", "user.name", "a"]);
     git(&repo, &["config", "user.email", "a@b"]);
     fs::write(repo.join(".gitattributes"), "*.crlf text eol=crlf\n").expect("attrs");
-    let files = grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES * 2;
+    let files = grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES * 2;
     for i in 0..files {
         let dir = repo.join(format!("d{:02}", i % 16));
         fs::create_dir_all(&dir).expect("mkdir dir");

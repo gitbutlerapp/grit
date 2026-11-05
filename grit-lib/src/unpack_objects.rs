@@ -1567,7 +1567,7 @@ pub(crate) struct PackReader<'a> {
 }
 
 impl<'a> PackReader<'a> {
-    pub(crate) fn new(data: &'a [u8]) -> Self {
+    pub fn new(data: &'a [u8]) -> Self {
         Self { data, pos: 0 }
     }
 

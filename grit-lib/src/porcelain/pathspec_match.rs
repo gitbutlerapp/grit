@@ -49,7 +49,7 @@ pub(crate) struct KnownPathspecChecker<'r> {
 
 impl<'r> KnownPathspecChecker<'r> {
     /// Creates a checker for `repo`; nothing is read until the first query.
-    pub(crate) fn new(repo: &'r Repository) -> Self {
+    pub fn new(repo: &'r Repository) -> Self {
         Self {
             repo,
             ignorecase: repo_pathspec_ignorecase(repo),

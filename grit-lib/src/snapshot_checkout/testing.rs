@@ -37,7 +37,7 @@ pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
-pub(crate) fn open(dir: &Path) -> Repository {
+pub fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open")
 }
 
@@ -45,7 +45,7 @@ pub(crate) fn oid(hex: &str) -> ObjectId {
     ObjectId::from_hex(hex).expect("oid")
 }
 
-pub(crate) fn commit(dir: &Path, path: &str, text: &str, message: &str) -> ObjectId {
+pub fn commit(dir: &Path, path: &str, text: &str, message: &str) -> ObjectId {
     let file = dir.join(path);
     std::fs::create_dir_all(file.parent().expect("parent")).expect("mkdir");
     std::fs::write(file, text).expect("write");
@@ -63,7 +63,7 @@ pub(crate) struct Served {
 }
 
 impl Served {
-    pub(crate) fn new(root: &Path) -> Self {
+    pub fn new(root: &Path) -> Self {
         let dir = root.join("served");
         std::fs::create_dir_all(&dir).expect("mkdir");
         git(&dir, &["init", "-q", "-b", "main"]);

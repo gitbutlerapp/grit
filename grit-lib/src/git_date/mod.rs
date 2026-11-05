@@ -2,7 +2,7 @@
 
 pub mod approx;
 pub(crate) mod compat;
-pub mod parse;
+pub(crate) mod parse;
 pub(crate) mod show;
 pub(crate) mod tm;
 

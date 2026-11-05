@@ -1,6 +1,6 @@
 //! Fetch from a remote and integrate the configured upstream into the current branch.
 //!
-//! [`pull`] runs fetch, resolves the branch upstream via [`resolve_pull_integration_base`], then
+//! [`pull`] runs fetch, resolves the branch upstream via `resolve_pull_integration_base`, then
 //! fast-forwards, merges, rebases local commits onto the upstream tip, or refuses
 //! when `--ff-only` / `pull.ff=only` forbids a merge commit. Rebase conflicts stop a
 //! resumable rebase session ([`start_rebase`]) with Git-compatible `.git/rebase-merge/`

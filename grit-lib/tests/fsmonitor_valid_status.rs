@@ -13,7 +13,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
 
 fn grit_bin() -> PathBuf {
     std::env::var("CARGO_BIN_EXE_grit")

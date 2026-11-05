@@ -27,7 +27,7 @@ fn normalize_repo_rel(path: &str) -> String {
 /// Tries canonical paths first, then a lexical `strip_prefix` when canonicalization
 /// does not yield a prefix relationship (symlinks, `core.worktree` quirks).
 #[must_use]
-pub fn cwd_relative_under_work_tree(work_tree: &Path, cwd: &Path) -> Option<String> {
+pub(crate) fn cwd_relative_under_work_tree(work_tree: &Path, cwd: &Path) -> Option<String> {
     cwd_relative_to_work_tree(work_tree, cwd)
 }
 
@@ -51,7 +51,10 @@ fn cwd_relative_to_work_tree(work_tree: &Path, cwd: &Path) -> Option<String> {
 /// `work_tree`, using canonical paths. Returns `None` when cwd is outside the
 /// work tree, equals the work tree root, or cannot be resolved.
 #[must_use]
-pub fn process_cwd_repo_relative(work_tree: &Path, environment: &Environment) -> Option<String> {
+pub(crate) fn process_cwd_repo_relative(
+    work_tree: &Path,
+    environment: &Environment,
+) -> Option<String> {
     if let Some(prefix) = environment.git_prefix.as_deref() {
         let p = normalize_repo_rel(prefix);
         if !p.is_empty() {
@@ -77,7 +80,7 @@ pub fn process_cwd_repo_relative(work_tree: &Path, environment: &Environment) ->
 /// relative to the repository root) would delete the process cwd — i.e. the
 /// path equals cwd or cwd lies under `repo_rel_path/`.
 #[must_use]
-pub fn cwd_would_be_removed_with_repo_path(
+pub(crate) fn cwd_would_be_removed_with_repo_path(
     work_tree: &Path,
     repo_rel_path: &str,
     environment: &Environment,

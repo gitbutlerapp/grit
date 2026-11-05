@@ -7654,7 +7654,7 @@ fn read_commit_bytes(repo: &Repository, oid: ObjectId) -> Result<Vec<u8>> {
 }
 
 impl<'r> CommitGraph<'r> {
-    pub(crate) fn new(repo: &'r Repository, first_parent_only: bool) -> Self {
+    pub fn new(repo: &'r Repository, first_parent_only: bool) -> Self {
         Self::with_commit_graph(repo, first_parent_only, false)
     }
 

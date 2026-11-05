@@ -1012,14 +1012,22 @@ fn builds_on(f: &Fixture, ancestor: &str, descendant: &str) -> bool {
 fn a_reset_with_new_commits_on_top_is_still_a_reset() {
     let Base { f, main, b, .. } = base();
     // We reset to main and add a commit; they kept the branch.
-    let ours = f.commit(Some(&main), &[("x.txt", Some("x\n"))], "Add X", Some(&id('q')));
+    let ours = f.commit(
+        Some(&main),
+        &[("x.txt", Some("x\n"))],
+        "Add X",
+        Some(&id('q')),
+    );
     let d = check(&f, &main, &b, &ours, &b, Scenario::ResetOne);
     assert!(d.options("them")[0].choice == Choice::Restore, "{d:#?}");
     // Restoring keeps their head as it is, and puts our new commit on top,
     // from either side.
     for (o, t) in [(&ours, &b), (&b, &ours)] {
         let head = combined(&f, &main, &b, o, t, Choice::Restore);
-        assert!(builds_on(&f, &b, &head), "restore didn't build on the kept head");
+        assert!(
+            builds_on(&f, &b, &head),
+            "restore didn't build on the kept head"
+        );
         assert_eq!(file(&f, &head, "x.txt").as_deref(), Some("x\n"));
         assert_eq!(subjects(&f, &main, &head), ["Add A", "Add C", "Add X"]);
     }
@@ -1028,10 +1036,30 @@ fn a_reset_with_new_commits_on_top_is_still_a_reset() {
 #[test]
 fn a_reset_over_merges_is_a_reset() {
     let Base { f, main, b, .. } = base();
-    let side = f.commit(Some(&main), &[("s.txt", Some("s\n"))], "Side", Some(&id('s')));
-    let merged = f.commit_parents(&[&b, &side], &[("s.txt", Some("s\n"))], "Merge", Some(&id('t')));
-    let top = f.commit(Some(&merged), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
-    let ours = f.commit(Some(&main), &[("x.txt", Some("x\n"))], "Add X", Some(&id('q')));
+    let side = f.commit(
+        Some(&main),
+        &[("s.txt", Some("s\n"))],
+        "Side",
+        Some(&id('s')),
+    );
+    let merged = f.commit_parents(
+        &[&b, &side],
+        &[("s.txt", Some("s\n"))],
+        "Merge",
+        Some(&id('t')),
+    );
+    let top = f.commit(
+        Some(&merged),
+        &[("e.txt", Some("e\n"))],
+        "Add E",
+        Some(&id('n')),
+    );
+    let ours = f.commit(
+        Some(&main),
+        &[("x.txt", Some("x\n"))],
+        "Add X",
+        Some(&id('q')),
+    );
     let d = check(&f, &main, &top, &ours, &top, Scenario::ResetOne);
     assert!(d.scenarios.contains(&Scenario::MergeCommit), "{d:#?}");
     let head = combined(&f, &main, &top, &ours, &top, Choice::Restore);
@@ -1043,10 +1071,18 @@ fn a_reset_over_merges_is_a_reset() {
 fn keep_both_builds_on_their_head() {
     let Base { f, main, a, b } = base();
     let amend = |text: &str| {
-        let a2 = f.commit(Some(&main), &[("a.txt", Some(text))], "Add A", Some(&id('l')));
+        let a2 = f.commit(
+            Some(&main),
+            &[("a.txt", Some(text))],
+            "Add A",
+            Some(&id('l')),
+        );
         f.commit(
             Some(&a2),
-            &[("c.txt", Some("c1\nc2\nc3\n")), ("d.txt", Some("d1\nd2\nd3\n"))],
+            &[
+                ("c.txt", Some("c1\nc2\nc3\n")),
+                ("d.txt", Some("d1\nd2\nd3\n")),
+            ],
             "Add C",
             Some(&id('m')),
         )
@@ -1054,13 +1090,30 @@ fn keep_both_builds_on_their_head() {
     let _ = a;
     let ours = amend("a1\nours\na3\n");
     let theirs = amend("a1\ntheirs\na3\n");
-    check(&f, &main, &b, &ours, &theirs, Scenario::AmendedBothConflicting);
+    check(
+        &f,
+        &main,
+        &b,
+        &ours,
+        &theirs,
+        Scenario::AmendedBothConflicting,
+    );
     let head = combined(&f, &main, &b, &ours, &theirs, Choice::KeepBoth);
-    assert!(builds_on(&f, &theirs, &head), "keep_both didn't build on their head");
+    assert!(
+        builds_on(&f, &theirs, &head),
+        "keep_both didn't build on their head"
+    );
     assert_eq!(file(&f, &head, "a.txt").as_deref(), Some("a1\nours\na3\n"));
     assert_eq!(subjects(&f, &main, &head), ["Add A", "Add C", "Add A"]);
     // Their side then sees a head that builds on theirs.
-    let d = classify(&f.repo(), &[oid(&main)], Some(oid(&b)), oid(&theirs), oid(&head)).unwrap();
+    let d = classify(
+        &f.repo(),
+        &[oid(&main)],
+        Some(oid(&b)),
+        oid(&theirs),
+        oid(&head),
+    )
+    .unwrap();
     assert_eq!(d.scenario, Scenario::Behind, "{d:#?}");
 }
 
@@ -1069,10 +1122,18 @@ fn without_a_shared_head_commits_are_matched_by_change_id() {
     let Base { f, main, b, .. } = base();
     // They amended A after we got the branch; we never moved ours. With no
     // head both had, the base is where the heads meet: main.
-    let a2 = f.commit(Some(&main), &[("a.txt", Some("a1\nA2\na3\n"))], "Add A", Some(&id('l')));
+    let a2 = f.commit(
+        Some(&main),
+        &[("a.txt", Some("a1\nA2\na3\n"))],
+        "Add A",
+        Some(&id('l')),
+    );
     let theirs = f.commit(
         Some(&a2),
-        &[("c.txt", Some("c1\nc2\nc3\n")), ("d.txt", Some("d1\nd2\nd3\n"))],
+        &[
+            ("c.txt", Some("c1\nc2\nc3\n")),
+            ("d.txt", Some("d1\nd2\nd3\n")),
+        ],
         "Add C",
         Some(&id('m')),
     );
@@ -1086,19 +1147,36 @@ fn without_a_shared_head_commits_are_matched_by_change_id() {
 fn the_same_rewrite_with_a_commit_on_top_still_diverges() {
     let Base { f, main, b, .. } = base();
     let amend = || {
-        let a2 = f.commit(Some(&main), &[("a.txt", Some("a1\nA2\na3\n"))], "Add A", Some(&id('l')));
+        let a2 = f.commit(
+            Some(&main),
+            &[("a.txt", Some("a1\nA2\na3\n"))],
+            "Add A",
+            Some(&id('l')),
+        );
         f.commit(
             Some(&a2),
-            &[("c.txt", Some("c1\nc2\nc3\n")), ("d.txt", Some("d1\nd2\nd3\n"))],
+            &[
+                ("c.txt", Some("c1\nc2\nc3\n")),
+                ("d.txt", Some("d1\nd2\nd3\n")),
+            ],
             "Add C",
             Some(&id('m')),
         )
     };
     let ours = amend();
     let theirs_amended = amend();
-    let theirs = f.commit(Some(&theirs_amended), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
+    let theirs = f.commit(
+        Some(&theirs_amended),
+        &[("e.txt", Some("e\n"))],
+        "Add E",
+        Some(&id('n')),
+    );
     let d = check(&f, &main, &b, &ours, &theirs, Scenario::RewroteOne);
-    assert!(d.summary("them").contains("same rewrite"), "{}", d.summary("them"));
+    assert!(
+        d.summary("them").contains("same rewrite"),
+        "{}",
+        d.summary("them")
+    );
     assert!(!d.options("them").is_empty());
     // The rewrite both made isn't listed as a change.
     assert!(d.changes.iter().all(|c| c.subject != "Add A"), "{d:#?}");
@@ -1111,10 +1189,22 @@ fn the_same_rewrite_with_a_commit_on_top_still_diverges() {
 fn a_restored_head_is_taken_by_the_one_who_reset() {
     let Base { f, main, b, .. } = base();
     // We reset and added X; they restored: their branch, then X on top.
-    let ours = f.commit(Some(&main), &[("x.txt", Some("x\n"))], "Add X", Some(&id('q')));
+    let ours = f.commit(
+        Some(&main),
+        &[("x.txt", Some("x\n"))],
+        "Add X",
+        Some(&id('q')),
+    );
     let restored = combined(&f, &main, &b, &b, &ours, Choice::Restore);
     assert!(builds_on(&f, &b, &restored));
-    let d = classify(&f.repo(), &[oid(&main)], Some(oid(&b)), oid(&ours), oid(&restored)).unwrap();
+    let d = classify(
+        &f.repo(),
+        &[oid(&main)],
+        Some(oid(&b)),
+        oid(&ours),
+        oid(&restored),
+    )
+    .unwrap();
     assert!(!d.scenario.needs_decision(), "{d:#?}");
     // Combining from our side takes theirs, dropping nothing.
     let head = combined(&f, &main, &b, &ours, &restored, Choice::Combine);
@@ -1126,24 +1216,57 @@ fn a_reword_survives_a_combine_from_either_side() {
     let Base { f, main, a, b } = base();
     let _ = a;
     // We reword A (C replayed on top); they add N.
-    let a2 = f.commit(Some(&main), &[("a.txt", Some("a1\na2\na3\n"))], "Add A, reworded", Some(&id('l')));
+    let a2 = f.commit(
+        Some(&main),
+        &[("a.txt", Some("a1\na2\na3\n"))],
+        "Add A, reworded",
+        Some(&id('l')),
+    );
     let ours = f.commit(
         Some(&a2),
-        &[("c.txt", Some("c1\nc2\nc3\n")), ("d.txt", Some("d1\nd2\nd3\n"))],
+        &[
+            ("c.txt", Some("c1\nc2\nc3\n")),
+            ("d.txt", Some("d1\nd2\nd3\n")),
+        ],
         "Add C",
         Some(&id('m')),
     );
     let theirs = f.commit(Some(&b), &[("n.txt", Some("n\n"))], "Add N", Some(&id('n')));
     let head = combined(&f, &main, &b, &ours, &theirs, Choice::Combine);
-    assert_eq!(subjects(&f, &main, &head), ["Add A, reworded", "Add C", "Add N"]);
+    assert_eq!(
+        subjects(&f, &main, &head),
+        ["Add A, reworded", "Add C", "Add N"]
+    );
     // They then compare their head with ours combined, from the head before N.
-    let d = classify(&f.repo(), &[oid(&main)], Some(oid(&b)), oid(&theirs), oid(&head)).unwrap();
+    let d = classify(
+        &f.repo(),
+        &[oid(&main)],
+        Some(oid(&b)),
+        oid(&theirs),
+        oid(&head),
+    )
+    .unwrap();
     assert!(!d.scenario.needs_decision(), "{d:#?}");
     let back = combined(&f, &main, &b, &theirs, &head, Choice::Combine);
-    assert_eq!(subjects(&f, &main, &back), ["Add A, reworded", "Add C", "Add N"], "{d:#?}");
+    assert_eq!(
+        subjects(&f, &main, &back),
+        ["Add A, reworded", "Add C", "Add N"],
+        "{d:#?}"
+    );
     // And we, with our combined head, compare it with theirs (N, without
     // the reword): their head lacks the reword, so nothing of theirs is new.
-    let d = classify(&f.repo(), &[oid(&main)], Some(oid(&b)), oid(&head), oid(&theirs)).unwrap();
+    let d = classify(
+        &f.repo(),
+        &[oid(&main)],
+        Some(oid(&b)),
+        oid(&head),
+        oid(&theirs),
+    )
+    .unwrap();
     let mine = combined(&f, &main, &b, &head, &theirs, Choice::Combine);
-    assert_eq!(subjects(&f, &main, &mine), ["Add A, reworded", "Add C", "Add N"], "{d:#?}");
+    assert_eq!(
+        subjects(&f, &main, &mine),
+        ["Add A, reworded", "Add C", "Add N"],
+        "{d:#?}"
+    );
 }

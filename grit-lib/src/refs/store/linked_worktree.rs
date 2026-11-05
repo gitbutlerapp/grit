@@ -34,7 +34,7 @@ pub(crate) struct LinkedWorktreeRefStore {
 
 impl LinkedWorktreeRefStore {
     /// View of the linked worktree administered at `admin_dir` over `shared`.
-    pub(crate) fn new(admin_dir: PathBuf, shared: Arc<dyn RefStore>) -> Self {
+    pub fn new(admin_dir: PathBuf, shared: Arc<dyn RefStore>) -> Self {
         let head = FilesRefStore::open(FilesRefStoreConfig {
             git_dir: admin_dir.clone(),
             common_dir: admin_dir,

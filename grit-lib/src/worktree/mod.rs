@@ -18,7 +18,6 @@ pub(crate) mod io_error;
 mod move_repair;
 pub(crate) mod symlink;
 
-pub use crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 pub use core::*;
 pub use error::{WorktreeError, WorktreeOperation};
 pub(crate) use io_error::{io_with_path, map_worktree_io, WorktreePathOperation};

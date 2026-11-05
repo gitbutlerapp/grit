@@ -62,7 +62,7 @@ impl PendingDelta {
     /// # Errors
     ///
     /// Returns [`Error::CorruptObject`] when the header is longer than 255 bytes.
-    pub(crate) fn new(
+    pub fn new(
         offset: usize,
         zlib_offset: usize,
         pack_end: usize,
@@ -221,7 +221,7 @@ pub(crate) struct DeltaChildren {
 
 impl DeltaChildren {
     /// Record that the delta at `index` is built on `base`.
-    pub(crate) fn push(&mut self, base: DeltaBase, index: u32) {
+    pub fn push(&mut self, base: DeltaBase, index: u32) {
         match base {
             DeltaBase::Offset(offset) => self.by_offset.push((offset, index)),
             DeltaBase::Oid(oid) => self.by_oid.push((oid, index)),
@@ -326,7 +326,7 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
     /// Compressed bytes come from `source`, [`DeltaRoot::Odb`] bases from `odb`.
     /// `chain_limit` caps the ancestor bytes a worker keeps (see
     /// [`DELTA_CHAIN_BYTES_PER_WORKER`]).
-    pub(crate) fn new(
+    pub fn new(
         source: PackBytes<'a>,
         odb: &'a Odb,
         pending: &'a [PendingDelta],

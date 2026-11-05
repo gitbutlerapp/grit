@@ -24,7 +24,7 @@ impl Default for OidAbbrevCache {
 
 impl OidAbbrevCache {
     #[must_use]
-    pub(crate) fn new(min_len: usize) -> Self {
+    pub fn new(min_len: usize) -> Self {
         Self {
             batch: OidAbbrevBatch::new(min_len),
         }

@@ -136,7 +136,7 @@ pub struct InitOptions {
     /// related cascade). When `None`, init uses [`Environment::empty`] and the handle stays
     /// hermetic like [`RepositoryOptions::empty`].
     pub environment: Option<Environment>,
-    /// Init-time filesystem probes ([`InitFilesystemConfigOptions`]).
+    /// Init-time filesystem probes (`InitFilesystemConfigOptions`).
     pub init_filesystem: InitFilesystemConfigOptions,
 }
 

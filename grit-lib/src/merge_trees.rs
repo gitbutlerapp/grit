@@ -269,7 +269,7 @@ pub(crate) struct ReplayConflictLabels {
 
 impl ReplayConflictLabels {
     /// Labels for replaying `commit`, whose message subject line is `subject`.
-    pub(crate) fn new(commit: ObjectId, subject: &str) -> Self {
+    pub fn new(commit: ObjectId, subject: &str) -> Self {
         let theirs = format!("{} ({subject})", commit.to_short_hex());
         let base = format!("parent of {theirs}");
         Self { theirs, base }
@@ -1439,7 +1439,7 @@ pub(crate) struct PathMergeContext<'r> {
 }
 
 impl<'r> PathMergeContext<'r> {
-    pub(crate) fn new(repo: &'r Repository, call_depth: usize) -> Self {
+    pub fn new(repo: &'r Repository, call_depth: usize) -> Self {
         Self {
             repo,
             rules: OnceCell::new(),

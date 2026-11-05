@@ -892,7 +892,7 @@ impl IdentityEnv for Environment {
 /// Callers pass this into [`crate::fsmonitor::FsmonitorRefreshOptions`] so fsmonitor hook
 /// protocol v1 tokens are sampled before the hook subprocess runs.
 #[must_use]
-pub fn wall_clock_unix_timestamp_nanos() -> u64 {
+pub(crate) fn wall_clock_unix_timestamp_nanos() -> u64 {
     u64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos()).unwrap_or(u64::MAX)
 }
 

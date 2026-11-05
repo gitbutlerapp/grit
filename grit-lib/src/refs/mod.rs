@@ -335,7 +335,7 @@ pub(crate) fn store_write_value_on_store(
 ///
 /// Opens a fresh on-disk ref store for `git_dir` (object-checked open used internally)
 /// and bypasses [`crate::repo::Repository::refs`] and any injected
-/// [`crate::refs::store::RefStore`]. Prefer [`commit_ref_updates_on_store`] with
+/// [`crate::refs::store::RefStore`]. Prefer `commit_ref_updates_on_store` with
 /// [`crate::repo::Repository::refs`] when you already have a
 /// [`crate::repo::Repository`].
 ///
@@ -357,11 +357,11 @@ pub fn commit_ref_store_batch(git_dir: &Path, updates: &[RefUpdate]) -> Result<(
     commit_ref_updates_on_store(&store::open_checked_ref_store(git_dir)?, updates, &[])
 }
 
-/// [`commit_ref_updates_non_atomic_on_store`] for a repository git directory.
+/// `commit_ref_updates_non_atomic_on_store` for a repository git directory.
 ///
 /// # Errors
 ///
-/// Same as [`commit_ref_updates_non_atomic_on_store`].
+/// Same as `commit_ref_updates_non_atomic_on_store`.
 pub fn commit_ref_updates_non_atomic(
     git_dir: &Path,
     updates: Vec<RefUpdate>,
@@ -390,7 +390,7 @@ pub fn commit_ref_updates_on_store(
 /// # Errors
 ///
 /// Propagates validation, compare-and-swap, and backend errors from [`RefStore::prepare`].
-pub fn commit_ref_batch_on_store(
+pub(crate) fn commit_ref_batch_on_store(
     store: &dyn RefStore,
     updates: &[RefUpdate],
     reflog_renames: &[RefReflogRename],
@@ -410,7 +410,7 @@ pub fn commit_ref_batch_on_store(
     )
 }
 
-/// Per-ref result from [`commit_ref_updates_non_atomic_on_store`].
+/// Per-ref result from `commit_ref_updates_non_atomic_on_store`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefUpdateCommitOutcome {
     /// Full ref name from the input batch.
@@ -429,7 +429,7 @@ pub struct RefUpdateCommitOutcome {
 /// # Errors
 ///
 /// Propagates whole-transaction failures (duplicate names in the batch, I/O, lock timeout).
-pub fn commit_ref_updates_non_atomic_on_store(
+pub(crate) fn commit_ref_updates_non_atomic_on_store(
     store: &dyn RefStore,
     updates: Vec<RefUpdate>,
 ) -> Result<Vec<RefUpdateCommitOutcome>> {
@@ -467,7 +467,7 @@ pub fn commit_ref_updates_non_atomic_on_store(
 /// # Errors
 ///
 /// Propagates whole-transaction failures from [`RefStore::prepare`] or commit.
-pub fn commit_ref_updates_allowing_failures_on_store(
+pub(crate) fn commit_ref_updates_allowing_failures_on_store(
     store: &dyn RefStore,
     updates: Vec<RefUpdate>,
 ) -> Result<Vec<RefUpdateCommitOutcome>> {
@@ -2396,7 +2396,7 @@ impl PackedRefPeels {
     ///
     /// Returns [`Error::Io`] when `packed-refs` exists but cannot be read, or
     /// [`Error::PackedRefsUnexpectedLine`] when it is malformed.
-    pub(crate) fn load(git_dir: &Path, format: RefStorageFormat) -> Result<Self> {
+    pub fn load(git_dir: &Path, format: RefStorageFormat) -> Result<Self> {
         if format != RefStorageFormat::Files {
             return Ok(Self::from_view(None));
         }
@@ -2656,7 +2656,7 @@ pub fn write_ref(git_dir: &Path, refname: &str, oid: &ObjectId) -> Result<()> {
 
 /// Per-ref update flags for [`RefUpdate`] (e.g. `REF_NO_DEREF` on `HEAD`).
 #[must_use]
-pub fn ref_update_flags(refname: &str) -> RefUpdateFlags {
+pub(crate) fn ref_update_flags(refname: &str) -> RefUpdateFlags {
     legacy_ref_update_flags(refname)
 }
 
@@ -3534,7 +3534,7 @@ pub fn should_autocreate_reflog(git_dir: &Path, refname: &str) -> bool {
 
 /// Like [`should_autocreate_reflog`], using an already-loaded repository config snapshot.
 #[must_use]
-pub fn should_autocreate_reflog_with_config(
+pub(crate) fn should_autocreate_reflog_with_config(
     config: &ConfigSet,
     _git_dir: &Path,
     refname: &str,
@@ -3657,7 +3657,7 @@ pub fn append_reflog(
 
 /// Like [`append_reflog`], reusing `config` for reflog auto-create policy when provided.
 #[allow(clippy::too_many_arguments)]
-pub fn append_reflog_with_config(
+pub(crate) fn append_reflog_with_config(
     git_dir: &Path,
     refname: &str,
     old_oid: &ObjectId,
@@ -4118,7 +4118,7 @@ pub(crate) fn test_ref_store_batch_pause_after_ref_write(idx: usize, git_dir: &P
 /// Loose branch ref lock held between CAS validation and the ref file commit.
 ///
 /// Dropping without [`commit_branch_commit_ref_lock`](Self::commit) aborts the lock file.
-pub struct BranchCommitRefLock {
+pub(crate) struct BranchCommitRefLock {
     lock: Option<crate::lockfile::LockFile>,
     disarmed: bool,
 }
@@ -4536,7 +4536,7 @@ pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'
 /// [`crate::repo::Repository::refs`] when you already have a
 /// [`crate::repo::Repository`]. Checked against that repository's objects like
 /// [`write_ref`]; see [`update_branch_for_commit_on_store`].
-pub fn update_branch_for_commit_with_config(
+pub(crate) fn update_branch_for_commit_with_config(
     git_dir: &Path,
     update: &BranchCommitRefUpdate<'_>,
     config: &ConfigSet,
@@ -5016,7 +5016,7 @@ pub fn list_refs_glob_for_repository(
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
 /// bypasses [`crate::repo::Repository::refs`] and any injected
-/// [`crate::refs::store::RefStore`]. Prefer [`list_refs_glob_for_repository`] when you
+/// [`crate::refs::store::RefStore`]. Prefer `list_refs_glob_for_repository` when you
 /// already have a [`crate::repo::Repository`].
 pub fn list_refs_glob(git_dir: &Path, pattern: &str) -> Result<Vec<(String, ObjectId)>> {
     let glob_pos = pattern.find(['*', '?', '[']);

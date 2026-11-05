@@ -86,7 +86,7 @@ fn ntfs_backslash_suffix_matches(name: &str, mut pred: impl FnMut(&str) -> bool)
 /// Covers HFS and NTFS spellings of `.gitmodules`, `.gitattributes`, `.gitignore`, and
 /// `.mailmap`, matching [`fsck_dot_special_tree_pass`].
 #[must_use]
-pub fn tree_entry_reserved_dot_symlink(mode: u32, name: &[u8]) -> Option<&'static str> {
+pub(crate) fn tree_entry_reserved_dot_symlink(mode: u32, name: &[u8]) -> Option<&'static str> {
     if mode != 0o120000 {
         return None;
     }
@@ -109,7 +109,7 @@ pub fn tree_entry_reserved_dot_symlink(mode: u32, name: &[u8]) -> Option<&'stati
 }
 
 /// Symlink and registration for one tree (Git `fsck_tree` entry loop).
-pub fn fsck_dot_special_tree_pass(
+pub(crate) fn fsck_dot_special_tree_pass(
     tree_oid: &ObjectId,
     data: &[u8],
     gitmodules_out: &mut HashSet<ObjectId>,
@@ -308,7 +308,7 @@ fn trim_bytes(mut s: &[u8]) -> &[u8] {
 }
 
 /// Content checks for OIDs registered as `.gitmodules` / `.gitattributes` targets (Git `fsck_blob` / `fsck_blobs`).
-pub fn fsck_dot_special_object(
+pub(crate) fn fsck_dot_special_object(
     oid: &ObjectId,
     kind: ObjectKind,
     data: &[u8],
@@ -387,7 +387,7 @@ pub fn fsck_dot_special_object(
 
 /// Tracks `.gitmodules` / `.gitattributes` blob OIDs discovered in trees (Git `fsck_options` oidsets).
 #[derive(Debug, Default)]
-pub struct DotFsckTracker {
+pub(crate) struct DotFsckTracker {
     /// `.gitmodules` blob OIDs discovered while walking trees.
     pub gitmodules_found: HashSet<ObjectId>,
     /// `.gitmodules` blobs already checked by [`Self::on_object`].
@@ -819,7 +819,11 @@ fn collect_gitmodules_blobs_from_tree(
 }
 
 /// Validate every `.gitmodules` blob reachable from `commit_oid`. Returns `Some(hex: msg)` on error.
-pub fn verify_gitmodules_for_commit(odb: &Odb, commit_oid: ObjectId) -> Result<Option<String>> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn verify_gitmodules_for_commit(
+    odb: &Odb,
+    commit_oid: ObjectId,
+) -> Result<Option<String>> {
     let obj = odb.read(&commit_oid)?;
     if obj.kind != ObjectKind::Commit {
         return Ok(None);
@@ -840,7 +844,8 @@ pub fn verify_gitmodules_for_commit(odb: &Odb, commit_oid: ObjectId) -> Result<O
 }
 
 /// Parse `objects/ab/cdef…` loose paths into OIDs; for `.idx` files load all contained OIDs.
-pub fn oids_from_copied_object_paths(copied: &[PathBuf]) -> Result<HashSet<ObjectId>> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn oids_from_copied_object_paths(copied: &[PathBuf]) -> Result<HashSet<ObjectId>> {
     let mut out = HashSet::new();
     for p in copied {
         let Some(name) = p.file_name().and_then(|n| n.to_str()) else {

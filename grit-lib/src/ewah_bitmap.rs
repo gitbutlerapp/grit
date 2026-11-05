@@ -103,7 +103,7 @@ pub(crate) struct Bitmap {
 
 impl Bitmap {
     /// Empty bitmap with no allocated words.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self { words: Vec::new() }
     }
 
@@ -224,7 +224,7 @@ pub(crate) struct EwahView<'a> {
 
 impl<'a> EwahView<'a> {
     /// Parse and validate `data` as Git's EWAH serialization prefix.
-    pub(crate) fn parse(data: &'a [u8]) -> Result<(Self, usize), EwahError> {
+    pub fn parse(data: &'a [u8]) -> Result<(Self, usize), EwahError> {
         let bit_size = read_be32(data)? as usize;
         let mut pos = 4;
         let buffer_size = read_be32(data.get(pos..).ok_or(EwahError::TruncatedHeader)?)? as usize;
@@ -445,7 +445,7 @@ pub(crate) struct EwahBitmap {
 }
 
 impl EwahBitmap {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             buffer: vec![0; 32],
             buffer_size: 1,

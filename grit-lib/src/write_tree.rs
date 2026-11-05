@@ -13,7 +13,7 @@ use crate::objects::{
 };
 use crate::odb::{Odb, WriteOptions};
 
-/// How [`cache_tree_update`] persists rebuilt tree objects.
+/// How `cache_tree_update` persists rebuilt tree objects.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum WriteTreePersistence {
     /// Write missing tree objects to the object store.
@@ -25,7 +25,7 @@ pub enum WriteTreePersistence {
     Repair,
 }
 
-/// Options for [`cache_tree_update`] and [`write_tree_update_index`].
+/// Options for `cache_tree_update` and `write_tree_update_index`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WriteTreeFlags {
     /// Allow missing blob OIDs when building trees.
@@ -55,7 +55,8 @@ impl WriteTreeFlags {
 /// Used after commit when the on-disk index may have been mutated by hooks while the in-memory
 /// index (and its cache-tree) reflects the tree that was actually committed.
 #[must_use]
-pub fn index_cache_tree_inputs_match(left: &Index, right: &Index) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn index_cache_tree_inputs_match(left: &Index, right: &Index) -> bool {
     let rows_left = cache_tree_index_rows(left);
     let rows_right = cache_tree_index_rows(right);
     if rows_left.len() != rows_right.len() {
@@ -75,7 +76,7 @@ pub fn index_cache_tree_inputs_match(left: &Index, right: &Index) -> bool {
 /// Hot paths (`status`, index↔worktree diff) trust this the same way Git trusts a loaded
 /// `TREE` extension until write-tree invalidates it. No object-store I/O is performed.
 #[must_use]
-pub fn cache_tree_extension_valid(node: Option<&CacheTreeNode>) -> bool {
+pub(crate) fn cache_tree_extension_valid(node: Option<&CacheTreeNode>) -> bool {
     let Some(it) = node else {
         return false;
     };
@@ -98,7 +99,7 @@ pub fn cache_tree_extension_valid(node: Option<&CacheTreeNode>) -> bool {
 /// only in a promisor pack of a files primary therefore count as present too. A store
 /// failure counts as "not valid".
 #[must_use]
-pub fn cache_tree_fully_valid(odb: &Odb, node: Option<&CacheTreeNode>) -> bool {
+pub(crate) fn cache_tree_fully_valid(odb: &Odb, node: Option<&CacheTreeNode>) -> bool {
     let Some(root) = node else {
         return false;
     };
@@ -126,7 +127,7 @@ fn collect_reusable_tree_ids(node: &CacheTreeNode, out: &mut Vec<ObjectId>) -> b
 /// Tree ids of the cached subtrees `cache_tree_update` may reuse, confirmed present in `odb`.
 ///
 /// Every candidate is probed in one batch up front instead of one store call per cached
-/// directory while rebuilding, across every source (see [`cache_tree_fully_valid`]).
+/// directory while rebuilding, across every source (see `cache_tree_fully_valid`).
 /// A store failure leaves the set empty, so everything is rebuilt (and the writes
 /// surface the failure).
 fn present_reusable_trees(odb: &Odb, root: &CacheTreeNode) -> OidHashSet {
@@ -149,7 +150,7 @@ fn present_reusable_trees(odb: &Odb, root: &CacheTreeNode) -> OidHashSet {
 /// # Errors
 ///
 /// Returns an error when the index has unmerged entries, path/file conflicts, or missing objects.
-pub fn cache_tree_update(odb: &Odb, index: &mut Index, flags: WriteTreeFlags) -> Result<()> {
+pub(crate) fn cache_tree_update(odb: &Odb, index: &mut Index, flags: WriteTreeFlags) -> Result<()> {
     verify_index_for_cache_tree(index, flags.silent)?;
 
     if flags.ignore_cache_tree {
@@ -299,12 +300,12 @@ fn find_or_create_child<'a>(
     node.children.last_mut()
 }
 
-/// Per-update state shared by every [`rebuild_directory_node`] call of one
-/// [`cache_tree_update`].
+/// Per-update state shared by every `rebuild_directory_node` call of one
+/// `cache_tree_update`.
 struct CacheTreeRebuild<'a> {
     odb: &'a Odb,
     flags: WriteTreeFlags,
-    /// Cached tree ids already confirmed present (see [`present_reusable_trees`]).
+    /// Cached tree ids already confirmed present (see `present_reusable_trees`).
     reusable: OidHashSet,
 }
 
@@ -561,7 +562,7 @@ fn store_tree_payload(
 
 /// Returns whether `oid` is Git's canonical empty tree (including the legacy hash).
 #[must_use]
-pub fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
+pub(crate) fn is_empty_tree_oid(odb: &Odb, oid: &ObjectId) -> bool {
     odb.is_empty_tree(oid)
 }
 
@@ -687,7 +688,8 @@ fn index_has_entry_under(index: &Index, dir: &[u8]) -> bool {
 /// The `prefix` argument optionally limits the write to a subtree path.
 /// Like [`write_tree_from_index`], but only index entries whose path is listed in `paths`
 /// (repository-relative, as stored in the index) are included in the tree.
-pub fn write_tree_from_index_subset(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn write_tree_from_index_subset(
     odb: &Odb,
     index: &Index,
     paths: &std::collections::HashSet<Vec<u8>>,
@@ -747,7 +749,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
 /// # Errors
 ///
 /// Returns an error if tree object creation fails.
-pub fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTreeNode> {
+pub(crate) fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTreeNode> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
     let mut entries: Vec<&IndexEntry> = index
         .entries
@@ -759,13 +761,13 @@ pub fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTree
 }
 
 /// Build a cache-tree directly from a **tree object**, preserving Git's raw `entry_count`
-/// semantics. Unlike [`build_cache_tree_from_index`], the per-node `entry_count` is the recursive
+/// semantics. Unlike `build_cache_tree_from_index`, the per-node `entry_count` is the recursive
 /// number of non-tree entries *as recorded in the tree* — duplicate path entries are counted
 /// separately, exactly as upstream Git's cache-tree does after reading such a tree into the index.
 ///
 /// This is the cache-tree real Git attaches after `read-tree`/`reset`/`checkout` populate the index
 /// from a tree. For a tree with duplicate entries (`t4058-diff-duplicates`) the resulting
-/// `entry_count` exceeds the number of (deduplicated) index entries, so [`verify_cache_tree`] later
+/// `entry_count` exceeds the number of (deduplicated) index entries, so cache-tree verification later
 /// reports "corrupted cache-tree has entries not present in index".
 pub fn build_cache_tree_from_tree(odb: &Odb, tree_oid: &ObjectId) -> Result<CacheTreeNode> {
     #[cfg(test)]
@@ -805,7 +807,7 @@ fn build_cache_tree_from_tree_named(
 /// "corrupted cache-tree has entries not present in index".
 ///
 /// Every index write runs this check before persisting the `TREE` extension.
-pub fn verify_cache_tree(index: &Index) -> Result<()> {
+pub(crate) fn verify_cache_tree(index: &Index) -> Result<()> {
     let Some(root) = index.cache_tree.as_ref() else {
         return Ok(());
     };
@@ -984,7 +986,7 @@ fn build_cache_tree_node(
 ///
 /// This matches Git's behaviour when committing with pathspecs while the index contains additional
 /// staged paths: the commit tree merges `HEAD` with only the pathspec-selected index updates.
-pub fn write_tree_partial_from_index(
+pub(crate) fn write_tree_partial_from_index(
     odb: &Odb,
     index: &Index,
     base_tree_oid: &ObjectId,

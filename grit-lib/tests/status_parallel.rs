@@ -311,7 +311,7 @@ fn untracked_cache_enabled_matches_serial() {
 
 #[test]
 fn large_index_stat_refresh_parallel_matches_serial() {
-    use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
+    use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -394,7 +394,7 @@ fn git_untracked_and_ignored(root: &Path, untracked_files: &str) -> (Vec<String>
 /// to split below the top level; its result must match the serial walk and system `git`.
 #[test]
 fn single_top_level_directory_split_walk_matches_serial_and_git() {
-    use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
+    use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

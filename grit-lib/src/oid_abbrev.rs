@@ -31,7 +31,7 @@ pub(crate) struct PackListing {
 }
 
 impl PackListing {
-    pub(crate) fn load(repo: &Repository) -> Result<Self> {
+    pub fn load(repo: &Repository) -> Result<Self> {
         let odb = repo.odb();
         let indexes = odb.pack_indexes_for_display()?;
         let non_promisor = indexes.iter().filter(|idx| !idx.is_promisor).count();

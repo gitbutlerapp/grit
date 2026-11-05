@@ -1091,7 +1091,7 @@ pub(crate) mod pack_cache {
     }
 
     impl ShardedDeltaBaseLru {
-        pub(crate) fn new() -> Self {
+        pub fn new() -> Self {
             let per_shard = DELTA_BASE_CACHE_DEFAULT / DELTA_LRU_SHARD_COUNT;
             Self {
                 cache_enabled: AtomicBool::new(true),

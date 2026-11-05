@@ -130,7 +130,7 @@ pub(crate) struct LooseFileReadBudget {
 }
 
 impl LooseFileReadBudget {
-    pub(crate) fn new(file: &std::fs::File) -> Result<Self> {
+    pub fn new(file: &std::fs::File) -> Result<Self> {
         #[cfg(windows)]
         {
             let remaining = file.metadata().map_err(Error::Io)?.len();

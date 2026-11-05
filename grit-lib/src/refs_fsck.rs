@@ -40,7 +40,7 @@ pub enum RefsFsckSeverity {
     Warning,
 }
 
-/// One diagnostic (use [`format_refs_fsck_line`] for Git-compatible output).
+/// One diagnostic (use `format_refs_fsck_line` for Git-compatible output).
 #[derive(Debug, Clone)]
 pub struct RefsFsckIssue {
     /// `severity` field.

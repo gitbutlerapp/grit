@@ -44,7 +44,7 @@ fn is_hfs_dot_generic(path: &str, needle: &str) -> bool {
 
 /// Whether `path` matches `.git` under Git's HFS+ equivalence rules (`is_hfs_dotgit`).
 #[must_use]
-pub fn is_hfs_dotgit(path: &str) -> bool {
+pub(crate) fn is_hfs_dotgit(path: &str) -> bool {
     is_hfs_dot_generic(path, "git")
 }
 
@@ -53,7 +53,7 @@ pub fn is_hfs_dotgit(path: &str) -> bool {
 /// Covers `.git` and its 8.3 short name `git~1`, each optionally followed by spaces and
 /// periods (which NTFS strips) or a `:` stream suffix, plus the hashed short forms.
 #[must_use]
-pub fn is_ntfs_dotgit(name: &str) -> bool {
+pub(crate) fn is_ntfs_dotgit(name: &str) -> bool {
     let b = name.as_bytes();
     // Every alias starts with `.`, `g` or `~`; most names are rejected on the first byte.
     match b.first() {

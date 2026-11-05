@@ -446,7 +446,7 @@ pub(crate) struct DentrySpellingCache<'w> {
 impl<'w> DentrySpellingCache<'w> {
     /// Cache for paths under `work_tree`; nothing is read until a path is resolved.
     #[must_use]
-    pub(crate) fn new(work_tree: &'w Path) -> Self {
+    pub fn new(work_tree: &'w Path) -> Self {
         Self {
             work_tree,
             listings: HashMap::new(),

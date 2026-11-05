@@ -1009,7 +1009,7 @@ pub(crate) struct CrcWriter<'a, W: Write + ?Sized> {
 }
 
 impl<'a, W: Write + ?Sized> CrcWriter<'a, W> {
-    pub(crate) fn new(inner: &'a mut W, prefix: &[u8]) -> Self {
+    pub fn new(inner: &'a mut W, prefix: &[u8]) -> Self {
         let mut crc = crc32fast::Hasher::new();
         crc.update(prefix);
         Self { inner, crc }

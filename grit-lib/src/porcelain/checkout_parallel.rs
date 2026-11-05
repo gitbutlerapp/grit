@@ -57,7 +57,7 @@ pub(crate) struct CheckoutWriteJob<'a> {
 
 impl<'a> CheckoutWriteJob<'a> {
     /// Job writing `change`'s new blob to `path` with `mode`.
-    pub(crate) fn new(
+    pub fn new(
         path: String,
         mode: u32,
         change: &'a crate::diff::DiffEntry,

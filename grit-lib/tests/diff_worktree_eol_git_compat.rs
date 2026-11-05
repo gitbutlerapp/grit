@@ -239,7 +239,13 @@ fn assert_eol_only_rewrite_is_clean(
 
 #[test]
 fn eol_crlf_lf_rewrite_is_not_modified_issue_2164() {
-    for (fillers, threads) in [(0, 1), (grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES, 4)] {
+    for (fillers, threads) in [
+        (0, 1),
+        (
+            grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES,
+            4,
+        ),
+    ] {
         assert_eol_only_rewrite_is_clean(
             "*.txt text eol=crlf\n",
             b"one\r\ntwo\r\n",
@@ -252,7 +258,13 @@ fn eol_crlf_lf_rewrite_is_not_modified_issue_2164() {
 
 #[test]
 fn text_auto_line_ending_rewrite_is_not_modified_issue_2164() {
-    for (fillers, threads) in [(0, 1), (grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES, 4)] {
+    for (fillers, threads) in [
+        (0, 1),
+        (
+            grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES,
+            4,
+        ),
+    ] {
         assert_eol_only_rewrite_is_clean(
             "* text=auto\n",
             b"one\ntwo\n",

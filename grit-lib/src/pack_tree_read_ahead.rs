@@ -64,7 +64,7 @@ pub(crate) struct TreeReadAhead<'scope, 'env> {
 
 impl<'scope, 'env> TreeReadAhead<'scope, 'env> {
     /// A read-ahead that will use up to `workers` threads of `scope`; `0` disables it.
-    pub(crate) fn new(scope: &'scope Scope<'scope, 'env>, odb: &'env Odb, workers: usize) -> Self {
+    pub fn new(scope: &'scope Scope<'scope, 'env>, odb: &'env Odb, workers: usize) -> Self {
         Self {
             scope,
             odb,

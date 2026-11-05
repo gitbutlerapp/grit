@@ -4,18 +4,18 @@
 //! service, an in-process map) does not have to re-derive Git's ref-update rules. The helpers
 //! here are the ones the built-in backends use:
 //!
-//! - [`check_transaction`] runs every check [`RefStore::prepare`](super::RefStore::prepare)
-//!   must make: ref names and null ids ([`validate_transaction`]), directory/file conflicts
-//!   ([`verify_create_conflicts`]), compare-and-swap expectations ([`expected_matches`],
+//! - `check_transaction` runs every check [`RefStore::prepare`](super::RefStore::prepare)
+//!   must make: ref names and null ids (`validate_transaction`), directory/file conflicts
+//!   (`verify_create_conflicts`), compare-and-swap expectations (`expected_matches`,
 //!   through symbolic refs) and two updates writing the same stored ref.
-//! - [`apply_transaction`] computes the refs and reflogs after a commit, including
+//! - `apply_transaction` computes the refs and reflogs after a commit, including
 //!   symbolic-ref dereferencing and the reflog lines appended to both the symbolic ref and
 //!   its target.
-//! - [`resolve_symbolic`] follows symbolic refs inside a [`RefBatchState`].
+//! - `resolve_symbolic` follows symbolic refs inside a [`RefBatchState`].
 //!
 //! A typical store loads the refs (and reflogs) a transaction touches into a
-//! [`RefBatchState`], calls [`check_transaction`] in `prepare` while holding its lock, and
-//! at commit applies [`apply_transaction`] in place on that map when it owns the state (or
+//! [`RefBatchState`], calls `check_transaction` in `prepare` while holding its lock, and
+//! at commit applies `apply_transaction` in place on that map when it owns the state (or
 //! on a copy while iterators still share it) and persists the difference.
 //! `MemoryRefStore` is implemented exactly this way. Run the
 //! `grit_test_support::refstore_conformance` suite to check a backend against the built-ins.
@@ -53,7 +53,8 @@ pub use super::validation::{
 /// # Errors
 ///
 /// Returns [`RefStoreError::InvalidRefName`] naming the rejected ref.
-pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
     validate_name(name)
 }
 
@@ -70,7 +71,8 @@ pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
 /// [`RefStoreError::InvalidSymrefTarget`] for a symbolic value Git would refuse,
 /// [`RefStoreError::NullOid`] for an update pointing a ref at the null id, or
 /// [`RefStoreError::InvalidReflog`] for forged reflog metadata.
-pub fn validate_transaction(txn: &RefTransaction) -> Result<(), RefStoreError> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn validate_transaction(txn: &RefTransaction) -> Result<(), RefStoreError> {
     txn.validate()
 }
 
@@ -221,7 +223,7 @@ pub(crate) fn check_transaction_updates(
 
 /// Whether a ref-store error may reject a single update while siblings still commit.
 #[must_use]
-pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
+pub(crate) fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
     matches!(
         err,
         RefStoreError::ExpectedMismatch { .. }
@@ -237,7 +239,7 @@ pub fn is_per_ref_rejectable(err: &RefStoreError) -> bool {
 ///
 /// Simulates accepted updates on `state` so later creates see earlier ones in the same batch.
 /// Non-rejectable errors fail the whole call.
-pub fn partition_updates_allowing_failures(
+pub(crate) fn partition_updates_allowing_failures(
     state: &RefBatchState,
     updates: Vec<RefUpdate>,
     ascii_casefold_lookup: CasefoldLookup<'_>,

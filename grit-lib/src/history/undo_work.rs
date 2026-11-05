@@ -273,7 +273,7 @@ impl UndoWork {
     }
 
     /// Paths this record restores, in record order.
-    pub(crate) fn paths(&self) -> Vec<String> {
+    pub fn paths(&self) -> Vec<String> {
         self.paths.iter().map(|p| p.restore.path.clone()).collect()
     }
 
@@ -327,7 +327,7 @@ impl StagedUndoWork {
     /// Write `work` to the sidecar's lock file without publishing it.
     ///
     /// Called by [`super::last`] while it holds the `history-last` lock.
-    pub(crate) fn stage(repo: &Repository, work: &UndoWork) -> Result<Self, HistoryError> {
+    pub fn stage(repo: &Repository, work: &UndoWork) -> Result<Self, HistoryError> {
         let target = sidecar_path(repo);
         let mut lock = LockFile::acquire(&target.with_extension("lock"), LockWait::Immediately)
             .map_err(write_err)?;
@@ -336,7 +336,7 @@ impl StagedUndoWork {
     }
 
     /// Rename the staged bytes over the sidecar.
-    pub(crate) fn commit(self) -> Result<(), HistoryError> {
+    pub fn commit(self) -> Result<(), HistoryError> {
         self.lock.commit_to(&self.target).map_err(write_err)
     }
 }

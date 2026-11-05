@@ -5413,7 +5413,7 @@ pub struct DiffIndexToWorktreeOptions {
     pub config: Option<std::sync::Arc<crate::config::ConfigSet>>,
     /// Cap parallel stat workers (`Some(1)` forces serial), also applied to hashing the
     /// racily clean entries the stat refresh verifies. When `None`, honors
-    /// `core.preloadIndex` and [`crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES`].
+    /// `core.preloadIndex` and `PARALLEL_STAT_MIN_ENTRIES`.
     pub stat_parallel_threads: Option<usize>,
     /// CLI / embedder thread override applied to stat preload and hashing in this diff.
     pub thread_policy: Option<crate::parallel::ThreadPolicy>,
@@ -5439,7 +5439,7 @@ pub struct DiffIndexToWorktreeOptions {
     pub refresh_fsmonitor: bool,
     /// Injectable subprocess runner for fsmonitor hooks; defaults to the system runner.
     pub command_runner: Option<std::sync::Arc<dyn crate::command_runner::CommandRunner>>,
-    /// When set, used as the hook protocol v1 query boundary; otherwise [`crate::environment::wall_clock_unix_timestamp_nanos`] is sampled once per diff.
+    /// When set, used as the hook protocol v1 query boundary; otherwise the wall-clock nanosecond timestamp is sampled once per diff.
     pub fsmonitor_query_boundary: Option<crate::fsmonitor::FsmonitorQueryBoundary>,
     /// When set, only index paths in this set are compared against the work tree.
     ///
@@ -7360,11 +7360,7 @@ pub(crate) struct WorktreeEntryComparer<'a> {
 
 impl<'a> WorktreeEntryComparer<'a> {
     /// Capture settings for `work_tree`; `config` falls back to the repository config files.
-    pub(crate) fn new(
-        repository_git_dir: &Path,
-        work_tree: &'a Path,
-        config: Option<&ConfigSet>,
-    ) -> Self {
+    pub fn new(repository_git_dir: &Path, work_tree: &'a Path, config: Option<&ConfigSet>) -> Self {
         let config = config.cloned().unwrap_or_else(|| {
             ConfigSet::load(
                 &crate::environment::Environment::empty(),
@@ -7740,7 +7736,7 @@ pub(crate) fn stat_matches_with_policy(
 /// then skipped, which is conservative for tree-built indexes whose zeroed stat never matches.
 ///
 /// `stat_parallel_threads` overrides parallel stat workers (`Some(1)` forces serial); when `None`,
-/// honors `core.preloadIndex` and [`crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES`].
+/// honors `core.preloadIndex` and `PARALLEL_STAT_MIN_ENTRIES`.
 ///
 /// Returns `Ok(true)` when at least one entry was refreshed or invalidated, so callers can write
 /// the index opportunistically (Git only persists a refresh that changed something).
@@ -8522,7 +8518,7 @@ pub(crate) enum WorktreeBlobContent {
 
 impl WorktreeBlobContent {
     /// Object id of the content, without storing it.
-    pub(crate) fn hash(self, odb: &Odb) -> Result<ObjectId> {
+    pub fn hash(self, odb: &Odb) -> Result<ObjectId> {
         match self {
             Self::Bytes(data) => odb.hash(ObjectKind::Blob, &data),
             Self::Stream { mut file, size } => odb.hash_stream(ObjectKind::Blob, size, &mut file),
@@ -8530,7 +8526,7 @@ impl WorktreeBlobContent {
     }
 
     /// Store the content as a blob and return its id.
-    pub(crate) fn store(self, odb: &Odb, options: crate::odb::WriteOptions) -> Result<ObjectId> {
+    pub fn store(self, odb: &Odb, options: crate::odb::WriteOptions) -> Result<ObjectId> {
         match self {
             Self::Bytes(data) => odb.write_with_options(ObjectKind::Blob, &data, options),
             Self::Stream { mut file, size } => {

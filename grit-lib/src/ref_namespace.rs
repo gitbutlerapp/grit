@@ -8,7 +8,7 @@ use crate::environment::Environment;
 
 /// Raw value of `GIT_NAMESPACE` (may contain `/`-separated components).
 #[must_use]
-pub fn raw_git_namespace_from_env(env: &Environment) -> Option<String> {
+pub(crate) fn raw_git_namespace_from_env(env: &Environment) -> Option<String> {
     let v = env.git_namespace.as_deref()?;
     let t = v.trim();
     if t.is_empty() {
@@ -21,7 +21,7 @@ pub fn raw_git_namespace_from_env(env: &Environment) -> Option<String> {
 /// Storage prefix for refs when a namespace is active, e.g. `refs/namespaces/foo/`.
 /// Returns `None` when `GIT_NAMESPACE` is unset or empty.
 #[must_use]
-pub fn ref_storage_prefix(env: &Environment) -> Option<String> {
+pub(crate) fn ref_storage_prefix(env: &Environment) -> Option<String> {
     let raw = raw_git_namespace_from_env(env)?;
     let mut buf = String::new();
     for part in raw.split('/') {
@@ -57,7 +57,7 @@ pub fn storage_ref_name(logical: &str) -> String {
 
 /// Whether `logical` is stored outside the namespace (e.g. global `HEAD` in `$GIT_DIR`).
 #[must_use]
-pub fn ref_skips_namespace_prefix(logical: &str) -> bool {
+pub(crate) fn ref_skips_namespace_prefix(logical: &str) -> bool {
     logical == "HEAD"
         || (!logical.is_empty()
             && !logical.contains('/')
@@ -68,7 +68,7 @@ pub fn ref_skips_namespace_prefix(logical: &str) -> bool {
 
 /// Map a logical ref name using an explicit storage prefix (not from environment).
 #[must_use]
-pub fn storage_ref_name_with_prefix(prefix: Option<&str>, logical: &str) -> String {
+pub(crate) fn storage_ref_name_with_prefix(prefix: Option<&str>, logical: &str) -> String {
     if prefix.is_some() && ref_skips_namespace_prefix(logical) {
         return logical.to_owned();
     }
@@ -81,7 +81,7 @@ pub fn storage_ref_name_with_prefix(prefix: Option<&str>, logical: &str) -> Stri
 
 /// Strip an explicit storage prefix to recover the logical ref name.
 #[must_use]
-pub fn logical_ref_name_with_prefix(prefix: Option<&str>, storage: &str) -> String {
+pub(crate) fn logical_ref_name_with_prefix(prefix: Option<&str>, storage: &str) -> String {
     match prefix {
         Some(p) if storage.starts_with(p) => storage[p.len()..].to_owned(),
         _ => storage.to_owned(),
@@ -90,7 +90,7 @@ pub fn logical_ref_name_with_prefix(prefix: Option<&str>, storage: &str) -> Stri
 
 /// Map a logical ref name using an explicit [`Environment`].
 #[must_use]
-pub fn storage_ref_name_env(env: &Environment, logical: &str) -> String {
+pub(crate) fn storage_ref_name_env(env: &Environment, logical: &str) -> String {
     match ref_storage_prefix(env) {
         Some(p) if logical.starts_with(&p) => logical.to_owned(),
         Some(p) => format!("{p}{logical}"),
@@ -100,7 +100,7 @@ pub fn storage_ref_name_env(env: &Environment, logical: &str) -> String {
 
 /// Active namespace storage prefix using an empty environment (no `GIT_NAMESPACE`).
 #[must_use]
-pub fn ref_storage_prefix_default() -> Option<String> {
+pub(crate) fn ref_storage_prefix_default() -> Option<String> {
     ref_storage_prefix(&Environment::empty())
 }
 

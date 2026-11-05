@@ -15,7 +15,7 @@ pub(crate) struct Slots<R> {
 }
 
 impl<R> Slots<R> {
-    pub(crate) fn new(len: usize) -> Self {
+    pub fn new(len: usize) -> Self {
         Self {
             cells: (0..len)
                 .map(|_| UnsafeCell::new(MaybeUninit::uninit()))
@@ -24,7 +24,7 @@ impl<R> Slots<R> {
         }
     }
 
-    pub(crate) fn store(&self, index: usize, value: R) {
+    pub fn store(&self, index: usize, value: R) {
         // SAFETY: each index is written at most once while `initialized` is false.
         unsafe {
             (*self.cells[index].get()).write(value);

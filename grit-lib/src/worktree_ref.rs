@@ -20,7 +20,7 @@ pub enum RefWorktreeType {
 
 /// `refs/worktree/*`, `refs/bisect/*`, and `refs/rewritten/*` are per-worktree.
 #[must_use]
-pub fn is_per_worktree_ref(refname: &str) -> bool {
+pub(crate) fn is_per_worktree_ref(refname: &str) -> bool {
     refname.starts_with("refs/worktree/")
         || refname.starts_with("refs/bisect/")
         || refname.starts_with("refs/rewritten/")
@@ -41,7 +41,9 @@ fn is_current_worktree_ref(refname: &str) -> bool {
 ///
 /// Returns worktree kind, bare ref name for storage, and worktree id for `worktrees/<id>/…`.
 #[must_use]
-pub fn parse_worktree_ref(maybe: &str) -> (RefWorktreeType, Cow<'_, str>, Option<Cow<'_, str>>) {
+pub(crate) fn parse_worktree_ref(
+    maybe: &str,
+) -> (RefWorktreeType, Cow<'_, str>, Option<Cow<'_, str>>) {
     if let Some(rest) = maybe.strip_prefix("worktrees/") {
         if let Some((id, bare)) = rest.split_once('/') {
             if is_current_worktree_ref(bare) {
@@ -74,7 +76,7 @@ pub fn parse_worktree_ref(maybe: &str) -> (RefWorktreeType, Cow<'_, str>, Option
 
 /// Git directory and on-disk ref path for `refname` from the current process's linked checkout.
 #[must_use]
-pub fn resolve_ref_storage(git_dir: &Path, refname: &str) -> (PathBuf, String) {
+pub(crate) fn resolve_ref_storage(git_dir: &Path, refname: &str) -> (PathBuf, String) {
     let common = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     resolve_ref_storage_in(git_dir, common, refname)
 }
@@ -100,7 +102,7 @@ pub(crate) fn resolve_ref_storage_in(
 
 /// Whether `refname` should appear in `for-each-ref` from a linked worktree.
 #[must_use]
-pub fn ref_visible_from_worktree(git_dir: &Path, refname: &str) -> bool {
+pub(crate) fn ref_visible_from_worktree(git_dir: &Path, refname: &str) -> bool {
     if !is_per_worktree_ref(refname) {
         return true;
     }
@@ -110,7 +112,7 @@ pub fn ref_visible_from_worktree(git_dir: &Path, refname: &str) -> bool {
 
 /// True when `git_dir` is a linked worktree administrative directory.
 #[must_use]
-pub fn is_linked_worktree_git_dir(git_dir: &Path) -> bool {
+pub(crate) fn is_linked_worktree_git_dir(git_dir: &Path) -> bool {
     common_dir(git_dir).is_some()
 }
 

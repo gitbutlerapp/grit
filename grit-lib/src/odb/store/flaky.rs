@@ -22,7 +22,7 @@ pub(crate) struct FlakyStore {
 }
 
 impl FlakyStore {
-    pub(crate) fn new() -> Arc<Self> {
+    pub fn new() -> Arc<Self> {
         Arc::new(Self {
             inner: MemoryStore::new(HashAlgo::Sha1),
             fail_contains: AtomicBool::new(false),

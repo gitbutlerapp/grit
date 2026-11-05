@@ -8,7 +8,7 @@ use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
 
 fn assert_git_diff_files_clean(repo_root: &Path) {
     let root = repo_root.to_str().expect("utf-8 path");

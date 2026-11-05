@@ -51,7 +51,7 @@ impl PreparedBlobPayload {
     ///
     /// Propagates write failures from the loose store or the custom primary.
     /// [`Error::WorktreeFileChanged`] when a streamed file no longer hashes to `oid`.
-    pub(crate) fn store(
+    pub fn store(
         &self,
         odb: &Odb,
         index_relpath: &str,

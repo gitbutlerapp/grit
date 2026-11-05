@@ -19,7 +19,8 @@ pub fn packed_refs_path(common_dir: &Path) -> PathBuf {
 
 /// Relative path prefix for reflogs under `refs/`.
 #[must_use]
-pub fn logs_refs_rel() -> &'static str {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn logs_refs_rel() -> &'static str {
     "logs/refs"
 }
 
@@ -37,30 +38,33 @@ pub const LOGS_REFS_HEADS_MAIN: &str = "logs/refs/heads/main";
 
 /// Build `logs/refs/<suffix>` for classification tests and tooling.
 #[must_use]
-pub fn logs_refs_child(suffix: &str) -> String {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn logs_refs_child(suffix: &str) -> String {
     format!("{}/{}", logs_refs_rel(), suffix)
 }
 
 /// Path to the top-level `logs` directory under a git or common directory.
 #[must_use]
-pub fn logs_dir_path(git_or_common: &Path) -> PathBuf {
+pub(crate) fn logs_dir_path(git_or_common: &Path) -> PathBuf {
     git_or_common.join("logs")
 }
 
 /// Path to `logs/refs` under a git or common directory.
 #[must_use]
-pub fn logs_refs_dir_path(git_or_common: &Path) -> PathBuf {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn logs_refs_dir_path(git_or_common: &Path) -> PathBuf {
     git_or_common.join(logs_refs_rel())
 }
 
 /// Path to `logs/refs/<suffix>` (suffix without leading `refs/`).
 #[must_use]
-pub fn logs_refs_subdir_path(git_or_common: &Path, suffix: &str) -> PathBuf {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn logs_refs_subdir_path(git_or_common: &Path, suffix: &str) -> PathBuf {
     logs_refs_dir_path(git_or_common).join(suffix)
 }
 
 /// Path to `refs` under an existing `logs/` directory (`logs_root/refs`).
 #[must_use]
-pub fn logs_refs_from_logs_root(logs_root: &Path) -> PathBuf {
+pub(crate) fn logs_refs_from_logs_root(logs_root: &Path) -> PathBuf {
     logs_root.join("refs")
 }

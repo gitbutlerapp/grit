@@ -214,7 +214,7 @@ impl PreparedSwitch {
         self.wholesale_safety_precomputed
     }
 
-    pub(crate) fn index(&self) -> &crate::index::Index {
+    pub fn index(&self) -> &crate::index::Index {
         &self.index
     }
 

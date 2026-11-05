@@ -27,7 +27,7 @@ pub(crate) struct PathPrefixIndex<'a> {
 }
 
 impl<'a> PathPrefixIndex<'a> {
-    pub(crate) fn new(paths: impl IntoIterator<Item = &'a Vec<u8>>) -> Self {
+    pub fn new(paths: impl IntoIterator<Item = &'a Vec<u8>>) -> Self {
         let mut index = Self {
             paths: HashSet::new(),
             ancestor_dirs: HashSet::new(),

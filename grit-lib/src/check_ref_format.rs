@@ -28,7 +28,7 @@ use crate::git_path::normalize_path_copy;
 
 use thiserror::Error;
 
-/// Errors returned by [`check_refname_format`].
+/// Errors returned by `check_refname_format`.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RefNameError {
     /// The ref name is empty.
@@ -353,7 +353,7 @@ pub fn validate_tag_short_name(name: &str) -> Result<(), RefNameError> {
 /// Whether a ref name from a fetch or upload-pack advertisement should be kept.
 ///
 /// Matches Git's `check_ref()` in `connect.c` with `REF_NORMAL`: the name must
-/// begin with `refs/` and pass [`check_refname_format`] without
+/// begin with `refs/` and pass `check_refname_format` without
 /// `--allow-onelevel` (rejecting `..`, illegal characters, and other malformed
 /// paths). Peeled `^{}` carriers are handled separately by callers.
 #[must_use]

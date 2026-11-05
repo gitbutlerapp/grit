@@ -6,7 +6,7 @@ use crate::ident_resolve::IdentityEnv;
 /// Git `ident_default_name()` for this merged config: `user.name` if that key was ever set
 /// (including to `""`), otherwise the passwd short name (Unix) or `USER` / `"unknown"`.
 #[must_use]
-pub fn ident_default_name(config: &ConfigSet, env: &impl IdentityEnv) -> String {
+pub(crate) fn ident_default_name(config: &ConfigSet, env: &impl IdentityEnv) -> String {
     if config.get_last_entry("user.name").is_some() {
         config
             .get("user.name")

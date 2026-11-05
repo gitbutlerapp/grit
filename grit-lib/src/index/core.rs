@@ -2980,7 +2980,7 @@ impl Index {
     /// **subtree** node, that subtree is removed entirely. The removal is essential for the
     /// directory→file transition (e.g. tracked dir `a/b/` replaced by file `a/b`): without it,
     /// stale descendant nodes (`a/b/c`, …) keep their positive `entry_count` and later trip
-    /// [`crate::write_tree::verify_cache_tree`] with "corrupted cache-tree has entries not present
+    /// `verify_cache_tree` with "corrupted cache-tree has entries not present
     /// in index".
     pub fn invalidate_cache_tree_for_path(&mut self, path: &[u8]) {
         let Some(root) = self.cache_tree.as_mut() else {

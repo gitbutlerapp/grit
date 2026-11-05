@@ -131,7 +131,7 @@ impl std::fmt::Debug for FilterProcessState {
 }
 
 impl FilterProcessState {
-    pub(crate) fn new(command_runner: Arc<dyn CommandRunner>) -> Self {
+    pub fn new(command_runner: Arc<dyn CommandRunner>) -> Self {
         Self {
             command_runner,
             registry: Mutex::new(HashMap::new()),

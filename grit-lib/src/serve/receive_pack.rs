@@ -1448,7 +1448,7 @@ pub(crate) struct ReceiveHookScripts<'a> {
 impl<'a> ReceiveHookScripts<'a> {
     /// Scripts of `repo` for a push that sent `push_options`, with `extra_env` set for every
     /// script.
-    pub(crate) fn new(
+    pub fn new(
         repo: &'a Repository,
         push_options: &[String],
         extra_env: Vec<(String, String)>,

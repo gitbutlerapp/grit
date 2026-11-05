@@ -92,7 +92,7 @@ pub fn write_resolve_undo_payload(map: &BTreeMap<Vec<u8>, ResolveUndoRecord>) ->
 }
 
 /// Merge one unmerged index entry into the resolve-undo map for its path.
-pub fn record_resolve_undo_for_entry(
+pub(crate) fn record_resolve_undo_for_entry(
     map: &mut Option<BTreeMap<Vec<u8>, ResolveUndoRecord>>,
     entry: &IndexEntry,
 ) {

@@ -169,7 +169,7 @@ pub enum ReftableError {
         name: String,
     },
 
-    /// [`ReftableWriter::add_ref`] was called out of name order.
+    /// `ReftableWriter::add_ref` was called out of name order.
     #[error("reftable: refs must be added in sorted order ('{next}' after '{previous}')")]
     UnsortedRefs {
         /// Name of the ref added before.
@@ -417,7 +417,7 @@ pub struct WriteOptions {
 ///
 /// Pass through [`RepositoryOptions::with_reftable_write`](crate::environment::RepositoryOptions::with_reftable_write)
 /// when opening a [`crate::repo::Repository`], or set fields on [`WriteOptions`] for direct
-/// [`ReftableWriter`] use.
+/// `ReftableWriter` use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ReftableWriteOptions {
@@ -3572,7 +3572,8 @@ pub fn reftable_write_ref_with_write_options(
 /// # Errors
 ///
 /// Returns [`Error::Io`] when the repository hash width cannot be determined.
-pub fn reftable_log_record_for_commit(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn reftable_log_record_for_commit(
     git_dir: &Path,
     refname: &str,
     old_oid: &ObjectId,
@@ -3638,7 +3639,7 @@ pub fn reftable_write_symref(
 /// Validate a ref batch for a reftable repository without per-ref filesystem scans.
 ///
 /// Loads the merged ref set once, then checks create/update naming rules in memory.
-pub fn verify_ref_transaction_batch_reftable(
+pub(crate) fn verify_ref_transaction_batch_reftable(
     git_dir: &Path,
     items: &[crate::refs::RefBatchItem],
 ) -> std::result::Result<(), crate::refs::RefnameUnavailable> {
@@ -3887,7 +3888,7 @@ pub fn read_write_options(git_dir: &Path) -> WriteOptions {
 }
 
 /// Read reftable write options from config and an explicit discovery environment.
-pub fn read_write_options_with_environment(
+pub(crate) fn read_write_options_with_environment(
     git_dir: &Path,
     env: &crate::environment::Environment,
     reftable_write: &ReftableWriteOptions,

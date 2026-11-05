@@ -31,7 +31,7 @@ pub(crate) struct PickaxeRenames<'a> {
 }
 
 impl<'a> PickaxeRenames<'a> {
-    pub(crate) fn new(detection: RenameDetection, config: &'a ConfigSet) -> Self {
+    pub fn new(detection: RenameDetection, config: &'a ConfigSet) -> Self {
         Self {
             threshold: detection.threshold_percent(),
             config,
@@ -39,11 +39,11 @@ impl<'a> PickaxeRenames<'a> {
     }
 
     /// Git's `log` default: `diff.renames` from `config`, at the default similarity.
-    pub(crate) fn from_config(config: &'a ConfigSet) -> Self {
+    pub fn from_config(config: &'a ConfigSet) -> Self {
         Self::new(renames_from_config(config), config)
     }
 
-    pub(crate) fn config(&self) -> &'a ConfigSet {
+    pub fn config(&self) -> &'a ConfigSet {
         self.config
     }
 }

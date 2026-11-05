@@ -365,7 +365,7 @@ fn merge_gitattributes_text(
 
 /// Load root and `info/attributes` gitattributes from the worktree.
 #[must_use]
-pub fn load_gitattributes_parsed(work_tree: &Path) -> ParsedGitAttributes {
+pub(crate) fn load_gitattributes_parsed(work_tree: &Path) -> ParsedGitAttributes {
     let mut merged = ParsedGitAttributes::default();
     let root_attrs = work_tree.join(".gitattributes");
     if let Ok(content) = std::fs::read_to_string(&root_attrs) {
@@ -406,7 +406,7 @@ pub fn load_gitattributes_from_index(
 
 /// Load merged `.gitattributes` for `rel_path` (root, nested dirs, info; index fallback).
 #[must_use]
-pub fn load_gitattributes_for_checkout_parsed(
+pub(crate) fn load_gitattributes_for_checkout_parsed(
     work_tree: &Path,
     rel_path: &str,
     index: &crate::index::Index,
@@ -456,7 +456,7 @@ pub fn load_gitattributes_for_checkout_parsed(
 
 /// Load `.gitattributes` rules that apply to `rel_path`, including root and
 /// nested `dir/.gitattributes` along parent directories (Git-consistent order:
-/// root first, then each ancestor directory; later rules win in [`get_file_attrs`]).
+/// root first, then each ancestor directory; later rules win in `get_file_attrs`).
 ///
 /// Reads from the working tree when present, otherwise from a stage-0 index entry.
 #[must_use]
@@ -486,7 +486,10 @@ fn attr_path_for_match(rel_path: &str, is_dir: bool) -> String {
 
 /// Map merged gitattributes (Git `collect_attrs`) to CRLF/filter [`FileAttrs`].
 #[must_use]
-pub fn file_attrs_from_attr_map(map: &HashMap<String, AttrValue>, config: &ConfigSet) -> FileAttrs {
+pub(crate) fn file_attrs_from_attr_map(
+    map: &HashMap<String, AttrValue>,
+    config: &ConfigSet,
+) -> FileAttrs {
     let mut fa = FileAttrs::default();
     for (name, value) in map {
         match name.as_str() {
@@ -594,7 +597,7 @@ pub fn file_attrs_from_attr_map(map: &HashMap<String, AttrValue>, config: &Confi
 
 /// Resolve [`FileAttrs`] using Git-compatible attribute matching and macro expansion.
 #[must_use]
-pub fn file_attrs_from_gitattributes(
+pub(crate) fn file_attrs_from_gitattributes(
     rules: &[AttrRule],
     macros: &MacroTable,
     rel_path: &str,
@@ -611,7 +614,7 @@ pub fn file_attrs_from_gitattributes(
 /// `is_dir` should be true when `rel_path` names a directory (Git passes a trailing `/` for
 /// directory paths in some call sites; we accept either trailing `/` or this flag from tree walks).
 #[must_use]
-pub fn get_file_attrs(
+pub(crate) fn get_file_attrs(
     rules: &[AttrRule],
     rel_path: &str,
     is_dir: bool,
@@ -634,7 +637,8 @@ pub(crate) fn path_gitattribute_values(
 
 /// Whether `rule` matches `rel_path` given directory vs file context (Git `path_matches`).
 #[must_use]
-pub fn attr_rule_matches(rule: &AttrRule, rel_path: &str, is_dir: bool) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn attr_rule_matches(rule: &AttrRule, rel_path: &str, is_dir: bool) -> bool {
     let match_path = attr_path_for_match(rel_path, is_dir);
     git_attr_rule_matches(rule, &match_path, false)
 }
@@ -895,7 +899,7 @@ pub fn clean_uses_autocrlf_index_guard(attrs: &FileAttrs, conv: &ConversionConfi
             && matches!(conv.autocrlf, AutoCrlf::True | AutoCrlf::Input))
 }
 
-/// Optional inputs for [`convert_to_git_with_opts`] (Git `CONV_EOL_RENORMALIZE` / index blob).
+/// Optional inputs for `convert_to_git_with_opts` (Git `CONV_EOL_RENORMALIZE` / index blob).
 #[derive(Clone, Copy)]
 pub struct ConvertToGitOpts<'a> {
     /// Stage-0 blob bytes for this path before the current add (for safer-autocrlf).
@@ -906,7 +910,7 @@ pub struct ConvertToGitOpts<'a> {
     pub check_safecrlf: bool,
     /// Long-running filter registry for this repository handle.
     pub filter_process: Option<&'a FilterProcessState>,
-    /// Subprocess runner for clean/smudge shell filters (defaults to [`ConversionConfig::command_runner`]).
+    /// Subprocess runner for clean/smudge shell filters (defaults to the conversion config runner).
     pub command_runner: Option<&'a dyn CommandRunner>,
 }
 
@@ -1346,7 +1350,7 @@ pub fn convert_to_git(
 }
 
 /// Like [`convert_to_git`] with Git-compatible safer-autocrlf index handling.
-pub fn convert_to_git_with_opts(
+pub(crate) fn convert_to_git_with_opts(
     data: &[u8],
     rel_path: &str,
     conv: &ConversionConfig,
@@ -1492,7 +1496,7 @@ pub(crate) fn convert_to_git_owned(
 /// - `conv` — line-ending configuration (`core.autocrlf`, `core.eol`).
 /// - `attrs` — the path's resolved attributes.
 #[must_use]
-pub fn git_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+pub(crate) fn git_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
     attrs.filter_process.is_none()
         && attrs.filter_clean.is_none()
         && !attrs.filter_clean_required
@@ -1714,7 +1718,7 @@ pub fn lf_to_crlf(data: &[u8]) -> Vec<u8> {
 /// Returns `Ok(None)` when the process filter returned `status=delayed` and `delayed_checkout` was
 /// provided (Git `delayed_checkout`); the path is queued for delayed checkout finish.
 #[allow(clippy::too_many_arguments)]
-pub fn convert_to_worktree(
+pub(crate) fn convert_to_worktree(
     data: &[u8],
     rel_path: &str,
     conv: &ConversionConfig,
@@ -1739,7 +1743,7 @@ pub fn convert_to_worktree(
 
 /// Like [`convert_to_worktree`] with an explicit filter [`CommandRunner`].
 #[expect(clippy::too_many_arguments)]
-pub fn convert_to_worktree_with_runner(
+pub(crate) fn convert_to_worktree_with_runner(
     data: &[u8],
     rel_path: &str,
     conv: &ConversionConfig,
@@ -1868,7 +1872,7 @@ pub fn convert_to_worktree_with_runner(
     Ok(Some(buf))
 }
 
-/// Like [`convert_to_worktree`] without delayed-checkout queueing (always materializes or errors).
+/// Like `convert_to_worktree` without delayed-checkout queueing (always materializes or errors).
 pub fn convert_to_worktree_eager(
     data: &[u8],
     rel_path: &str,
@@ -1908,7 +1912,7 @@ pub fn convert_to_worktree_eager(
 /// - `conv` — line-ending configuration (`core.autocrlf`, `core.eol`).
 /// - `attrs` — the path's resolved attributes.
 #[must_use]
-pub fn worktree_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+pub(crate) fn worktree_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
     !attrs.ident
         && attrs.working_tree_encoding.is_none()
         && attrs.filter_smudge.is_none()

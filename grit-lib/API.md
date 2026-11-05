@@ -66,13 +66,13 @@ Use this checklist before merging a new or widened public API:
 
 ## Audit
 
-Snapshot date: **2026-11-05**, from committed [`public-api.txt`](public-api.txt) (**33 397** lines; `wc -l` on the file). Top-level modules match:
+Snapshot date: **2026-11-05**, from committed [`public-api.txt`](public-api.txt) (**27 980** lines; `wc -l` on the file). Top-level modules match:
 
 ```bash
 grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt
 ```
 
-**External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **432** repo-first and **157** `_with_` function names; the baseline still records **33 295** `public_api_lines` until the ratchet step lands, while the committed snapshot file is **33 397** lines today.
+**External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **385** repo-first and **112** `_with_`-style function names; the baseline records **27 980** `public_api_lines`, matching the committed snapshot file.
 
 ### Regenerating counts
 
@@ -222,3 +222,18 @@ Regenerate with `make public-api` when you intentionally change the supported su
 ### API ratchet (`make api-ratchet-check`)
 
 Quality counts in [`api-ratchet.toml`](api-ratchet.toml) must not rise without an intentional fix; update the baseline with `make api-ratchet` when counts fall. See [`TESTING.md`](../TESTING.md).
+
+### Results (visibility sweep: refs, config, worktree, index and small root modules)
+
+| Metric | Before (post–objects sweep on `main`) | After (this step) |
+| --- | ---: | ---: |
+| `public_api_lines` | **28 373** | **27 980** (−393, ~1.4%) |
+| Top-level `pub mod grit_lib::*` | **36** | **36** |
+
+**Done in this step:** removed orphan root `bench_fixture` tree; `config::ident_config` and nested helpers crate-private where tests/CLI allow; `PARALLEL_STAT_MIN_ENTRIES` moved behind `test-support` counters; bulk `pub(crate)` on symbols not referenced from `grit-lib/tests`, `grit-cli`, or examples (scripts under `scripts/visibility_sweep_*.py`, `restore_public_from_compile_errors.py`); rustdoc links to privatized items rewritten to plain names; review follow-up kept `#[doc(hidden)] pub mod repo_relpath` and reverted accidental `pub` expansions; [`api-ratchet.toml`](api-ratchet.toml) baseline updated to **27 980**.
+
+**Ratchet:** Plan target ≤ 29 300 lines is met (**27 980**). Cumulative reduction from the original audit baseline (32 590) is **4 610** lines (~14.1%).
+
+**Top-level module count:** Still **36** (target ≤ 33 not met). `repo_relpath` stays `#[doc(hidden)] pub mod` (CLI path display); `ident` and `worktree::pathspec` unchanged per canonical-modules guidance.
+
+**Audit rows (this step):** `bench_fixture` root alias — **done**. `PARALLEL_STAT_MIN_ENTRIES`, probe hooks — **done** or owned by test-only item. Domain modules — **keep** with nested surface reduced where tests/CLI allow; branch-tracking / pathspec types used by CLI remain **public** (merge into repository handles deferred to later API items).

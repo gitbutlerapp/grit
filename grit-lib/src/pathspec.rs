@@ -807,7 +807,7 @@ pub fn pathspec_is_exclude(spec: &str) -> bool {
 /// trigger that helper alone, but Git's implicit match-all still requires walking non-excluded
 /// directories so nested paths can match [`matches_pathspec_list`].
 #[must_use]
-pub fn pathspec_wants_descent_for_rev_tree(path: &str, specs: &[String]) -> bool {
+pub(crate) fn pathspec_wants_descent_for_rev_tree(path: &str, specs: &[String]) -> bool {
     if specs.is_empty() {
         return true;
     }
@@ -999,7 +999,7 @@ mod pathspec_descent_tests {
     }
 }
 
-/// Like [`matches_pathspec_set_for_object`], but uses [`matches_ls_tree_pathspec`] for each
+/// Like [`matches_pathspec_set_for_object`], but uses `matches_ls_tree_pathspec` for each
 /// element so `ls-files` / index filtering agrees with `ls-tree` on patterns such as `a[a]`.
 #[must_use]
 pub fn matches_pathspec_set_for_object_ls_tree(
@@ -1091,7 +1091,7 @@ pub fn pathspec_has_top(spec: &str) -> bool {
 /// [`crate::repo::Repository::pathspec_matcher`], which loads the repository's attributes and
 /// validates the clauses, or [`matches_pathspec_list_for_object`] with caller-supplied rules.
 #[must_use]
-pub fn pathspec_has_attr_magic(spec: &str) -> bool {
+pub(crate) fn pathspec_has_attr_magic(spec: &str) -> bool {
     // Attr magic only exists in long form; skip the allocating parse for every other spec.
     spec.starts_with(":(") && spec.contains("attr:") && !attr_clauses(spec).is_empty()
 }
@@ -1103,7 +1103,7 @@ pub fn pathspec_has_attr_magic(spec: &str) -> bool {
 /// paths reads them once. Attr requirements see `[attr]` macro expansion and match attribute
 /// patterns case-insensitively when `core.ignorecase` is set, as Git does. Paths are treated as regular files: a spec ending in `/` does not match
 /// a path equal to its directory, and `builtin_objectmode` reads as `100644`. Use
-/// [`matches_pathspec_list_for_object`] when the entry mode matters.
+/// `matches_pathspec_list_for_object` when the entry mode matters.
 #[derive(Debug, Clone)]
 pub struct PathspecMatcher<'s> {
     specs: Cow<'s, [String]>,
@@ -1114,6 +1114,7 @@ pub struct PathspecMatcher<'s> {
 }
 
 impl<'s> PathspecMatcher<'s> {
+    /// Build a matcher from pathspec strings and optional parsed gitattributes.
     pub(crate) fn new(
         specs: &'s [String],
         precompose: bool,
@@ -1214,7 +1215,7 @@ pub(crate) struct AttrLookup<'a> {
 }
 
 impl<'a> AttrLookup<'a> {
-    pub(crate) fn new(rules: &'a [AttrRule], macros: &'a MacroTable, icase: bool) -> Self {
+    pub fn new(rules: &'a [AttrRule], macros: &'a MacroTable, icase: bool) -> Self {
         Self {
             rules,
             macros: Some(macros),
@@ -1376,7 +1377,7 @@ pub fn extend_pathspec_list_implicit_cwd(
 /// No `.gitattributes` rules are available here, so a positive `:(attr:...)` spec never matches
 /// and an exclude `:(exclude,attr:...)` spec never excludes. Use
 /// [`crate::repo::Repository::paths_match_pathspecs`] or [`matches_pathspec_list_for_object`]
-/// when specs may carry attr magic (see [`pathspec_has_attr_magic`]).
+/// when specs may carry attr magic (see `pathspec_has_attr_magic`).
 #[must_use]
 pub fn matches_pathspec_list(path: &str, specs: &[String]) -> bool {
     matches_pathspec_list_with_context(path, specs, PathspecMatchContext::default())
@@ -1550,7 +1551,7 @@ struct LiteralPathspecSet {
 
 impl<'a> PathspecListMatcher<'a> {
     /// Prepare `specs` for repeated matching under `ctx`.
-    pub(crate) fn new(specs: &'a [String], ctx: PathspecMatchContext) -> Self {
+    pub fn new(specs: &'a [String], ctx: PathspecMatchContext) -> Self {
         let all_plain =
             !specs.is_empty() && specs.iter().all(|s| is_plain_literal_pathspec(s, ctx));
         let literals = all_plain.then(|| {
@@ -1818,8 +1819,8 @@ pub struct PathspecMatchContext {
 /// [`matches_pathspec_with_context`].
 ///
 /// `:(attr:...)` requirements are not evaluated here (only the pattern part is matched); use
-/// [`matches_pathspec_for_object`] or [`crate::repo::Repository::paths_match_pathspecs`] for
-/// specs where [`pathspec_has_attr_magic`] is true.
+/// `matches_pathspec_for_object` or [`crate::repo::Repository::paths_match_pathspecs`] for
+/// specs where `pathspec_has_attr_magic` is true.
 #[must_use]
 pub fn matches_pathspec(spec: &str, path: &str) -> bool {
     matches_pathspec_with_context(spec, path, PathspecMatchContext::default())
@@ -1922,7 +1923,7 @@ pub fn context_from_mode_octal(mode: &str) -> PathspecMatchContext {
 
 /// Classify a raw Git mode (e.g. from an index or tree entry) for pathspec matching.
 #[must_use]
-pub fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
+pub(crate) fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
     let ty = mode & 0o170000;
     PathspecMatchContext {
         is_directory: ty == 0o040000,
@@ -1937,7 +1938,7 @@ pub fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
 /// starters unless a `*` or `?` appears — so `a[a]` matches the literal directory `a[a]` (t3102),
 /// while `a*` matches `a/one`, `aa/two`, `a[a]/three`, …
 #[must_use]
-pub fn matches_ls_tree_pathspec(
+pub(crate) fn matches_ls_tree_pathspec(
     spec: &str,
     path: &str,
     mode: u32,
@@ -2017,7 +2018,7 @@ pub fn matches_ls_tree_pathspec(
 ///
 /// `mode` supplies directory/gitlink context for literal pathspecs ending in `/`.
 #[must_use]
-pub fn matches_pathspec_for_object(
+pub(crate) fn matches_pathspec_for_object(
     spec: &str,
     path: &str,
     mode: u32,
@@ -2291,7 +2292,9 @@ fn prepend_cwd_to_short_exclude_pathspec(spec: &str, cwd: &str) -> Option<String
 
 /// Build [`PathspecMatchContext`] with optional NFC path normalization for comparisons.
 #[must_use]
-pub fn pathspec_match_context_with_precompose(precompose_paths: bool) -> PathspecMatchContext {
+pub(crate) fn pathspec_match_context_with_precompose(
+    precompose_paths: bool,
+) -> PathspecMatchContext {
     PathspecMatchContext {
         precompose_paths,
         ..PathspecMatchContext::default()
@@ -2314,7 +2317,7 @@ pub fn matches_pathspec_list_precompose(
 
 /// True when argv pathspec strings must not be NFC-normalized (magic syntax).
 #[must_use]
-pub fn argv_pathspec_preserves_spelling(pathspec: &str) -> bool {
+pub(crate) fn argv_pathspec_preserves_spelling(pathspec: &str) -> bool {
     pathspec.starts_with(":(")
         || pathspec.starts_with(":/")
         || pathspec.starts_with(":!")
@@ -2336,11 +2339,11 @@ pub fn precompose_argv_pathspec(pathspec: &str) -> Cow<'_, str> {
 /// `prefix` is the current directory relative to the work tree (no trailing slash),
 /// or `None` when cwd is the work tree root.
 #[must_use]
-pub fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) -> String {
+pub(crate) fn resolve_pathspec(pathspec: &str, work_tree: &Path, prefix: Option<&str>) -> String {
     resolve_pathspec_with_argv_precompose(pathspec, work_tree, prefix, false)
 }
 
-/// Like [`resolve_pathspec`], but NFC-normalizes literal argv path segments when requested.
+/// Like `resolve_pathspec`, but NFC-normalizes literal argv path segments when requested.
 #[must_use]
 pub fn resolve_pathspec_with_argv_precompose(
     pathspec: &str,
@@ -2442,7 +2445,7 @@ fn resolve_pathspec_impl(pathspec: &str, work_tree: &Path, prefix: Option<&str>)
 
 /// Resolve a pathspec and ensure it lies inside `work_tree` (used by `git add`, etc.).
 ///
-/// Returns [`PathOutsideRepository`] when resolution stays absolute, matching Git's
+/// Returns `PathOutsideRepository` when resolution stays absolute, matching Git's
 /// `'%s' is outside repository at '%s'` fatal (t7010).
 pub fn resolve_pathspec_in_worktree(
     elt: &str,
@@ -2483,7 +2486,8 @@ pub(crate) fn resolve_pathspec_in_worktree_with_argv_precompose(
 ///
 /// Accepts repo-relative or absolute paths under `work_tree`.
 #[must_use]
-pub fn normalize_worktree_file_path(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn normalize_worktree_file_path(
     file_path: &str,
     work_tree: &Path,
     prefix: Option<&str>,
@@ -2493,7 +2497,7 @@ pub fn normalize_worktree_file_path(
 
 /// Like [`normalize_worktree_file_path`], honoring `core.precomposeunicode` argv normalization for `git_dir`.
 #[must_use]
-pub fn normalize_worktree_file_path_with_git_dir(
+pub(crate) fn normalize_worktree_file_path_with_git_dir(
     file_path: &str,
     work_tree: &Path,
     prefix: Option<&str>,

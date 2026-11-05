@@ -4067,7 +4067,7 @@ struct ContainsFrame {
 impl<'repo> RefContainsMemo<'repo> {
     /// Returns `None` for rewritten parents: ancestry need not be acyclic, so
     /// callers must use the batch walk instead of inferring negative ancestors.
-    pub(crate) fn new(repo: &'repo Repository, targets: &[ObjectId]) -> Result<Option<Self>> {
+    pub fn new(repo: &'repo Repository, targets: &[ObjectId]) -> Result<Option<Self>> {
         let mut graph = CommitGraphCache::new(repo);
         if graph.has_parent_rewrites()? {
             return Ok(None);
@@ -4224,7 +4224,7 @@ pub(crate) struct RefContainsBatch<'repo> {
 
 impl<'repo> RefContainsBatch<'repo> {
     /// Start a batch session on `repo`.
-    pub(crate) fn new(repo: &'repo Repository) -> Self {
+    pub fn new(repo: &'repo Repository) -> Self {
         Self {
             graph: CommitGraphCache::new(repo),
             tips: Vec::new(),

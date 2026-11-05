@@ -46,6 +46,7 @@ pub fn format_path_stored(prefix: &str, name: &[u8]) -> String {
     storage_string(&join_rel(&prefix_bytes, name))
 }
 
+/// Join a parent repository-relative path with a single name segment using `/`.
 #[must_use]
 pub fn join_rel(parent: &[u8], name: &[u8]) -> Vec<u8> {
     if parent.is_empty() {

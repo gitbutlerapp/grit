@@ -85,7 +85,7 @@ pub enum FetchRefspecPlan {
 /// Errors while resolving fetch refspecs before transfer.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum FetchRefspecError {
-    /// A refspec string failed [`parse_fetch_refspec`].
+    /// A refspec string failed `parse_fetch_refspec`.
     #[error("invalid refspec '{spec}': {message}")]
     InvalidRefspec {
         /// Original refspec string.

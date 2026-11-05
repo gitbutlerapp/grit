@@ -5629,7 +5629,7 @@ fn precreate_checkout_parent_dirs(
 }
 
 impl LeadingDirCache {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::with_protect(ProtectOptions::default())
     }
 

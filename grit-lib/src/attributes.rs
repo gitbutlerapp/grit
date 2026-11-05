@@ -150,7 +150,7 @@ pub struct ParsedGitAttributes {
 
 /// Returns true if `name` is reserved (`builtin_*` except the real builtin names Git allows).
 #[must_use]
-pub fn is_reserved_builtin_name(name: &str) -> bool {
+pub(crate) fn is_reserved_builtin_name(name: &str) -> bool {
     let Some(rest) = name.strip_prefix("builtin_") else {
         return false;
     };
@@ -160,7 +160,8 @@ pub fn is_reserved_builtin_name(name: &str) -> bool {
 /// Validate user-defined attribute names in parsed rules (for `git add`).
 ///
 /// Returns an error string matching Git when a rule uses an invalid `builtin_*` name.
-pub fn validate_rules_for_add(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn validate_rules_for_add(
     rules: &[AttrRule],
     display_path: &str,
 ) -> std::result::Result<(), String> {
@@ -181,7 +182,7 @@ pub fn validate_rules_for_add(
 }
 
 /// Collect warnings for invalid `builtin_*` assignments (check-attr continues).
-pub fn builtin_warnings_for_rules(rules: &[AttrRule], display_path: &str) -> Vec<String> {
+pub(crate) fn builtin_warnings_for_rules(rules: &[AttrRule], display_path: &str) -> Vec<String> {
     let mut w = Vec::new();
     for rule in rules {
         if rule.skip {
@@ -233,13 +234,16 @@ fn read_gitattributes_maybe_symlink(
 
 /// Parse one gitattributes file from disk (patterns are relative to `attr_base`, the directory
 /// containing the file — use `""` for the repository root file).
-pub fn parse_gitattributes_file_content(content: &str, display_path: &str) -> ParsedGitAttributes {
+pub(crate) fn parse_gitattributes_file_content(
+    content: &str,
+    display_path: &str,
+) -> ParsedGitAttributes {
     parse_gitattributes_content_impl(content, display_path, false, "")
 }
 
 /// Parse attributes defined in a `.gitattributes` file located in `attr_base` (repo-relative,
 /// `/` separators, no trailing slash; empty string for the repository root).
-pub fn parse_gitattributes_file_content_with_base(
+pub(crate) fn parse_gitattributes_file_content_with_base(
     content: &str,
     display_path: &str,
     attr_base: &str,
@@ -560,7 +564,7 @@ fn path_dir_prefix(rel_path: &str) -> &str {
 ///
 /// Rules from nested attribute files only affect paths inside that directory tree.
 #[must_use]
-pub fn attr_rule_applies_to_path(attr_base: &str, rel_path: &str, icase: bool) -> bool {
+pub(crate) fn attr_rule_applies_to_path(attr_base: &str, rel_path: &str, icase: bool) -> bool {
     if attr_base.is_empty() {
         return true;
     }
@@ -587,7 +591,8 @@ pub fn attr_rule_applies_to_path(attr_base: &str, rel_path: &str, icase: bool) -
 
 /// Match one parsed rule against a repo-relative path (Git `path_matches` / `attr.c`).
 #[must_use]
-pub fn attr_rule_matches(rule: &AttrRule, rel_path: &str, icase: bool) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn attr_rule_matches(rule: &AttrRule, rel_path: &str, icase: bool) -> bool {
     if !attr_rule_applies_to_path(&rule.attr_base, rel_path, icase) {
         return false;
     }
@@ -728,7 +733,8 @@ pub fn collect_attrs_for_path(
 
 /// Quote a path for `check-attr` output (C-style) when needed.
 #[must_use]
-pub fn quote_path_for_check_attr(path: &str) -> String {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn quote_path_for_check_attr(path: &str) -> String {
     let needs = path
         .chars()
         .any(|c| c.is_control() || c == '"' || c == '\\');
@@ -1036,7 +1042,8 @@ pub(crate) fn load_gitattributes_stack_uncached(
 /// Bare repository: only `info/attributes` from disk (no in-repo `.gitattributes` file).
 ///
 /// Memoized like [`load_gitattributes_stack`], keyed by `git_dir`.
-pub fn load_gitattributes_bare(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn load_gitattributes_bare(
     repo: &Repository,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
     repo.caches().load_gitattributes_bare(repo)
@@ -1139,7 +1146,8 @@ fn merge_collected_gitattributes(
 }
 
 /// `load_gitattributes_from_tree` function.
-pub fn load_gitattributes_from_tree(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn load_gitattributes_from_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
@@ -1235,7 +1243,8 @@ fn append_gitattributes_from_tree(
 ///
 /// Returns an error when a tree-ish source is set from the environment or command line and cannot
 /// be resolved (Git: *"bad --attr-source or GIT_ATTR_SOURCE"*).
-pub fn load_gitattributes_for_diff(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn load_gitattributes_for_diff(
     repo: &Repository,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
     let (treeish, ignore_bad_tree) = resolve_attr_treeish(repo, None)?;
@@ -1261,7 +1270,8 @@ pub fn load_gitattributes_for_diff(
 /// The second return value is `ignore_bad_resolution`: when true (only for `attr.tree` from
 /// config), an unresolvable tree-ish falls back to reading `.gitattributes` from the work tree
 /// or index instead of erroring (matches Git `compute_default_attr_source`).
-pub fn resolve_attr_treeish(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn resolve_attr_treeish(
     repo: &Repository,
     source_arg: Option<&str>,
 ) -> std::result::Result<(Option<String>, bool), crate::error::Error> {
@@ -1440,7 +1450,8 @@ pub fn load_gitattributes_for_check_attr_source(
 /// Submodule checkout directories (`.git` is a file containing `gitdir:`) report `160000`
 /// like Git, not `040000`.
 #[must_use]
-pub fn builtin_objectmode_worktree(repo: &Repository, rel_path: &str) -> Option<String> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn builtin_objectmode_worktree(repo: &Repository, rel_path: &str) -> Option<String> {
     let wt = repo.work_tree()?;
     let p = wt.join(rel_path);
     let meta = fs::symlink_metadata(&p).ok()?;

@@ -10,7 +10,7 @@ pub(crate) struct RenameBlobCache {
 }
 
 impl RenameBlobCache {
-    pub(crate) fn new(deleted_len: usize, added_len: usize) -> Self {
+    pub fn new(deleted_len: usize, added_len: usize) -> Self {
         Self {
             deleted_bytes: vec![None; deleted_len],
             added_bytes: vec![None; added_len],

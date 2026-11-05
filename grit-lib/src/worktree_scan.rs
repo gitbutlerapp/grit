@@ -912,7 +912,7 @@ pub(crate) struct RealDirChain {
 #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
 impl RealDirChain {
     /// Open a handle on `work_tree` (following symlinks in the work tree's own path).
-    pub(crate) fn open(work_tree: &Path) -> Self {
+    pub fn open(work_tree: &Path) -> Self {
         use std::os::unix::fs::OpenOptionsExt;
         let root = fs::OpenOptions::new()
             .read(true)

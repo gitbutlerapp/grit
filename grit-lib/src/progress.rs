@@ -329,7 +329,7 @@ pub(crate) struct HttpStackWatch(pub(crate) std::sync::Arc<std::sync::atomic::At
 
 impl HttpStackWatch {
     #[must_use]
-    pub(crate) fn new(cancel: &dyn Cancel) -> Self {
+    pub fn new(cancel: &dyn Cancel) -> Self {
         Self(cancel.shared_watch().unwrap_or_else(|| {
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(cancel.is_cancelled()))
         }))
@@ -416,7 +416,7 @@ pub(crate) struct StackCancelPoll {
 impl StackCancelPoll {
     /// Capture `progress` and `watch` for [`Self::poll_owner`].
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         progress: &mut WatchProgress<'_>,
         watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
@@ -483,7 +483,7 @@ pub(crate) struct CancelSignal<'a> {
 }
 
 impl<'a> CancelSignal<'a> {
-    pub(crate) fn new(cancel: &'a dyn Cancel) -> Self {
+    pub fn new(cancel: &'a dyn Cancel) -> Self {
         Self {
             cancel,
             flag: cancel_watch_arc(cancel),
@@ -574,7 +574,7 @@ pub(crate) struct ProgressScope<'a> {
 }
 
 impl<'a> ProgressScope<'a> {
-    pub(crate) fn new(sink: &'a mut dyn ProgressSink, cancel: &'a dyn Cancel) -> Self {
+    pub fn new(sink: &'a mut dyn ProgressSink, cancel: &'a dyn Cancel) -> Self {
         let watch = cancel_watch_arc(cancel);
         Self {
             sink: WatchProgress::new(sink, std::sync::Arc::clone(&watch)),
@@ -605,7 +605,7 @@ pub(crate) struct UncancellableProgress<'a> {
 }
 
 impl<'a> UncancellableProgress<'a> {
-    pub(crate) fn new(inner: &'a mut dyn ProgressSink) -> Self {
+    pub fn new(inner: &'a mut dyn ProgressSink) -> Self {
         Self { inner }
     }
 }

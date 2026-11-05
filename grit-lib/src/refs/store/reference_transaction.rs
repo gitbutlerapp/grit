@@ -152,7 +152,7 @@ pub(crate) struct HookWrappedPrepared<'a> {
 }
 
 impl<'a> HookWrappedPrepared<'a> {
-    pub(crate) fn new(
+    pub fn new(
         inner: Box<dyn PreparedRefTransaction + Send + 'a>,
         hooks: Arc<RefHookContext>,
         lines: Vec<ReferenceTransactionLine>,

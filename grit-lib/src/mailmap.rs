@@ -214,7 +214,7 @@ fn read_mailmap_line_into(table: &mut MailmapTable, line: &str) {
 }
 
 /// Append mappings from a mailmap file body (Git `read_mailmap_string`).
-pub fn read_mailmap_string(table: &mut MailmapTable, buf: &str) {
+pub(crate) fn read_mailmap_string(table: &mut MailmapTable, buf: &str) {
     let mut start = 0usize;
     for (i, ch) in buf.char_indices() {
         if ch == '\n' {
@@ -309,7 +309,8 @@ pub fn parse_contact(contact: &str) -> (Option<String>, Option<String>) {
 
 /// Map `(name, email)` through the mailmap; uses [`MailmapTable`] internally.
 #[must_use]
-pub fn map_contact(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn map_contact(
     name: Option<&str>,
     email: Option<&str>,
     mailmap: &[MailmapEntry],
@@ -405,7 +406,8 @@ fn read_optional_mailmap_file(path: &Path, nofollow: bool) -> Result<String> {
 ///
 /// Returns [`Error::PathError`] when `spec` does not resolve, the object cannot be read,
 /// or it names an object that is not a blob.
-pub fn read_mailmap_blob(repo: &Repository, spec: &str) -> Result<String> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn read_mailmap_blob(repo: &Repository, spec: &str) -> Result<String> {
     let oid = resolve_revision(repo, spec)
         .map_err(|e| Error::PathError(format!("resolving mailmap blob '{spec}': {e}")))?;
     match read_blob_text(repo, &oid, spec)? {
@@ -465,7 +467,7 @@ pub fn load_mailmap_table(repo: &Repository) -> Result<MailmapTable> {
 }
 
 /// Merge Git's configured mailmap sources into `table`.
-pub fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> Result<()> {
+pub(crate) fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> Result<()> {
     let config = repo.config()?;
     let mut mailmap_blob = config.get("mailmap.blob");
     let is_bare = repo.work_tree().is_none();
@@ -507,7 +509,8 @@ pub fn load_mailmap(repo: &Repository) -> Result<Vec<MailmapEntry>> {
 ///
 /// Git applies mailmap only to the `Name <email>` prefix; the trailing ` <epoch> <tz>` is preserved.
 #[must_use]
-pub fn apply_mailmap_to_commit_or_tag_bytes(data: &[u8], mailmap: &MailmapTable) -> Vec<u8> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn apply_mailmap_to_commit_or_tag_bytes(data: &[u8], mailmap: &MailmapTable) -> Vec<u8> {
     if mailmap.is_empty() {
         return data.to_vec();
     }

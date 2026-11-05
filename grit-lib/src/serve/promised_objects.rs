@@ -93,7 +93,7 @@ impl<'a> PromisorObjects<'a> {
     /// # Errors
     ///
     /// Pack directory listing or index parse failures.
-    pub(crate) fn new(repo: &'a Repository) -> crate::error::Result<Self> {
+    pub fn new(repo: &'a Repository) -> crate::error::Result<Self> {
         let promisor_indexes = if repo.odb().uses_files_primary() {
             repo.odb()
                 .local_pack_indexes()?

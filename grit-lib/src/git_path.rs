@@ -450,7 +450,7 @@ fn key_has_prefix_node(key: &[u8], node: &[u8]) -> bool {
 /// directory, mirroring Git's `update_common_dir` decision (`git/path.c`).
 ///
 /// `rel` is the component after the git dir (for example the reflog prefix from
-/// [`crate::refs::store::paths::logs_refs_rel`], `config`, or `HEAD`). Any trailing `.lock` suffix is ignored for the decision, exactly as
+/// `logs_refs_rel`, `config`, or `HEAD`). Any trailing `.lock` suffix is ignored for the decision, exactly as
 /// `update_common_dir` strips `LOCK_SUFFIX` before consulting the trie.
 #[must_use]
 pub fn is_common_git_path(rel: &str) -> bool {
@@ -538,7 +538,7 @@ pub(crate) fn strip_verbatim_prefix_from_subprocess_path_vars(set: &mut [(OsStri
 
 /// Strip Windows extended-length `\\?\` / `\\?\UNC\` prefixes for comparison and display.
 #[must_use]
-pub fn strip_verbatim_path_prefix_str(path: &str) -> Cow<'_, str> {
+pub(crate) fn strip_verbatim_path_prefix_str(path: &str) -> Cow<'_, str> {
     if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
         Cow::Owned(format!(r"\\{rest}"))
     } else if let Some(rest) = path.strip_prefix(r"\\?\") {
@@ -738,7 +738,7 @@ fn lexical_normalize_path_buf(path: PathBuf) -> PathBuf {
 
 /// Repository-relative path with forward slashes when `path` lies under `work_tree`.
 #[must_use]
-pub fn strip_worktree_prefix(path: &Path, work_tree: &Path) -> Option<String> {
+pub(crate) fn strip_worktree_prefix(path: &Path, work_tree: &Path) -> Option<String> {
     let path_key = apply_macos_private_alias_for_compare(path_lexical_for_disk_compare(path));
     let wt_key = path_for_disk_compare(work_tree);
     let rel = path_key.strip_prefix(&wt_key).ok()?;
@@ -747,7 +747,7 @@ pub fn strip_worktree_prefix(path: &Path, work_tree: &Path) -> Option<String> {
 
 /// Convert a filesystem path to Git's slash-separated repo-relative form.
 #[must_use]
-pub fn path_to_git_slash(path: &Path) -> String {
+pub(crate) fn path_to_git_slash(path: &Path) -> String {
     path.components()
         .filter_map(|c| match c {
             Component::Normal(s) => Some(s.to_string_lossy().into_owned()),

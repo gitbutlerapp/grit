@@ -2041,7 +2041,7 @@ impl ConfigSet {
     /// Whether paths are stored NFC-precomposed (`core.precomposeUnicode`, default `false`).
     ///
     /// This is the value in this set only; callers that may not have a loaded set use
-    /// [`effective_core_precomposeunicode_with_config`](crate::precompose_config::effective_core_precomposeunicode_with_config).
+    /// `effective_core_precomposeunicode_with_config`.
     #[must_use]
     pub fn precompose_unicode(&self) -> bool {
         self.bool_or("core.precomposeUnicode", false)
@@ -3059,7 +3059,7 @@ pub(crate) struct ConfigCacheKey {
 }
 
 impl ConfigCacheKey {
-    pub(crate) fn new(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Self {
+    pub fn new(git_dir: Option<&Path>, opts: &LoadConfigOptions) -> Self {
         Self {
             git_dir: git_dir.map(Path::to_path_buf),
             include_system: opts.include_system,

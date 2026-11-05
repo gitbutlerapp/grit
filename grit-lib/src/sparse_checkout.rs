@@ -3,13 +3,15 @@
 //! Cone-mode parsing and matching follow Git's `add_pattern_to_hashsets` and
 //! `path_matches_pattern_list` closely enough for `read-tree` and plumbing tests.
 
+#![allow(dead_code)] // cone/non-cone helpers are covered from integration tests
+
 use std::collections::BTreeSet;
 
 use crate::wildmatch::{wildmatch, WM_PATHNAME};
 
 /// Parsed non-cone sparse-checkout patterns in file order (last match wins).
 #[derive(Debug, Clone)]
-pub struct NonConePatterns {
+pub(crate) struct NonConePatterns {
     lines: Vec<String>,
 }
 
@@ -163,7 +165,7 @@ fn non_cone_line_matches(pattern: &str, path: &str) -> bool {
 
 /// Cone-mode sparse state: keys use a leading `/` (Git's internal form).
 #[derive(Debug, Clone, Default)]
-pub struct ConePatterns {
+pub(crate) struct ConePatterns {
     /// `full_cone` field.
     pub full_cone: bool,
     /// `recursive_slash` field.
@@ -447,7 +449,8 @@ impl ConePatterns {
 
 /// Load sparse-checkout file; returns `(cone_parse_ok, cone, non_cone)`.
 #[must_use]
-pub fn load_sparse_checkout(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn load_sparse_checkout(
     git_dir: &std::path::Path,
     cone_config: bool,
 ) -> (bool, Option<ConePatterns>, NonConePatterns) {
@@ -456,7 +459,8 @@ pub fn load_sparse_checkout(
 }
 
 /// Like [`load_sparse_checkout`] but appends cone-parse warnings (for stderr).
-pub fn load_sparse_checkout_with_warnings(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn load_sparse_checkout_with_warnings(
     git_dir: &std::path::Path,
     cone_config: bool,
     warnings: &mut Vec<String>,
@@ -477,7 +481,8 @@ pub fn load_sparse_checkout_with_warnings(
 
 /// If `path` is included in the sparse checkout.
 #[must_use]
-pub fn path_in_sparse_checkout(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn path_in_sparse_checkout(
     path: &str,
     cone_config: bool,
     cone: Option<&ConePatterns>,
@@ -797,7 +802,7 @@ fn path_found(path: &str, data: &mut PathFoundData) -> bool {
 ///
 /// Matches Git's `clear_skip_worktree_from_present_files` (`sparse-index.c`) for a full
 /// (non-sparse-index) in-memory index.
-pub fn clear_skip_worktree_from_present_files(
+pub(crate) fn clear_skip_worktree_from_present_files(
     git_dir: &std::path::Path,
     work_tree: &std::path::Path,
     index: &mut crate::index::Index,
@@ -840,7 +845,7 @@ pub fn clear_skip_worktree_from_present_files(
 
 /// Mutable cone sparse state (Git `pattern_list` hashmaps) for building `sparse-checkout` files.
 #[derive(Debug, Clone, Default)]
-pub struct ConeWorkspace {
+pub(crate) struct ConeWorkspace {
     /// `recursive_slash` field.
     pub recursive_slash: BTreeSet<String>,
     /// `parent_slash` field.
@@ -983,7 +988,7 @@ fn escape_cone_path_component(path_with_leading_slash: &str) -> String {
 }
 
 /// Read non-empty, non-comment lines from `.git/info/sparse-checkout`.
-pub fn parse_sparse_checkout_file(content: &str) -> Vec<String> {
+pub(crate) fn parse_sparse_checkout_file(content: &str) -> Vec<String> {
     content
         .lines()
         .map(|l| l.trim())
@@ -994,7 +999,7 @@ pub fn parse_sparse_checkout_file(content: &str) -> Vec<String> {
 
 /// Returns true when the sparse-checkout file uses Git's expanded cone format
 /// (starts with `/*` then `!/*/`).
-pub fn sparse_checkout_lines_look_like_expanded_cone(lines: &[String]) -> bool {
+pub(crate) fn sparse_checkout_lines_look_like_expanded_cone(lines: &[String]) -> bool {
     lines.len() >= 2 && lines[0] == "/*" && lines[1] == "!/*/"
 }
 
@@ -1113,7 +1118,7 @@ fn path_in_expanded_cone(path: &str, lines: &[String]) -> bool {
 /// expanded template (`/*`, `!/*/`, …). Raw lines like `a` are matched as
 /// non-cone patterns even if `core.sparseCheckoutCone` is true.
 #[must_use]
-pub fn effective_cone_mode_for_sparse_file(cone_config: bool, lines: &[String]) -> bool {
+pub(crate) fn effective_cone_mode_for_sparse_file(cone_config: bool, lines: &[String]) -> bool {
     cone_config && sparse_checkout_lines_look_like_expanded_cone(lines)
 }
 
@@ -1122,7 +1127,8 @@ pub fn effective_cone_mode_for_sparse_file(cone_config: bool, lines: &[String]) 
 ///
 /// `dirs` are worktree-relative directory paths as the user typed them (no
 /// leading slash, `/` separators). Empty entries are ignored.
-pub fn build_expanded_cone_sparse_checkout_lines(dirs: &[String]) -> Vec<String> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn build_expanded_cone_sparse_checkout_lines(dirs: &[String]) -> Vec<String> {
     let mut recursive: BTreeSet<String> = BTreeSet::new();
     for d in dirs {
         let t = d.trim().trim_start_matches('/').trim_end_matches('/');
@@ -1221,7 +1227,8 @@ fn recursive_set_has_strict_ancestor(recursive: &BTreeSet<String>, path: &str) -
 
 /// Parse recursive directory paths from an expanded cone sparse-checkout file
 /// (for merging on `sparse-checkout add`).
-pub fn parse_expanded_cone_recursive_dirs(lines: &[String]) -> Vec<String> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn parse_expanded_cone_recursive_dirs(lines: &[String]) -> Vec<String> {
     if !sparse_checkout_lines_look_like_expanded_cone(lines) {
         return Vec::new();
     }
@@ -1262,7 +1269,8 @@ pub fn parse_expanded_cone_recursive_dirs(lines: &[String]) -> Vec<String> {
 /// [`parse_expanded_cone_recursive_dirs`], which would skip those lines and wrongly treat the file as
 /// an empty cone list.
 #[must_use]
-pub fn cone_directory_inputs_for_add(content: &str) -> Vec<String> {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn cone_directory_inputs_for_add(content: &str) -> Vec<String> {
     let lines: Vec<String> = parse_sparse_checkout_file(content);
     if sparse_checkout_lines_look_like_expanded_cone(&lines) {
         let recursive = parse_expanded_cone_recursive_dirs(&lines);
@@ -1308,7 +1316,12 @@ pub fn cone_directory_inputs_for_add(content: &str) -> Vec<String> {
 /// parents) are tried until one matches or the path is exhausted.
 ///
 /// `path` must use `/` separators and be relative to the repository root.
-pub fn path_in_sparse_checkout_patterns(path: &str, patterns: &[String], cone_mode: bool) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn path_in_sparse_checkout_patterns(
+    path: &str,
+    patterns: &[String],
+    cone_mode: bool,
+) -> bool {
     if path.is_empty() || patterns.is_empty() {
         return true;
     }
@@ -1339,7 +1352,8 @@ pub fn path_in_sparse_checkout_patterns(path: &str, patterns: &[String], cone_mo
 ///
 /// When sparse-checkout is not in cone mode, Git treats every path as "in" for
 /// this check (backward compatibility for file destinations).
-pub fn path_in_cone_mode_sparse_checkout(
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn path_in_cone_mode_sparse_checkout(
     path: &str,
     patterns: &[String],
     cone_enabled: bool,
@@ -1352,7 +1366,11 @@ pub fn path_in_cone_mode_sparse_checkout(
 
 /// Returns true when `path` is included, using the same rules as
 /// `grit sparse-checkout` / `apply_sparse_patterns`.
-pub fn path_matches_sparse_patterns(path: &str, patterns: &[String], cone_mode: bool) -> bool {
+pub(crate) fn path_matches_sparse_patterns(
+    path: &str,
+    patterns: &[String],
+    cone_mode: bool,
+) -> bool {
     let expanded_cone = sparse_checkout_lines_look_like_expanded_cone(patterns);
     if expanded_cone {
         return path_in_expanded_cone(path, patterns);

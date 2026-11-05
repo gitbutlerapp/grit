@@ -409,7 +409,7 @@ impl<'a> ResidentBudget<'a> {
 
     /// Keep at most about `limit` bytes of `pack` resident.
     #[must_use]
-    pub(crate) fn new(pack: &'a PackData, limit: usize) -> Self {
+    pub fn new(pack: &'a PackData, limit: usize) -> Self {
         Self {
             pack: Some(pack),
             limit,

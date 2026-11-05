@@ -224,7 +224,7 @@ fn parse_refspec(refspec: &str, fetch: bool) -> Result<RefspecItem, RefspecError
 }
 
 /// Parse a fetch refspec, returning the parsed item or an error.
-pub fn parse_fetch_refspec(refspec: &str) -> Result<RefspecItem, RefspecError> {
+pub(crate) fn parse_fetch_refspec(refspec: &str) -> Result<RefspecItem, RefspecError> {
     parse_refspec(refspec, true)
 }
 
@@ -234,12 +234,14 @@ pub fn parse_push_refspec(refspec: &str) -> Result<RefspecItem, RefspecError> {
 }
 
 /// Returns `true` when `refspec` is a valid fetch refspec.
-pub fn valid_fetch_refspec(refspec: &str) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn valid_fetch_refspec(refspec: &str) -> bool {
     parse_refspec(refspec, true).is_ok()
 }
 
 /// Returns `true` when `refspec` is a valid push refspec.
-pub fn valid_push_refspec(refspec: &str) -> bool {
+#[allow(dead_code)] // integration / re-export use only
+pub(crate) fn valid_push_refspec(refspec: &str) -> bool {
     parse_refspec(refspec, false).is_ok()
 }
 

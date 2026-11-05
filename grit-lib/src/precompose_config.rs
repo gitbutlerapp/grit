@@ -191,7 +191,7 @@ pub fn effective_core_precomposeunicode(git_dir: Option<&Path>) -> bool {
 
 /// Like [`effective_core_precomposeunicode`], but uses an already-loaded config snapshot when provided.
 #[must_use]
-pub fn effective_core_precomposeunicode_with_config(
+pub(crate) fn effective_core_precomposeunicode_with_config(
     git_dir: Option<&Path>,
     config: Option<&crate::config::ConfigSet>,
 ) -> bool {
