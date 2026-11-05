@@ -32,7 +32,7 @@ use crate::context;
 use crate::diff_format::DiffFormatArgs;
 pub use crate::diff_render::DiffStat;
 use crate::diff_render::{self, diffstat_from_files};
-use crate::markdown::print_fenced_text;
+use crate::markdown::{escape_table_cell, format_inline_code, print_fenced_text};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 /// Inputs for `grit show`.
@@ -536,7 +536,7 @@ impl MarkdownRender for ShowPathOutcome {
                 text,
                 ..
             } => {
-                outln!(w, "## `{}`\n", spec);
+                outln!(w, "## {}\n", format_inline_code(spec));
                 outln!(w, "**Oid:** `{oid}`");
                 outln!(w, "**Size:** {size} bytes\n");
                 if *binary {
@@ -546,17 +546,17 @@ impl MarkdownRender for ShowPathOutcome {
                 }
             }
             ShowPathOutcome::Tree { spec, entries, .. } => {
-                outln!(w, "## `{}`\n", spec);
+                outln!(w, "## {}\n", format_inline_code(spec));
                 outln!(w, "| Mode | Type | OID | Path |");
                 outln!(w, "| --- | --- | --- | --- |");
                 for e in entries {
+                    let path_cell = format_inline_code(&escape_table_cell(&e.path));
                     outln!(
                         w,
-                        "| {} | {} | `{}` | `{}` |",
+                        "| {} | {} | `{}` | {path_cell} |",
                         e.mode,
                         e.object_type,
                         e.oid,
-                        e.path
                     );
                 }
             }

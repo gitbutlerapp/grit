@@ -1772,13 +1772,13 @@ impl DiffOutcome {
                     self.path_display.as_ref(),
                 )?;
                 let line = String::from_utf8(buf).unwrap_or_default();
-                outln!(w, "- `{}`", line.trim());
+                outln!(w, "- {}", markdown::format_inline_code(line.trim()));
             }
             return Ok(());
         }
         if fmt.human_name_only() {
             for file in &self.files {
-                outln!(w, "- `{}`", file.path);
+                outln!(w, "- {}", markdown::format_inline_code(&file.path));
             }
             return Ok(());
         }

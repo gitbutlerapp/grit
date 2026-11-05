@@ -125,7 +125,11 @@ impl HumanRender for BlameOutcome {
 
 impl MarkdownRender for BlameOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "## Blame: `{}`\n", self.file);
+        outln!(
+            w,
+            "## Blame: {}\n",
+            markdown::format_inline_code(&self.file)
+        );
         outln!(w, "Revision `{}`\n", self.rev);
         if self.display_lines.is_empty() {
             outln!(w, "No lines to show.\n");

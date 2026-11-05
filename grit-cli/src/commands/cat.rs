@@ -13,7 +13,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::context;
-use crate::markdown::print_fenced_text;
+use crate::markdown::{escape_table_cell, format_inline_code, print_fenced_text};
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// Blob payload in JSON (`--json` contract).
@@ -94,7 +94,7 @@ impl HumanRender for CatOutcome {
 impl MarkdownRender for CatOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Cat\n");
-        outln!(w, "- **spec:** `{}`", self.spec);
+        outln!(w, "- **spec:** {}", format_inline_code(&self.spec));
         outln!(w, "- **oid:** `{}`", self.oid);
         outln!(w, "- **kind:** {}", self.kind);
         outln!(w, "- **size:** {}", self.size);
@@ -116,13 +116,13 @@ impl MarkdownRender for CatOutcome {
                 outln!(w, "| Mode | Type | OID | Path |");
                 outln!(w, "| --- | --- | --- | --- |");
                 for e in entries {
+                    let path_cell = format_inline_code(&escape_table_cell(&e.path));
                     outln!(
                         w,
-                        "| {} | {} | `{}` | `{}` |",
+                        "| {} | {} | `{}` | {path_cell} |",
                         e.mode,
                         e.object_type,
                         e.oid,
-                        e.path.replace('|', "\\|")
                     );
                 }
             }
