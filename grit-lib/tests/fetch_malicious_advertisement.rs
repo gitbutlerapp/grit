@@ -161,7 +161,7 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
     let config_before = config_bytes(&git_dir);
 
     let mut script = Vec::new();
-    pkt_line::write_line(&mut script, &format!("{oid} {MALICIOUS}")).unwrap();
+    pkt_line::write_line_to_vec(&mut script, &format!("{oid} {MALICIOUS}")).unwrap();
     pkt_line::write_flush(&mut script).unwrap();
 
     let conn = ScriptedConn::new(script)
@@ -195,8 +195,8 @@ fn read_advertisement_v0_filters_malicious_ref_and_symref() {
     let oid = "aabbccddeeff00112233445566778899aabbccdd";
     let mut buf = Vec::new();
     let head = format!("{oid} HEAD\0symref=HEAD:{MALICIOUS} multi_ack");
-    pkt_line::write_line(&mut buf, &head).unwrap();
-    pkt_line::write_line(&mut buf, &format!("{oid} {MALICIOUS}")).unwrap();
+    pkt_line::write_line_to_vec(&mut buf, &head).unwrap();
+    pkt_line::write_line_to_vec(&mut buf, &format!("{oid} {MALICIOUS}")).unwrap();
     pkt_line::write_flush(&mut buf).unwrap();
 
     let adv = read_advertisement(&mut Cursor::new(buf)).unwrap();
