@@ -1,4 +1,3 @@
-grit_lib::commit_graph_file::commit_graph_chain_from_layers_for_test
 grit_lib::config::environment::Environment::git_test_assume_different_owner
 grit_lib::config::environment::Environment::git_test_no_write_rev_index
 grit_lib::config::environment::Environment::git_test_reftable_autocompaction
@@ -35,10 +34,3 @@ grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc
 grit_lib::prelude::RepositoryOptions::test_assume_different_owner
 grit_lib::remote::DefaultHttpClientFactory::create_for_probe
 grit_lib::remote::HttpClientFactory::create_for_probe
-grit_lib::repo::set_test_inject_index_write_fail
-grit_lib::repo::set_test_inject_index_write_fail_remaining
-grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs
-grit_lib::worktree_scan::WorktreeProbeScope
-grit_lib::worktree_scan::reset_worktree_metadata_probe
-grit_lib::worktree_scan::worktree_metadata_probe_count
-grit_lib::worktree_scan::worktree_path_resolve_probe_count
