@@ -258,7 +258,10 @@ fn issue_2258_invalid_symref_targets_leave_git_status_and_fsck_clean() {
         let grit = open(repo);
         for (name, target) in [
             ("HEAD", "foo"),
-            ("refs/heads/sym1", "foo"),
+            ("HEAD", "refs/heads/x\nref: refs/heads/evil"),
+            ("refs/heads/sym-a", "refs/heads/has space"),
+            ("refs/heads/sym-b", "refs/heads/../../config"),
+            ("refs/heads/sym-c", "refs/heads/trailing.lock"),
             ("refs/heads/loop", "refs/heads/loop"),
             ("HEAD", "refs/heads/a..b"),
         ] {
@@ -267,6 +270,9 @@ fn issue_2258_invalid_symref_targets_leave_git_status_and_fsck_clean() {
                 "{backend:?} {name} -> {target}"
             );
         }
+        commit_one(grit.refs(), symref("refs/heads/probe", "foo")).expect("one-level symref");
+        commit_one(grit.refs(), symref("refs/heads/probe2", "heads/main"))
+            .expect("two-component symref without refs/");
         assert!(git_ok(repo.worktree(), &["status", "--porcelain"]));
         assert!(git_ok(repo.worktree(), &["fsck", "--no-progress"]));
         assert_fsck_when_git_interop(repo);

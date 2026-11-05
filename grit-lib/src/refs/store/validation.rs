@@ -23,8 +23,9 @@ pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
 
 /// Reject a symbolic ref value before any lock or target lookup.
 ///
-/// The target must be safe to store (same rules as an update name). `HEAD` may only point
-/// under `refs/`. A ref may not symbolically point at itself.
+/// `HEAD` must point at a name safe to store under `refs/`. Other refs use Git's
+/// one-level symbolic target rules (`--allow-onelevel`). A ref may not symbolically point at
+/// itself.
 ///
 /// # Errors
 ///
@@ -34,13 +35,16 @@ pub fn validate_symref_target(name: &str, target: &str) -> Result<(), RefStoreEr
         name: name.to_owned(),
         target: target.to_owned(),
     };
-    if crate::refs::ensure_refname_safe_for_storage(target).is_err() {
-        return Err(err());
-    }
-    if name == "HEAD" && !target.starts_with("refs/") {
-        return Err(err());
-    }
     if target == name {
+        return Err(err());
+    }
+    if name == "HEAD" {
+        if !target.starts_with("refs/")
+            || crate::refs::ensure_refname_safe_for_storage(target).is_err()
+        {
+            return Err(err());
+        }
+    } else if !crate::refs::is_valid_advertised_symref_target(target) {
         return Err(err());
     }
     Ok(())
