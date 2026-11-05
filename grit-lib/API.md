@@ -49,7 +49,7 @@ Every public item has rustdoc. Entry points include examples. Crate-level docume
 
 **From 0.6.0 through 0.6.x:** the public API only **grows**. No removals, renames, or signature changes without keeping the old form: add the replacement, mark the old entry `#[deprecated(since = "0.6.x", note = "use …")]`, and remove it in **0.7**.
 
-**Enforcement:** CI runs a semver check against the recorded public API snapshot; the exact command and workflow step are documented under [Gates](#gates) once the ratchet lands in the repository.
+**Enforcement:** CI runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) against the latest reachable `v*` tag (see [Gates](#gates)). The committed [`public-api.txt`](public-api.txt) snapshot and [`api-ratchet.toml`](api-ratchet.toml) ratchet complement that check until **0.6.0**.
 
 ## How to add a public item
 
@@ -196,4 +196,29 @@ Listed accessors match [`Repository` methods](https://docs.rs/grit-lib/latest/gr
 
 ## Gates
 
-Documentation for `make semver-check`, the public API ratchet, and related CI gates will be filled in when those targets land in the repository.
+These checks guard the public API on the path to **0.6.0** and afterward.
+
+### Semver check (`make semver-check`)
+
+[`scripts/semver-check.sh`](../scripts/semver-check.sh) runs:
+
+```bash
+cargo semver-checks check-release -p grit-lib \
+  --baseline-rev "${SEMVER_BASELINE:-$(git describe --tags --abbrev=0 --match 'v*')}" \
+  --features http-ureq
+```
+
+- **Baseline:** the latest `v*` tag reachable from `HEAD` (override with `SEMVER_BASELINE=…`).
+- **Surface:** same optional features as the public API snapshot (`http-ureq` only; no `unstable-bench-helpers`).
+- **Toolchain:** the workspace pin in [`rust-toolchain.toml`](../rust-toolchain.toml) (currently **1.99.0**). `cargo-semver-checks` builds baseline rustdoc in `target/semver-checks/`; that is separate from normal `cargo build` output.
+- **Local run:** `make semver-check` (installs the pinned `cargo-semver-checks` on first use; OpenSSL development headers are required on Linux, same as `cargo-public-api`).
+- **CI:** the **semver-check** job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) uses `fetch-depth: 0` so tags exist. Until **0.6.0** the job sets `continue-on-error: true` and appends the report to the GitHub Actions step summary — expect failures while **0.5.x** still carries breaking API edits.
+- **At 0.6.0:** remove `continue-on-error` on that job so merges require additive-only changes within **0.6.x** (see [Stability policy](#stability-policy)).
+
+### Public API snapshot (`make public-api-check`)
+
+Regenerate with `make public-api` when you intentionally change the supported surface; CI fails if the committed [`public-api.txt`](public-api.txt) drifts.
+
+### API ratchet (`make api-ratchet-check`)
+
+Quality counts in [`api-ratchet.toml`](api-ratchet.toml) must not rise without an intentional fix; update the baseline with `make api-ratchet` when counts fall. See [`TESTING.md`](../TESTING.md).

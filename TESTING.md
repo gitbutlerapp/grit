@@ -228,6 +228,18 @@ make public-api-check
 
 The first run may install the pinned nightly toolchain and `cargo-public-api` (OpenSSL development headers are required to build the tool on Linux). The check is **not** part of **`make gate`** because installing nightly is slow; CI runs it in the dedicated **public-api** job.
 
+## Semver check
+
+[`scripts/semver-check.sh`](scripts/semver-check.sh) runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) **`check-release`** on **`grit-lib`** with **`--features http-ureq`** (same surface as the public API snapshot; no `unstable-bench-helpers`). The baseline git revision defaults to the latest **`v*`** tag reachable from **`HEAD`** (`SEMVER_BASELINE` overrides). Pin: **`CARGO_SEMVER_CHECKS_VERSION`** in the script.
+
+**Check locally (same as CI semver-check job):**
+
+```bash
+make semver-check
+```
+
+The first run may install **`cargo-semver-checks`** (OpenSSL development headers required on Linux). The tool builds the baseline crate in **`target/semver-checks/`**, not the normal worktree target dir. The check is **not** part of **`make gate`** because it clones and compiles the baseline tag; CI runs it in the dedicated **semver-check** job (**`continue-on-error: true`** until **0.6.0** — delete that line when the release policy becomes additive-only within **0.6.x**).
+
 ## API ratchet
 
 [`scripts/api_ratchet.py`](scripts/api_ratchet.py) tracks public API quality metrics that must not grow without an intentional fix (and must ratchet down when you improve the API). Counts live in [`grit-lib/api-ratchet.toml`](grit-lib/api-ratchet.toml) next to the hygiene baseline. Inputs are the committed [`grit-lib/public-api.txt`](grit-lib/public-api.txt) and rustdoc JSON for `grit-lib` built with the pinned nightly from [`scripts/public-api.sh`](scripts/public-api.sh), `--features http-ureq` (same surface as the public API snapshot; no `unstable-bench-helpers`).
@@ -280,6 +292,7 @@ Pushes and pull requests run only the fast jobs, the merge status. The nightly j
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
 | **public-api** | `make public-api-check` then `make api-ratchet-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`; API quality counts vs `grit-lib/api-ratchet.toml`) | `make public-api-check` and `make api-ratchet-check` |
+| **semver-check** | `make semver-check` (`cargo-semver-checks` vs latest reachable `v*` tag; informational until 0.6.0) | `make semver-check` |
 | **coverage** | Nightly and on demand only: `make coverage` (llvm-cov over every `grit-lib` test, `full-tests` included, floor ratchet) | `make coverage` |
 | **test** | The fast run: `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc` | `make test` |
 | **test-full** | Nightly and on demand only: the same with `full-tests` on every crate (system `git` comparisons, heavy fixtures, `grit-bench` scenarios), the transport tests and Criterion smoke runs | `make test-full`; see [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
