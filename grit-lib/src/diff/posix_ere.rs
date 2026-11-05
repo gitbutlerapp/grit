@@ -122,10 +122,9 @@ mod imp {
     fn regexec_from(re: &regex_t, haystack: &[u8], from: usize) -> Option<(usize, usize)> {
         use libc::REG_STARTEND;
 
-        let mut pmatch = regmatch_t {
-            rm_so: from as libc::regoff_t,
-            rm_eo: haystack.len() as libc::regoff_t,
-        };
+        let mut pmatch = regmatch_t { rm_so: 0, rm_eo: 0 };
+        pmatch.rm_so = from as _;
+        pmatch.rm_eo = haystack.len() as _;
         let rc = unsafe { regexec(re, haystack.as_ptr().cast(), 1, &mut pmatch, REG_STARTEND) };
         decode_regexec(haystack.len(), rc, &pmatch)
     }
