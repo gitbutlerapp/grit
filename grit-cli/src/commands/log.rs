@@ -9,12 +9,15 @@ use grit_lib::diff::{CommitFilesManyOptions, DiffOptions};
 use grit_lib::gitbutler::GitButlerWorkspace;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::CommitReuse;
+use grit_lib::revwalk::group_by::{
+    group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping,
+    GroupByAuthorOptions,
+};
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
 use grit_lib::revwalk::CommitExtent;
 use grit_lib::revwalk::{
-    display_parents_for_graph, group_commits_by_author, group_commits_by_author_from_rev,
-    log_graph_materialize, mailmap_for_grouping, GraphCharset, GraphCommitInput, GraphLayout,
-    GraphLineKind, GraphRenderedLine, GroupByAuthorOptions,
+    display_parents_for_graph, log_graph_materialize, GraphCharset, GraphCommitInput, GraphLayout,
+    GraphLineKind, GraphRenderedLine,
 };
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;

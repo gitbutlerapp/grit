@@ -10,7 +10,7 @@
 //! use grit_lib::config::mailmap::MailmapTable;
 //! use grit_lib::objects::ObjectId;
 //! use grit_lib::repo::{InitOptions, Repository};
-//! use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder};
+//! use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
@@ -39,12 +39,12 @@ use crate::repo::Repository;
 
 /// A single user-supplied match pattern (BRE or fixed string).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pattern(String);
+pub(crate) struct Pattern(String);
 
 impl Pattern {
-    /// Wrap a pattern string from the caller.
     #[must_use]
-    pub fn new(raw: impl Into<String>) -> Self {
+    #[allow(dead_code)] // used by unit tests in this module
+    pub(crate) fn new(raw: impl Into<String>) -> Self {
         Self(raw.into())
     }
 
@@ -178,22 +178,22 @@ impl CommitFilterBuilder {
 
     /// Add an `--author` pattern (multiple patterns OR together).
     #[must_use]
-    pub fn author(mut self, pattern: impl Into<Pattern>) -> Self {
-        self.author.push(pattern.into());
+    pub fn author(mut self, pattern: impl Into<String>) -> Self {
+        self.author.push(Pattern(pattern.into()));
         self
     }
 
     /// Add a `--committer` pattern (multiple patterns OR together).
     #[must_use]
-    pub fn committer(mut self, pattern: impl Into<Pattern>) -> Self {
-        self.committer.push(pattern.into());
+    pub fn committer(mut self, pattern: impl Into<String>) -> Self {
+        self.committer.push(Pattern(pattern.into()));
         self
     }
 
     /// Add a `--grep` pattern (OR unless [`Self::all_match`], then AND).
     #[must_use]
-    pub fn grep(mut self, pattern: impl Into<Pattern>) -> Self {
-        self.grep.push(pattern.into());
+    pub fn grep(mut self, pattern: impl Into<String>) -> Self {
+        self.grep.push(Pattern(pattern.into()));
         self
     }
 

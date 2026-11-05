@@ -46,8 +46,13 @@ fn main() -> Result<(), grit_lib::error::Error> {
     )
     .map_err(grit_lib::error::Error::History)?;
 
-    for line in plan.ref_update_lines() {
-        println!("dry-run: {line}");
+    for update in &plan.ref_updates {
+        println!(
+            "dry-run: {} {} -> {}",
+            update.name,
+            update.old.to_short_hex(),
+            update.new.to_short_hex(),
+        );
     }
 
     let applied = apply_rewrite(

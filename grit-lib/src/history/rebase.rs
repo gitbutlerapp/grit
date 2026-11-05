@@ -40,11 +40,13 @@ pub mod patch_id_inject {
         static PATCH_ID_COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
     }
 
+    /// Returns how many times patch-id computation ran on this thread since the last reset.
     #[must_use]
     pub fn patch_id_compute_call_count() -> usize {
         PATCH_ID_COMPUTE_CALLS.with(Cell::get)
     }
 
+    /// Clears the patch-id computation counter for this thread.
     pub fn reset_patch_id_compute_call_count() {
         PATCH_ID_COMPUTE_CALLS.with(|c| c.set(0));
     }
