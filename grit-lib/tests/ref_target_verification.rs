@@ -361,7 +361,10 @@ fn issue_2258_invalid_symref_targets_are_refused_and_store_is_unchanged() {
         let main_before = fx.raw("refs/heads/main");
         for (name, target) in [
             ("HEAD", "foo"),
-            ("refs/heads/sym1", "foo"),
+            ("HEAD", "refs/heads/x\nref: refs/heads/evil"),
+            ("refs/heads/sym-a", "refs/heads/has space"),
+            ("refs/heads/sym-b", "refs/heads/../../config"),
+            ("refs/heads/sym-c", "refs/heads/trailing.lock"),
             ("refs/heads/loop", "refs/heads/loop"),
             ("HEAD", "refs/heads/a..b"),
         ] {

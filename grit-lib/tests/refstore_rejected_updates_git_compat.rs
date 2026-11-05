@@ -61,6 +61,21 @@ fn rejected_updates_keep_repository_clean_for_git() {
             );
         }
 
+        for (name, target) in [
+            ("HEAD", "refs/heads/x\nref: refs/heads/evil"),
+            ("refs/heads/sym-a", "refs/heads/has space"),
+            ("refs/heads/sym-b", "refs/heads/../../config"),
+            ("refs/heads/sym-c", "refs/heads/trailing.lock"),
+        ] {
+            assert!(
+                matches!(
+                    put(store.as_ref(), name, RawRef::Symbolic(target.to_owned())),
+                    Err(RefStoreError::InvalidSymrefTarget { .. })
+                ),
+                "{backend:?} {name:?} -> {target:?}"
+            );
+        }
+
         put(store.as_ref(), "refs/heads/kept", RawRef::Direct(commit)).expect("valid update");
         assert_eq!(
             store.read_raw("refs/heads/z").expect("read z"),

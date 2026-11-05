@@ -481,7 +481,10 @@ mod tests {
     fn validate_rejects_invalid_symref_targets() {
         for (name, target) in [
             ("HEAD", "foo"),
-            ("refs/heads/sym1", "foo"),
+            ("HEAD", "refs/heads/x\nref: refs/heads/evil"),
+            ("refs/heads/a", "refs/heads/has space"),
+            ("refs/heads/b", "refs/heads/../../config"),
+            ("refs/heads/c", "refs/heads/trailing.lock"),
             ("refs/heads/loop", "refs/heads/loop"),
             ("HEAD", "refs/heads/a..b"),
         ] {
@@ -491,6 +494,21 @@ mod tests {
                 .validate()
                 .unwrap_err();
             assert_eq!(err, invalid_symref(name, target), "{name} -> {target}");
+        }
+    }
+
+    #[test]
+    fn validate_accepts_onelevel_symref_targets_for_non_head() {
+        for (name, target) in [
+            ("refs/heads/probe", "foo"),
+            ("refs/heads/probe2", "heads/main"),
+            ("refs/heads/alias", "refs/heads/not-yet"),
+        ] {
+            RefTransaction::new()
+                .update(symref(name, target))
+                .unwrap()
+                .validate()
+                .expect("{name} -> {target}");
         }
     }
 
