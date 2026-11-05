@@ -908,6 +908,15 @@ fn space_for_clone(dir: &str, url: &str, remote: &str) -> Option<String> {
     )
     .ok()?;
     let setup = crate::commands::sync::ensure_space(&repo, &config, remote).ok()??;
+    // Shared branches: bring the other members' heads now, so the first
+    // `grit status` shows them.
+    if !setup.space.shared.is_empty() {
+        let _ = crate::commands::sync::fetch_shared_heads(
+            &repo,
+            &setup.remote,
+            crate::output::OutputMode::Human,
+        );
+    }
     (setup.remote != remote).then_some(setup.space.project)
 }
 
