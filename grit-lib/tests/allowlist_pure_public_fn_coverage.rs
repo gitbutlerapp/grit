@@ -15,12 +15,12 @@ use grit_lib::command_runner::hooks::{resolve_hooks_dir, run_hook};
 use grit_lib::command_runner::{run_program, CommandStdin, CommandStdio, RecordingRunner};
 use grit_lib::config::config_file_display_for_error;
 use grit_lib::config::dotfile::is_ntfs_dot_gitignore;
-use grit_lib::config::ident::SignatureTimestamp;
-use grit_lib::config::ident::{fsck_commit_idents, timestamp_for_at_ct};
 use grit_lib::diff::{
     detect_copies, read_submodule_head_for_checkout, submodule_commit_subject_line, unified_diff,
     unified_diff_with_prefix,
 };
+use grit_lib::ident::SignatureTimestamp;
+use grit_lib::ident::{fsck_commit_idents, timestamp_for_at_ct};
 use grit_lib::lockfile::{LockFile, LockWait, SystemLockJitter};
 use grit_lib::objects::hash::try_par_hash_with_force;
 use grit_lib::objects::pack_receive::copy_reader_to_writer;

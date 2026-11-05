@@ -44,10 +44,6 @@ pub mod gitmodules {
         pub use crate::submodule_gitdir::*;
     }
 }
-pub mod ident {
-    //! ident API (re-exported at this path).
-    pub use crate::ident::*;
-}
 pub mod ident_config {
     //! ident_config API (re-exported at this path).
     pub use crate::ident_config::*;
