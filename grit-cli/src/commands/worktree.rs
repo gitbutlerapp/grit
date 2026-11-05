@@ -246,7 +246,7 @@ pub fn run_add(
     .map_err(anyhow::Error::new)?;
     let (branch_name, head_hex) = head_summary(&entry.head);
     Ok(WorktreeOutcome::Add {
-        path: entry.path.display().to_string(),
+        path: user_display_path(&entry.path),
         branch: branch_name,
         head: head_hex,
         locked: entry.is_locked,
@@ -259,7 +259,7 @@ pub fn run_remove(path: PathBuf, force: bool) -> Result<WorktreeOutcome> {
     let canonical = path_for_disk_compare(&path);
     remove_linked_worktree(&repo, &canonical, force).map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Remove {
-        path: canonical.display().to_string(),
+        path: user_display_path(&canonical),
     })
 }
 
@@ -272,7 +272,7 @@ pub fn run_prune(dry_run: bool) -> Result<WorktreeOutcome> {
         pruned: pruned
             .into_iter()
             .map(|e| PrunedWorktreeRow {
-                path: e.path.display().to_string(),
+                path: user_display_path(&e.path),
                 reason: e.reason,
             })
             .collect(),
@@ -291,7 +291,7 @@ pub fn run_lock(path: PathBuf, reason: Option<String>) -> Result<WorktreeOutcome
         )
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Lock {
-        path: canonical.display().to_string(),
+        path: user_display_path(&canonical),
         reason,
     })
 }
@@ -352,7 +352,7 @@ pub fn run_unlock(path: PathBuf) -> Result<WorktreeOutcome> {
         .unlock(&canonical)
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Unlock {
-        path: canonical.display().to_string(),
+        path: user_display_path(&canonical),
     })
 }
 
@@ -393,5 +393,18 @@ fn head_summary(head: &HeadState) -> (Option<String>, String) {
         } => (Some(short_name.clone()), oid.to_hex()),
         HeadState::Detached { oid } => (None, oid.to_hex()),
         _ => (None, String::new()),
+    }
+}
+
+#[cfg(test)]
+mod user_path_tests {
+    use super::*;
+
+    #[test]
+    fn add_outcome_path_uses_forward_slashes() {
+        let path = PathBuf::from(r"\\?\C:\Users\x\wt");
+        let shown = user_display_path(&path);
+        assert_eq!(shown, "C:/Users/x/wt");
+        assert!(!shown.contains('\\'));
     }
 }

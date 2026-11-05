@@ -23,6 +23,7 @@ use serde::Serialize;
 
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::progress::{format_bytes, format_duration, paint, TerminalProgress, BOLD, DIM};
+use crate::ui::filesystem_path_for_user;
 
 /// Result of `grit checkout <url>`.
 #[derive(Serialize, JsonSchema)]
@@ -195,7 +196,10 @@ pub fn run(
         None => std::env::current_dir()?.join(slice.unwrap_or(&server.name)),
     };
     if dest.is_dir() && std::fs::read_dir(&dest)?.next().is_some() {
-        anyhow::bail!("{} already exists and is not empty", dest.display());
+        anyhow::bail!(
+            "{} already exists and is not empty",
+            filesystem_path_for_user(&dest)
+        );
     }
     let mut progress = TerminalProgress::new(mode);
     if progress.is_drawing() {
@@ -215,7 +219,7 @@ pub fn run(
                 &format!("of {} at {}", server.branch, short_hex(&server.head))
             ),
             paint(color, DIM, "→"),
-            paint(color, BOLD, &dest.display().to_string()),
+            paint(color, BOLD, &filesystem_path_for_user(&dest)),
         );
     }
 
@@ -269,7 +273,7 @@ pub fn run(
 
     Ok(CheckoutOutcome {
         url: redact_url_for_display(&client.url().repo_url),
-        path: dest.display().to_string(),
+        path: filesystem_path_for_user(&dest),
         branch: info.branch,
         work,
         base: info.base,

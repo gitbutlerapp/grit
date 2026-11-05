@@ -541,3 +541,17 @@ pub fn print_ignored(
     outln!(w);
     Ok(())
 }
+
+#[cfg(test)]
+mod path_display_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn filesystem_path_for_user_strips_verbatim_prefix_and_uses_slashes() {
+        assert_eq!(
+            filesystem_path_for_user(Path::new(r"\\?\C:\Users\x\wt")),
+            "C:/Users/x/wt"
+        );
+    }
+}

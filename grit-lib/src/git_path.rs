@@ -1198,6 +1198,23 @@ mod git_path_component_tests {
     }
 
     #[test]
+    fn library_error_messages_use_user_display_paths() {
+        use crate::error::Error;
+        use std::path::PathBuf;
+
+        let verbatim = PathBuf::from(r"\\?\C:\Users\x\pack.tmp");
+        let temp_missing = Error::ReceivedPackTempMissing {
+            path: verbatim.clone(),
+        };
+        assert!(
+            temp_missing.to_string().contains("C:/Users/x/pack.tmp"),
+            "{}",
+            temp_missing
+        );
+        assert!(!temp_missing.to_string().contains(r"\\?\"));
+    }
+
+    #[test]
     fn absolute_path_for_gitfile_stored_path_strips_verbatim() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let dir = tmp.path().join("linked");
