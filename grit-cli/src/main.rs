@@ -1920,8 +1920,26 @@ enum Command {
         #[arg(short = 't', long = "tags")]
         tags: bool,
         /// Delete the named remote branches or tags instead of pushing.
-        #[arg(long = "delete", conflicts_with = "tags")]
+        #[arg(
+            long = "delete",
+            conflicts_with_all = ["tags", "all", "mirror"]
+        )]
         delete: bool,
+        /// Push every local branch (`refs/heads/*:refs/heads/*`).
+        #[arg(
+            long = "all",
+            conflicts_with_all = ["tags", "mirror", "refspecs"]
+        )]
+        all: bool,
+        /// Mirror all refs under `refs/` and delete stale remote refs (implies force).
+        #[arg(
+            long = "mirror",
+            conflicts_with_all = ["tags", "all", "refspecs", "delete"]
+        )]
+        mirror: bool,
+        /// Delete remote branch refs that have no local counterpart in this push.
+        #[arg(long = "prune", conflicts_with = "mirror")]
+        prune: bool,
         /// Remote to push to (defaults to the current branch's remote or `origin`).
         #[arg(long, hide = true)]
         remote: Option<String>,
@@ -4477,6 +4495,9 @@ fn dispatch(
         Command::Push {
             tags,
             delete,
+            all,
+            mirror,
+            prune,
             remote,
             dry_run,
             force,
@@ -4498,6 +4519,9 @@ fn dispatch(
             let outcome = commands::push::run(
                 tags,
                 delete,
+                all,
+                mirror,
+                prune,
                 remote,
                 &positionals,
                 dry_run,

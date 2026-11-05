@@ -23485,6 +23485,9 @@ pub grit_lib::remote::push_plan::PushRequest::force: grit_lib::remote::push_plan
 pub grit_lib::remote::push_plan::PushRequest::refspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::push_plan::PushRequest::remote: core::option::Option<alloc::string::String>
 pub grit_lib::remote::push_plan::PushRequest::set_upstream: bool
+pub grit_lib::remote::push_plan::PushRequest::all: bool
+pub grit_lib::remote::push_plan::PushRequest::mirror: bool
+pub grit_lib::remote::push_plan::PushRequest::prune: bool
 pub grit_lib::remote::push_plan::PushRequest::tags: bool
 impl core::clone::Clone for grit_lib::remote::push_plan::PushRequest
 pub fn grit_lib::remote::push_plan::PushRequest::clone(&self) -> Self

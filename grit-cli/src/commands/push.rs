@@ -320,6 +320,9 @@ struct PushWireOptions<'a> {
 pub fn run(
     tags: bool,
     delete_refs: bool,
+    all: bool,
+    mirror: bool,
+    prune: bool,
     remote_flag: Option<String>,
     positionals: &[String],
     dry_run: bool,
@@ -367,6 +370,9 @@ pub fn run(
         force: force_mode,
         follow_tags: follow,
         set_upstream,
+        all,
+        mirror,
+        prune,
     };
 
     let mut plan = resolve_push(&repo, &config, &push_request, &plan_ctx).map_err(plan_error)?;

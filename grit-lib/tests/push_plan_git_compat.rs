@@ -11,7 +11,7 @@ use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{
     load_push_plan_context, open_push_destination, resolve_push, resolve_push_invocation,
-    PushPlanContext, PushRequest,
+    PushPlanContext, PushPlanError, PushRequest,
 };
 use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
 use grit_lib::repo::Repository;
@@ -405,18 +405,26 @@ fn matching_push_config_only_existing_remote_heads() {
     assert!(specs[0].src_ref.as_deref() == Some("refs/heads/main"));
 }
 
+fn porcelain_push_dst(spec: &str) -> &str {
+    spec.rsplit_once(':')
+        .map(|(_, dst)| dst)
+        .unwrap_or(spec)
+        .trim_start_matches('+')
+}
+
 fn compare_with_git(local: &Path, git_args: &[&str], specs: &[PushRefSpec], bare: &Path) {
-    let git_lines = git_porcelain_dry_run(local, git_args);
-    dry_run_push_local(&local.join(".git"), bare, specs);
-    assert_eq!(git_lines.len(), specs.len(), "ref count");
-    for (g, s) in git_lines.iter().zip(specs.iter()) {
-        let (gs, gd) = g.spec.split_once(':').expect("git spec");
-        assert_eq!(gd, s.dst);
+    let mut git_lines = git_porcelain_dry_run(local, git_args);
+    git_lines.sort_by(|a, b| porcelain_push_dst(&a.spec).cmp(porcelain_push_dst(&b.spec)));
+    let mut specs_sorted = specs.to_vec();
+    specs_sorted.sort_by(|a, b| a.dst.cmp(&b.dst));
+    dry_run_push_local(&local.join(".git"), bare, &specs_sorted);
+    assert_eq!(git_lines.len(), specs_sorted.len(), "ref count");
+    for (g, s) in git_lines.iter().zip(specs_sorted.iter()) {
+        assert_eq!(porcelain_push_dst(&g.spec), s.dst.as_str());
         // Git porcelain dry-run often uses a space flag even when the refspec had `+`.
         if g.forced {
             assert!(s.force, "git marked forced but spec did not");
         }
-        let _ = gs;
     }
 }
 
@@ -752,6 +760,7 @@ fn push_to_relative_path_remote_is_readable_by_git() {
     std::fs::write(work.join("f"), "1\n").unwrap();
     git(&work, &["add", "f"]);
     git(&work, &["commit", "-q", "-m", "c1"]);
+    std::fs::create_dir_all(&bare).expect("bare dir");
     git(&bare, &["init", "-q", "--bare", "-b", "main", "."]);
 
     let repo = open_repo(&work);
@@ -789,6 +798,339 @@ fn push_to_relative_path_remote_is_readable_by_git() {
     assert!(out.ok(), "rev-parse: {}", out.stderr);
     let fsck = git_cmd(&["fsck", "--strict"]).in_dir(&bare).exec();
     assert!(fsck.ok(), "git fsck: {}", fsck.stderr);
+}
+
+#[test]
+fn cli_wildcard_heads_refspec_matches_configured_push() {
+    let fx = setup_feature_and_main();
+    git(
+        &fx.local,
+        &["config", "remote.origin.push", "refs/heads/*:refs/heads/*"],
+    );
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let configured = plan_specs(&repo, &config, PushRequest::default(), &ctx);
+    let cli = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["refs/heads/*:refs/heads/*".into()],
+            remote: Some("origin".into()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert_eq!(configured.len(), cli.len());
+    compare_with_git(
+        &fx.local,
+        &["origin", "refs/heads/*:refs/heads/*"],
+        &cli,
+        &fx.bare,
+    );
+}
+
+#[test]
+fn push_all_includes_branches_not_on_empty_remote() {
+    let fx = setup_feature_and_main();
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            all: true,
+            remote: Some("origin".into()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(specs.iter().any(|s| s.dst == "refs/heads/feature"));
+    assert!(specs.iter().any(|s| s.dst == "refs/heads/main"));
+    compare_with_git(&fx.local, &["origin", "--all"], &specs, &fx.bare);
+}
+
+#[test]
+fn mirror_push_plans_delete_for_remote_only_ref() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main"]);
+    let main_oid = git(&fx.bare, &["rev-parse", "refs/heads/main"])
+        .trim()
+        .to_owned();
+    git_cmd(&["update-ref", "refs/heads/orphan", &main_oid])
+        .in_dir(&fx.bare)
+        .exec();
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            mirror: true,
+            remote: Some("origin".into()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        specs
+            .iter()
+            .any(|s| s.delete && s.dst == "refs/heads/orphan"),
+        "mirror must plan deletion of remote-only branch"
+    );
+    compare_with_git(&fx.local, &["origin", "--mirror"], &specs, &fx.bare);
+}
+
+#[test]
+fn cli_negative_refspec_excludes_matched_branch() {
+    let fx = setup_feature_and_main();
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec![
+                "refs/heads/*:refs/heads/*".into(),
+                "^refs/heads/feature".into(),
+            ],
+            remote: Some("origin".into()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        !specs.iter().any(|s| s.dst == "refs/heads/feature"),
+        "negative refspec should drop feature"
+    );
+    assert!(specs.iter().any(|s| s.dst == "refs/heads/main"));
+}
+
+#[test]
+fn wildcard_zero_match_errors() {
+    let fx = setup_feature_and_main();
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let err = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            refspecs: vec!["refs/heads/nope/*:refs/heads/nope/*".into()],
+            remote: Some("origin".into()),
+            ..Default::default()
+        },
+        &PushPlanContext::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(err, PushPlanError::SrcRefspecNoMatch { .. }));
+}
+
+#[test]
+fn remotes_wildcard_to_heads_seeds_new_remote() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main", "feature"]);
+    let dest = fx.local.parent().unwrap().join("dest.git");
+    std::fs::create_dir_all(&dest).unwrap();
+    git(&dest, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(
+        &fx.local,
+        &["remote", "add", "dest", dest.to_str().unwrap()],
+    );
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&dest);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["refs/remotes/origin/*:refs/heads/*".into()],
+            remote: Some("dest".into()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(specs.iter().any(|s| s.dst == "refs/heads/main"));
+    assert!(specs.iter().any(|s| s.dst == "refs/heads/feature"));
+    compare_with_git(
+        &fx.local,
+        &["dest", "refs/remotes/origin/*:refs/heads/*"],
+        &specs,
+        &dest,
+    );
+}
+
+#[test]
+fn glob_push_roundtrip_fsck_with_git() {
+    let fx = setup_feature_and_main();
+    git(
+        &fx.local,
+        &["remote", "add", "nb", fx.bare.to_str().unwrap()],
+    );
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["refs/heads/*:refs/heads/*".into()],
+            remote: Some("nb".into()),
+            ..Default::default()
+        },
+        &PushPlanContext::default(),
+    );
+    push_local(
+        &fx.local_git,
+        &fx.bare,
+        &specs,
+        &PushOptions::default(),
+        &NeverCancel,
+    )
+    .expect("push");
+    let refs = git(&fx.bare, &["for-each-ref", "--format=%(refname)"]);
+    assert!(refs.contains("refs/heads/main"));
+    assert!(refs.contains("refs/heads/feature"));
+    let fsck = git_cmd(&["fsck", "--strict"]).in_dir(&fx.bare).exec();
+    assert!(fsck.ok(), "git fsck: {}", fsck.stderr);
+}
+
+#[test]
+fn prune_negative_refspec_preserves_excluded_remote_branch() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main", "feature"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec![
+                "refs/heads/*:refs/heads/*".into(),
+                "^refs/heads/feature".into(),
+            ],
+            remote: Some("origin".into()),
+            prune: true,
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        !specs
+            .iter()
+            .any(|s| s.delete && s.dst == "refs/heads/feature"),
+        "negative refspec must keep remote feature out of prune deletes"
+    );
+    compare_with_git(
+        &fx.local,
+        &[
+            "origin",
+            "--prune",
+            "refs/heads/*:refs/heads/*",
+            "^refs/heads/feature",
+        ],
+        &specs,
+        &fx.bare,
+    );
+}
+
+#[test]
+fn configured_negative_with_prune_does_not_delete_excluded_remote() {
+    for negative_first in [false, true] {
+        let fx = setup_main_and_private_with_negative_push_config(negative_first);
+        let repo = open_repo(&fx.local);
+        let config = load_config(&repo);
+        let ctx = push_plan_context(&fx.bare);
+        let specs = plan_specs(
+            &repo,
+            &config,
+            PushRequest {
+                remote: Some("origin".into()),
+                prune: true,
+                ..Default::default()
+            },
+            &ctx,
+        );
+        assert!(
+            !specs
+                .iter()
+                .any(|s| s.delete && s.dst == "refs/heads/private"),
+            "configured ^ must exclude private from prune (negative_first={negative_first})"
+        );
+        compare_with_git(&fx.local, &["origin", "--prune"], &specs, &fx.bare);
+    }
+}
+
+#[test]
+fn prune_single_branch_push_does_not_delete_sibling_remote() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main", "feature"]);
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["branch", "-D", "feature"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["main".into()],
+            remote: Some("origin".into()),
+            prune: true,
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        !specs.iter().any(|s| s.delete),
+        "single-ref push must not plan prune deletes: {specs:?}"
+    );
+    compare_with_git(&fx.local, &["origin", "--prune", "main"], &specs, &fx.bare);
+}
+
+#[test]
+fn prune_custom_wildcard_destination_namespace() {
+    let fx = setup_feature_and_main();
+    git(
+        &fx.local,
+        &["push", "-q", "origin", "refs/heads/*:refs/tmp/*"],
+    );
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["branch", "-D", "feature"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = push_plan_context(&fx.bare);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["refs/heads/*:refs/tmp/*".into()],
+            remote: Some("origin".into()),
+            prune: true,
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert!(
+        specs
+            .iter()
+            .any(|s| s.delete && s.dst == "refs/tmp/feature"),
+        "stale refs/tmp/feature should be pruned"
+    );
+    assert!(
+        !specs
+            .iter()
+            .any(|s| s.delete && s.dst.starts_with("refs/heads/")),
+        "must not prune refs/heads when dst namespace is refs/tmp/*"
+    );
+    compare_with_git(
+        &fx.local,
+        &["origin", "--prune", "refs/heads/*:refs/tmp/*"],
+        &specs,
+        &fx.bare,
+    );
 }
 
 fn list_remote_refs(bare: &Path) -> HashSet<String> {
