@@ -5657,6 +5657,38 @@ pub fn grit_lib::diff::write_unified_diff_with_prefix_and_funcname_and_algorithm
 pub fn grit_lib::diff::zero_oid() -> grit_lib::objects::ObjectId
 pub type grit_lib::diff::IndexPathSkipPredicate = alloc::rcs::arc::Arc<(dyn core::ops::function::Fn(&[u8]) -> bool + core::marker::Send + core::marker::Sync)>
 pub mod grit_lib::divergence
+pub enum grit_lib::divergence::Choice
+pub grit_lib::divergence::Choice::Combine
+pub grit_lib::divergence::Choice::Drop
+pub grit_lib::divergence::Choice::KeepAmended
+pub grit_lib::divergence::Choice::KeepBoth
+pub grit_lib::divergence::Choice::KeepMine
+pub grit_lib::divergence::Choice::KeepTheirs
+pub grit_lib::divergence::Choice::MyOrder
+pub grit_lib::divergence::Choice::MySplit
+pub grit_lib::divergence::Choice::Resolve
+pub grit_lib::divergence::Choice::Restore
+pub grit_lib::divergence::Choice::TheirOrder
+pub grit_lib::divergence::Choice::TheirSplit
+impl grit_lib::divergence::Choice
+pub fn grit_lib::divergence::Choice::id(self) -> &'static str
+pub fn grit_lib::divergence::Choice::parse(&str) -> core::option::Option<Self>
+impl core::clone::Clone for grit_lib::divergence::Choice
+pub fn grit_lib::divergence::Choice::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::divergence::Choice
+impl core::cmp::PartialEq for grit_lib::divergence::Choice
+pub fn grit_lib::divergence::Choice::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::divergence::Choice
+pub fn grit_lib::divergence::Choice::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::divergence::Choice
+impl core::marker::StructuralPartialEq for grit_lib::divergence::Choice
+impl core::marker::Freeze for grit_lib::divergence::Choice
+impl core::marker::Send for grit_lib::divergence::Choice
+impl core::marker::Sync for grit_lib::divergence::Choice
+impl core::marker::Unpin for grit_lib::divergence::Choice
+impl core::marker::UnsafeUnpin for grit_lib::divergence::Choice
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Choice
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Choice
 pub enum grit_lib::divergence::Did
 pub grit_lib::divergence::Did::Absent
 pub grit_lib::divergence::Did::Amended
@@ -5764,6 +5796,25 @@ impl core::marker::Unpin for grit_lib::divergence::Change
 impl core::marker::UnsafeUnpin for grit_lib::divergence::Change
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Change
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Change
+pub struct grit_lib::divergence::Combined
+pub grit_lib::divergence::Combined::conflicts: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::divergence::Combined::head: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::divergence::Combined::stopped_at: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::divergence::Combined
+pub fn grit_lib::divergence::Combined::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::divergence::Combined
+impl core::cmp::PartialEq for grit_lib::divergence::Combined
+pub fn grit_lib::divergence::Combined::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::divergence::Combined
+pub fn grit_lib::divergence::Combined::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::divergence::Combined
+impl core::marker::Freeze for grit_lib::divergence::Combined
+impl core::marker::Send for grit_lib::divergence::Combined
+impl core::marker::Sync for grit_lib::divergence::Combined
+impl core::marker::Unpin for grit_lib::divergence::Combined
+impl core::marker::UnsafeUnpin for grit_lib::divergence::Combined
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Combined
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Combined
 pub struct grit_lib::divergence::Divergence
 pub grit_lib::divergence::Divergence::base: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::divergence::Divergence::changes: alloc::vec::Vec<grit_lib::divergence::Change>
@@ -5771,6 +5822,8 @@ pub grit_lib::divergence::Divergence::conflicts: alloc::vec::Vec<alloc::string::
 pub grit_lib::divergence::Divergence::matched_without_ids: bool
 pub grit_lib::divergence::Divergence::scenario: grit_lib::divergence::Scenario
 pub grit_lib::divergence::Divergence::scenarios: alloc::vec::Vec<grit_lib::divergence::Scenario>
+impl grit_lib::divergence::Divergence
+pub fn grit_lib::divergence::Divergence::options(&self, &str) -> alloc::vec::Vec<grit_lib::divergence::ResolveOption>
 impl grit_lib::divergence::Divergence
 pub fn grit_lib::divergence::Divergence::summary(&self, &str) -> alloc::string::String
 impl core::clone::Clone for grit_lib::divergence::Divergence
@@ -5788,7 +5841,27 @@ impl core::marker::Unpin for grit_lib::divergence::Divergence
 impl core::marker::UnsafeUnpin for grit_lib::divergence::Divergence
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Divergence
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Divergence
+pub struct grit_lib::divergence::ResolveOption
+pub grit_lib::divergence::ResolveOption::choice: grit_lib::divergence::Choice
+pub grit_lib::divergence::ResolveOption::label: alloc::string::String
+pub grit_lib::divergence::ResolveOption::loses: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::divergence::ResolveOption
+pub fn grit_lib::divergence::ResolveOption::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::divergence::ResolveOption
+impl core::cmp::PartialEq for grit_lib::divergence::ResolveOption
+pub fn grit_lib::divergence::ResolveOption::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::divergence::ResolveOption
+pub fn grit_lib::divergence::ResolveOption::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::divergence::ResolveOption
+impl core::marker::Freeze for grit_lib::divergence::ResolveOption
+impl core::marker::Send for grit_lib::divergence::ResolveOption
+impl core::marker::Sync for grit_lib::divergence::ResolveOption
+impl core::marker::Unpin for grit_lib::divergence::ResolveOption
+impl core::marker::UnsafeUnpin for grit_lib::divergence::ResolveOption
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::ResolveOption
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::ResolveOption
 pub fn grit_lib::divergence::classify(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::divergence::Divergence>
+pub fn grit_lib::divergence::combine(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, grit_lib::divergence::Choice) -> grit_lib::error::Result<grit_lib::divergence::Combined>
 pub fn grit_lib::divergence::common_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::divergence::heads_seen(&grit_lib::repo::Repository, &str) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub mod grit_lib::error
