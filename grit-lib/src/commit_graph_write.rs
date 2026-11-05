@@ -1,5 +1,7 @@
 //! Serialize Git commit-graph v1 files with GDA2 + optional Bloom chunks (`commit-graph.c` compatible).
 
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -78,7 +80,7 @@ fn commit_info_from_ref(commit: &CommitRef<'_>) -> CommitGraphCommitInfo {
 ///
 /// [`crate::error::Error::CorruptObject`] when `oid` is not a commit, plus any read or
 /// parse error from [`Odb::read_commit`].
-pub fn load_commit_graph_commit_info(
+pub(crate) fn load_commit_graph_commit_info(
     odb: &Odb,
     oid: ObjectId,
 ) -> crate::error::Result<CommitGraphCommitInfo> {
@@ -334,7 +336,7 @@ pub struct BloomWriteStats {
 }
 #[expect(clippy::too_many_arguments)]
 /// Build raw commit-graph bytes (without touching the filesystem).
-pub fn build_commit_graph_bytes(
+pub(crate) fn build_commit_graph_bytes(
     sorted_oids: &[ObjectId],
     infos: &HashMap<ObjectId, CommitGraphCommitInfo>,
     odb: &Odb,
@@ -656,7 +658,7 @@ fn ref_tips_for_repository(repo: &crate::repo::Repository) -> crate::error::Resu
 /// # Errors
 ///
 /// Propagates ref listing or object read/parse failures.
-pub fn collect_reachable_commit_oids_for_repository(
+pub(crate) fn collect_reachable_commit_oids_for_repository(
     repo: &crate::repo::Repository,
 ) -> crate::error::Result<HashSet<ObjectId>> {
     Ok(collect_reachable_commit_infos_for_repository(repo)?
@@ -676,7 +678,7 @@ pub(crate) fn collect_reachable_commit_infos_for_repository(
 ///
 /// Prefer [`collect_reachable_commit_oids_for_repository`] when a [`crate::repo::Repository`] is
 /// available (reftable and linked worktrees require the ref store).
-pub fn collect_reachable_commit_oids(
+pub(crate) fn collect_reachable_commit_oids(
     git_dir: &std::path::Path,
     odb: &Odb,
 ) -> crate::error::Result<HashSet<ObjectId>> {
@@ -878,7 +880,7 @@ pub(crate) fn remove_commit_graph_files(
 /// Count unique commit OIDs that refs point to directly (peeling annotated tags), matching Git's
 /// `add_ref_to_set` accounting for the "Collecting referenced commits" progress meter. Unlike
 /// [`collect_reachable_commit_oids`], this does not walk commit parents.
-pub fn count_referenced_commit_tips(
+pub(crate) fn count_referenced_commit_tips(
     git_dir: &std::path::Path,
     odb: &Odb,
 ) -> crate::error::Result<usize> {

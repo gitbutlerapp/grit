@@ -1,5 +1,7 @@
 //! Parsing Git commit-graph files and Bloom filter lookup (`commit-graph.c` / `bloom.c` compatible).
 
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -695,7 +697,7 @@ impl CommitGraphLayer {
         })
     }
 
-    fn parse(path: PathBuf, raw: Vec<u8>) -> Option<Self> {
+    pub(crate) fn parse(path: PathBuf, raw: Vec<u8>) -> Option<Self> {
         Self::try_parse(path, raw).ok()
     }
 
@@ -1727,7 +1729,7 @@ pub fn diff_changed_paths_for_bloom(
 pub use crate::bloom::collect_changed_paths_for_bloom;
 
 /// Build Bloom filter bytes for one commit; returns cumulative size contribution for BIDX.
-pub fn bloom_filter_for_commit_write(
+pub(crate) fn bloom_filter_for_commit_write(
     odb: &Odb,
     parents: &[ObjectId],
     tree_oid: ObjectId,
@@ -1762,7 +1764,7 @@ pub(crate) fn bloom_filter_for_tree_diff(
 /// high bit set (`& 0x80`). Mirrors `bloom.c:has_entries_with_high_bit`, used to
 /// decide whether a v1 changed-path Bloom filter can be relabeled as v2 without
 /// recomputation (v1/v2 hashing only differs for bytes >= 0x80).
-fn tree_has_high_bit_paths(odb: &Odb, tree_oid: ObjectId) -> bool {
+pub(crate) fn tree_has_high_bit_paths(odb: &Odb, tree_oid: ObjectId) -> bool {
     let Ok(obj) = odb.read(&tree_oid) else {
         // Git treats an unreadable tree conservatively (no upgrade).
         return true;
@@ -1783,7 +1785,7 @@ fn tree_has_high_bit_paths(odb: &Odb, tree_oid: ObjectId) -> bool {
 
 /// Whether a commit's tree (recursively) has any high-bit path bytes
 /// (`bloom.c:commit_tree_has_high_bit_paths`).
-pub fn commit_tree_has_high_bit_paths(odb: &Odb, commit_oid: ObjectId) -> bool {
+pub(crate) fn commit_tree_has_high_bit_paths(odb: &Odb, commit_oid: ObjectId) -> bool {
     match odb.commit_tree(&commit_oid) {
         Ok(tree) => tree_has_high_bit_paths(odb, tree),
         Err(_) => true,
@@ -1791,7 +1793,7 @@ pub fn commit_tree_has_high_bit_paths(odb: &Odb, commit_oid: ObjectId) -> bool {
 }
 
 /// Parse all chunks for `test-tool read-graph` / debugging.
-pub fn parse_graph_file(path: &Path) -> Option<ParsedGraphDump> {
+pub(crate) fn parse_graph_file(path: &Path) -> Option<ParsedGraphDump> {
     let raw = std::fs::read(path).ok()?;
     if raw.len() < 28 {
         return None;
@@ -1854,7 +1856,7 @@ pub fn parse_graph_file(path: &Path) -> Option<ParsedGraphDump> {
 }
 
 /// Parsed commit-graph header fields for debugging and `--dump` style output.
-pub struct ParsedGraphDump {
+pub(crate) struct ParsedGraphDump {
     /// Commit-graph file signature word (`0x43475048`).
     pub header_word: u32,
     /// Commit-graph format version byte.
@@ -1874,7 +1876,7 @@ pub struct ParsedGraphDump {
 }
 
 /// Dump hex lines of Bloom filters (one per commit, empty line for empty filter).
-pub fn dump_bloom_filters(path: &Path) -> Option<Vec<String>> {
+pub(crate) fn dump_bloom_filters(path: &Path) -> Option<Vec<String>> {
     let raw = std::fs::read(path).ok()?;
     let layer = CommitGraphLayer::parse(path.to_path_buf(), raw)?;
     let mut out = Vec::new();

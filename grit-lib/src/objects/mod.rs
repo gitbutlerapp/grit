@@ -82,9 +82,10 @@ pub mod midx {
 pub mod hash {
     //! Object-id hashing, file checksums, and hash algorithm selection.
     pub use crate::hash::{
-        hash_object, hash_objects_parallel, par_hash_with, parallel_hash_worthwhile,
-        try_par_hash_with, try_par_hash_with_force, verify_trailer, ChecksumHasher, HashingWriter,
-        ObjectHasher, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS, PAR_HASH_MIN_TOTAL_BYTES,
+        backend, hash_object, hash_objects_parallel, par_hash_with, parallel_hash_worthwhile,
+        try_par_hash_with, try_par_hash_with_force, verify_trailer, Backend, ChecksumHasher,
+        HashingWriter, ObjectHasher, ParallelHashError, Parallelism, PAR_HASH_MIN_ITEMS,
+        PAR_HASH_MIN_TOTAL_BYTES,
     };
 }
 

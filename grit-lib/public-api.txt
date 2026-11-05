@@ -8921,6 +8921,32 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::delta_encode::D
 pub fn grit_lib::objects::delta_encode::encode_delta(&[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::delta_encode::encode_lcp_delta(&[u8], &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub mod grit_lib::objects::hash
+pub enum grit_lib::objects::hash::Backend
+pub grit_lib::objects::hash::Backend::Aarch64Sha
+pub grit_lib::objects::hash::Backend::Portable
+pub grit_lib::objects::hash::Backend::X86ShaNi
+impl grit_lib::objects::hash::Backend
+pub const fn grit_lib::objects::hash::Backend::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::objects::hash::Backend
+pub fn grit_lib::objects::hash::Backend::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::hash::Backend
+impl core::cmp::PartialEq for grit_lib::objects::hash::Backend
+pub fn grit_lib::objects::hash::Backend::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::hash::Backend
+pub fn grit_lib::objects::hash::Backend::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::objects::hash::Backend
+pub fn grit_lib::objects::hash::Backend::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::objects::hash::Backend
+pub fn grit_lib::objects::hash::Backend::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::objects::hash::Backend
+impl core::marker::StructuralPartialEq for grit_lib::objects::hash::Backend
+impl core::marker::Freeze for grit_lib::objects::hash::Backend
+impl core::marker::Send for grit_lib::objects::hash::Backend
+impl core::marker::Sync for grit_lib::objects::hash::Backend
+impl core::marker::Unpin for grit_lib::objects::hash::Backend
+impl core::marker::UnsafeUnpin for grit_lib::objects::hash::Backend
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::hash::Backend
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::hash::Backend
 pub enum grit_lib::objects::hash::ChecksumHasher
 pub grit_lib::objects::hash::ChecksumHasher::Sha1(sha1::Sha1)
 pub grit_lib::objects::hash::ChecksumHasher::Sha256(sha2::Sha256)
@@ -9027,6 +9053,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::parallel::Parallelism
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::parallel::Parallelism
 pub const grit_lib::objects::hash::PAR_HASH_MIN_ITEMS: usize
 pub const grit_lib::objects::hash::PAR_HASH_MIN_TOTAL_BYTES: usize
+pub fn grit_lib::objects::hash::backend(grit_lib::objects::HashAlgo) -> grit_lib::objects::hash::Backend
 pub fn grit_lib::objects::hash::hash_object(grit_lib::objects::HashAlgo, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::hash::hash_objects_parallel(grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectKind, &[u8])], core::num::nonzero::NonZeroUsize) -> core::result::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>, grit_lib::parallel::ParallelHashError<grit_lib::error::Error>>
 pub fn grit_lib::objects::hash::par_hash_with<T, R, F>(&[T], core::num::nonzero::NonZeroUsize, usize, F) -> alloc::vec::Vec<R> where T: core::marker::Sync, R: core::marker::Send, F: core::ops::function::Fn(&T) -> R + core::marker::Sync
