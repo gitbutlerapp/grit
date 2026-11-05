@@ -1514,6 +1514,19 @@ pub(crate) fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -
         && !(literal_global() || glob_global() || noglob_global() || icase_global())
 }
 
+/// Encode an exact repository-relative path for pathspec-limited diffs and Bloom prechecks.
+///
+/// Tree diffs and skip-applied filters collect literal object paths. Names may begin with `:`
+/// or contain glob metacharacters, so they must not be passed as raw user pathspec syntax.
+pub(crate) fn repository_path_as_literal_pathspec(path: &str) -> String {
+    let ctx = PathspecMatchContext::default();
+    if is_plain_literal_pathspec(path, ctx) {
+        path.to_owned()
+    } else {
+        format!(":(literal){path}")
+    }
+}
+
 /// A pathspec list prepared once for matching many paths with the same context.
 ///
 /// Gives the same answers as [`matches_pathspec_list_with_context`] with the list and context
@@ -2894,6 +2907,14 @@ mod resolve_pathspec_tests {
         assert!(!pathspec_is_exclude(&resolved));
         assert!(pathspec_matches(&resolved, ":!foo"));
         assert!(!pathspec_matches(&resolved, "other"));
+    }
+
+    #[test]
+    fn repository_path_as_literal_pathspec_matches_exact_object_path() {
+        let magic = ":(literal)foo";
+        let spec = super::repository_path_as_literal_pathspec(magic);
+        assert!(matches_pathspec_list(magic, std::slice::from_ref(&spec)));
+        assert!(!matches_pathspec_list("foo", std::slice::from_ref(&spec)));
     }
 
     #[test]
