@@ -1592,6 +1592,8 @@ mod remote_set_url_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "remote_unreadable.rs"]
 mod remote_unreadable;
+#[path = "remote_url_display.rs"]
+mod remote_url_display;
 #[cfg(feature = "full-tests")]
 #[path = "repack_delta_reuse_git_compat.rs"]
 mod repack_delta_reuse_git_compat;

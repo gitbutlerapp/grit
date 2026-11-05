@@ -63,10 +63,6 @@ use crate::protocol::client_git_protocol_header_from_config;
 use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
 
-fn url_for_display(url: &str) -> String {
-    redact_url_for_display(url)
-}
-
 /// Repository URL for error reports: credentials redacted and the smart-HTTP endpoint
 /// (`/info/refs?service=…`, `/git-upload-pack`, `/git-receive-pack`) removed.
 fn repository_url_for_display(url: &str) -> String {
@@ -78,7 +74,7 @@ fn repository_url_for_display(url: &str) -> String {
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| url.to_owned());
-    url_for_display(&base)
+    redact_url_for_display(&base)
 }
 
 fn auth_error(url: &str, reason: AuthFailure) -> Error {
@@ -1451,7 +1447,7 @@ const LOW_SPEED_TRANSPORT_DETAIL: &str =
 
 fn low_speed_transport_error(url: &str) -> Error {
     Error::remote_unreadable(
-        url_for_display(url),
+        redact_url_for_display(url),
         RemoteUnreadableReason::Transport {
             detail: LOW_SPEED_TRANSPORT_DETAIL.to_owned(),
         },
@@ -1477,7 +1473,7 @@ fn map_ureq_transport_error(
 fn http_transport_error(url: &str, err: impl std::fmt::Display) -> Error {
     let detail = credentials::redact_embedded_url_credentials(&err.to_string());
     Error::remote_unreadable(
-        url_for_display(url),
+        redact_url_for_display(url),
         RemoteUnreadableReason::Transport { detail },
     )
 }

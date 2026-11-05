@@ -4,7 +4,6 @@ use crate::git_path::CanonicalizeExt;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use url::Url;
 
 use crate::error::Error;
 
@@ -71,38 +70,44 @@ pub fn strip_verbatim_path_prefix(path: &str) -> &str {
     path.strip_prefix(r"\\?\").unwrap_or(path)
 }
 
-/// Returns a copy of `url` with embedded username and password removed, safe for logs and errors.
+/// Returns the display form of a remote URL: `url` with any embedded username and password
+/// removed, safe for logs, errors and command output.
 ///
 /// Remote URLs may carry credentials in configuration or on the command line; user-facing output
-/// must never echo them. Well-formed `http(s)://`, `git://`, and `ssh://` URLs are parsed with
-/// the `url` crate (including percent-encoded userinfo). SCP-style `user:pass@host:path` strings
-/// and other non-URL forms fall back to Git-style scanning for the last `@` before the path.
+/// (human, JSON and Markdown alike) must never echo them. Use this for every copy of a remote
+/// address that is shown, and keep the original for transport and configuration.
+///
+/// Only the userinfo is removed: everything else is returned byte for byte (surrounding
+/// whitespace aside), so host case, ports, paths and percent-encoding are never rewritten. Local
+/// paths (see [`url_is_local_not_ssh`]) and addresses without an `@` are returned unchanged. For
+/// `scheme://` URLs the userinfo ends at the last `@` before the path, so an unescaped `@` in a
+/// password is removed too; SCP-style `user@host:path` drops everything up to that `@`.
 #[must_use]
 pub fn redact_url_for_display(url: &str) -> String {
     let trimmed = url.trim();
-    if trimmed.is_empty() {
-        return String::new();
+    if !trimmed.contains('@') || url_is_local_not_ssh(trimmed) {
+        return trimmed.to_owned();
     }
-    if let Ok(mut parsed) = Url::parse(trimmed) {
-        let scheme = parsed.scheme();
-        if matches!(scheme, "http" | "https" | "git" | "ssh" | "file" | "ftp")
-            && parsed.has_authority()
-        {
-            let _ = parsed.set_username("");
-            let _ = parsed.set_password(None);
-            return parsed.to_string();
-        }
-    }
-    redact_userinfo_fallback(trimmed)
-}
-
-fn redact_userinfo_fallback(url: &str) -> String {
-    if let Some((scheme, rest)) = url.split_once("://") {
+    if let Some((scheme, rest)) = trimmed.split_once("://") {
         let host_start = userinfo_host_start(rest);
         return format!("{scheme}://{}", &rest[host_start..]);
     }
-    let host_start = userinfo_host_start(url);
-    url[host_start..].to_string()
+    let host_start = scp_host_start(trimmed);
+    trimmed[host_start..].to_owned()
+}
+
+/// Index where `host:path` begins in an SCP-style address: just past the last `@` that is
+/// followed by a `host:` (a `:` with no `/` before it). An `@` inside the path is not userinfo.
+fn scp_host_start(url: &str) -> usize {
+    url.match_indices('@')
+        .rev()
+        .map(|(at, _)| at + 1)
+        .find(|&start| {
+            let rest = &url[start..];
+            rest.find(':')
+                .is_some_and(|colon| !rest[..colon].contains('/'))
+        })
+        .unwrap_or(0)
 }
 
 /// Index in `authority_or_url` where the host begins after optional `user:pass@` userinfo.
@@ -734,5 +739,49 @@ mod tests {
             redact_url_for_display("https://host.example/foo@bar.git"),
             "https://host.example/foo@bar.git"
         );
+        assert_eq!(
+            redact_url_for_display("file:///srv/me@work/repo.git"),
+            "file:///srv/me@work/repo.git"
+        );
+        assert_eq!(
+            redact_url_for_display("git@host.example:org/repo@v1.git"),
+            "host.example:org/repo@v1.git"
+        );
+        assert_eq!(
+            redact_url_for_display("host.example:org/repo@v1.git"),
+            "host.example:org/repo@v1.git"
+        );
+    }
+
+    #[test]
+    fn redact_url_for_display_never_rewrites_credential_free_urls() {
+        for url in [
+            "http://127.0.0.1:9419/auth.git",
+            "HTTP://Host.Example:80/a%20b/Repo.git",
+            "https://host.example:443/r.git?x=1#frag",
+            "ssh://host.example:2222/~/repo.git",
+            "git://[::1]/repo",
+            "host.example:repo.git",
+            "origin",
+            "",
+        ] {
+            assert_eq!(redact_url_for_display(url), url);
+        }
+        assert_eq!(
+            redact_url_for_display("HTTP://u:p@Host.Example:80/a%20b/Repo.git"),
+            "HTTP://Host.Example:80/a%20b/Repo.git"
+        );
+    }
+
+    #[test]
+    fn redact_url_for_display_leaves_local_paths_alone() {
+        for path in [
+            "/tmp/alice@laptop/repo.git",
+            "../me@there/repo",
+            "me@there",
+            "./a:b@c",
+        ] {
+            assert_eq!(redact_url_for_display(path), path);
+        }
     }
 }
