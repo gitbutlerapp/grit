@@ -1,0 +1,101 @@
+{
+  "$id": "https://grit-scm.com/schemas/share.resolve/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ResolveOptionJson": {
+      "description": "One way out of a divergence.",
+      "properties": {
+        "command": {
+          "description": "The command that applies it.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Its stable id: `combine`, `keep_mine`, `keep_theirs`, `keep_both`, `keep_amended`, `drop`, `my_order`, `their_order`, `my_split`, `their_split`, `restore` or `resolve`.",
+          "type": "string"
+        },
+        "label": {
+          "description": "What it does.",
+          "type": "string"
+        },
+        "loses": {
+          "description": "What it leaves out (kept in the share's log), or `null` when it keeps every change: such an option is safe to choose without asking.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit share resolve`.",
+  "properties": {
+    "branch": {
+      "description": "The shared branch.",
+      "type": "string"
+    },
+    "head": {
+      "description": "Your head afterwards, when it moved.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "next": {
+      "description": "What to run next, when the option is done by hand.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "option": {
+      "description": "The option applied, or omitted when none was (a decision is needed).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "options": {
+      "description": "The ways out, when a decision is needed and none was chosen.",
+      "items": {
+        "$ref": "#/definitions/ResolveOptionJson"
+      },
+      "type": "array"
+    },
+    "previous": {
+      "description": "Your head before.",
+      "type": "string"
+    },
+    "pushed": {
+      "description": "Whether your head was pushed.",
+      "type": "boolean"
+    },
+    "scenario": {
+      "description": "What the two heads added up to, before.",
+      "type": "string"
+    },
+    "summary": {
+      "description": "What happened, in a sentence.",
+      "type": "string"
+    },
+    "with": {
+      "description": "The member whose head yours was put together with.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "branch",
+    "previous",
+    "pushed",
+    "scenario",
+    "summary",
+    "with"
+  ],
+  "title": "ShareResolveOutcome",
+  "type": "object"
+}
