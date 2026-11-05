@@ -1909,6 +1909,8 @@ mod sparse_oid_filter_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "split_index_git_compat.rs"]
 mod split_index_git_compat;
+#[path = "stage_options_embedder_guard.rs"]
+mod stage_options_embedder_guard;
 #[cfg(feature = "full-tests")]
 #[path = "stage_tracked_chunked_restage_git_compat.rs"]
 mod stage_tracked_chunked_restage_git_compat;
