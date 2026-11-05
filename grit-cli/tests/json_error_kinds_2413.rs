@@ -90,3 +90,26 @@ fn json_error_kinds_for_ci_failures() {
         "path_not_found"
     );
 }
+
+#[test]
+fn json_error_kind_not_a_repository_for_diff_and_stash() {
+    let no_repo = CliFixture::workspace();
+    for args in [
+        &["--json", "diff"][..],
+        &["--json", "diff", "--staged"][..],
+        &["--json", "diff", "--stat"][..],
+        &["--json", "diff", "HEAD~1"][..],
+        &["--json", "stash"][..],
+        &["--json", "stash", "push"][..],
+    ] {
+        let err = json_err(&no_repo, args);
+        assert_eq!(err["kind"], "not_a_repository", "args={args:?}");
+        assert!(
+            err["error"]
+                .as_str()
+                .unwrap_or("")
+                .contains("not a git repository"),
+            "args={args:?}"
+        );
+    }
+}
