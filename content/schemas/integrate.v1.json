@@ -742,6 +742,13 @@
       "description": "The server's target branch.",
       "type": "string"
     },
+    "unshared": {
+      "description": "For a shared branch (`grit share`): the other members. Integrating it ended the share and deleted the branch from their copies.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "url": {
       "description": "The pull request's web page.",
       "type": [

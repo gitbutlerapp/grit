@@ -242,6 +242,87 @@
       ],
       "type": "object"
     },
+    "PushedToIntegrated": {
+      "description": "A branch pushed again after a share of it was integrated.",
+      "properties": {
+        "at": {
+          "description": "When, RFC 3339.",
+          "type": "string"
+        },
+        "branch": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "by": {
+          "description": "Who integrated it.",
+          "type": "string"
+        },
+        "integrated": {
+          "description": "How many of the branch's commits were integrated already.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "into": {
+          "description": "The project it was merged into, `<owner>/<project>`.",
+          "type": "string"
+        },
+        "new": {
+          "description": "How many are new.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "options": {
+          "description": "The ways forward, recommended first.",
+          "items": {
+            "$ref": "#/definitions/ResolveOptionJson"
+          },
+          "type": "array"
+        },
+        "pull": {
+          "description": "The pull request it went through, for an organization's project.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scenario": {
+          "description": "Always `pushed_to_integrated`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "What happened, in a sentence.",
+          "type": "string"
+        },
+        "target_branch": {
+          "description": "The branch it was merged into.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The pull request's page.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "branch",
+        "by",
+        "integrated",
+        "into",
+        "new",
+        "options",
+        "scenario",
+        "summary",
+        "target_branch"
+      ],
+      "type": "object"
+    },
     "ResolveOptionJson": {
       "description": "One way out of a divergence.",
       "properties": {
@@ -338,6 +419,13 @@
         "string",
         "null"
       ]
+    },
+    "pushed_to_integrated": {
+      "description": "Branches this push made again after a share of them was integrated (scenario `pushed_to_integrated`): nobody shares them now. Each has the options `grit share resolve` takes.",
+      "items": {
+        "$ref": "#/definitions/PushedToIntegrated"
+      },
+      "type": "array"
     },
     "rejected": {
       "type": "boolean"

@@ -5847,6 +5847,25 @@ impl core::marker::Unpin for grit_lib::divergence::Divergence
 impl core::marker::UnsafeUnpin for grit_lib::divergence::Divergence
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Divergence
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Divergence
+pub struct grit_lib::divergence::Keyed
+pub grit_lib::divergence::Keyed::commit: grit_lib::objects::ObjectId
+pub grit_lib::divergence::Keyed::key: alloc::string::String
+pub grit_lib::divergence::Keyed::subject: alloc::string::String
+impl core::clone::Clone for grit_lib::divergence::Keyed
+pub fn grit_lib::divergence::Keyed::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::divergence::Keyed
+impl core::cmp::PartialEq for grit_lib::divergence::Keyed
+pub fn grit_lib::divergence::Keyed::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::divergence::Keyed
+pub fn grit_lib::divergence::Keyed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::divergence::Keyed
+impl core::marker::Freeze for grit_lib::divergence::Keyed
+impl core::marker::Send for grit_lib::divergence::Keyed
+impl core::marker::Sync for grit_lib::divergence::Keyed
+impl core::marker::Unpin for grit_lib::divergence::Keyed
+impl core::marker::UnsafeUnpin for grit_lib::divergence::Keyed
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::divergence::Keyed
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::divergence::Keyed
 pub struct grit_lib::divergence::ResolveOption
 pub grit_lib::divergence::ResolveOption::choice: grit_lib::divergence::Choice
 pub grit_lib::divergence::ResolveOption::label: alloc::string::String
@@ -5870,6 +5889,9 @@ pub fn grit_lib::divergence::classify(&grit_lib::repo::Repository, &[grit_lib::o
 pub fn grit_lib::divergence::combine(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, grit_lib::divergence::Choice) -> grit_lib::error::Result<grit_lib::divergence::Combined>
 pub fn grit_lib::divergence::common_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::divergence::heads_seen(&grit_lib::repo::Repository, &str) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub fn grit_lib::divergence::keyed_commits(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::divergence::Keyed>>
+pub fn grit_lib::divergence::missing_from(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::divergence::Keyed>>
+pub fn grit_lib::divergence::replay_onto(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId], grit_lib::objects::ObjectId, &std::collections::hash::set::HashSet<alloc::string::String>) -> grit_lib::error::Result<core::result::Result<grit_lib::objects::ObjectId, alloc::vec::Vec<alloc::string::String>>>
 pub mod grit_lib::error
 #[non_exhaustive] pub enum grit_lib::error::ApplyError
 pub grit_lib::error::ApplyError::BinaryDataMissing
@@ -22714,6 +22736,8 @@ pub grit_lib::remote::grit_server_share::ShareRequest::Leave
 pub grit_lib::remote::grit_server_share::ShareRequest::Leave::branch: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareRequest::List
 pub grit_lib::remote::grit_server_share::ShareRequest::List::branch: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_share::ShareRequest::Reshare
+pub grit_lib::remote::grit_server_share::ShareRequest::Reshare::branch: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareRequest::RevokeLink
 pub grit_lib::remote::grit_server_share::ShareRequest::RevokeLink::branch: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareRequest::RevokeLink::link: alloc::string::String
@@ -22860,6 +22884,34 @@ impl core::marker::Unpin for grit_lib::remote::grit_server_share::ShareAcceptReq
 impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_share::ShareAcceptRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_share::ShareAcceptRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_share::ShareAcceptRequest
+pub struct grit_lib::remote::grit_server_share::ShareIntegration
+pub grit_lib::remote::grit_server_share::ShareIntegration::at: alloc::string::String
+pub grit_lib::remote::grit_server_share::ShareIntegration::by: alloc::string::String
+pub grit_lib::remote::grit_server_share::ShareIntegration::changes: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::grit_server_share::ShareIntegration::commit: alloc::string::String
+pub grit_lib::remote::grit_server_share::ShareIntegration::into: alloc::string::String
+pub grit_lib::remote::grit_server_share::ShareIntegration::pull: core::option::Option<u64>
+pub grit_lib::remote::grit_server_share::ShareIntegration::target_branch: alloc::string::String
+pub grit_lib::remote::grit_server_share::ShareIntegration::url: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::remote::grit_server_share::ShareIntegration
+pub fn grit_lib::remote::grit_server_share::ShareIntegration::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_share::ShareIntegration
+pub fn grit_lib::remote::grit_server_share::ShareIntegration::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_share::ShareIntegration
+pub fn grit_lib::remote::grit_server_share::ShareIntegration::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_share::ShareIntegration
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_share::ShareIntegration
+pub fn grit_lib::remote::grit_server_share::ShareIntegration::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_share::ShareIntegration
+pub fn grit_lib::remote::grit_server_share::ShareIntegration::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::marker::Send for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::marker::Sync for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::marker::Unpin for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_share::ShareIntegration
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_share::ShareIntegration
 pub struct grit_lib::remote::grit_server_share::ShareLinkInfo
 pub grit_lib::remote::grit_server_share::ShareLinkInfo::expires_at: alloc::string::String
 pub grit_lib::remote::grit_server_share::ShareLinkInfo::for_user: core::option::Option<alloc::string::String>
@@ -22938,6 +22990,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_shar
 pub struct grit_lib::remote::grit_server_share::SharedBranch
 pub grit_lib::remote::grit_server_share::SharedBranch::base_branch: core::option::Option<alloc::string::String>
 pub grit_lib::remote::grit_server_share::SharedBranch::branch: alloc::string::String
+pub grit_lib::remote::grit_server_share::SharedBranch::integrated: core::option::Option<grit_lib::remote::grit_server_share::ShareIntegration>
 pub grit_lib::remote::grit_server_share::SharedBranch::invited: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::grit_server_share::SharedBranch::links: alloc::vec::Vec<grit_lib::remote::grit_server_share::ShareLinkInfo>
 pub grit_lib::remote::grit_server_share::SharedBranch::members: alloc::vec::Vec<grit_lib::remote::grit_server_share::ShareMember>
@@ -22968,6 +23021,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_s
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_share::SharedBranch
 pub const grit_lib::remote::grit_server_share::ACCEPT_PATH: &str
 pub const grit_lib::remote::grit_server_share::DEFAULT_LINK_DAYS: u32
+pub const grit_lib::remote::grit_server_share::INTEGRATED_KEEP_DAYS: u32
 pub const grit_lib::remote::grit_server_share::LINK_PATH: &str
 pub const grit_lib::remote::grit_server_share::MAX_LINK_DAYS: u32
 pub const grit_lib::remote::grit_server_share::SHARED_PATH: &str
@@ -23011,7 +23065,9 @@ pub grit_lib::remote::grit_server_space::IntegrateBranchReply::project: alloc::s
 pub grit_lib::remote::grit_server_space::IntegrateBranchReply::pull: core::option::Option<u64>
 pub grit_lib::remote::grit_server_space::IntegrateBranchReply::status: grit_lib::remote::grit_server_space::IntegrateBranchStatus
 pub grit_lib::remote::grit_server_space::IntegrateBranchReply::target_branch: alloc::string::String
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::unshared: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::grit_server_space::IntegrateBranchReply::url: core::option::Option<alloc::string::String>
+pub grit_lib::remote::grit_server_space::IntegrateBranchReply::waiting: alloc::vec::Vec<grit_lib::remote::grit_server_space::WaitingHead>
 impl core::clone::Clone for grit_lib::remote::grit_server_space::IntegrateBranchReply
 pub fn grit_lib::remote::grit_server_space::IntegrateBranchReply::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::grit_server_space::IntegrateBranchReply
@@ -23033,6 +23089,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_s
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::IntegrateBranchReply
 pub struct grit_lib::remote::grit_server_space::IntegrateBranchRequest
 pub grit_lib::remote::grit_server_space::IntegrateBranchRequest::branch: alloc::string::String
+pub grit_lib::remote::grit_server_space::IntegrateBranchRequest::without: alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for grit_lib::remote::grit_server_space::IntegrateBranchRequest
 pub fn grit_lib::remote::grit_server_space::IntegrateBranchRequest::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::grit_server_space::IntegrateBranchRequest
@@ -23081,6 +23138,29 @@ impl core::marker::Unpin for grit_lib::remote::grit_server_space::Space
 impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_space::Space
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_space::Space
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::Space
+pub struct grit_lib::remote::grit_server_space::WaitingHead
+pub grit_lib::remote::grit_server_space::WaitingHead::commits: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::grit_server_space::WaitingHead::head: alloc::string::String
+pub grit_lib::remote::grit_server_space::WaitingHead::user: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::grit_server_space::WaitingHead
+pub fn grit_lib::remote::grit_server_space::WaitingHead::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_space::WaitingHead
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_space::WaitingHead
+pub fn grit_lib::remote::grit_server_space::WaitingHead::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_space::WaitingHead
+pub fn grit_lib::remote::grit_server_space::WaitingHead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_space::WaitingHead
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_space::WaitingHead
+pub fn grit_lib::remote::grit_server_space::WaitingHead::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_space::WaitingHead
+pub fn grit_lib::remote::grit_server_space::WaitingHead::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_space::WaitingHead
+impl core::marker::Send for grit_lib::remote::grit_server_space::WaitingHead
+impl core::marker::Sync for grit_lib::remote::grit_server_space::WaitingHead
+impl core::marker::Unpin for grit_lib::remote::grit_server_space::WaitingHead
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_space::WaitingHead
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_space::WaitingHead
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_space::WaitingHead
 pub const grit_lib::remote::grit_server_space::INTEGRATE_PATH: &str
 pub const grit_lib::remote::grit_server_space::SPACE_PATH: &str
 pub fn grit_lib::remote::grit_server_space::fetch_space(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl, &str) -> core::result::Result<grit_lib::remote::grit_server_space::Space, grit_lib::remote::grit_server_auth::ServerAuthError>

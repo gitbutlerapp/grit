@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new (pushed_to_integrated)\n! Choose what to do:\n  1  rebase onto main: keep only the 1 new commit  grit share resolve pairing rebase\n  2  keep it as pairing-2                          grit share resolve pairing rename pairing-2\n  3  share it again with bob                       grit share resolve pairing reshare\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"pairing\",\"with\":\"alice\",\"scenario\":\"pushed_to_integrated\",\"summary\":\"pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new\",\"previous\":\"4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e\",\"pushed\":false,\"options\":[{\"id\":\"rebase\",\"label\":\"rebase onto main: keep only the 1 new commit\",\"loses\":null,\"command\":\"grit share resolve pairing rebase\"},{\"id\":\"rename\",\"label\":\"keep it as pairing-2\",\"loses\":null,\"command\":\"grit share resolve pairing rename pairing-2\"},{\"id\":\"reshare\",\"label\":\"share it again with bob\",\"loses\":null,\"command\":\"grit share resolve pairing reshare\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Resolve `pairing` with `alice`\n\n**Scenario:** `pushed_to_integrated`. pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new\n\n| Option | What it does | Leaves out | Command |\n| --- | --- | --- | --- |\n| `rebase` (recommended) | rebase onto main: keep only the 1 new commit | nothing | `grit share resolve pairing rebase` |\n| `rename` | keep it as pairing-2 | nothing | `grit share resolve pairing rename pairing-2` |\n| `reshare` | share it again with bob | nothing | `grit share resolve pairing reshare` |\n\nExit status 3: a decision is needed.\n",
+    "stderr": ""
+  }
+}

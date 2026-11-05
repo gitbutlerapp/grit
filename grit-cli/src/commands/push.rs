@@ -59,6 +59,12 @@ pub struct PushOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub shared: Vec<PushSharedBranch>,
+    /// Branches this push made again after a share of them was integrated
+    /// (scenario `pushed_to_integrated`): nobody shares them now. Each has
+    /// the options `grit share resolve` takes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub pushed_to_integrated: Vec<PushedToIntegrated>,
     /// Pack build and send timing, for the human summary after ref results.
     #[serde(skip)]
     #[schemars(skip)]
@@ -83,14 +89,25 @@ pub struct PushSharedBranch {
     pub head: Option<String>,
 }
 
+/// A branch pushed again after a share of it was integrated.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PushedToIntegrated {
+    /// The branch.
+    pub branch: String,
+    /// What happened, and the options.
+    #[serde(flatten)]
+    pub report: crate::commands::share::IntegratedJson,
+}
+
 impl PushOutcome {
     /// Whether a shared branch pushed needs someone to decide what to do.
     pub fn needs_decision(&self) -> bool {
-        self.shared.iter().any(|s| {
-            s.heads
-                .iter()
-                .any(crate::commands::sync::SharedHead::needs_decision)
-        })
+        !self.pushed_to_integrated.is_empty()
+            || self.shared.iter().any(|s| {
+                s.heads
+                    .iter()
+                    .any(crate::commands::sync::SharedHead::needs_decision)
+            })
     }
 }
 
@@ -264,6 +281,9 @@ impl HumanRender for PushOutcome {
                 }
             }
         }
+        for p in &self.pushed_to_integrated {
+            p.report.render_human(w, &p.branch)?;
+        }
         if self.transfer.received_anything() {
             outln!(w);
             self.transfer.render_rows(w, stdout_color())?;
@@ -310,6 +330,11 @@ impl MarkdownRender for PushOutcome {
             {
                 writeln!(w, "\nExit status 3: pushed, decision needed.")?;
             }
+        }
+        for p in &self.pushed_to_integrated {
+            writeln!(w, "\n## Pushed to an integrated branch: `{}`\n", p.branch)?;
+            p.report.render_markdown(w, &p.branch)?;
+            writeln!(w, "\nExit status 3: pushed, decision needed.")?;
         }
         if let Some(url) = &self.origin_added {
             writeln!(w, "\nAdded remote `origin` → `{url}`.")?;
@@ -537,6 +562,7 @@ pub fn run(
 
     // After replacing your head of a shared branch, see where the others are.
     let mut shared = Vec::new();
+    let mut pushed_to_integrated = Vec::new();
     if !dry_run {
         for result in &results {
             let Some(name) = result.ref_name.strip_prefix("refs/heads/") else {
@@ -546,10 +572,21 @@ pub fn run(
                 result.status,
                 PushRefOutcomeStatus::Ok | PushRefOutcomeStatus::UpToDate
             );
-            if !pushed
-                || result.deleted == Some(true)
-                || !crate::commands::sync::is_shared(&config, name)
-            {
+            if !pushed || result.deleted == Some(true) {
+                continue;
+            }
+            // A branch made again: was it shared, and integrated since?
+            if result.old_oid.is_none() {
+                if let Some(report) = integrated_again(&repo, &config, &plan.remote, name) {
+                    let _ = crate::commands::sync::unmark_shared(&repo, name);
+                    pushed_to_integrated.push(PushedToIntegrated {
+                        branch: name.to_owned(),
+                        report,
+                    });
+                    continue;
+                }
+            }
+            if !crate::commands::sync::is_shared(&config, name) {
                 continue;
             }
             let space = crate::commands::sync::SPACE_REMOTE;
@@ -636,8 +673,28 @@ pub fn run(
         origin_added,
         remote_messages: report.remote_messages,
         shared,
+        pushed_to_integrated,
         transfer,
     })
+}
+
+/// When `branch`, just made on `remote`, was shared there and integrated
+/// since, and brings integrated commits: the report. Asking the server is
+/// best-effort; a push never fails on it.
+fn integrated_again(
+    repo: &grit_lib::repo::Repository,
+    config: &ConfigSet,
+    remote: &str,
+    branch: &str,
+) -> Option<crate::commands::share::IntegratedJson> {
+    let url = config
+        .get(&format!("remote.{remote}.pushurl"))
+        .or_else(|| config.get(&format!("remote.{remote}.url")))?;
+    let (server, project) = grit_lib::remote::grit_server_space::hosted_project(&url)?;
+    let tip = grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{branch}")).ok()?;
+    crate::commands::share::integrated_on(repo, config, &server, &project, branch, tip)
+        .ok()
+        .flatten()
 }
 
 fn plan_error(err: PushPlanError) -> anyhow::Error {
@@ -745,6 +802,7 @@ mod tests {
                 origin_added: None,
                 remote_messages: Vec::new(),
                 shared: Vec::new(),
+                pushed_to_integrated: Vec::new(),
                 transfer: TransferSummary::default(),
             };
             let mut out = Vec::new();

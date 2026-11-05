@@ -75,9 +75,23 @@
       "description": "Whether your head was pushed.",
       "type": "boolean"
     },
+    "renamed": {
+      "description": "For `rename`: the branch's new name, here and in your space.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "scenario": {
       "description": "What the two heads added up to, before.",
       "type": "string"
+    },
+    "shared_with": {
+      "description": "For `reshare`: who the branch is shared with again.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "summary": {
       "description": "What happened, in a sentence.",

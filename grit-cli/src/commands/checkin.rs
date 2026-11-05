@@ -363,6 +363,11 @@ pub struct IntegrateOutcome {
     /// the merge.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local: Option<crate::commands::sync::SyncTarget>,
+    /// For a shared branch (`grit share`): the other members. Integrating
+    /// it ended the share and deleted the branch from their copies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub unshared: Vec<String>,
 }
 
 impl IntegrateOutcome {
@@ -414,6 +419,14 @@ impl HumanRender for IntegrateOutcome {
         if let Some(local) = &self.local {
             let tip = local.tip.as_deref().map(short_hex).unwrap_or_default();
             outln!(w, "· {} here: {} ({tip})", local.name, local.action.word());
+        }
+        if !self.unshared.is_empty() {
+            outln!(
+                w,
+                "· {} was shared with {}: the share is over, and the branch is gone from their copies",
+                self.name,
+                self.unshared.join(", ")
+            );
         }
         if let Some(follows) = &self.follows {
             outln!(
@@ -471,6 +484,13 @@ impl MarkdownRender for IntegrateOutcome {
         }
         if let Some(url) = &self.url {
             outln!(w, "- **url**: {url}");
+        }
+        if !self.unshared.is_empty() {
+            outln!(
+                w,
+                "- **unshared**: {} (the share is over; the branch is gone from their copies)",
+                self.unshared.join(", ")
+            );
         }
         if let Some(follows) = &self.follows {
             outln!(
@@ -577,9 +597,12 @@ fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode)
 /// its next snapshot, so they are never replayed: when `HEAD` is on the
 /// branch it moves to the new snapshot, keeping uncommitted changes, and onto
 /// a fresh work branch ([`land_integration`] decides).
-pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
+pub fn integrate(name: &str, without: &[String], mode: OutputMode) -> Result<IntegrateOutcome> {
     if crate::commands::checkout::open_checkout_here()?.is_none() {
-        return integrate_hosted(name, mode);
+        return integrate_hosted(name, without, mode);
+    }
+    if !without.is_empty() {
+        bail!("--without is for shared branches, in a clone of a project on a grit hosting server");
     }
     let co = require_checkout()?;
     if same_branch_name(name, &co.marker.branch) {
@@ -652,6 +675,7 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
         pull: None,
         url: None,
         local: None,
+        unshared: Vec::new(),
     })
 }
 
@@ -659,7 +683,7 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
 /// server: push the branch to your space, have the server merge it into the
 /// target (the organization's main, through a pull request, for a copy; the
 /// project's own main otherwise), then bring the target here up to date.
-fn integrate_hosted(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
+fn integrate_hosted(name: &str, without: &[String], mode: OutputMode) -> Result<IntegrateOutcome> {
     use crate::commands::sync::{ensure_space, fetch, push, sync_target, tips};
     use grit_lib::config::ConfigSet;
     use grit_lib::remote::grit_server_space::{
@@ -698,6 +722,7 @@ fn integrate_hosted(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
         &setup.space.project,
         &IntegrateBranchRequest {
             branch: name.to_owned(),
+            without: without.to_vec(),
         },
     )
     .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -715,6 +740,9 @@ fn integrate_hosted(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
             }
         }
     };
+    if !reply.unshared.is_empty() {
+        crate::commands::sync::unmark_shared(&repo, name)?;
+    }
     fetch("origin", mode)?;
     let local = sync_target(&repo, "origin", &reply.target_branch)?;
     let commits = match reply
@@ -750,5 +778,6 @@ fn integrate_hosted(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
         pull: reply.pull,
         url: reply.url,
         local,
+        unshared: reply.unshared,
     })
 }

@@ -890,3 +890,110 @@ fn every_scenario_offers_options() {
         assert_eq!(Choice::parse(choice.id()), Some(choice));
     }
 }
+
+use grit_lib::divergence::{keyed_commits, missing_from, replay_onto};
+
+#[test]
+fn what_integrating_one_head_leaves_out() {
+    let Base { f, main, a, b } = base();
+    // Theirs adds E on B; ours amended A and has B: theirs has one change
+    // ours lacks, whatever ours did to the others.
+    let theirs = f.commit(Some(&b), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
+    let a2 = f.commit(
+        Some(&main),
+        &[("a.txt", Some("a1 amended\na2\na3\n"))],
+        "Add A",
+        Some(&id('l')),
+    );
+    let ours = f.commit(
+        Some(&a2),
+        &[
+            ("c.txt", Some("c1\nc2\nc3\n")),
+            ("d.txt", Some("d1\nd2\nd3\n")),
+        ],
+        "Add B",
+        Some(&id('m')),
+    );
+    let repo = f.repo();
+    let missing = missing_from(&repo, &[oid(&main)], oid(&ours), oid(&theirs)).unwrap();
+    assert_eq!(
+        missing
+            .iter()
+            .map(|k| k.subject.as_str())
+            .collect::<Vec<_>>(),
+        ["Add E"]
+    );
+    // A head ours builds on leaves nothing out.
+    assert!(missing_from(&repo, &[oid(&main)], oid(&theirs), oid(&a))
+        .unwrap()
+        .is_empty());
+    // Keys come oldest first, by change id.
+    let keys: Vec<String> = keyed_commits(&repo, oid(&ours), &[oid(&main)])
+        .unwrap()
+        .into_iter()
+        .map(|k| k.key)
+        .collect();
+    assert_eq!(keys, [id('l'), id('m')]);
+}
+
+#[test]
+fn replaying_what_is_new_onto_the_target() {
+    let Base { f, main, a: _, b } = base();
+    // B (with A) was integrated into main by a merge; the branch then got
+    // F. Replayed onto the merge without A and B, only F is left.
+    let merge = f.commit_parents(
+        &[&main, &b],
+        &[
+            ("a.txt", Some("a1\na2\na3\n")),
+            ("c.txt", Some("c1\nc2\nc3\n")),
+            ("d.txt", Some("d1\nd2\nd3\n")),
+        ],
+        "Merge",
+        None,
+    );
+    let tip = f.commit(Some(&b), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
+    let repo = f.repo();
+    let skip = [id('l'), id('m')].into_iter().collect();
+    let head = replay_onto(&repo, oid(&tip), &[oid(&merge)], oid(&merge), &skip)
+        .unwrap()
+        .unwrap();
+    assert_eq!(subjects(&f, &merge, &head.to_hex()), ["Add F"]);
+    assert_eq!(file(&f, &head.to_hex(), "f.txt").as_deref(), Some("f\n"));
+    // A integrated, then amended here, then G: the amended A was
+    // integrated already (by change id), so only G is new.
+    let a2 = f.commit(
+        Some(&b),
+        &[(
+            "a.txt",
+            Some(
+                "a1 again
+a2
+a3
+",
+            ),
+        )],
+        "Add A",
+        Some(&id('l')),
+    );
+    let g = f.commit(
+        Some(&a2),
+        &[(
+            "g.txt",
+            Some(
+                "g
+",
+            ),
+        )],
+        "Add G",
+        Some(&id('p')),
+    );
+    let head = replay_onto(&repo, oid(&g), &[oid(&merge)], oid(&merge), &skip)
+        .unwrap()
+        .unwrap();
+    assert_eq!(subjects(&f, &merge, &head.to_hex()), ["Add G"]);
+    // Nothing new: the target itself.
+    let head = replay_onto(&repo, oid(&b), &[oid(&merge)], oid(&merge), &skip)
+        .unwrap()
+        .unwrap();
+    assert_eq!(head, oid(&merge));
+}

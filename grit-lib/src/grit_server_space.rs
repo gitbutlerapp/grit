@@ -73,6 +73,24 @@ pub struct Space {
 pub struct IntegrateBranchRequest {
     /// The branch of the user's space to merge.
     pub branch: String,
+    /// For a shared branch: members whose heads may have changes the
+    /// caller's lacks. Those changes stay in their copies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub without: Vec<String>,
+}
+
+/// A member's head of a shared branch with changes the integrated head
+/// lacks: integration waits for it, unless the member is named in
+/// [`IntegrateBranchRequest::without`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WaitingHead {
+    /// The member.
+    pub user: String,
+    /// The tip of their head.
+    pub head: String,
+    /// The subjects of the commits whose changes the caller's head lacks,
+    /// oldest first.
+    pub commits: Vec<String>,
 }
 
 /// What an integrate request did.
@@ -113,6 +131,14 @@ pub struct IntegrateBranchReply {
     /// Why it was refused, for [`IntegrateBranchStatus::Refused`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// For a shared branch refused because other members' heads have
+    /// changes the caller's lacks: those heads.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<WaitingHead>,
+    /// For a shared branch that was integrated: the other members, whose
+    /// copies no longer have the branch. The share is over.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unshared: Vec<String>,
 }
 
 /// The server and project (`<owner>/<project>`) a hosted repository URL names,
@@ -212,6 +238,8 @@ mod tests {
             pull: Some(3),
             url: None,
             message: None,
+            waiting: Vec::new(),
+            unshared: Vec::new(),
         };
         let json = serde_json::to_string(&reply).unwrap();
         assert!(json.contains("\"already_integrated\""), "{json}");
@@ -298,6 +326,7 @@ mod tests {
             "bob/widget",
             &IntegrateBranchRequest {
                 branch: "fix".to_owned(),
+                without: Vec::new(),
             },
         )
         .unwrap();

@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new (pushed_to_integrated)\n✓ renamed pairing to pairing-2, here and in your space\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"pairing\",\"with\":\"alice\",\"scenario\":\"pushed_to_integrated\",\"summary\":\"pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new\",\"option\":\"rename\",\"previous\":\"4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e\",\"pushed\":true,\"renamed\":\"pairing-2\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Resolve `pairing` with `alice`\n\n**Scenario:** `pushed_to_integrated`. pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new\n\nRenamed `pairing` to `pairing-2`, here and in your space.\n",
+    "stderr": ""
+  }
+}

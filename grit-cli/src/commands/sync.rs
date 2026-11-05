@@ -71,7 +71,7 @@ impl SyncOutcome {
     pub fn needs_decision(&self) -> bool {
         self.branches
             .iter()
-            .any(|b| b.shared.iter().any(SharedHead::needs_decision))
+            .any(|b| b.integrated.is_some() || b.shared.iter().any(SharedHead::needs_decision))
     }
 
     pub fn needs_attention(&self) -> bool {
@@ -127,6 +127,11 @@ pub struct SyncBranch {
     /// afterwards.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub shared: Vec<SharedHead>,
+    /// For a branch this sync made again after a share of it was
+    /// integrated (scenario `pushed_to_integrated`): what happened, and the
+    /// options. Nobody shares it now.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub integrated: Option<crate::commands::share::IntegratedJson>,
 }
 
 /// Another member's head of a shared branch.
@@ -542,16 +547,28 @@ pub(crate) fn push(
     branches: &[String],
     mode: OutputMode,
 ) -> Result<BTreeMap<String, Option<String>>> {
-    if branches.is_empty() {
+    let specs: Vec<String> = branches
+        .iter()
+        .map(|b| format!("refs/heads/{b}:refs/heads/{b}"))
+        .collect();
+    push_specs(remote, &specs, mode)
+}
+
+/// Push refspecs `specs` to `remote`; each branch's result.
+pub(crate) fn push_specs(
+    remote: &str,
+    specs: &[String],
+    mode: OutputMode,
+) -> Result<BTreeMap<String, Option<String>>> {
+    if specs.is_empty() {
         return Ok(BTreeMap::new());
     }
     let mut positionals = vec![remote.to_owned()];
-    positionals.extend(
-        branches
-            .iter()
-            .map(|b| format!("refs/heads/{b}:refs/heads/{b}")),
-    );
+    positionals.extend(specs.iter().cloned());
     let outcome = crate::commands::push::run(
+        false,
+        false,
+        false,
         false,
         false,
         None,
@@ -664,6 +681,8 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
     let shared: BTreeSet<&str> = setup.space.shared.iter().map(String::as_str).collect();
     let mut branches = Vec::new();
     let mut to_push = Vec::new();
+    // Branches this sync makes in your space.
+    let mut made = BTreeSet::new();
     for name in names {
         let is_shared = shared.contains(name.as_str());
         let (mut ours, theirs) = (local.get(name).copied(), remote.get(name).copied());
@@ -769,7 +788,11 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
             tip: None,
             message,
             shared: Vec::new(),
+            integrated: None,
         });
+        if theirs.is_none() && ours.is_some() {
+            made.insert(name.clone());
+        }
     }
 
     let pushed = push(&setup.remote, &to_push, mode)?;
@@ -780,6 +803,23 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
             branch.message = Some(why.clone());
         }
         branch.tip = local.get(&branch.name).map(ObjectId::to_hex);
+        if made.contains(&branch.name) && branch.action == SyncAction::Pushed {
+            if let Some(tip) = local.get(&branch.name).copied() {
+                branch.integrated = crate::commands::share::integrated_on(
+                    &repo,
+                    &config,
+                    &setup.server,
+                    &setup.space.project,
+                    &branch.name,
+                    tip,
+                )
+                .ok()
+                .flatten();
+                if branch.integrated.is_some() {
+                    unmark_shared(&repo, &branch.name)?;
+                }
+            }
+        }
         if shared.contains(branch.name.as_str()) {
             let ours = local.get(&branch.name).copied();
             for (user, tip) in shared_heads(&repo, &setup.remote, &branch.name)? {
@@ -853,6 +893,9 @@ impl HumanRender for SyncOutcome {
             if let Some(m) = &b.message {
                 outln!(w, "  {m}");
             }
+            if let Some(i) = &b.integrated {
+                i.render_human(w, &b.name)?;
+            }
             for h in &b.shared {
                 outln!(
                     w,
@@ -885,6 +928,11 @@ impl MarkdownRender for SyncOutcome {
             match &b.message {
                 Some(m) => outln!(w, "- `{}`: {} — {m}", b.name, b.action.word()),
                 None => outln!(w, "- `{}`: {}", b.name, b.action.word()),
+            }
+            if let Some(i) = &b.integrated {
+                outln!(w);
+                i.render_markdown(w, &b.name)?;
+                outln!(w);
             }
             for h in &b.shared {
                 outln!(

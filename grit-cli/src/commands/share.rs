@@ -671,15 +671,7 @@ fn here() -> Result<Here> {
 }
 
 fn ask(here: &Here, request: &ShareRequest) -> Result<ShareReply> {
-    let http = context::http_client_factory()
-        .create(&here.config)
-        .context("could not set up HTTP client")?;
-    let reply = api::share(http.as_ref(), &here.server, &here.project, request)
-        .map_err(|e| server_error(&here.server, e))?;
-    if let Some(why) = &reply.refused {
-        bail!("{why}");
-    }
-    Ok(reply)
+    ask_about(&here.config, &here.server, &here.project, request)
 }
 
 /// Bring the shares' heads into the clone after a change.
@@ -868,6 +860,14 @@ pub struct ShareResolveOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub options: Vec<ResolveOptionJson>,
+    /// For `rename`: the branch's new name, here and in your space.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub renamed: Option<String>,
+    /// For `reshare`: who the branch is shared with again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub shared_with: Vec<String>,
 }
 
 impl ShareResolveOutcome {
@@ -881,6 +881,7 @@ impl ShareResolveOutcome {
 pub fn resolve(
     branch: &str,
     option: Option<&str>,
+    name: Option<&str>,
     with: Option<&str>,
     mode: OutputMode,
 ) -> Result<ShareResolveOutcome> {
@@ -890,7 +891,17 @@ pub fn resolve(
         bail!("there is no branch {branch} here");
     };
     let heads = crate::commands::sync::shared_heads(&here.repo, &here.remote, branch)?;
-    if heads.is_empty() {
+    let integrated_option = option.is_some_and(|o| INTEGRATED_OPTIONS.contains(&o));
+    if heads.is_empty() || integrated_option {
+        if let Some(report) = integrated_report(&here, branch, ours, !integrated_option)? {
+            return resolve_integrated(&here, branch, ours, report, option, name, mode);
+        }
+        if integrated_option {
+            bail!(
+                "{branch} wasn't shared and integrated lately, so there's nothing to {}",
+                option.unwrap_or_default()
+            );
+        }
         bail!("{branch} isn't shared here, or nobody else has pushed a head of it yet");
     }
     let diverged: Vec<(String, ObjectId)> = heads
@@ -930,6 +941,8 @@ pub fn resolve(
         pushed: false,
         next: None,
         options: Vec::new(),
+        renamed: None,
+        shared_with: Vec::new(),
     };
     let chosen = match option {
         Some(id) => id.to_owned(),
@@ -1020,6 +1033,22 @@ impl HumanRender for ShareResolveOutcome {
                     outln!(w, "✓ pushed your head");
                 }
             }
+            (Some(_), None) if self.renamed.is_some() => {
+                let to = self.renamed.as_deref().unwrap_or_default();
+                outln!(
+                    w,
+                    "✓ renamed {} to {to}, here and in your space",
+                    self.branch
+                );
+            }
+            (Some(_), None) if !self.shared_with.is_empty() => {
+                outln!(
+                    w,
+                    "✓ shared {} again with {}",
+                    self.branch,
+                    self.shared_with.join(", ")
+                );
+            }
             (Some(option), None) => {
                 outln!(
                     w,
@@ -1065,6 +1094,22 @@ impl MarkdownRender for ShareResolveOutcome {
                     if self.pushed { ", pushed" } else { "" }
                 );
             }
+            (Some(_), None) if self.renamed.is_some() => {
+                outln!(
+                    w,
+                    "Renamed `{}` to `{}`, here and in your space.",
+                    self.branch,
+                    self.renamed.as_deref().unwrap_or_default()
+                );
+            }
+            (Some(_), None) if !self.shared_with.is_empty() => {
+                outln!(
+                    w,
+                    "Shared `{}` again with {}.",
+                    self.branch,
+                    self.shared_with.join(", ")
+                );
+            }
             (Some(option), None) => {
                 outln!(
                     w,
@@ -1075,6 +1120,400 @@ impl MarkdownRender for ShareResolveOutcome {
         }
         Ok(())
     }
+}
+
+/// The `grit share resolve` options for a branch pushed again after its
+/// share was integrated.
+const INTEGRATED_OPTIONS: [&str; 3] = ["rebase", "rename", "reshare"];
+
+/// A branch pushed (or synced) again after its share was integrated,
+/// bringing integrated commits: scenario `pushed_to_integrated`. It is a
+/// branch nobody shares now.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IntegratedJson {
+    /// Always `pushed_to_integrated`.
+    pub scenario: String,
+    /// What happened, in a sentence.
+    pub summary: String,
+    /// Who integrated it.
+    pub by: String,
+    /// When, RFC 3339.
+    pub at: String,
+    /// The project it was merged into, `<owner>/<project>`.
+    pub into: String,
+    /// The branch it was merged into.
+    pub target_branch: String,
+    /// The pull request it went through, for an organization's project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull: Option<u64>,
+    /// The pull request's page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// How many of the branch's commits were integrated already.
+    pub integrated: usize,
+    /// How many are new.
+    pub new: usize,
+    /// The ways forward, recommended first.
+    pub options: Vec<ResolveOptionJson>,
+}
+
+impl IntegratedJson {
+    /// The report, for people: what happened and the options.
+    pub(crate) fn render_human(&self, w: &mut dyn Write, branch: &str) -> Result<()> {
+        let pull = self
+            .pull
+            .map(|n| format!(" (pull request {n})"))
+            .unwrap_or_default();
+        outln!(
+            w,
+            "! {branch} was shared, and {} integrated it into {} {}{pull}; it's a branch nobody shares now",
+            self.by,
+            self.into,
+            self.target_branch
+        );
+        outln!(
+            w,
+            "  {} of its commits {} integrated already; {} {} new",
+            self.integrated,
+            if self.integrated == 1 { "was" } else { "were" },
+            self.new,
+            if self.new == 1 { "is" } else { "are" }
+        );
+        let width = self
+            .options
+            .iter()
+            .map(|o| o.label.len())
+            .max()
+            .unwrap_or(0);
+        for (i, o) in self.options.iter().enumerate() {
+            outln!(w, "    {}  {:<width$}  {}", i + 1, o.label, o.command);
+        }
+        Ok(())
+    }
+
+    /// The report, for agents.
+    pub(crate) fn render_markdown(&self, w: &mut dyn Write, branch: &str) -> Result<()> {
+        outln!(w, "**Scenario:** `{}`. {}.", self.scenario, self.summary);
+        if let Some(url) = &self.url {
+            outln!(w);
+            outln!(w, "Pull request: {url}");
+        }
+        outln!(w);
+        outln!(w, "`{branch}` is a branch nobody shares now. Options:");
+        outln!(w);
+        outln!(w, "| Option | What it does | Leaves out | Command |");
+        outln!(w, "| --- | --- | --- | --- |");
+        for (i, o) in self.options.iter().enumerate() {
+            let recommended = if i == 0 { " (recommended)" } else { "" };
+            outln!(
+                w,
+                "| `{}`{recommended} | {} | {} | `{}` |",
+                o.id,
+                o.label,
+                o.loses.as_deref().unwrap_or("nothing"),
+                o.command
+            );
+        }
+        Ok(())
+    }
+}
+
+/// Ask `server` about the shares of `branch` in `project`.
+fn ask_about(
+    config: &ConfigSet,
+    server: &ServerUrl,
+    project: &str,
+    request: &ShareRequest,
+) -> Result<ShareReply> {
+    let http = context::http_client_factory()
+        .create(config)
+        .context("could not set up HTTP client")?;
+    let reply =
+        api::share(http.as_ref(), server, project, request).map_err(|e| server_error(server, e))?;
+    if let Some(why) = &reply.refused {
+        bail!("{why}");
+    }
+    Ok(reply)
+}
+
+/// When `branch` of `project` on `server` (here at `tip`) brings commits of
+/// a share of it integrated lately: the report. `None` when it wasn't
+/// shared and integrated, or brings none of the commits integrated (reusing
+/// the name for other work).
+pub(crate) fn integrated_on(
+    repo: &Repository,
+    config: &ConfigSet,
+    server: &ServerUrl,
+    project: &str,
+    branch: &str,
+    tip: ObjectId,
+) -> Result<Option<IntegratedJson>> {
+    integrated_share(repo, config, server, project, branch, tip, true)
+}
+
+/// [`integrated_on`], or with `carried` unset, the report for any share of
+/// `branch` integrated lately, whatever the branch holds now.
+fn integrated_share(
+    repo: &Repository,
+    config: &ConfigSet,
+    server: &ServerUrl,
+    project: &str,
+    branch: &str,
+    tip: ObjectId,
+    carried: bool,
+) -> Result<Option<IntegratedJson>> {
+    let reply = ask_about(
+        config,
+        server,
+        project,
+        &ShareRequest::List {
+            branch: Some(branch.to_owned()),
+        },
+    )?;
+    if reply
+        .shares
+        .iter()
+        .any(|s| s.branch == branch && s.state == ShareState::Active)
+    {
+        return Ok(None);
+    }
+    let Some((share, how)) = reply.shares.iter().find_map(|s| {
+        (s.branch == branch && s.state == ShareState::Integrated)
+            .then_some(s)
+            .and_then(|s| s.integrated.as_ref().map(|i| (s, i)))
+    }) else {
+        return Ok(None);
+    };
+    let keys: std::collections::HashSet<&str> = how.changes.iter().map(String::as_str).collect();
+    if keys.is_empty() && carried {
+        return Ok(None);
+    }
+    let commits = grit_lib::divergence::keyed_commits(repo, tip, &[])?;
+    let integrated = commits
+        .iter()
+        .filter(|k| keys.contains(k.key.as_str()))
+        .count();
+    if integrated == 0 && carried {
+        return Ok(None);
+    }
+    let new = commits
+        .iter()
+        .rposition(|k| keys.contains(k.key.as_str()))
+        .map_or(0, |i| commits.len() - i - 1);
+    let others: Vec<String> = share
+        .members
+        .iter()
+        .filter(|m| !m.you)
+        .map(|m| m.user.clone())
+        .collect();
+    let plural = |n: usize| if n == 1 { "" } else { "s" };
+    let summary = format!(
+        "{branch} was shared, and {} integrated it into {} {}; {integrated} of its commit{} {} there already, {new} {} new",
+        how.by,
+        how.into,
+        how.target_branch,
+        plural(integrated),
+        if integrated == 1 { "is" } else { "are" },
+        if new == 1 { "is" } else { "are" },
+    );
+    let renamed = format!("{branch}-2");
+    let mut options = vec![
+        ResolveOptionJson {
+            id: "rebase".to_owned(),
+            label: format!(
+                "rebase onto {}: keep only the {new} new commit{}",
+                how.target_branch,
+                plural(new)
+            ),
+            loses: None,
+            command: format!("grit share resolve {branch} rebase"),
+        },
+        ResolveOptionJson {
+            id: "rename".to_owned(),
+            label: format!("keep it as {renamed}"),
+            loses: None,
+            command: format!("grit share resolve {branch} rename {renamed}"),
+        },
+    ];
+    if !others.is_empty() {
+        options.push(ResolveOptionJson {
+            id: "reshare".to_owned(),
+            label: format!("share it again with {}", others.join(", ")),
+            loses: None,
+            command: format!("grit share resolve {branch} reshare"),
+        });
+    }
+    Ok(Some(IntegratedJson {
+        scenario: "pushed_to_integrated".to_owned(),
+        summary,
+        by: how.by.clone(),
+        at: how.at.clone(),
+        into: how.into.clone(),
+        target_branch: how.target_branch.clone(),
+        pull: how.pull,
+        url: how.url.clone(),
+        integrated,
+        new,
+        options,
+    }))
+}
+
+fn integrated_report(
+    here: &Here,
+    branch: &str,
+    tip: ObjectId,
+    carried: bool,
+) -> Result<Option<IntegratedJson>> {
+    integrated_share(
+        &here.repo,
+        &here.config,
+        &here.server,
+        &here.project,
+        branch,
+        tip,
+        carried,
+    )
+}
+
+/// `grit share resolve <branch> rebase|rename <name>|reshare`, for a
+/// branch pushed again after its share was integrated.
+fn resolve_integrated(
+    here: &Here,
+    branch: &str,
+    ours: ObjectId,
+    report: IntegratedJson,
+    option: Option<&str>,
+    name: Option<&str>,
+    mode: OutputMode,
+) -> Result<ShareResolveOutcome> {
+    let mut outcome = ShareResolveOutcome {
+        branch: branch.to_owned(),
+        with: report.by.clone(),
+        scenario: report.scenario.clone(),
+        summary: report.summary.clone(),
+        option: None,
+        previous: ours.to_hex(),
+        head: None,
+        pushed: false,
+        next: None,
+        options: Vec::new(),
+        renamed: None,
+        shared_with: Vec::new(),
+    };
+    let Some(option) = option else {
+        outcome.options = report.options;
+        return Ok(outcome);
+    };
+    if !report.options.iter().any(|o| o.id == option) {
+        let ids: Vec<&str> = report.options.iter().map(|o| o.id.as_str()).collect();
+        bail!(
+            "{option} isn't an option for {} ({}); choose one of: {}",
+            report.scenario,
+            report.summary,
+            ids.join(", ")
+        );
+    }
+    outcome.option = Some(option.to_owned());
+    match option {
+        "rebase" => {
+            fetch("origin", mode)?;
+            let target = &report.target_branch;
+            let onto = tips(&here.repo, "refs/remotes/origin/")?
+                .get(target)
+                .copied()
+                .or(tips(&here.repo, &format!("refs/remotes/{}/", here.remote))?
+                    .get(target)
+                    .copied())
+                .with_context(|| format!("there is no origin/{target} here to rebase onto"))?;
+            let reply = ask_about(
+                &here.config,
+                &here.server,
+                &here.project,
+                &ShareRequest::List {
+                    branch: Some(branch.to_owned()),
+                },
+            )?;
+            let skip: std::collections::HashSet<String> = reply
+                .shares
+                .iter()
+                .filter_map(|s| s.integrated.as_ref())
+                .flat_map(|i| i.changes.iter().cloned())
+                .collect();
+            let head =
+                match grit_lib::divergence::replay_onto(&here.repo, ours, &[onto], onto, &skip)? {
+                    Ok(head) => head,
+                    Err(paths) => bail!(
+                        "rebasing {branch} onto {target} conflicts in {}: run `grit rebase origin/{target}` and settle them by hand",
+                        paths.join(", ")
+                    ),
+                };
+            if head != ours {
+                move_branch(&here.repo, branch, head)?;
+            }
+            outcome.head = Some(head.to_hex());
+            let spec = format!("+refs/heads/{branch}:refs/heads/{branch}");
+            let pushed = crate::commands::sync::push_specs(&here.remote, &[spec], mode)?;
+            if let Some(Some(why)) = pushed.get(branch) {
+                bail!(
+                    "{branch} is at {} here, but pushing it was refused: {why}",
+                    short_hex(&head.to_hex())
+                );
+            }
+            outcome.pushed = true;
+        }
+        "rename" => {
+            let Some(new) = name else {
+                bail!("name the new branch: `grit share resolve {branch} rename <name>`");
+            };
+            grit_lib::porcelain::branch::rename_branch(
+                &here.repo,
+                &grit_lib::porcelain::branch::RenameBranchOptions {
+                    old: branch.to_owned(),
+                    new: new.to_owned(),
+                    force: false,
+                    dry_run: false,
+                },
+            )
+            .with_context(|| format!("renaming {branch} to {new}"))?;
+            let specs = vec![
+                format!("refs/heads/{new}:refs/heads/{new}"),
+                format!(":refs/heads/{branch}"),
+            ];
+            let pushed = crate::commands::sync::push_specs(&here.remote, &specs, mode)?;
+            if let Some(Some(why)) = pushed.get(new) {
+                bail!("{new} was renamed here, but pushing it was refused: {why}");
+            }
+            outcome.renamed = Some(new.to_owned());
+            outcome.pushed = true;
+        }
+        _ => {
+            let reply = ask_about(
+                &here.config,
+                &here.server,
+                &here.project,
+                &ShareRequest::Reshare {
+                    branch: branch.to_owned(),
+                },
+            )?;
+            let share = reply.shares.iter().find(|s| s.branch == branch);
+            configure_shared(
+                &here.repo,
+                &here.remote,
+                &[branch.to_owned()],
+                share.and_then(|s| s.base_branch.as_deref()),
+            )?;
+            outcome.shared_with = share
+                .map(|s| {
+                    s.members
+                        .iter()
+                        .filter(|m| !m.you)
+                        .map(|m| m.user.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+    }
+    Ok(outcome)
 }
 
 /// `grit share accept`.
