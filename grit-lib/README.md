@@ -11,6 +11,10 @@ agents, or services without shelling out to the `git` binary.
 Crate-level documentation (architecture, features, and a compiling example) lives
 in the [rustdoc](https://docs.rs/grit-lib) for `grit_lib`.
 
+Public API conventions, stability policy, and a checklist for new items are in
+[`API.md`](API.md) in this directory (also on
+[GitHub](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/API.md)).
+
 ## Toolchain
 
 **MSRV:** Rust **1.95** or newer. Cargo reports this via the crate's
@@ -63,13 +67,13 @@ Add the dependency:
 
 ```toml
 [dependencies]
-grit-lib = "0.1"
+grit-lib = "0.5"
 ```
 
 For smart-HTTP remotes:
 
 ```toml
-grit-lib = { version = "0.1", features = ["http-ureq"] }
+grit-lib = { version = "0.5", features = ["http-ureq"] }
 ```
 
 ### Open a repository and read HEAD
