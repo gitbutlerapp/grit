@@ -48,7 +48,7 @@ Author, committer, and message filters match [`grit revs`](../revs/): patterns u
 
 Diff detail flags (same family as [`grit diff`](../diff/)) append output under each commit line: `-p` / `--patch` (unified patch), `--stat`, `--numstat`, `--shortstat`, `--name-only`, or `--name-status`. Only one format at a time. `-U` sets unified context lines for patches (default from `diff.context`).
 
-With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape matching [`grit show`](../show/)). Merge commits show the change against their first parent for stat and name modes; `-p` skips merge patches (like `git log -p`). Path operands limit both which commits appear and the paths included in each patch.
+With `--stat`, each commit is also summarized in JSON under `stat` (legacy shape matching [`grit show`](../show/)). By default, merge commits include no diff in any detail mode (same as `git log` without `-m`, `-c`, or `--cc`); there is no grit flag for a first-parent or combined merge diff yet. Path operands limit both which commits appear and the paths included in each patch.
 
 With `--graph`, human output draws a commit graph in the left margin (Unicode box-drawing by default, or ASCII `*|` with `--graph-ascii`). `--graph-unicode` is accepted as an alias for the default Unicode graph and implies `--graph`. Graph mode uses topological ordering like Git's `log --graph`, including with path and author/committer/grep filters (filtered commits are skipped while keeping lane connectivity). `--json` rejects `--graph` (exit **1**, `kind: "incompatible_flags"`) because graph columns are human-only; `--markdown` lists commits without graph columns and includes a note that `--graph` is human-only. `--graph` cannot be combined with diff format flags, `--group-by`, or `--cursor`.
 
@@ -187,7 +187,7 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `commits` | array | Up to twenty commits by default, or up to `-n` when set, newest first. Each entry uses the shared [`CommitJson`](../README.md#commit-json-object-commitjson) shape (`oid`, `parents`, `author`, `committer`, `subject`, `message`, `refs`, `change_id`, `change_id_stored`, optional `relative_date`). Defaults to `[]` when omitted (for example with `--group-by author`, which fills `groups` instead). |
 | `commits[].files` | array | With any diff detail flag: same [`FileDiff`](/schemas/diff/v1.json) objects as [`grit diff`](../diff/) (including `stat` sub-objects for `--stat` / `--numstat`). |
-| `commits[].totals` | object | With stat-style flags: `files_changed`, `insertions`, `deletions`. |
+| `commits[].totals` | object | With `--stat`, `--numstat`, `--shortstat`, or `-p`: `files_changed`, `insertions`, `deletions` (for `-p`, summed from patch hunks). Omitted with `--name-only` and `--name-status`. |
 | `commits[].stat` | object | Only with `--stat`: duplicate summary in the legacy [`grit show`](../show/) `stat` shape (`files`, `files_changed`, …). |
 | `groups` | array | With `--group-by author`: `{name, email, count, commits?}` sorted like `git shortlog -sne`. `commits` holds full [`CommitJson`](../README.md#commit-json-object-commitjson) rows unless `--count` is set. |
 | `next` | string or null | Opaque continuation cursor (prefix `lw1.`) to pass to `--cursor` for the next page, or `null` when there is no more history or when the walk does not support paging (paths, `--reverse`, `--group-by`, and similar). |

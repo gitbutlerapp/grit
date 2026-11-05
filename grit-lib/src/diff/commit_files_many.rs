@@ -9,7 +9,7 @@ use crate::odb::Odb;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp, ParallelOptions, ThreadPolicy};
 
 use super::core::diff_trees_with_renames_for_pathspecs_and_policy;
-use super::detail::{DiffDetail, DiffTotals};
+use super::detail::{DiffDetail, DiffTotals, FileDiff, LineStat};
 use super::files::{build_file_diffs, DiffFilesOutput};
 use super::options::DiffOptions;
 use super::Diff;
@@ -22,7 +22,8 @@ pub struct CommitFilesManyOptions {
     pub diff_options: DiffOptions,
     /// How much to compute per changed file.
     pub detail: DiffDetail,
-    /// When set with [`DiffDetail::Patch`], merge commits (2+ parents) produce empty file lists.
+    /// When set, merge commits (2+ parents) produce empty file lists for every detail level
+    /// (like `git log` without `-m`, `-c`, or `--cc`).
     pub skip_merge_patches: bool,
 }
 
@@ -79,14 +80,43 @@ fn parent_tree_for_commit(
     Ok(parse_commit(&raw.data)?.tree)
 }
 
-fn totals_for_detail(files: &[super::detail::FileDiff], detail: DiffDetail) -> Option<DiffTotals> {
+fn totals_from_patch_files(files: &[FileDiff]) -> DiffTotals {
+    let lines: LineStat = files
+        .iter()
+        .filter_map(|file| {
+            file.structured
+                .as_ref()
+                .map(|structured| LineStat::from_hunks(&structured.hunks))
+        })
+        .sum();
+    DiffTotals {
+        files_changed: files.len(),
+        insertions: lines.insertions,
+        deletions: lines.deletions,
+    }
+}
+
+fn totals_for_detail(files: &[FileDiff], detail: DiffDetail) -> Option<DiffTotals> {
     match detail {
-        DiffDetail::Stat | DiffDetail::Patch => Some(DiffTotals::from_files(files)),
-        DiffDetail::NameOnly | DiffDetail::NameStatus => Some(DiffTotals {
-            files_changed: files.len(),
+        DiffDetail::Stat => Some(DiffTotals::from_files(files)),
+        DiffDetail::Patch => Some(totals_from_patch_files(files)),
+        DiffDetail::NameOnly | DiffDetail::NameStatus => None,
+    }
+}
+
+fn empty_merge_output(detail: DiffDetail) -> DiffFilesOutput {
+    let totals = match detail {
+        DiffDetail::NameOnly | DiffDetail::NameStatus => None,
+        DiffDetail::Stat | DiffDetail::Patch => Some(DiffTotals {
+            files_changed: 0,
             insertions: 0,
             deletions: 0,
         }),
+    };
+    DiffFilesOutput {
+        files: Vec::new(),
+        totals,
+        inexact_rename_skipped: None,
     }
 }
 
@@ -122,17 +152,9 @@ fn diff_one_commit(
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<CommitFilesResult> {
-    if opts.skip_merge_patches && opts.detail == DiffDetail::Patch && work.parent_count > 1 {
+    if opts.skip_merge_patches && work.parent_count > 1 {
         return Ok(CommitFilesResult {
-            output: DiffFilesOutput {
-                files: Vec::new(),
-                totals: Some(DiffTotals {
-                    files_changed: 0,
-                    insertions: 0,
-                    deletions: 0,
-                }),
-                inexact_rename_skipped: None,
-            },
+            output: empty_merge_output(opts.detail),
             parent_count: work.parent_count,
         });
     }
@@ -531,6 +553,98 @@ mod tests {
                 &ThreadPolicy::default(),
             )
             .is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn patch_totals_match_hunk_line_counts() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let tree1 = tree_with(&repo, &[("a.txt", b"one\n")]);
+        let root = write_commit(&repo, tree1, vec![], "root");
+        let tree2 = tree_with(&repo, &[("a.txt", b"one\ntwo\n")]);
+        let child = write_commit(&repo, tree2, vec![root], "add line");
+
+        let config = ConfigSet::default();
+        let policy = ThreadPolicy::default();
+        let opts = CommitFilesManyOptions {
+            diff_options: DiffOptions::default(),
+            detail: DiffDetail::Patch,
+            skip_merge_patches: true,
+        };
+        let results =
+            repo.diff()
+                .commit_files_many(&[child], &[], opts.clone(), &config, &policy)?;
+        let totals = results[0].output.totals.expect("patch totals");
+        assert_eq!(
+            (totals.files_changed, totals.insertions, totals.deletions),
+            (1, 1, 0)
+        );
+
+        let name_status_opts = CommitFilesManyOptions {
+            detail: DiffDetail::NameStatus,
+            ..opts.clone()
+        };
+        let name_status =
+            repo.diff()
+                .commit_files_many(&[child], &[], name_status_opts, &config, &policy)?;
+        assert!(name_status[0].output.totals.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn skip_merge_patches_empties_stat_and_name_modes() -> Result<()> {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let base_tree = tree_with(&repo, &[("a.txt", b"one\n")]);
+        let base = write_commit(&repo, base_tree, vec![], "base");
+        let side_tree = tree_with(&repo, &[("a.txt", b"one\n"), ("b.txt", b"side\n")]);
+        let side = write_commit(&repo, side_tree, vec![base], "side");
+        let main_tree = tree_with(&repo, &[("a.txt", b"one\ntwo\n")]);
+        let main = write_commit(&repo, main_tree, vec![base], "main");
+        let merge = write_commit(&repo, side_tree, vec![main, side], "merge");
+
+        let config = ConfigSet::default();
+        let policy = ThreadPolicy::default();
+        let base_opts = CommitFilesManyOptions {
+            diff_options: DiffOptions::default(),
+            detail: DiffDetail::Stat,
+            skip_merge_patches: true,
+        };
+
+        for detail in [
+            DiffDetail::Patch,
+            DiffDetail::Stat,
+            DiffDetail::NameOnly,
+            DiffDetail::NameStatus,
+        ] {
+            let opts = CommitFilesManyOptions {
+                detail,
+                ..base_opts.clone()
+            };
+            let results = repo
+                .diff()
+                .commit_files_many(&[merge], &[], opts, &config, &policy)?;
+            assert!(
+                results[0].output.files.is_empty(),
+                "merge files should be empty for {detail:?}"
+            );
+            match detail {
+                DiffDetail::NameOnly | DiffDetail::NameStatus => {
+                    assert!(results[0].output.totals.is_none());
+                }
+                DiffDetail::Patch | DiffDetail::Stat => {
+                    assert_eq!(
+                        results[0].output.totals,
+                        Some(DiffTotals {
+                            files_changed: 0,
+                            insertions: 0,
+                            deletions: 0,
+                        })
+                    );
+                }
+            }
+        }
         Ok(())
     }
 }
