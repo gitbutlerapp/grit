@@ -336,6 +336,7 @@ pub(crate) mod refspec;
 pub(crate) mod reftable;
 pub mod remote;
 pub(crate) mod repack_pack;
+pub(crate) mod replay_merge_session;
 pub mod repo;
 pub(crate) mod repo_caches;
 pub mod repo_handles;

@@ -56,7 +56,6 @@ mod r#move;
 mod plan;
 mod rebase;
 mod rebase_session;
-mod replay_merge_session;
 mod reword;
 mod split;
 mod squash;

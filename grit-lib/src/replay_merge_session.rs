@@ -9,8 +9,8 @@ use crate::index::{Index, IndexEntry, MODE_TREE};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     lookup_index_entry_at_path_cached, merge_trees_replay_transplant, merge_trees_three_way_cached,
-    DirectoryRenameMode, MergeTreeCache, ReplayConflictLabels, TreeMergeOutput,
-    WhitespaceMergeOptions,
+    DirectoryRenameMode, MergeTreeCache, ReplayConflictLabels, TreeMergeConflictPresentation,
+    TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
@@ -18,7 +18,7 @@ use crate::porcelain::cherry_pick::directory_renames_from_file_renames;
 use crate::repo::Repository;
 use crate::write_tree::write_tree_partial_from_index;
 
-use super::error::HistoryError;
+use std::collections::BTreeMap;
 
 thread_local! { // hygiene: replay merge metrics for unit tests
     #[cfg(test)]
@@ -76,8 +76,16 @@ struct UpstreamDeltaCache {
     dir_rename_roots: HashSet<Vec<u8>>,
 }
 
+type FastTransplantOutcome = (ObjectId, HashSet<Vec<u8>>, Index);
+
+#[allow(clippy::large_enum_variant)]
 enum OverlapTransplant {
-    Applied(ObjectId),
+    AppliedPartial {
+        tree: ObjectId,
+        paths: HashSet<Vec<u8>>,
+        index: Index,
+    },
+    AppliedMerge(Box<TreeMergeOutput>),
     Conflict(Box<TreeMergeOutput>),
     NotApplicable,
 }
@@ -92,14 +100,19 @@ pub(crate) struct ReplayMergeSession {
 }
 
 impl ReplayMergeSession {
+    /// Drop cached parsed trees retained for the current replay step.
+    pub(crate) fn clear_merge_cache_retained(&mut self) {
+        self.merge_cache.clear_retained();
+    }
+
     fn directory_renames(
         &mut self,
         repo: &Repository,
-    ) -> Result<DirectoryRenameMode, HistoryError> {
+    ) -> crate::error::Result<DirectoryRenameMode> {
         match self.directory_renames {
             Some(mode) => Ok(mode),
             None => {
-                let mode = DirectoryRenameMode::from_repo(repo).map_err(HistoryError::from)?;
+                let mode = DirectoryRenameMode::from_repo(repo)?;
                 self.directory_renames = Some(mode);
                 Ok(mode)
             }
@@ -111,7 +124,7 @@ impl ReplayMergeSession {
         repo: &Repository,
         fork_tree: ObjectId,
         onto_tree: ObjectId,
-    ) -> Result<(), HistoryError> {
+    ) -> crate::error::Result<()> {
         if self.upstream.is_some() {
             return Ok(());
         }
@@ -123,11 +136,10 @@ impl ReplayMergeSession {
         repo: &Repository,
         fork_tree: ObjectId,
         onto_tree: ObjectId,
-    ) -> Result<(), HistoryError> {
+    ) -> crate::error::Result<()> {
         record_upstream_delta_scan();
         let odb = repo.odb();
-        let entries =
-            diff_trees(odb, Some(&fork_tree), Some(&onto_tree), "").map_err(HistoryError::from)?;
+        let entries = diff_trees(odb, Some(&fork_tree), Some(&onto_tree), "")?;
         let touched = paths_from_diff_entries(&entries);
         let rename_pairs = rename_pairs_from_diff(odb, entries)?;
         let fork_onto_rename_triples = rename_pairs.clone();
@@ -171,7 +183,7 @@ impl ReplayMergeSession {
         repo: &Repository,
         old_parent_tree: ObjectId,
         new_parent_tree: ObjectId,
-    ) -> Result<bool, HistoryError> {
+    ) -> crate::error::Result<bool> {
         let Some(upstream) = &self.upstream else {
             return Ok(true);
         };
@@ -206,8 +218,8 @@ impl ReplayMergeSession {
         old_parent_tree: ObjectId,
         new_parent_tree: ObjectId,
         merge_favor: MergeFavor,
-        on_conflict: impl FnOnce(ObjectId, TreeMergeOutput) -> Result<ObjectId, HistoryError>,
-    ) -> Result<ObjectId, HistoryError> {
+        on_conflict: impl FnOnce(ObjectId, TreeMergeOutput) -> crate::error::Result<ObjectId>,
+    ) -> crate::error::Result<ObjectId> {
         if old_parent_tree == new_parent_tree {
             return Ok(subject_tree);
         }
@@ -217,7 +229,7 @@ impl ReplayMergeSession {
         }
 
         if merge_favor == MergeFavor::default() {
-            if let Some(result) =
+            if let Some((result, _paths, _index)) =
                 self.try_fast_transplant(repo, old_parent_tree, new_parent_tree, subject_tree)?
             {
                 self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
@@ -229,14 +241,20 @@ impl ReplayMergeSession {
             if self.upstream_cache_still_valid(repo, old_parent_tree, new_parent_tree)? {
                 match self.try_overlap_transplant(
                     repo,
-                    labels,
                     subject_tree,
                     old_parent_tree,
                     new_parent_tree,
+                    merge_favor,
+                    WhitespaceMergeOptions::default(),
+                    labels.presentation(crate::merge_file::ConflictStyle::Merge),
                 )? {
-                    OverlapTransplant::Applied(result) => {
+                    OverlapTransplant::AppliedPartial { tree, .. } => {
                         self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
-                        return Ok(result);
+                        return Ok(tree);
+                    }
+                    OverlapTransplant::AppliedMerge(merge) => {
+                        self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+                        return Ok(merge.result_tree);
                     }
                     OverlapTransplant::Conflict(merge) => return on_conflict(commit, *merge),
                     OverlapTransplant::NotApplicable => {}
@@ -259,8 +277,7 @@ impl ReplayMergeSession {
             None,
             labels.presentation(crate::merge_file::ConflictStyle::Merge),
             directory_renames,
-        )
-        .map_err(HistoryError::from)?;
+        )?;
 
         if crate::operation::tree_merge_has_conflicts(&merge) {
             return on_conflict(commit, merge);
@@ -274,10 +291,9 @@ impl ReplayMergeSession {
         repo: &Repository,
         old_parent_tree: ObjectId,
         subject_tree: ObjectId,
-    ) -> Result<(), HistoryError> {
+    ) -> crate::error::Result<()> {
         let odb = repo.odb();
-        let entries = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")
-            .map_err(HistoryError::from)?;
+        let entries = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")?;
         let paths = paths_from_diff_entries(&entries);
         self.replayed_touched
             .extend(expand_replayed_paths(self.upstream.as_ref(), &paths));
@@ -290,15 +306,14 @@ impl ReplayMergeSession {
         old_parent_tree: ObjectId,
         new_parent_tree: ObjectId,
         subject_tree: ObjectId,
-    ) -> Result<Option<ObjectId>, HistoryError> {
+    ) -> crate::error::Result<Option<FastTransplantOutcome>> {
         let Some(upstream) = self.upstream.as_ref() else {
             return Ok(None);
         };
         let odb = repo.odb();
-        let commit_diff = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")
-            .map_err(HistoryError::from)?;
+        let commit_diff = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")?;
         if commit_diff.is_empty() {
-            return Ok(Some(new_parent_tree));
+            return Ok(Some((new_parent_tree, HashSet::new(), Index::new())));
         }
         if !commit_diff.iter().all(commit_change_is_simple) {
             return Ok(None);
@@ -339,19 +354,106 @@ impl ReplayMergeSession {
         }
         let index = index_from_commit_diff(repo, &commit_diff)?;
         let result =
-            write_tree_partial_from_index(odb, &index, &new_parent_tree, &paths_from_index)
-                .map_err(HistoryError::from)?;
-        Ok(Some(result))
+            write_tree_partial_from_index(odb, &index, &new_parent_tree, &paths_from_index)?;
+        Ok(Some((result, paths_from_index, index)))
     }
 
+    /// Three-way merge for cherry-pick/revert replay, reusing upstream fork→onto analysis.
+    #[expect(clippy::too_many_arguments)]
+    pub(crate) fn merge_for_replay(
+        &mut self,
+        repo: &Repository,
+        _labels: &ReplayConflictLabels,
+        base_tree: ObjectId,
+        ours_tree: ObjectId,
+        theirs_tree: ObjectId,
+        merge_favor: MergeFavor,
+        ws: WhitespaceMergeOptions,
+        presentation: TreeMergeConflictPresentation<'_>,
+        directory_renames: DirectoryRenameMode,
+    ) -> crate::error::Result<TreeMergeOutput> {
+        let old_parent_tree = base_tree;
+        let new_parent_tree = ours_tree;
+        let subject_tree = theirs_tree;
+
+        if old_parent_tree == new_parent_tree {
+            return Ok(partial_tree_merge_output(
+                subject_tree,
+                HashSet::new(),
+                Index::new(),
+            ));
+        }
+
+        if merge_favor == MergeFavor::default() && self.upstream.is_none() {
+            self.ensure_upstream(repo, old_parent_tree, new_parent_tree)?;
+        }
+
+        if merge_favor == MergeFavor::default() {
+            if let Some((tree, paths, index)) =
+                self.try_fast_transplant(repo, old_parent_tree, new_parent_tree, subject_tree)?
+            {
+                self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+                return Ok(partial_tree_merge_output(tree, paths, index));
+            }
+        }
+
+        if merge_favor == MergeFavor::default() {
+            if self.upstream_cache_still_valid(repo, old_parent_tree, new_parent_tree)? {
+                match self.try_overlap_transplant(
+                    repo,
+                    subject_tree,
+                    old_parent_tree,
+                    new_parent_tree,
+                    merge_favor,
+                    ws,
+                    presentation,
+                )? {
+                    OverlapTransplant::AppliedPartial { tree, paths, index } => {
+                        self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+                        return Ok(partial_tree_merge_output(tree, paths, index));
+                    }
+                    OverlapTransplant::AppliedMerge(merge) => {
+                        self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+                        return Ok(*merge);
+                    }
+                    OverlapTransplant::Conflict(merge) => return Ok(*merge),
+                    OverlapTransplant::NotApplicable => {}
+                }
+            } else {
+                self.upstream = None;
+            }
+        }
+
+        record_merge_call();
+        let merge = merge_trees_three_way_cached(
+            repo,
+            &mut self.merge_cache,
+            old_parent_tree,
+            new_parent_tree,
+            subject_tree,
+            merge_favor,
+            ws,
+            None,
+            presentation,
+            directory_renames,
+        )?;
+        if !crate::operation::tree_merge_has_conflicts(&merge) {
+            self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
+        }
+        Ok(merge)
+    }
+
+    #[expect(clippy::too_many_arguments)]
     fn try_overlap_transplant(
         &mut self,
         repo: &Repository,
-        labels: &ReplayConflictLabels,
         subject_tree: ObjectId,
         old_parent_tree: ObjectId,
         new_parent_tree: ObjectId,
-    ) -> Result<OverlapTransplant, HistoryError> {
+        merge_favor: MergeFavor,
+        ws: WhitespaceMergeOptions,
+        presentation: TreeMergeConflictPresentation<'_>,
+    ) -> crate::error::Result<OverlapTransplant> {
         let Some(upstream) = &self.upstream else {
             return Ok(OverlapTransplant::NotApplicable);
         };
@@ -360,10 +462,13 @@ impl ReplayMergeSession {
         let upstream_touched = upstream.touched.clone();
         let dir_rename_roots = upstream.dir_rename_roots.clone();
         let odb = repo.odb();
-        let commit_diff = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")
-            .map_err(HistoryError::from)?;
+        let commit_diff = diff_trees(odb, Some(&old_parent_tree), Some(&subject_tree), "")?;
         if commit_diff.is_empty() {
-            return Ok(OverlapTransplant::Applied(new_parent_tree));
+            return Ok(OverlapTransplant::AppliedPartial {
+                tree: new_parent_tree,
+                paths: HashSet::new(),
+                index: Index::new(),
+            });
         }
         if !commit_diff.iter().all(commit_change_is_simple) {
             return Ok(OverlapTransplant::NotApplicable);
@@ -381,10 +486,12 @@ impl ReplayMergeSession {
             }
             let index = index_from_commit_diff(repo, &commit_diff)?;
             let result =
-                write_tree_partial_from_index(odb, &index, &new_parent_tree, &paths_from_index)
-                    .map_err(HistoryError::from)?;
-            self.note_replayed_commit(repo, old_parent_tree, subject_tree)?;
-            return Ok(OverlapTransplant::Applied(result));
+                write_tree_partial_from_index(odb, &index, &new_parent_tree, &paths_from_index)?;
+            return Ok(OverlapTransplant::AppliedPartial {
+                tree: result,
+                paths: paths_from_index,
+                index,
+            });
         }
 
         let directory_renames = self.directory_renames(repo)?;
@@ -398,18 +505,32 @@ impl ReplayMergeSession {
             &file_old_to_new,
             &fork_onto_rename_triples,
             &upstream_touched,
-            MergeFavor::default(),
-            WhitespaceMergeOptions::default(),
+            merge_favor,
+            ws,
             None,
-            labels.presentation(crate::merge_file::ConflictStyle::Merge),
+            presentation,
             directory_renames,
-        )
-        .map_err(HistoryError::from)?;
+        )?;
 
         if crate::operation::tree_merge_has_conflicts(&merge) {
             return Ok(OverlapTransplant::Conflict(Box::new(merge)));
         }
-        Ok(OverlapTransplant::Applied(merge.result_tree))
+        Ok(OverlapTransplant::AppliedMerge(Box::new(merge)))
+    }
+}
+
+fn partial_tree_merge_output(
+    result_tree: ObjectId,
+    touched_paths: HashSet<Vec<u8>>,
+    index: Index,
+) -> TreeMergeOutput {
+    TreeMergeOutput {
+        index,
+        conflict_content: BTreeMap::new(),
+        result_tree,
+        touched_paths,
+        rename_conflicts: Vec::new(),
+        directory_rename_conflicts: Vec::new(),
     }
 }
 
@@ -419,13 +540,12 @@ fn diff_only_touches_replayed(
     from_tree: ObjectId,
     to_tree: ObjectId,
     replayed: &HashSet<Vec<u8>>,
-) -> Result<bool, HistoryError> {
+) -> crate::error::Result<bool> {
     if from_tree == to_tree {
         return Ok(true);
     }
     let odb = repo.odb();
-    let entries =
-        diff_trees(odb, Some(&from_tree), Some(&to_tree), "").map_err(HistoryError::from)?;
+    let entries = diff_trees(odb, Some(&from_tree), Some(&to_tree), "")?;
     for entry in entries {
         for path in diff_entry_paths(&entry) {
             if replayed.contains(&path) {
@@ -546,7 +666,7 @@ type RenameTriple = (Vec<u8>, Vec<u8>, u32);
 fn rename_pairs_from_diff(
     odb: &crate::odb::Odb,
     entries: Vec<DiffEntry>,
-) -> Result<Vec<RenameTriple>, HistoryError> {
+) -> crate::error::Result<Vec<RenameTriple>> {
     let entries = detect_renames(odb, None, entries, 50);
     let mut out = Vec::new();
     for e in entries {
@@ -574,9 +694,8 @@ fn is_tree_path(
     odb: &crate::odb::Odb,
     tree: &ObjectId,
     path: &[u8],
-) -> Result<bool, HistoryError> {
-    Ok(lookup_index_entry_at_path_cached(cache, odb, tree, path)
-        .map_err(HistoryError::from)?
+) -> crate::error::Result<bool> {
+    Ok(lookup_index_entry_at_path_cached(cache, odb, tree, path)?
         .is_some_and(|e| e.mode == MODE_TREE))
 }
 
@@ -618,11 +737,9 @@ fn parents_agree_at_path(
     old_parent: ObjectId,
     new_parent: ObjectId,
     path: &[u8],
-) -> Result<bool, HistoryError> {
-    let old_e = lookup_index_entry_at_path_cached(cache, odb, &old_parent, path)
-        .map_err(HistoryError::from)?;
-    let new_e = lookup_index_entry_at_path_cached(cache, odb, &new_parent, path)
-        .map_err(HistoryError::from)?;
+) -> crate::error::Result<bool> {
+    let old_e = lookup_index_entry_at_path_cached(cache, odb, &old_parent, path)?;
+    let new_e = lookup_index_entry_at_path_cached(cache, odb, &new_parent, path)?;
     Ok(match (old_e, new_e) {
         (None, None) => true,
         (Some(a), Some(b)) => a.mode == b.mode && a.oid == b.oid,
@@ -636,11 +753,9 @@ fn parent_dir_ready(
     old_parent: ObjectId,
     new_parent: ObjectId,
     dir: &[u8],
-) -> Result<bool, HistoryError> {
-    let old_e = lookup_index_entry_at_path_cached(cache, odb, &old_parent, dir)
-        .map_err(HistoryError::from)?;
-    let new_e = lookup_index_entry_at_path_cached(cache, odb, &new_parent, dir)
-        .map_err(HistoryError::from)?;
+) -> crate::error::Result<bool> {
+    let old_e = lookup_index_entry_at_path_cached(cache, odb, &old_parent, dir)?;
+    let new_e = lookup_index_entry_at_path_cached(cache, odb, &new_parent, dir)?;
     Ok(match (old_e, new_e) {
         (None, None) => true,
         (Some(a), Some(b)) if a.mode == MODE_TREE && b.mode == MODE_TREE => a.oid == b.oid,
@@ -658,7 +773,7 @@ fn commit_change_is_simple(entry: &DiffEntry) -> bool {
         && entry.new_mode != FileMode::SYMLINK
 }
 
-fn index_from_commit_diff(repo: &Repository, diff: &[DiffEntry]) -> Result<Index, HistoryError> {
+fn index_from_commit_diff(repo: &Repository, diff: &[DiffEntry]) -> crate::error::Result<Index> {
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
     for entry in diff {
@@ -694,5 +809,144 @@ fn index_entry_from_diff(entry: &DiffEntry, path: Vec<u8>) -> IndexEntry {
         flags_extended: None,
         path,
         base_index_pos: 0,
+    }
+}
+
+#[cfg(test)]
+mod upstream_cache_tests {
+    use super::*;
+    use crate::index::MODE_REGULAR;
+    use crate::merge_trees::TreeMergeConflictPresentation;
+    use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
+    use crate::porcelain::merge::tree_to_index_entries;
+    use crate::repo::{InitOptions, Repository};
+    use crate::write_tree::write_tree_from_index;
+
+    fn tree_with_file(
+        repo: &Repository,
+        parent_tree: ObjectId,
+        path: &str,
+        bytes: &[u8],
+    ) -> crate::error::Result<ObjectId> {
+        let blob = repo.odb().write(ObjectKind::Blob, bytes)?;
+        let mut index = Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        for mut entry in tree_to_index_entries(repo, &parent_tree, "")? {
+            entry.base_index_pos = 0;
+            index.add_or_replace(entry);
+        }
+        index.add_or_replace(IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: bytes.len() as u32,
+            oid: blob,
+            flags: path.len().min(0xfff) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        });
+        write_tree_from_index(repo.odb(), &index, "")
+    }
+
+    fn write_commit(repo: &Repository, tree: ObjectId, parent: ObjectId, msg: &str) -> ObjectId {
+        let sig = "T <t@example.com> 1 +0000".to_owned();
+        let raw = serialize_commit(&CommitData {
+            tree,
+            parents: vec![parent],
+            author: sig.clone(),
+            committer: sig,
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: format!("{msg}\n"),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        });
+        repo.odb().write(ObjectKind::Commit, &raw).expect("commit")
+    }
+
+    /// Same scan-once invariant as history rebase planning, for porcelain replay merges.
+    #[test]
+    fn merge_for_replay_builds_upstream_cache_once() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &InitOptions::new().with_initial_branch("main".to_owned()),
+        )
+        .expect("init");
+        let sig = "T <t@example.com> 1 +0000".to_owned();
+        let empty = repo.odb().empty_tree_oid().expect("empty");
+        let mut fork_tree = empty;
+        for i in 0..24 {
+            fork_tree = tree_with_file(&repo, fork_tree, &format!("wide/f{i:02}.txt"), b"base\n")
+                .expect("fork file");
+        }
+        let fork = write_commit(&repo, fork_tree, empty, "fork");
+        let mut onto_tree = fork_tree;
+        for i in 0..24 {
+            onto_tree = tree_with_file(
+                &repo,
+                onto_tree,
+                &format!("wide/f{i:02}.txt"),
+                format!("main {i}\n").as_bytes(),
+            )
+            .expect("onto file");
+        }
+        let onto = write_commit(&repo, onto_tree, fork, "onto");
+
+        let mut parent = fork;
+        let mut parent_tree = fork_tree;
+        let mut lc_commits = Vec::new();
+        for i in 0..8 {
+            let subject_tree =
+                tree_with_file(&repo, parent_tree, &format!("tp/u{i}.txt"), b"add\n")
+                    .expect("lc add");
+            parent = write_commit(&repo, subject_tree, parent, &format!("lc {i}"));
+            lc_commits.push((parent, parent_tree, subject_tree));
+            parent_tree = subject_tree;
+        }
+
+        test_reset_merge_tree_call_count();
+        test_reset_upstream_delta_scan_count();
+        let mut session = ReplayMergeSession::default();
+        let mut head_tree = parse_commit(&repo.odb().read(&onto).expect("read").data)
+            .expect("parse")
+            .tree;
+        for (commit_oid, base_tree, theirs_tree) in lc_commits {
+            let labels = ReplayConflictLabels::new(commit_oid, "lc");
+            let presentation = TreeMergeConflictPresentation::default();
+            let merged = session
+                .merge_for_replay(
+                    &repo,
+                    &labels,
+                    base_tree,
+                    head_tree,
+                    theirs_tree,
+                    MergeFavor::default(),
+                    WhitespaceMergeOptions::default(),
+                    presentation,
+                    DirectoryRenameMode::Off,
+                )
+                .expect("merge");
+            head_tree = merged.result_tree;
+        }
+        assert_eq!(
+            test_upstream_delta_scan_count(),
+            1,
+            "fork→onto analysis runs once per replay session"
+        );
+        assert_eq!(
+            test_merge_tree_call_count(),
+            0,
+            "independent adds should fast-transplant without full tree merge"
+        );
+        let _ = sig;
     }
 }
