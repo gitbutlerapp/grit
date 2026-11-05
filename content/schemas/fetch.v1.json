@@ -197,6 +197,7 @@
       "type": "boolean"
     },
     "remote": {
+      "description": "Remote name, or the URL fetched from with any credentials removed.",
       "type": "string"
     },
     "shallow": {

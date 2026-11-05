@@ -100,7 +100,7 @@ Schema: [v1](/schemas/checkin/v1.json)
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `url` | string | The server repository. |
+| `url` | string | The server repository, with any `user:password@` removed. |
 | `gave_change_ids` | integer | Commits made with plain `git` that were given a change id before the check-in (their branches were rewritten); `0` when none needed one. |
 | `branches` | array | One entry per branch (empty when there was nothing to check in): `name`, `status` (`created`, `updated`, `unchanged` or `refused`; `unchanged` when the server's branch was at the graft already or ahead of it), `grafted` (the server commit the branch became), `previous` (where the server's branch was), `commits` (commits replayed), `rule` for an updated branch, and for a refused branch `message` (why, in words) and `reason`. |
 | `branches[].rule` | string or omitted | What let an `updated` branch move: `fast_forward`, `own_last_set` (this checkout set it last), `keeps_every_commit` (a rebase that keeps every commit the server's branch had, by change id) or `forced`. |

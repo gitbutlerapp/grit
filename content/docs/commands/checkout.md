@@ -85,7 +85,7 @@ Schema: [v1](/schemas/checkout/v1.json)
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `url` | string | The repository URL, configured as `origin` (with the fetch and push refspecs above). |
+| `url` | string | The repository URL, configured as `origin` (with the fetch and push refspecs above), with any `user:password@` removed. |
 | `path` | string | Directory the checkout was made in. |
 | `branch` | string | The server's target branch the snapshot was taken from. |
 | `work` | string | The new branch checked out for your work. |

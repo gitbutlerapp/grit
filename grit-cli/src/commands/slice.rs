@@ -41,7 +41,7 @@ impl From<Slice> for SliceJson {
 /// Result of `grit slice list`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct SliceListOutcome {
-    /// The server repository.
+    /// The server repository, with any credentials removed.
     pub url: String,
     /// The target branch the slices are on.
     pub target: String,

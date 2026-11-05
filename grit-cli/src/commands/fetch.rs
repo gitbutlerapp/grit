@@ -10,6 +10,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::objects::short_hex;
 use grit_lib::progress::Cancel;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
+use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::{
     resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions,
     FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateKind, UpdateMode,
@@ -28,6 +29,7 @@ use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 /// Result of `grit fetch`: the refs that changed.
 #[derive(Serialize, JsonSchema)]
 pub struct FetchOutcome {
+    /// Remote name, or the URL fetched from with any credentials removed.
     pub remote: String,
     pub updates: Vec<FetchUpdate>,
     pub updated: usize,
@@ -83,6 +85,7 @@ pub struct FetchAllOutcome {
 /// One remote's result inside [`FetchAllOutcome`].
 #[derive(Serialize, JsonSchema)]
 pub struct FetchAllRemoteOutcome {
+    /// Remote name.
     pub remote: String,
     pub updates: Vec<FetchUpdate>,
     pub updated: usize,
@@ -387,7 +390,7 @@ pub(crate) fn run_one_in(
     .with_milestones(progress.milestones().to_vec());
 
     Ok(FetchOutcome {
-        remote: refs.remote,
+        remote: redact_url_for_display(&refs.remote),
         updates: refs.updates,
         updated: refs.updated,
         dry_run: args.dry_run,

@@ -9,6 +9,7 @@ use grit_lib::remote::push_plan::{
     resolve_push_invocation, PushPlanError, PushPlanKind, PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
+use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::PushOptions;
 use grit_lib::remote::DefaultHttpClientFactory;
 use schemars::JsonSchema;
@@ -29,6 +30,7 @@ use grit_lib::remote::transfer::TransferStats;
 /// Result of `grit push`: the per-ref outcomes for the remote.
 #[derive(Serialize, JsonSchema)]
 pub struct PushOutcome {
+    /// Remote name, or the URL pushed to with any credentials removed.
     pub remote: String,
     /// High-level push kind (`branch`, `tags`, `delete`, `refspecs`).
     pub kind: PushKind,
@@ -624,7 +626,7 @@ pub fn run(
     transfer.transfer_sent = true;
 
     Ok(PushOutcome {
-        remote: plan.remote,
+        remote: redact_url_for_display(&plan.remote),
         kind: plan.kind.into(),
         branch,
         results,

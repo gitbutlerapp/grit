@@ -120,7 +120,7 @@
       "type": "boolean"
     },
     "url": {
-      "description": "The server repository.",
+      "description": "The server repository, with any credentials removed.",
       "type": "string"
     }
   },

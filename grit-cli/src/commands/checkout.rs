@@ -27,7 +27,7 @@ use crate::progress::{format_bytes, format_duration, paint, TerminalProgress, BO
 /// Result of `grit checkout <url>`.
 #[derive(Serialize, JsonSchema)]
 pub struct CheckoutOutcome {
-    /// The repository URL, configured as `origin`.
+    /// The repository URL, configured as `origin`, with any credentials removed.
     pub url: String,
     /// Directory the checkout was made in.
     pub path: String,

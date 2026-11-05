@@ -8,6 +8,7 @@ use anyhow::Result;
 use grit_lib::objects::index_pack::ObjectKindCounts;
 use grit_lib::progress::{ProgressPhase, ProgressUnit};
 use grit_lib::remote::fetch::FetchMilestone;
+use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::TransferStats;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -171,20 +172,17 @@ impl TransferSummary {
 /// The line printed on stderr before a fetch or pull starts drawing progress:
 /// `<verb> <remote> <url>`, leaving out the URL when it is the remote argument
 /// itself (a literal URL or path rather than a configured remote name).
+/// Credentials embedded in either are never shown.
 #[must_use]
 pub fn transfer_header(verb: &str, remote: &str, url: Option<&str>, color: bool) -> String {
     let mut line = format!(
         "{} {}",
         paint(color, BOLD, verb),
-        paint(color, BOLD, remote)
+        paint(color, BOLD, &redact_url_for_display(remote))
     );
     if let Some(url) = url.filter(|u| !u.is_empty() && *u != remote) {
         line.push(' ');
-        line.push_str(&paint(
-            color,
-            DIM,
-            &grit_lib::remote::redact_url_for_display(url),
-        ));
+        line.push_str(&paint(color, DIM, &redact_url_for_display(url)));
     }
     line
 }
@@ -736,6 +734,24 @@ mod tests {
         assert_eq!(
             transfer_header("Pulling", "origin", None, false),
             "Pulling origin"
+        );
+    }
+
+    #[test]
+    fn transfer_header_hides_url_credentials() {
+        assert_eq!(
+            transfer_header(
+                "Fetching",
+                "origin",
+                Some("http://alice:s3cret@127.0.0.1:9419/auth.git"),
+                false
+            ),
+            "Fetching origin http://127.0.0.1:9419/auth.git"
+        );
+        let url = "https://x-access-token:tok@host.example/r.git";
+        assert_eq!(
+            transfer_header("Pulling", url, Some(url), false),
+            "Pulling https://host.example/r.git"
         );
     }
 

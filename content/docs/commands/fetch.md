@@ -133,7 +133,7 @@ Schema: [v1](/schemas/fetch/v1.json)
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `remote` | string | Remote that was fetched. |
+| `remote` | string | Remote that was fetched: its name, or the URL given with any `user:password@` removed. Human and Markdown output show the same value. |
 | `dry_run` | boolean | True when `--dry-run` was used. |
 | `rejected` | boolean | True when any update was rejected (exit 1). |
 | `updates` | array | Per-ref results. Each object has `ref`, `remote_ref`, `status` (`new`, `fast_forward`, `forced`, `pruned`, `rejected`, or `up_to_date`), `old_oid` and `new_oid` (full hex or `null`), and `reason` when `status` is `rejected`. |

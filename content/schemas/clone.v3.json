@@ -407,6 +407,7 @@
       "type": "integer"
     },
     "url": {
+      "description": "Source URL or path, with any credentials removed.",
       "type": "string"
     },
     "worktree_bytes": {

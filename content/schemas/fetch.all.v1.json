@@ -12,6 +12,7 @@
           ]
         },
         "remote": {
+          "description": "Remote name.",
           "type": "string"
         },
         "updated": {

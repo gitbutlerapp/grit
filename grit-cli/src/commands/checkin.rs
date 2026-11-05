@@ -92,7 +92,7 @@ impl CheckinRuleJson {
 /// Result of `grit checkin`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct CheckinOutcome {
-    /// The server repository.
+    /// The server repository, with any credentials removed.
     pub url: String,
     /// Commits made with plain Git that were given a change id first (their
     /// branches were rewritten with it).

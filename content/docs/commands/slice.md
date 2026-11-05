@@ -65,7 +65,7 @@ Schema: [slice.list v1](/schemas/slice.list/v1.json) · [slice.new v1](/schemas/
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `url` | string | The server repository. |
+| `url` | string | The server repository, with any `user:password@` removed. |
 | `target` | string | The target branch the slices are on. |
 | `head` | string | Where it is. |
 | `slices` | array | Each slice's `name`, `description` (when set) and `paths`. |

@@ -60,7 +60,7 @@
       "type": "string"
     },
     "url": {
-      "description": "The repository URL, configured as `origin`.",
+      "description": "The repository URL, configured as `origin`, with any credentials removed.",
       "type": "string"
     },
     "work": {

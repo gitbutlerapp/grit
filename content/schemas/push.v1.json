@@ -343,6 +343,7 @@
       "type": "boolean"
     },
     "remote": {
+      "description": "Remote name, or the URL pushed to with any credentials removed.",
       "type": "string"
     },
     "remote_messages": {

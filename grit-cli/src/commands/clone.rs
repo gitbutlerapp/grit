@@ -150,6 +150,7 @@ pub struct CloneBundleJson {
 /// Result of `grit clone`.
 #[derive(Serialize, JsonSchema)]
 pub struct CloneOutcome {
+    /// Source URL or path, with any credentials removed.
     pub url: String,
     /// Destination directory.
     pub path: String,
