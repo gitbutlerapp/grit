@@ -13,6 +13,7 @@ grit share list [<branch>]
 grit share accept <link>
 grit share remove <branch> [<user>|<email>...]
 grit share leave <branch>
+grit share resolve <branch> [<option>] [--with <user>]
 grit share revoke <branch> <link-id>
 ```
 
@@ -28,6 +29,7 @@ The other members' heads are fetched beside yours as `<remote>/shared/<branch>/<
 - **`grit share accept <link>`** accepts a link: you are on the branch, and your copy of the project is made in your space. In a clone of the project it fetches the branch into it; anywhere else it clones your copy into a new directory.
 - **`grit share remove <branch> <user>...`** removes people, and withdraws invitations to the email addresses you name. Only the person who shared the branch (or, for a copy of an organization's project, someone who can integrate into it) can remove people, and nobody can remove the person who shared it. With no users, it ends the share. Nobody loses work: each member's head stays a branch in their own space.
 - **`grit share leave <branch>`** takes you off a branch; your head stays a branch in your space.
+- **`grit share resolve <branch> [<option>]`** puts your head and another member's back together after they diverged (see [Resolving a divergence](#resolving-a-divergence)). Name the member with `--with` when several heads diverged from yours.
 - **`grit share revoke <branch> <link-id>`** stops a link from working. Link ids are in `grit share list`.
 
 ### Your copy
@@ -75,6 +77,25 @@ When another member's head has diverged from yours, `grit sync`, `grit status`, 
 Heads that haven't diverged are `same`, `ahead`, `behind`, `same_content` (the same changes as different commits) or `same_rewrite` (the same amend, drop or squash on both sides).
 
 The comparison starts from the last head you both had, read from the reflogs of your branch and of their head here; without one, from where the two heads meet. Use `grit commit` and `grit rebase`, which keep change ids, so commits can be followed across amends.
+
+### Resolving a divergence
+
+Every divergence report lists its options, the recommended one first, each with the command that applies it and what it leaves out (`loses`, `null` when it keeps every change). What an option leaves out is never lost: every head anyone pushed stays in the share's log on the server.
+
+| Option | What it does |
+| --- | --- |
+| `combine` | Every change from both heads, commit by commit: their commits kept as they are where possible, yours replayed on top, so they can fast-forward to the result. |
+| `keep_both` | For a commit you both amended, differently: their version, then yours as a commit of its own on top. |
+| `keep_amended` / `drop` | For a commit one of you dropped and the other amended: keep the amended version, or drop it. |
+| `my_order` / `their_order` | When you both reordered the commits. |
+| `my_split` / `their_split` | When you both split a commit. |
+| `restore` | When one head dropped most of the branch: bring the dropped commits back. |
+| `keep_mine` / `keep_theirs` | One head as it is. |
+| `resolve` | By hand: rebase onto their head (`grit rebase <remote>/shared/<branch>/<user>`), settle the conflicts, `grit rebase --continue`, and `grit push`. |
+
+`grit share resolve <branch>` with no option applies `combine` when nothing would be lost; otherwise it lists the options and exits with status `3`. With an option, it moves your branch to the result (when the branch is checked out, as `grit reset --keep` does, keeping local changes or refusing) and pushes your head.
+
+**Without asking.** When another member's head and yours can be put together without losing anything (any scenario that doesn't need a decision), `grit sync` and `grit push` do it themselves: they combine the two, move your branch, and push the result, and the other member's next `grit sync` fast-forwards to it. Only when someone has to decide do they stop, report the options, and exit `3`.
 
 ## Options
 
@@ -124,7 +145,7 @@ feature, shared with bob, carol, dave
 
 ## JSON output
 
-Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/share.list/v1.json) · [share.accept v1](/schemas/share.accept/v1.json) · [share.remove v1](/schemas/share.remove/v1.json) · [share.leave v1](/schemas/share.leave/v1.json) · [share.revoke v1](/schemas/share.revoke/v1.json)
+Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/share.list/v1.json) · [share.accept v1](/schemas/share.accept/v1.json) · [share.remove v1](/schemas/share.remove/v1.json) · [share.leave v1](/schemas/share.leave/v1.json) · [share.revoke v1](/schemas/share.revoke/v1.json) · [share.resolve v1](/schemas/share.resolve/v1.json)
 
 `grit share add`, `list`, `remove`, `leave` and `revoke` have the same shape:
 
@@ -190,11 +211,41 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
 }
 ```
 
+`grit share resolve`:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | The shared branch. |
+| `with` | string | The member whose head yours was put together with. |
+| `scenario` | string | What the two heads added up to, before. |
+| `summary` | string | What happened, in a sentence. |
+| `option` | string or omitted | The option applied; omitted when a decision is needed and none was chosen. |
+| `previous` | string | Your head before. |
+| `head` | string or omitted | Your head afterwards, when it moved. |
+| `pushed` | boolean | Whether your head was pushed. |
+| `next` | string or omitted | What to run next, for `resolve`, which is done by hand. |
+| `options` | array or omitted | When a decision is needed and none was chosen: each option's `id`, `label`, `loses` and `command`. |
+
+<!-- schema: share.resolve -->
+
+```json
+{
+  "branch": "pairing",
+  "with": "carol",
+  "scenario": "amended_both_conflicting",
+  "summary": "You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs.",
+  "option": "keep_both",
+  "previous": "538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8",
+  "head": "9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b",
+  "pushed": true
+}
+```
+
 ## Markdown output
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/share.list/v1.json) · [share.accept v1](/schemas/share.accept/v1.json) · [share.remove v1](/schemas/share.remove/v1.json) · [share.leave v1](/schemas/share.leave/v1.json) · [share.revoke v1](/schemas/share.revoke/v1.json)
+Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/share.list/v1.json) · [share.accept v1](/schemas/share.accept/v1.json) · [share.remove v1](/schemas/share.remove/v1.json) · [share.leave v1](/schemas/share.leave/v1.json) · [share.revoke v1](/schemas/share.revoke/v1.json) · [share.resolve v1](/schemas/share.resolve/v1.json)
 
 ```markdown
 ## Shared branches in `alice/widget`
@@ -216,7 +267,8 @@ Shared by `alice` from `alice/widget`; state active, base `main`.
 | Code | Meaning |
 | --- | --- |
 | `0` | Done. |
-| `1` | The server refused (the message says why: not on the branch, only the sharer can remove people, a used-up or expired link), or the command could not run: not a clone of a hosted project, not signed in. |
+| `1` | The server refused (the message says why: not on the branch, only the sharer can remove people, a used-up or expired link), the option chosen conflicts, or the command could not run: not a clone of a hosted project, not signed in. |
+| `3` | `grit share resolve` without an option, for a divergence that needs a decision: the options are listed (`needs_decision`). |
 | `2` | Invalid arguments, such as `--uses` without `--link`. |
 
 ## See also

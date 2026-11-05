@@ -49,7 +49,7 @@ With `--delete`, every positional after the remote names a remote branch or tag 
 
 `--force-with-lease` updates a remote ref only when it still matches the local remote-tracking ref mapped from the push destination (or when the ref is absent if there is no tracking ref). Use `--force-with-lease=<rev>` when pushing exactly one ref to compare against a specific commit. `--force` overwrites the remote ref unconditionally. The two flags cannot be combined.
 
-A branch you [share](../share/) (`branch.<name>.shared` is `true`) is pushed with `--force-with-lease` without your asking: your head of it is yours alone, so replacing it after an amend or rebase is safe, as long as the server's head is still the one you last fetched.
+A branch you [share](../share/) (`branch.<name>.shared` is `true`) is pushed with `--force-with-lease` without your asking: your head of it is yours alone, so replacing it after an amend or rebase is safe, as long as the server's head is still the one you last fetched. After the push, grit fetches the other members' heads: one that diverged from yours but goes together with it without losing anything is combined with your branch here and pushed again (`combined` in `--json`); one that needs a decision is reported with its options, and the push exits `3`.
 
 `-u` / `--set-upstream` writes `branch.<name>.remote` and `branch.<name>.merge` for each successfully pushed branch (skipped with `--dry-run`).
 
@@ -216,7 +216,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
 | `origin_added` | string | URL saved as `origin` after an `<owner>/<project>` push from a repository with no remotes (omitted otherwise). |
 | `remote_messages` | array of strings | Hook and diagnostic text from the remote (same lines as `remote: …` on stderr in human mode; omitted when empty). |
-| `shared` | array | For each [shared](../share/) branch pushed: `branch` and `heads`, the other members' heads fetched right after the push, each with `user`, `tip`, `relation` to your branch (`same`, `ahead`, `behind`, `diverged` or `unknown`), and for a head that diverged from yours `divergence`: `scenario` (a stable code such as `amended_both_conflicting`; see [Divergence scenarios](../share/#divergence-scenarios)), `summary`, `needs_decision`, `base`, `changes` (each commit's `change`, `subject`, and what `you` and `them` did to it), `conflicts` and `also`. Omitted when no shared branch was pushed. |
+| `shared` | array | For each [shared](../share/) branch pushed: `branch`, `combined` (members whose heads were combined into yours and pushed again), `head` (your head after combining) and `heads`, the other members' heads fetched right after the push, each with `user`, `tip`, `relation` to your branch (`same`, `ahead`, `behind`, `diverged` or `unknown`), and for a head that diverged from yours `divergence`: `scenario` (a stable code such as `amended_both_conflicting`; see [Divergence scenarios](../share/#divergence-scenarios)), `summary`, `needs_decision`, `base`, `changes` (each commit's `change`, `subject`, and what `you` and `them` did to it), `conflicts` and `also`. Omitted when no shared branch was pushed. |
 
 Example:
 
