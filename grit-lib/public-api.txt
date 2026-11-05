@@ -10612,6 +10612,8 @@ pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKin
 pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::store::enumerate_loose_objects(&std::path::Path, grit_lib::objects::HashAlgo) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, std::path::PathBuf)>>
 pub fn grit_lib::objects::odb::store::enumerate_loose_objects(&std::path::Path, grit_lib::objects::HashAlgo) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, std::path::PathBuf)>>
+pub fn grit_lib::objects::odb::store::read_loose_object_info(&std::path::Path) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
+pub fn grit_lib::objects::odb::store::read_loose_object_info(&std::path::Path) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub struct grit_lib::objects::odb::CompositeStore
 impl grit_lib::objects::odb::CompositeStore
 pub fn grit_lib::objects::odb::CompositeStore::new(alloc::vec::Vec<alloc::rcs::arc::Arc<dyn grit_lib::objects::odb::store::ObjectStore>>, grit_lib::objects::HashAlgo) -> Self
