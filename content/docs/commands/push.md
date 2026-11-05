@@ -164,7 +164,7 @@ When the remote moved since your last fetch:
 
 ```console
 $ grit push --force-with-lease
-  rejected origin refs/heads/main: stale remote ref — run `grit fetch` and try again
+  rejected origin refs/heads/main: stale remote ref — run `grit fetch --prune` and try again
 ```
 
 When another push created the same new branch while yours was in flight (each ref update is compare-and-swapped against what the push saw, so the other push's commit is never overwritten, even with `--force`):

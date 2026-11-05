@@ -226,7 +226,7 @@ impl HumanRender for PushOutcome {
                 PushRefOutcomeStatus::Rejected => match result.detail {
                     PushRefStatus::RejectStale => outln!(
                         w,
-                        "  rejected {target}: stale remote ref — run `grit fetch` and try again"
+                        "  rejected {target}: stale remote ref — run `grit fetch --prune` and try again"
                     ),
                     PushRefStatus::RejectRemoteRefMissing => {
                         outln!(w, "  rejected {target}: remote ref does not exist")
@@ -268,6 +268,17 @@ impl HumanRender for PushOutcome {
                 );
             }
             for h in &s.heads {
+                if s.combined.contains(&h.user) {
+                    // Nothing to decide: their next sync takes the result.
+                    outln!(
+                        w,
+                        "  {}: {}'s head {} is in yours now; their next sync takes it",
+                        s.branch,
+                        h.user,
+                        grit_lib::objects::short_hex(&h.tip),
+                    );
+                    continue;
+                }
                 outln!(
                     w,
                     "  {}: {}'s head {} {}",
@@ -313,6 +324,15 @@ impl MarkdownRender for PushOutcome {
                 writeln!(w, "Nobody else has pushed a head yet.")?;
             }
             for h in &s.heads {
+                if s.combined.contains(&h.user) {
+                    writeln!(
+                        w,
+                        "- `{}`'s head `{}`: in yours now; their next sync takes it",
+                        h.user,
+                        grit_lib::objects::short_hex(&h.tip),
+                    )?;
+                    continue;
+                }
                 writeln!(
                     w,
                     "- `{}`'s head `{}`: {}",
@@ -812,7 +832,7 @@ mod tests {
 
         let stale = render(result_with(PushRefStatus::RejectStale, Some("stale")));
         assert!(
-            stale.contains("stale remote ref — run `grit fetch`"),
+            stale.contains("stale remote ref — run `grit fetch --prune`"),
             "{stale}"
         );
         let missing = render(result_with(

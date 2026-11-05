@@ -345,8 +345,11 @@ pub(crate) fn fetch(remote: &str, mode: OutputMode) -> Result<()> {
 /// Fetch `remote` into `repo`, and the other members' heads of shared
 /// branches when the clone is set up for them.
 pub(crate) fn fetch_in(repo: &Repository, remote: &str, mode: OutputMode) -> Result<()> {
+    // Prune: a branch the server deleted (a shared branch once it's
+    // integrated, say) must not linger here as a stale remote ref.
     let args = FetchArgs {
         remote: Some(remote.to_owned()),
+        prune: true,
         quiet: QuietArgs { quiet: true },
         ..FetchArgs::default()
     };
@@ -732,6 +735,26 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
                     ours = Some(head);
                     combined_with.push(user);
                 }
+            }
+        }
+        // A branch that was shared and is gone from your space: integrated,
+        // most likely. With nothing new on it, it stays here as it is (a
+        // snapshot member's base doesn't hold the real commits, so `merged`
+        // can't tell).
+        if let (Some(mine), None, true) = (ours, theirs, self::is_shared(&config, name)) {
+            let report = crate::commands::share::integrated_on(
+                &repo,
+                &config,
+                &setup.server,
+                &setup.space.project,
+                name,
+                mine,
+            )
+            .ok()
+            .flatten();
+            if report.is_some_and(|r| r.new == 0) {
+                unmark_shared(&repo, name)?;
+                continue;
             }
         }
         let action = match (ours, theirs) {
