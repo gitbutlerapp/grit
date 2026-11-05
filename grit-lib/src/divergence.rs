@@ -384,6 +384,9 @@ impl Divergence {
                 "You and {them} both added commits, and they conflict in {}.",
                 self.conflict_paths()
             ),
+            Scenario::RewroteOne if self.scenarios.contains(&Scenario::SameRewrite) => format!(
+                "You and {them} made the same rewrite, and one of you added commits on top."
+            ),
             Scenario::RewroteOne => format!(
                 "One of you rewrote commits ({}); the other only added on top.",
                 self.rewrite_words()
@@ -513,6 +516,8 @@ struct Version {
     tree: ObjectId,
     parent: Option<ObjectId>,
     merge: bool,
+    /// When it was committed (seconds since the epoch).
+    time: i64,
     /// Lines it adds and removes, as `(path, '+'|'-', line)`.
     lines: Option<HashSet<(String, char, String)>>,
     paths: Vec<String>,
@@ -561,6 +566,7 @@ fn sequence(repo: &Repository, head: ObjectId, floor: &[ObjectId]) -> Result<Vec
             tree: data.tree,
             parent: data.parents.first().copied(),
             merge: data.parents.len() > 1,
+            time: crate::ident::committer_timestamp_for_until_filter(&data.committer),
             lines: None,
             paths: Vec::new(),
         });
@@ -647,6 +653,74 @@ fn lines_of(v: &Version) -> HashSet<(String, char, String)> {
 fn within(inner: &Version, outer: &Version) -> bool {
     let a = lines_of(inner);
     !a.is_empty() && a.is_subset(&lines_of(outer))
+}
+
+/// Without a head both sides had (a fresh clone has no reflog to find one
+/// in), the base is where the two heads meet, and commits both sides have
+/// past it, by change id, would read as new on both. Take the older version
+/// of each such commit as the base's: the newer side changed it.
+fn extend_base(base: &mut Vec<Version>, ours: &[Version], theirs: &[Version]) {
+    let known: HashSet<String> = base.iter().map(|v| v.key.clone()).collect();
+    for o in ours {
+        if known.contains(&o.key) || o.by_patch {
+            continue;
+        }
+        if let Some(t) = theirs.iter().find(|t| t.key == o.key) {
+            base.push(if t.time < o.time { t.clone() } else { o.clone() });
+        }
+    }
+}
+
+/// Whether `big` holds every commit of `small`: the same change, with the
+/// same content and message.
+fn holds_all(repo: &Repository, big: &mut [Version], small: &mut [Version]) -> Result<bool> {
+    if small.is_empty() {
+        return Ok(false);
+    }
+    for v in big.iter_mut().chain(small.iter_mut()) {
+        load_changes(repo, v)?;
+    }
+    Ok(small
+        .iter()
+        .all(|s| {
+            big.iter()
+                .any(|b| b.key == s.key && b.patch == s.patch && b.message == s.message)
+        }))
+}
+
+/// When one head holds everything the other has, and the other added
+/// commits since `base` (a reset, then put back together by the one that
+/// kept the branch, say), compare from the other head instead: nothing of
+/// it is dropped. The new base.
+fn rebase_on_held(
+    repo: &Repository,
+    base: Option<ObjectId>,
+    base_seq: &mut Vec<Version>,
+    ours: ObjectId,
+    ours_seq: &mut [Version],
+    theirs: ObjectId,
+    theirs_seq: &mut [Version],
+) -> Result<Option<ObjectId>> {
+    let added = |seq: &[Version], base_seq: &[Version]| {
+        seq.iter().any(|v| !base_seq.iter().any(|b| b.key == v.key))
+    };
+    if added(ours_seq, base_seq) && holds_all(repo, theirs_seq, ours_seq)? {
+        *base_seq = ours_seq.to_vec();
+        return Ok(Some(ours));
+    }
+    if added(theirs_seq, base_seq) && holds_all(repo, ours_seq, theirs_seq)? {
+        *base_seq = theirs_seq.to_vec();
+        return Ok(Some(theirs));
+    }
+    Ok(base)
+}
+
+/// Whether `seq` leaves out most of `base`'s commits, only dropping (an
+/// accidental reset, say): at least two, and more than half.
+fn resets(base: &[Version], seq: &[Version]) -> bool {
+    let kept: HashSet<&str> = seq.iter().map(|v| v.key.as_str()).collect();
+    let gone = base.iter().filter(|b| !kept.contains(b.key.as_str())).count();
+    gone >= 2 && gone * 2 > base.len()
 }
 
 /// What one side did to each commit of the base, and its new commits.
@@ -885,11 +959,66 @@ pub fn classify(
     };
     let mut ours_seq = sequence(repo, ours, floor)?;
     let mut theirs_seq = sequence(repo, theirs, floor)?;
+    let base = rebase_on_held(
+        repo,
+        base,
+        &mut base_seq,
+        ours,
+        &mut ours_seq,
+        theirs,
+        &mut theirs_seq,
+    )?;
+    extend_base(&mut base_seq, &ours_seq, &theirs_seq);
 
     let mut scenarios = BTreeSet::new();
     if ours_seq.iter().chain(&theirs_seq).any(|v| v.merge) {
-        let mut d = Divergence::simple(Scenario::MergeCommit, base);
-        d.scenarios = vec![Scenario::MergeCommit];
+        // A head that drops most of the branch is a reset first, merges or
+        // not: the dropped commits can be brought back.
+        let reset = |seq: &[Version]| resets(&base_seq, seq) && !seq.iter().any(|v| v.merge);
+        let scenario = if reset(&ours_seq) || reset(&theirs_seq) {
+            Scenario::ResetOne
+        } else {
+            Scenario::MergeCommit
+        };
+        let mut d = Divergence::simple(scenario, base);
+        if scenario == Scenario::ResetOne {
+            d.scenarios = vec![Scenario::ResetOne, Scenario::MergeCommit];
+            let has = |seq: &[Version], key: &str| seq.iter().any(|v| v.key == key);
+            for b in &base_seq {
+                let did = |seq: &[Version]| if has(seq, &b.key) { Did::Unchanged } else { Did::Dropped };
+                let (o, t) = (did(&ours_seq), did(&theirs_seq));
+                if o.changed() || t.changed() {
+                    d.changes.push(Change {
+                        key: b.key.clone(),
+                        subject: b.subject.clone(),
+                        ours: o,
+                        theirs: t,
+                        ours_commit: None,
+                        theirs_commit: None,
+                        paths: Vec::new(),
+                    });
+                }
+            }
+            for (seq, mine) in [(&ours_seq, true), (&theirs_seq, false)] {
+                for v in seq.iter().filter(|v| !has(&base_seq, &v.key)) {
+                    if d.changes.iter().any(|c| c.key == v.key) {
+                        continue;
+                    }
+                    let other = if mine { &theirs_seq } else { &ours_seq };
+                    let there = if has(other, &v.key) { Did::New } else { Did::Absent };
+                    let (o, t) = if mine { (Did::New, there) } else { (there, Did::New) };
+                    d.changes.push(Change {
+                        key: v.key.clone(),
+                        subject: v.subject.clone(),
+                        ours: o,
+                        theirs: t,
+                        ours_commit: None,
+                        theirs_commit: None,
+                        paths: Vec::new(),
+                    });
+                }
+            }
+        }
         return Ok(d);
     }
     let same_content = ours_seq.len() == theirs_seq.len()
@@ -1033,7 +1162,11 @@ pub fn classify(
             }
             _ => {}
         }
-        if ours_did.changed() || theirs_did.changed() {
+        // A commit both rewrote the same way is agreed on: not a change.
+        let agreed = matches!(ours_did, Did::Amended | Did::Reworded)
+            && matches!(theirs_did, Did::Amended | Did::Reworded)
+            && matches!((&o, &t), (Some(o), Some(t)) if o.patch == t.patch && o.message == t.message);
+        if (ours_did.changed() || theirs_did.changed()) && !agreed {
             changes.push(Change {
                 key: key.clone(),
                 subject: newest.map(|v| v.subject.clone()).unwrap_or_default(),
@@ -1071,7 +1204,8 @@ pub fn classify(
             .did
             .values()
             .all(|d| matches!(d, Did::Dropped | Did::Unchanged));
-        if n >= 2 && n * 2 > base_seq.len() && only_drops && side.new.is_empty() {
+        // New commits on top don't make it any less of a reset.
+        if n >= 2 && n * 2 > base_seq.len() && only_drops {
             scenarios.insert(Scenario::ResetOne);
         }
     }
@@ -1167,6 +1301,14 @@ pub fn classify(
     });
     if matched_without_ids && unmatched_patch && (ours_rewrote || theirs_rewrote) {
         scenarios.insert(Scenario::NoChangeIds);
+    }
+    // The same rewrite on both sides, and new commits on one: they still
+    // differ, and combining puts them together.
+    if !scenarios.is_empty()
+        && scenarios.iter().all(|s| !s.diverged())
+        && (!ours_side.new.is_empty() || !theirs_side.new.is_empty())
+    {
+        scenarios.insert(Scenario::RewroteOne);
     }
     if scenarios.is_empty() {
         scenarios.insert(if changes.is_empty() {
@@ -1429,6 +1571,16 @@ pub fn combine(
     };
     let mut ours_seq = sequence(repo, ours, floor)?;
     let mut theirs_seq = sequence(repo, theirs, floor)?;
+    rebase_on_held(
+        repo,
+        base,
+        &mut base_seq,
+        ours,
+        &mut ours_seq,
+        theirs,
+        &mut theirs_seq,
+    )?;
+    extend_base(&mut base_seq, &ours_seq, &theirs_seq);
     let ours_side = compare_side(repo, &mut base_seq, &mut ours_seq)?;
     let theirs_side = compare_side(repo, &mut base_seq, &mut theirs_seq)?;
 
@@ -1453,6 +1605,62 @@ pub fn combine(
     };
     let find = |seq: &[Version], key: &str| seq.iter().find(|v| v.key == key).cloned();
     let base_has = |key: &str| base_seq.iter().any(|v| v.key == key);
+
+    // keep_both and restore leave one head exactly as it is, so its owner
+    // can fast-forward to the result, and put the other's changes on top as
+    // commits of their own: for keep_both, their head and your amendments;
+    // for restore, the head that kept the branch and the new commits of the
+    // one that dropped it.
+    if matches!(choice, Choice::KeepBoth | Choice::Restore) {
+        let drops = |side: &Side| side.did.values().filter(|d| **d == Did::Dropped).count();
+        let ours_keeps = choice == Choice::Restore && drops(&ours_side) < drops(&theirs_side);
+        let (keep, keep_seq, add_seq, add_side) = if ours_keeps {
+            (ours, &ours_seq, &theirs_seq, &theirs_side)
+        } else {
+            (theirs, &theirs_seq, &ours_seq, &ours_side)
+        };
+        let mut tip = keep;
+        for v in add_seq {
+            let kept = keep_seq.iter().find(|k| k.key == v.key);
+            let step = if !base_has(&v.key) {
+                if kept.is_some() {
+                    continue;
+                }
+                Step {
+                    version: v.clone(),
+                    fold: None,
+                    message: None,
+                    new_change: false,
+                    against: None,
+                }
+            } else if matches!(add_side.did.get(&v.key), Some(Did::Amended)) {
+                let Some(against) = kept.cloned().or_else(|| find(&base_seq, &v.key)) else {
+                    continue;
+                };
+                Step {
+                    version: v.clone(),
+                    fold: None,
+                    message: None,
+                    new_change: true,
+                    against: Some(against),
+                }
+            } else {
+                continue;
+            };
+            match replay(repo, tip, &step)? {
+                Ok(Some(next)) => tip = next,
+                Ok(None) => {}
+                Err(conflicts) => {
+                    return Ok(Combined {
+                        head: None,
+                        conflicts,
+                        stopped_at: Some(step.version.subject.clone()),
+                    })
+                }
+            }
+        }
+        return Ok(done(tip));
+    }
     // Whether `side` dropped `key` and that drop stands.
     let dropped = |side: &Side, other: &Side, key: &str| -> bool {
         let gone = matches!(side.did.get(key), Some(Did::Dropped));

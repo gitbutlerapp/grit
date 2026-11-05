@@ -71,7 +71,7 @@ When another member's head has diverged from yours, `grit sync`, `grit status`, 
 | `split_both` | You both split the same commit, differently. | yes |
 | `split_one_amended_other_spanning` | One split a commit; the other's amendment of it spans the pieces. | yes |
 | `squashed_both_differently` | You both squashed commits, differently. | yes |
-| `reset_one` | One head drops most of the branch: perhaps an accidental reset. | yes |
+| `reset_one` | One head drops most of the branch, with or without new commits on top: perhaps an accidental reset. | yes |
 | `merge_commit` | One head has a merge commit. | yes |
 | `no_change_ids` | Commits made or rebased with plain `git` have no change ids, so an amend can't be told from a new commit. | yes |
 
@@ -86,11 +86,11 @@ Every divergence report lists its options, the recommended one first, each with 
 | Option | What it does |
 | --- | --- |
 | `combine` | Every change from both heads, commit by commit: their commits kept as they are where possible, yours replayed on top, so they can fast-forward to the result. |
-| `keep_both` | For a commit you both amended, differently: their version, then yours as a commit of its own on top. |
+| `keep_both` | For a commit you both amended, differently: their head as it is, then your version as a commit of its own on top, so they can fast-forward to the result. |
 | `keep_amended` / `drop` | For a commit one of you dropped and the other amended: keep the amended version, or drop it. |
 | `my_order` / `their_order` | When you both reordered the commits. |
 | `my_split` / `their_split` | When you both split a commit. |
-| `restore` | When one head dropped most of the branch: bring the dropped commits back. |
+| `restore` | When one head dropped most of the branch: the head that kept it, as it is, with the other head's new commits on top. |
 | `keep_mine` / `keep_theirs` | One head as it is. |
 | `resolve` | By hand: rebase onto their head (`grit rebase <remote>/shared/<branch>/<user>`), settle the conflicts, `grit rebase --continue`, and `grit push`. |
 
@@ -104,12 +104,12 @@ Every divergence report lists its options, the recommended one first, each with 
 
 - its base branch (`main`) is a **snapshot**: one commit standing for the base where the branch starts, cut down to his paths. Each path brings everything under it, plus the files directly in each directory above it (as Git's cone-mode sparse checkout does);
 - the branch, and the other members' heads under `origin/shared/<branch>/<user>`, are their commits **projected** onto the snapshot, cut down the same way. So he has the branch's history, not the project's;
-- when the base moves, his next fetch brings a new snapshot of it on top of the last one, so `grit sync` (or a rebase) brings his branch up to it. His base branch is read-only.
+- when the base moves, his next fetch brings a new snapshot of it on top of the last one, and `grit sync` fast-forwards his base branch to it; to build on it, he rebases his branch onto it (`grit rebase origin/main`), as anyone would. His base branch is read-only.
 
 He works with grit or plain git as usual. What he pushes is grafted back onto the real history as his head, so everyone with the whole branch gets full commits, with the files outside his paths as they were. A push that would undo changes outside his paths stays in his space, unshared, and the push's `remote:` lines say why with the code `outside_paths`:
 
 - rewriting a commit (an amend, a rebase that drops it) that also changed files outside his paths. Add new commits on top instead;
-- a commit that changes a file the base now holds differently outside his paths. `grit sync` onto the newest snapshot first.
+- a commit that changes a file the base now holds differently outside his paths. Rebase onto the newest snapshot first.
 
 A member with a snapshot share can add people only with the same view, and can't integrate the branch: someone with the whole branch does.
 
