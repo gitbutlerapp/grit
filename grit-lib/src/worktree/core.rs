@@ -15,8 +15,9 @@ use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::git_path::{absolute_path_for_gitfile_stored_path, path_for_disk_compare};
 use crate::hooks::run_post_checkout;
-use crate::porcelain::branch::{resolve_create_tracking, TrackMode};
+use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::BranchError;
+use crate::porcelain::branch_error::TrackMode;
 use crate::porcelain::checkout::{checkout_between_trees_with_progress, CheckoutOutcome};
 use crate::porcelain::checkout_reflog::{
     create_branch_ref_with_reflog, reset_branch_ref_with_reflog,

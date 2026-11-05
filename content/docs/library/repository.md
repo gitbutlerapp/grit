@@ -43,13 +43,13 @@ Core engine areas use thin handles on `Repository` (no duplicated logic):
 
 | Method | Handle | Role |
 | --- | --- | --- |
-| [`objects`](rustdoc:grit_lib::repo::Repository) | [`Objects`](rustdoc:grit_lib::objects::handle::Objects) | read/write/contains for the ODB |
-| [`references`](rustdoc:grit_lib::repo::Repository) | [`References`](rustdoc:grit_lib::refs::handle::References) | resolve, list, update refs; read reflog |
+| [`objects`](rustdoc:grit_lib::repo::Repository) | [`Objects`](rustdoc:grit_lib::objects::Objects) | read/write/contains for the ODB |
+| [`references`](rustdoc:grit_lib::repo::Repository) | [`References`](rustdoc:grit_lib::refs::References) | resolve, list, update refs; read reflog |
 | [`reflogs`](rustdoc:grit_lib::repo::Repository) | [`RepositoryReflogs`](rustdoc:grit_lib::repo_handles::RepositoryReflogs) | list reflog refs, show/delete/expire entries |
-| [`index_handle`](rustdoc:grit_lib::repo::Repository) | [`IndexHandle`](rustdoc:grit_lib::index::handle::IndexHandle) | load/write the index |
-| [`config_handle`](rustdoc:grit_lib::repo::Repository) | [`ConfigHandle`](rustdoc:grit_lib::config::handle::ConfigHandle) | merged get; local set + reload |
-| [`rev_walk`](rustdoc:grit_lib::repo::Repository) | [`RevWalk`](rustdoc:grit_lib::revwalk::handle::RevWalk) | rev-parse specs; rev-list walks |
-| [`diff`](rustdoc:grit_lib::repo::Repository) | [`Diff`](rustdoc:grit_lib::diff::handle::Diff) | tree↔tree, index↔tree, worktree↔index |
+| [`index_handle`](rustdoc:grit_lib::repo::Repository) | [`IndexHandle`](rustdoc:grit_lib::index::IndexHandle) | load/write the index |
+| [`config_handle`](rustdoc:grit_lib::repo::Repository) | [`ConfigHandle`](rustdoc:grit_lib::config::ConfigHandle) | merged get; local set + reload |
+| [`rev_walk`](rustdoc:grit_lib::repo::Repository) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) | rev-parse specs; rev-list walks |
+| [`diff`](rustdoc:grit_lib::repo::Repository) | [`Diff`](rustdoc:grit_lib::diff::Diff) | tree↔tree, index↔tree, worktree↔index |
 
 `Repository::refs` still returns the pluggable `RefStore` trait object for embedders and low-level ref backends.
 

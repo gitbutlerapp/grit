@@ -37,10 +37,10 @@
 //! # }
 //! ```
 
-pub mod handle;
+pub(crate) mod handle;
 pub mod listing;
 pub mod query_reachability;
-pub mod shorten;
+pub(crate) mod shorten;
 pub mod store;
 pub mod version_sort;
 

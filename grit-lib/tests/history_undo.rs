@@ -7,7 +7,7 @@ use crate::support;
 use std::fs;
 use std::process::Command;
 
-use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
 use grit_lib::refs::{resolve_ref, write_ref};

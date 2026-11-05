@@ -22,12 +22,12 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::porcelain::branch::BranchList>();
     assert_serialize::<grit_lib::remote::transfer::FetchOutcome>();
     assert_serialize::<grit_lib::remote::transfer::PushOutcome>();
-    assert_serialize::<grit_lib::porcelain::stash::StashEntry>();
-    assert_serialize::<grit_lib::porcelain::stash::StashApplyOutcome>();
+    assert_serialize::<grit_lib::stash::StashEntry>();
+    assert_serialize::<grit_lib::stash::StashApplyOutcome>();
     assert_serialize::<grit_lib::ident::Signature>();
     assert_serialize::<grit_lib::revwalk::history::RewritePlan>();
     assert_serialize::<grit_lib::revwalk::history::RebaseOutcome>();
-    assert_serialize::<grit_lib::operation::Operation>();
+    assert_serialize::<grit_lib::state::Operation>();
     assert_serialize::<grit_lib::operation::Conflict>();
     assert_serialize::<grit_lib::error::Error>();
     assert_serialize::<grit_lib::porcelain::status::StatusModel>();
@@ -36,7 +36,7 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>();
     assert_serialize::<grit_lib::porcelain::tag::TagSummary>();
     assert_serialize::<grit_lib::porcelain::tag::TagList>();
-    assert_serialize::<grit_lib::revwalk::describe::DescribedCommit>();
+    assert_serialize::<grit_lib::revwalk::DescribedCommit>();
     assert_serialize::<grit_lib::blame::BlameResult>();
     assert_serialize::<grit_lib::blame::BlameHunk>();
     assert_serialize::<grit_lib::blame::BlameCommitInfo>();
@@ -258,7 +258,7 @@ fn commit_author_info_serializes_rfc3339_date() {
 #[test]
 fn stash_and_branch_outcomes_serialize() {
     let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
-    let entry = grit_lib::porcelain::stash::StashEntry {
+    let entry = grit_lib::stash::StashEntry {
         index: 0,
         oid,
         message: "WIP on main".into(),

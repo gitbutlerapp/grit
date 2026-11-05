@@ -27,9 +27,6 @@ mod workspace_snapshot;
 mod worktree;
 
 pub use crate::reflog::MessageMatcher;
-pub use crate::remote::{
-    InspectOptions, RemoteBranchState, RemoteBranchStateKind, RemotePullBranch, RemoteSummary,
-};
 pub use bundle::RepositoryBundles;
 pub use hooks::{HookInfo, HookSource, RepositoryHooks};
 pub use notes::{

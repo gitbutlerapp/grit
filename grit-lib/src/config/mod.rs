@@ -13,7 +13,7 @@
 //! # }
 //! ```
 mod core;
-pub mod handle;
+pub(crate) mod handle;
 mod location;
 mod typed;
 

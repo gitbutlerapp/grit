@@ -24,9 +24,10 @@ use std::sync::OnceLock;
 
 use similar::{Algorithm as SimilarAlgorithm, DiffOp};
 
+use crate::line_range::{resolve_line_range, LineRangeError};
+
 #[path = "blame_ignore_revs.rs"]
 mod blame_ignore_revs;
-pub use crate::line_range::{resolve_line_range, LineRangeError};
 pub use blame_ignore_revs::{IgnoreRevs, IgnoreRevsSources};
 
 /// Diff algorithm used when mapping lines between blob revisions during blame.

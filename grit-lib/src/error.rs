@@ -2073,7 +2073,7 @@ pub enum Error {
     #[error("conflicts in index while applying stash with --index")]
     StashIndexConflict,
 
-    /// Incompatible [`StashPushOptions`](crate::porcelain::stash::StashPushOptions) flags.
+    /// Incompatible [`StashPushOptions`](crate::stash::StashPushOptions) flags.
     #[error("{0}")]
     StashOptionConflict(String),
 

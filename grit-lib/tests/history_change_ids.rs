@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use grit_lib::change_id::{set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};

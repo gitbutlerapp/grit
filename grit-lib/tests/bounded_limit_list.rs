@@ -1093,9 +1093,9 @@ fn bounded_parent_filter_rev_walk_matches_git() {
                 &RevWalkListOptions {
                     limit: Some(limit),
                     merges: if merges_only {
-                        grit_lib::revwalk::queries::MergeFilter::OnlyMerges
+                        grit_lib::revwalk::MergeFilter::OnlyMerges
                     } else {
-                        grit_lib::revwalk::queries::MergeFilter::NoMerges
+                        grit_lib::revwalk::MergeFilter::NoMerges
                     },
                     ..Default::default()
                 },

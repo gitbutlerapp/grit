@@ -172,7 +172,8 @@ The current-branch check reads `HEAD` through the repository's store, including 
 
 ```rust
 use grit_lib::error::Error;
-use grit_lib::porcelain::branch::{delete_branch, BranchError, DeleteMode};
+use grit_lib::porcelain::branch::delete_branch;
+use grit_lib::porcelain::branch_error::{BranchError, DeleteMode};
 
 let dry_run = false;
 match delete_branch(&repo, "topic", DeleteMode::Safe, dry_run) {

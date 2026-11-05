@@ -14,7 +14,7 @@ pub mod backend;
 mod checked;
 mod error;
 mod files;
-pub mod gate;
+pub(crate) mod gate;
 mod linked_worktree;
 mod memory;
 mod open;

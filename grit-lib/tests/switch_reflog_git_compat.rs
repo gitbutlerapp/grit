@@ -176,7 +176,7 @@ fn run_repro_sequence(repo: &Repository) {
                 repo,
                 "topic",
                 None,
-                grit_lib::porcelain::branch::TrackMode::Auto,
+                grit_lib::porcelain::branch_error::TrackMode::Auto,
             )
             .unwrap(),
             dry_run: false,
@@ -383,7 +383,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
                 &repo,
                 "topic",
                 None,
-                grit_lib::porcelain::branch::TrackMode::Auto,
+                grit_lib::porcelain::branch_error::TrackMode::Auto,
             )
             .unwrap(),
             dry_run: false,
@@ -480,7 +480,7 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
                 &repo,
                 "topic",
                 None,
-                grit_lib::porcelain::branch::TrackMode::Auto,
+                grit_lib::porcelain::branch_error::TrackMode::Auto,
             )
             .expect("x"),
             dry_run: false,

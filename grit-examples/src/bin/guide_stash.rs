@@ -3,8 +3,8 @@
 //! Source for the library guide "Stash" page (included in the docs site).
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::stash::{StashMode, StashPushOptions};
 use grit_lib::repo::Repository;
+use grit_lib::stash::{StashMode, StashPushOptions};
 use std::path::{Path, PathBuf};
 
 const IDENT: &str = "Library Guide <guide@grit-scm.com> 1735689600 +0000";

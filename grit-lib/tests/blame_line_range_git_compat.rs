@@ -286,9 +286,9 @@ fn blame_line_range_custom_xfuncname_driver() {
 
 #[test]
 fn blame_line_range_parser_errors() {
-    use grit_lib::blame::LineRangeError;
     use grit_lib::config::ConfigSet;
     use grit_lib::line_range::resolve_line_range;
+    use grit_lib::line_range::LineRangeError;
 
     let content = "a\nb\n";
     let cfg = ConfigSet::default();

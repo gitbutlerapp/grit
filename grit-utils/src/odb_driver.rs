@@ -15,8 +15,8 @@ use grit_lib::objects::pack::{
 use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions, RevListResult};
+use grit_lib::revwalk::CommitFilterBuilder;
 use grit_lib::revwalk::{DescribeOptions, RevWalkListOptions};
 use std::sync::Arc;
 
@@ -308,7 +308,7 @@ pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
 }
 
 /// `rev-list --count HEAD` (commits reachable from `HEAD`).
-fn author_filter(pattern: &str) -> Result<Arc<grit_lib::revwalk::filter::CommitFilter>> {
+fn author_filter(pattern: &str) -> Result<Arc<grit_lib::revwalk::CommitFilter>> {
     Ok(Arc::new(
         CommitFilterBuilder::new()
             .author(pattern)

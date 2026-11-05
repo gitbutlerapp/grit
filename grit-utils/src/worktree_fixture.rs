@@ -378,7 +378,7 @@ pub fn shell_git_apply_cached(git: &Path) -> String {
 /// Ensure `large.txt` (50k lines) exists and is committed, then write 500 one-line hunks and bench artifacts.
 pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+    use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide};
     use grit_lib::porcelain::hunk_select::{resolve_selection, unstaged_file_diffs, HunkSelection};
     use grit_lib::repo::Repository;
 
@@ -522,7 +522,7 @@ fn write_hunk_patch_line(out: &mut String, prefix: char, text: &str) {
 /// Ensure bench artifacts for `grit add --lines` on the first 25k new-side lines of `large.txt`.
 pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
     use grit_lib::config::environment::RepositoryOptions;
-    use grit_lib::diff::hunk_id::DiffSide;
+    use grit_lib::diff::DiffSide;
     use grit_lib::porcelain::hunk_select::{resolve_selection, HunkSelection, LineRange};
     use grit_lib::repo::Repository;
 

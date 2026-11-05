@@ -11,13 +11,13 @@ mod composite;
 mod files;
 #[cfg(test)]
 pub(crate) mod flaky;
-pub mod loose;
+pub(crate) mod loose;
 mod midx;
 mod packs;
 
 pub use composite::CompositeStore;
 pub use files::FilesSource;
-pub use loose::LooseStore;
+pub use loose::{enumerate_loose_objects, LooseStore};
 pub(crate) use loose::{LooseNegativeCache, SharedLooseNegativeCache};
 pub use midx::{MidxObjects, MidxObjectsStatus};
 pub(crate) use packs::touch_pack_mtime;

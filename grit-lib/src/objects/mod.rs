@@ -19,7 +19,7 @@
 mod commit_ref;
 mod core;
 mod extra_headers;
-pub mod handle;
+pub(crate) mod handle;
 mod oid_hashtable;
 mod write;
 
@@ -38,12 +38,6 @@ pub use oid_hashtable::{
 };
 pub use write::{NewCommit, TreeEntryError, WriteTreeOptions};
 
-pub use crate::change_id::{
-    change_id, find_commits_by_change_id_prefix, is_change_id_spec_token,
-    resolve_commit_by_change_id_prefix, resolved_change_id, set_change_id, ChangeId, ChangeIdError,
-    ChangeIdGenerator, ChangeIdMatch, ChangeIdPolicy, OsChangeIdGenerator, ResolvedChangeId,
-};
-
 pub mod odb {
     //! Object database backends and loose/packed storage.
     pub use crate::odb::builder;
@@ -57,10 +51,10 @@ pub mod pack {
     pub use crate::pack_reuse_root::*;
 }
 
-pub mod pack_reuse {
-    //! Verbatim pack reuse for upload-pack.
+pub(crate) mod pack_reuse {
     pub use crate::pack_reuse_root::*;
 }
+
 pub mod pack_write {
     //! Pack and index installation helpers.
     pub use crate::pack_write_root::*;

@@ -4,7 +4,8 @@ use anyhow::{bail, Result};
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::short_hex;
-use grit_lib::porcelain::branch::{upstream_tracking_display, TrackMode};
+use grit_lib::porcelain::branch::upstream_tracking_display;
+use grit_lib::porcelain::branch_error::TrackMode;
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,

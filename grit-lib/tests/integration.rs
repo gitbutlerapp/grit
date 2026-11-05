@@ -1357,6 +1357,8 @@ mod pre_push_hook;
 #[cfg(feature = "full-tests")]
 #[path = "precompose_system_git_roundtrip.rs"]
 mod precompose_system_git_roundtrip;
+#[path = "prelude_only_reexports.rs"]
+mod prelude_only_reexports;
 #[cfg(feature = "full-tests")]
 #[path = "promisor_on_demand_fetch.rs"]
 mod promisor_on_demand_fetch;

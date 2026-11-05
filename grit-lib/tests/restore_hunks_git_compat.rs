@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
+use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use grit_lib::porcelain::hunk_select::{restore_hunks, unstaged_file_diffs, HunkSelection};
 use grit_lib::repo::Repository;
 use grit_test_support::git;

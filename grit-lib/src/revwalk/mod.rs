@@ -12,14 +12,13 @@
 //! # Ok(())
 //! # }
 //! ```
-pub mod describe;
-pub mod filter;
-pub mod graph;
-pub mod group_by;
-pub mod handle;
-pub mod queries;
+pub(crate) mod describe;
+pub(crate) mod filter;
+pub(crate) mod graph;
+pub(crate) mod group_by;
+pub(crate) mod handle;
+pub(crate) mod queries;
 
-pub use crate::diff::{Pickaxe, PickaxeError, PickaxeKind};
 pub use crate::rev_list::CommitExtent;
 pub use describe::{DescribeOptions, DescribedCommit};
 pub use filter::{CommitFilter, CommitFilterBuilder, CommitFilterError, Pattern};
@@ -32,8 +31,7 @@ pub use group_by::{
     group_commits_by_author, group_commits_by_author_from_rev, mailmap_for_grouping, AuthorGroup,
     GroupByAuthorOptions,
 };
-pub use handle::RevWalk;
-pub use handle::RevWalkCommitIter;
+pub use handle::{RevWalk, RevWalkCommitIter};
 pub use queries::{
     committer_cutoff_from_date, parse_rev_walk_tokens, resolve_log_walk_tips_and_hide,
     rev_list_commits_for_author_group, rev_walk_list_supports_stream, LeftRightCounts, MergeFilter,

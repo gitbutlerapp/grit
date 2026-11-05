@@ -9,10 +9,10 @@ use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::config::parse_bool;
 use grit_lib::diff::{Pickaxe, PickaxeError};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder, CommitFilterError};
 use grit_lib::revwalk::{
     committer_cutoff_from_date, MergeFilter, RefSelection, RevWalkListOptions,
 };
+use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder, CommitFilterError};
 
 use crate::error_kind::ErrorKind;
 use crate::json_error::{

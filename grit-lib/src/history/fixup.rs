@@ -13,7 +13,7 @@ use super::undo_work::capture_path_states;
 use super::{commit_tree, load_commit};
 use crate::apply::{apply_patch_to_blob, BlobApplyOptions};
 use crate::diff::diff_index_to_tree;
-use crate::diff::hunk_id::DiffSide;
+use crate::diff::DiffSide;
 use crate::index::write_tree::write_tree_from_index;
 use crate::index::{Index, IndexEntry, MODE_REGULAR};
 use crate::merge_file::MergeFavor;
@@ -488,7 +488,7 @@ mod hunk_selection_restore_tests {
     use super::super::apply::apply_fixup_rewrite;
     use super::*;
     use crate::config::environment::RepositoryOptions;
-    use crate::diff::hunk_id::hunk_ids_with_duplicate_peers;
+    use crate::diff::hunk_ids_with_duplicate_peers;
     use crate::diff::DiffOptions;
     use crate::history::RefScope;
     use crate::objects::ObjectId;

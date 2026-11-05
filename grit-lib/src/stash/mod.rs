@@ -1,4 +1,4 @@
-//! Stash stack read/write — stable types from [`crate::porcelain::stash`].
+//! Stash stack read/write — stable types for [`RepositoryStash`](crate::repo_handles::RepositoryStash).
 //!
 //! Library guide: [mod](https://grit-scm.com/docs/library/stash)
 //!

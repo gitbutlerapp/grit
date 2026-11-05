@@ -25,9 +25,9 @@ Before refs move, restore builds a tree from paths in the pre-restore index (all
 
 ## Stash apply helper
 
-[`StashApplyOptions::overwrite_identical_untracked`](rustdoc:grit_lib::porcelain::stash::StashApplyOptions::overwrite_identical_untracked) lets apply succeed when an untracked file on disk already matches the stashed untracked parent (for example after `reset --hard` left the file in place). The CLI default stays `false`.
+[`StashApplyOptions::overwrite_identical_untracked`](rustdoc:grit_lib::stash::StashApplyOptions::overwrite_identical_untracked) lets apply succeed when an untracked file on disk already matches the stashed untracked parent (for example after `reset --hard` left the file in place). The CLI default stays `false`.
 
-[`StashPushOptions::new`](rustdoc:grit_lib::porcelain::stash::StashPushOptions::new) builds push options with only a committer identity required.
+[`StashPushOptions::new`](rustdoc:grit_lib::stash::StashPushOptions::new) builds push options with only a committer identity required.
 
 ## Persistence and object lifetime
 

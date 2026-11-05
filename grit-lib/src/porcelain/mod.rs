@@ -83,7 +83,7 @@ pub mod restore;
 pub mod revert;
 pub mod stage_tracked;
 pub mod staging;
-pub mod stash;
+pub(crate) mod stash;
 pub mod status;
 pub mod switch;
 pub mod tag;

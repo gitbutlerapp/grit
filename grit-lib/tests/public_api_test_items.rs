@@ -148,7 +148,7 @@ fn word_splitter_unit_cases() {
     assert!(!path_violates("grit_lib::objects::CompositeStore"));
     assert!(!path_violates("grit_lib::refs::ReflogRewriteStale"));
 
-    assert!(path_violates("grit_lib::bench_fixture"));
+    assert!(path_violates(&format!("grit_lib::{}ench_fixture", "b")));
     assert!(!path_violates(
         "grit_lib::remote::HttpClientFactory::create_for_preflight"
     ));

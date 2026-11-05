@@ -24,11 +24,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::diff::merge_trees::{DirectoryRenameConflict, TreeMergeOutput};
 use crate::index::Index;
-
-pub use crate::state::{
-    operation_alternatives, operation_next_steps, operation_next_steps_empty, status_operation,
-    InProgressOperation, NextStep, Operation,
-};
+use crate::state::NextStep;
 
 /// How the two sides of a merge collided on one path.
 ///

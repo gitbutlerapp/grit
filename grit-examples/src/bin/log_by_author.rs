@@ -1,4 +1,4 @@
-//! List commits matching an author pattern via [`CommitFilter`](grit_lib::revwalk::filter::CommitFilter) and [`rev_list`].
+//! List commits matching an author pattern via [`CommitFilter`](grit_lib::revwalk::CommitFilter) and [`rev_list`].
 //!
 //! Source for the library guide "Revwalk" page (included in the docs site).
 
@@ -8,8 +8,8 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+use grit_lib::revwalk::CommitFilterBuilder;
 
 fn main() -> Result<(), grit_lib::error::Error> {
     let mut args = std::env::args().skip(1);

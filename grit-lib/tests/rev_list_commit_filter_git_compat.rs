@@ -9,8 +9,8 @@ use std::sync::Arc;
 use grit_lib::config::mailmap::load_mailmap_table;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder};
 use grit_lib::revwalk::rev_list::{rev_list, MissingAction, RevListOptions};
+use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder};
 use support::{
     commit_file, git, git_commit_graph_write, git_rev_list, open_grit_repo, HistoryRepo,
 };
@@ -174,32 +174,28 @@ fn parse_rev_list_cli(args: &[&str]) -> ParsedRevListCli {
             continue;
         }
         if arg == "--since" || arg == "--after" {
-            let ts = grit_lib::revwalk::queries::committer_cutoff_from_date(args[i + 1], 0)
-                .expect("since");
+            let ts = grit_lib::revwalk::committer_cutoff_from_date(args[i + 1], 0).expect("since");
             since_cutoff = Some(ts);
             i += 2;
             continue;
         }
         if let Some(rest) = arg.strip_prefix("--since=") {
             let date = rest.strip_prefix('@').unwrap_or(rest);
-            since_cutoff = Some(
-                grit_lib::revwalk::queries::committer_cutoff_from_date(date, 0).expect("since"),
-            );
+            since_cutoff =
+                Some(grit_lib::revwalk::committer_cutoff_from_date(date, 0).expect("since"));
             i += 1;
             continue;
         }
         if arg == "--until" || arg == "--before" {
-            let ts = grit_lib::revwalk::queries::committer_cutoff_from_date(args[i + 1], 0)
-                .expect("until");
+            let ts = grit_lib::revwalk::committer_cutoff_from_date(args[i + 1], 0).expect("until");
             until_cutoff = Some(ts);
             i += 2;
             continue;
         }
         if let Some(rest) = arg.strip_prefix("--until=") {
             let date = rest.strip_prefix('@').unwrap_or(rest);
-            until_cutoff = Some(
-                grit_lib::revwalk::queries::committer_cutoff_from_date(date, 0).expect("until"),
-            );
+            until_cutoff =
+                Some(grit_lib::revwalk::committer_cutoff_from_date(date, 0).expect("until"));
             i += 1;
             continue;
         }

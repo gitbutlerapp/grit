@@ -648,8 +648,8 @@ impl fmt::Display for InvalidCommitFilterExit {
 
 impl StdError for InvalidCommitFilterExit {}
 
-/// Build a structured CLI error from [`grit_lib::revwalk::filter::CommitFilterError`].
-pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) -> Error {
+/// Build a structured CLI error from [`grit_lib::revwalk::CommitFilterError`].
+pub fn invalid_commit_filter(err: grit_lib::revwalk::CommitFilterError) -> Error {
     let human = err.to_string();
     Error::new(StructuredCliError {
         payload: StructuredJsonError::new(human.clone(), ErrorKind::InvalidPattern),

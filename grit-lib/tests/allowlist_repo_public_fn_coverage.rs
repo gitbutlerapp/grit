@@ -40,7 +40,7 @@ use grit_lib::objects::index_pack::{
     ingest_received_pack_path, install_pack_bytes, install_pack_path, IngestPackOptions,
 };
 use grit_lib::objects::midx::{midx_sidecar_path_for_midx_file, read_midx_btmp_ranges};
-use grit_lib::objects::odb::store::loose::enumerate_loose_objects;
+use grit_lib::objects::odb::store::enumerate_loose_objects;
 use grit_lib::objects::pack::{
     clear_pack_delta_base_cache, configure_delta_base_cache_from_config,
     packed_ref_delta_reuse_slice, read_object_from_pack_at_offset, read_pack_index,
@@ -53,7 +53,6 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::stash::worktree_bytes_for_index_mode;
 use grit_lib::porcelain::status::{expand_untracked_for_staging, status_path_matches_worktree};
 use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
@@ -70,6 +69,7 @@ use grit_lib::remote::transfer::{build_pack, FetchOptions, PackBuildOptions, Tag
 use grit_lib::repo::caches::RepoCaches;
 use grit_lib::repo::ensure_core_bare;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::stash::worktree_bytes_for_index_mode;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress};
 use tempfile::tempdir;
@@ -392,7 +392,7 @@ fn porcelain_stash_tag_status_and_worktree() {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
-            mode: grit_lib::porcelain::stash::StashMode::default(),
+            mode: grit_lib::stash::StashMode::default(),
         },
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,

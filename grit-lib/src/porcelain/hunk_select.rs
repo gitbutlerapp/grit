@@ -13,7 +13,6 @@ use crate::apply::{
     FilePatch, Hunk, HunkLine, IndexApplyOptions, IndexApplyOutcome,
 };
 use crate::crlf::worktree_conversion_is_identity;
-use crate::diff::hunk_id::{hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use crate::diff::structured::{
     structured_file_diff, SideBytes, StructuredHunk, StructuredLine, StructuredLineKind,
     StructuredSegment,
@@ -25,6 +24,7 @@ use crate::diff::{
     unstaged_raw_changes_with_peer_hunks_in, DiffOptions, DiffStatus, DiffTarget, FileChange,
     FileDiff,
 };
+use crate::diff::{hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use crate::error::{ApplyError, Error};
 use crate::index::{Index, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
 use crate::objects::FileMode;
@@ -1627,7 +1627,7 @@ pub fn list_unstaged_hunk_ids(
 mod tests {
     use super::*;
     use crate::diff::hunk_diff_bundle;
-    use crate::diff::hunk_id::hunk_ids;
+    use crate::diff::hunk_ids;
     use crate::index::write_tree::write_tree_from_index;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;

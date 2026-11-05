@@ -31,7 +31,7 @@ use crate::worktree::{map_worktree_io, WorktreePathOperation};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, IndexApplyOptions};
 use crate::check_ref_format::validate_branch_short_name;
-use crate::diff::hunk_id::HunkId;
+use crate::diff::HunkId;
 use crate::ident::Signature;
 #[cfg(unix)]
 use crate::index::MODE_EXECUTABLE;
@@ -3922,7 +3922,7 @@ mod hunk_push_tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+    use crate::diff::{hunk_ids_with_duplicate_peers, DiffSide};
     use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
     use crate::environment::RepositoryOptions;
     use crate::porcelain::hunk_select::{HunkSelection, LineRange};

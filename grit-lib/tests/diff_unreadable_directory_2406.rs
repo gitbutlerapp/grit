@@ -155,7 +155,7 @@ mod unix {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
-            mode: grit_lib::porcelain::stash::StashMode::default(),
+            mode: grit_lib::stash::StashMode::default(),
         };
         fx.repo
             .stash()

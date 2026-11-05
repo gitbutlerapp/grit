@@ -27,8 +27,8 @@ describe("resolveRustdocPath associated items", () => {
   });
 
   it("follows re-exports of items that are public elsewhere", () => {
-    expect(resolveRustdocPath("grit_lib::config::ConfigHandle")).toBe("config/handle/struct.ConfigHandle.html");
-    expect(resolveRustdocPath("grit_lib::porcelain::branch::DeleteMode::Safe")).toBe(
+    expect(resolveRustdocPath("grit_lib::config::ConfigHandle")).toBe("config/struct.ConfigHandle.html");
+    expect(resolveRustdocPath("grit_lib::porcelain::branch_error::DeleteMode::Safe")).toBe(
       "porcelain/branch_error/enum.DeleteMode.html#variant.Safe",
     );
   });

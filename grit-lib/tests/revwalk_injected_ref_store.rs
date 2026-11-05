@@ -19,8 +19,8 @@ use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
-use grit_lib::revwalk::queries::{RefSelection, RevWalkListOptions};
 use grit_lib::revwalk::rev_list::{collect_revision_specs_from_stdin_lines, tag_targets};
+use grit_lib::revwalk::{RefSelection, RevWalkListOptions};
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch, WorktreeEntry};
 

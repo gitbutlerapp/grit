@@ -10,7 +10,7 @@
 //! use grit_lib::config::mailmap::MailmapTable;
 //! use grit_lib::objects::ObjectId;
 //! use grit_lib::repo::{InitOptions, Repository};
-//! use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder};
+//! use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder};
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;

@@ -32,19 +32,21 @@ use super::types::{
 };
 
 #[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
-#[allow(missing_docs)]
 pub mod patch_id_inject {
+    //! Test-support hook for counting patch-id computations during rebase.
     use std::cell::Cell;
 
     thread_local! { // hygiene: test-support/bench-only patch-id compute call counter
         static PATCH_ID_COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
     }
 
+    /// Returns how many patch-id computations ran on this thread since the last reset.
     #[must_use]
     pub fn patch_id_compute_call_count() -> usize {
         PATCH_ID_COMPUTE_CALLS.with(Cell::get)
     }
 
+    /// Clears the per-thread patch-id computation counter.
     pub fn reset_patch_id_compute_call_count() {
         PATCH_ID_COMPUTE_CALLS.with(|c| c.set(0));
     }

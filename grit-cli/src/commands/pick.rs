@@ -15,10 +15,8 @@ use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::{short_hex, ObjectId};
+use grit_lib::operation::next_step_grit_commands;
 use grit_lib::operation::Conflict;
-use grit_lib::operation::{
-    next_step_grit_commands, operation_alternatives, operation_next_steps_empty,
-};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
@@ -26,6 +24,7 @@ use grit_lib::porcelain::replay_sequence::{
     ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
 use grit_lib::state::InProgressOperation;
+use grit_lib::state::{operation_alternatives, operation_next_steps_empty};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;

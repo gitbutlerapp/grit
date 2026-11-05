@@ -8,9 +8,9 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{
-    create_branch, delete_branch, set_upstream, unset_upstream, BranchError, CreateBranchOptions,
-    DeleteMode, StartPoint, TrackMode,
+    create_branch, delete_branch, set_upstream, unset_upstream, CreateBranchOptions,
 };
+use grit_lib::porcelain::branch_error::{BranchError, DeleteMode, StartPoint, TrackMode};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, git_cmd};
 

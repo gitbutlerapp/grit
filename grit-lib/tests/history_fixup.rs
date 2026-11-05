@@ -9,8 +9,8 @@ use std::process::Command;
 use std::str::FromStr;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use grit_lib::diff::DiffStatus;
+use grit_lib::diff::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::hunk_select::{
     unstaged_file_diffs, HunkSelectError, HunkSelection, LineRange,
