@@ -1610,6 +1610,7 @@ impl core::fmt::Debug for grit_lib::command_runner::RecordingRunner
 pub fn grit_lib::command_runner::RecordingRunner::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::RecordingRunner
 pub fn grit_lib::command_runner::RecordingRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::RecordingRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl !core::marker::Freeze for grit_lib::command_runner::RecordingRunner
 impl core::marker::Send for grit_lib::command_runner::RecordingRunner
 impl core::marker::Sync for grit_lib::command_runner::RecordingRunner
@@ -1622,7 +1623,7 @@ impl grit_lib::command_runner::RunningCommand
 pub fn grit_lib::command_runner::RunningCommand::child_pid(&self) -> core::option::Option<u32>
 pub fn grit_lib::command_runner::RunningCommand::close_stdin(&mut self)
 pub fn grit_lib::command_runner::RunningCommand::from_recording(grit_lib::command_runner::CommandExit, core::option::Option<alloc::vec::Vec<u8>>, alloc::vec::Vec<u8>, bool) -> Self
-pub fn grit_lib::command_runner::RunningCommand::from_system(std::process::Child, core::option::Option<std::process::ChildStdin>, core::option::Option<std::process::ChildStdout>, core::option::Option<std::process::ChildStderr>) -> Self
+pub fn grit_lib::command_runner::RunningCommand::from_system(std::process::Child, core::option::Option<std::process::ChildStdin>, core::option::Option<std::process::ChildStdout>, core::option::Option<std::process::ChildStderr>, bool) -> Self
 pub fn grit_lib::command_runner::RunningCommand::into_system_parts(self) -> core::result::Result<(std::process::Child, core::option::Option<std::process::ChildStdin>, core::option::Option<std::process::ChildStdout>, core::option::Option<std::process::ChildStderr>), grit_lib::command_runner::CommandHandleError>
 pub fn grit_lib::command_runner::RunningCommand::kill(&mut self) -> core::io::error::Result<()>
 pub fn grit_lib::command_runner::RunningCommand::stdin_mut(&mut self) -> core::option::Option<&mut dyn core::io::write::Write>
@@ -1645,6 +1646,7 @@ impl core::fmt::Debug for grit_lib::command_runner::SystemCommandRunner
 pub fn grit_lib::command_runner::SystemCommandRunner::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::SystemCommandRunner
 pub fn grit_lib::command_runner::SystemCommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::SystemCommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl core::marker::Freeze for grit_lib::command_runner::SystemCommandRunner
 impl core::marker::Send for grit_lib::command_runner::SystemCommandRunner
 impl core::marker::Sync for grit_lib::command_runner::SystemCommandRunner
@@ -1654,10 +1656,13 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::Syste
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::SystemCommandRunner
 pub trait grit_lib::command_runner::CommandRunner: core::marker::Send + core::marker::Sync
 pub fn grit_lib::command_runner::CommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::CommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::RecordingRunner
 pub fn grit_lib::command_runner::RecordingRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::RecordingRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::SystemCommandRunner
 pub fn grit_lib::command_runner::SystemCommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::SystemCommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 pub fn grit_lib::command_runner::run_program(&dyn grit_lib::command_runner::CommandRunner, &std::path::Path, &[std::ffi::os_str::OsString], core::option::Option<&std::path::Path>, grit_lib::command_runner::CommandStdin, grit_lib::command_runner::CommandStdio) -> core::io::error::Result<grit_lib::command_runner::CommandOutput>
 pub fn grit_lib::command_runner::run_sh_dash_c(&dyn grit_lib::command_runner::CommandRunner, &str, core::option::Option<&std::path::Path>, grit_lib::command_runner::CommandStdin, grit_lib::command_runner::CommandStdio) -> core::io::error::Result<grit_lib::command_runner::CommandOutput>
 pub fn grit_lib::command_runner::system_command_runner() -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
@@ -7158,7 +7163,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::gitbutler::WorkspaceS
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::gitbutler::WorkspaceStanding
 pub const grit_lib::gitbutler::WORKSPACE_BRANCH: &str
 pub const grit_lib::gitbutler::WORKSPACE_COMMIT_MARKER: &str
-pub fn grit_lib::release_unused_heap() -> bool
 pub mod grit_lib::ident
 pub enum grit_lib::ident::AuthorArgError
 pub grit_lib::ident::AuthorArgError::EmptyEmail
@@ -18894,6 +18898,7 @@ impl core::fmt::Debug for grit_lib::command_runner::RecordingRunner
 pub fn grit_lib::command_runner::RecordingRunner::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::RecordingRunner
 pub fn grit_lib::command_runner::RecordingRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::RecordingRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl !core::marker::Freeze for grit_lib::command_runner::RecordingRunner
 impl core::marker::Send for grit_lib::command_runner::RecordingRunner
 impl core::marker::Sync for grit_lib::command_runner::RecordingRunner
@@ -19058,6 +19063,7 @@ impl core::fmt::Debug for grit_lib::command_runner::SystemCommandRunner
 pub fn grit_lib::command_runner::SystemCommandRunner::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::SystemCommandRunner
 pub fn grit_lib::command_runner::SystemCommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::SystemCommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl core::marker::Freeze for grit_lib::command_runner::SystemCommandRunner
 impl core::marker::Send for grit_lib::command_runner::SystemCommandRunner
 impl core::marker::Sync for grit_lib::command_runner::SystemCommandRunner
@@ -19067,10 +19073,13 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::Syste
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::SystemCommandRunner
 pub trait grit_lib::prelude::CommandRunner: core::marker::Send + core::marker::Sync
 pub fn grit_lib::prelude::CommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::prelude::CommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::RecordingRunner
 pub fn grit_lib::command_runner::RecordingRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::RecordingRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 impl grit_lib::command_runner::CommandRunner for grit_lib::command_runner::SystemCommandRunner
 pub fn grit_lib::command_runner::SystemCommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
+pub fn grit_lib::command_runner::SystemCommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 pub trait grit_lib::prelude::DiagnosticSink: core::marker::Send + core::marker::Sync
 pub fn grit_lib::prelude::DiagnosticSink::trace(&self, grit_lib::diagnostics::Trace)
 pub fn grit_lib::prelude::DiagnosticSink::warn(&self, grit_lib::diagnostics::Warning)
@@ -23615,7 +23624,6 @@ pub fn grit_lib::remote::receive_pack::max_input_size_from_config(&grit_lib::con
 pub fn grit_lib::remote::receive_pack::pack_object_count(&[u8]) -> core::option::Option<u32>
 pub fn grit_lib::remote::receive_pack::receive_unpack_limit(&grit_lib::config::ConfigSet) -> i32
 pub fn grit_lib::remote::receive_pack::should_use_unpack_objects(&[u8], &grit_lib::config::ConfigSet) -> bool
-pub fn grit_lib::remote::redact_url_for_display(&str) -> alloc::string::String
 pub mod grit_lib::remote::resumable
 pub enum grit_lib::remote::resumable::ResumableDownloadDest
 pub grit_lib::remote::resumable::ResumableDownloadDest::Private(std::path::PathBuf)
@@ -27033,6 +27041,7 @@ pub fn grit_lib::remote::inspect_remote(&grit_lib::repo::Repository, &str, &grit
 pub fn grit_lib::remote::list_refs_from_git_dir(&std::path::Path, core::option::Option<&grit_lib::objects::odb::Odb>, &grit_lib::remote::ListRefsOptions) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<grit_lib::remote::RemoteRef>>
 pub fn grit_lib::remote::parse_remote_url(&str) -> grit_lib::remote::RemoteResult<grit_lib::remote::RemoteUrl>
 pub fn grit_lib::remote::query_remote_refs_in_memory(alloc::vec::Vec<grit_lib::remote::RemoteRef>, &grit_lib::remote::ListRefsOptions, &grit_lib::refs::listing::RefQueryOptions) -> alloc::vec::Vec<grit_lib::remote::RemoteRef>
+pub fn grit_lib::remote::redact_url_for_display(&str) -> alloc::string::String
 pub fn grit_lib::remote::ref_matches_ls_remote_patterns(&str, &[alloc::string::String]) -> bool
 pub type grit_lib::remote::RemoteResult<T> = core::result::Result<T, grit_lib::remote::RemoteError>
 pub mod grit_lib::repo
@@ -33305,3 +33314,4 @@ impl core::marker::UnsafeUnpin for grit_lib::OidAbbrevBatch
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::OidAbbrevBatch
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::OidAbbrevBatch
 pub const grit_lib::PARALLEL_STAT_MIN_ENTRIES: usize
+pub fn grit_lib::release_unused_heap() -> bool
