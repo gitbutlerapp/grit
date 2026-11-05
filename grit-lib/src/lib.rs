@@ -77,7 +77,8 @@
 //! | `sparse_checkout`, `split_index`, `untracked_cache`, `resolve_undo`, … | [`index`] |
 //! | `rev_list`, `rev_parse`, `merge_base`, `commit_graph_file`, … | [`revwalk`] |
 //! | `bloom`, `patch_ids`, `merge_trees`, `rerere`, … | [`diff`] |
-//! | `dotfile`, `ident`, `init_filesystem`, … | [`config`] |
+//! | `dotfile`, `init_filesystem`, … | [`config`] |
+//! | `ident` | [`ident`] (root) |
 //! | `fetch`, `push`, `transport`, `credentials`, … | [`remote`] |
 //! | `ignore`, `attributes`, `pathspec`, … | [`worktree`] |
 //! | porcelain stash types | [`stash`] |
@@ -310,7 +311,7 @@ pub(crate) mod patch_ids;
 pub(crate) mod path_icase;
 pub(crate) mod path_population;
 pub mod path_validate;
-pub mod pathspec;
+pub(crate) mod pathspec;
 pub(crate) mod pkt_line;
 pub(crate) mod precompose_config;
 pub(crate) mod promisor;

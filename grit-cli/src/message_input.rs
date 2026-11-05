@@ -7,7 +7,7 @@ use std::sync::Once;
 
 use anyhow::{Context, Result};
 use clap::Args;
-use grit_lib::config::ident::parse_author_arg;
+use grit_lib::ident::parse_author_arg;
 use grit_lib::ident::AuthorContact;
 use grit_lib::porcelain::commit::normalize_commit_message;
 

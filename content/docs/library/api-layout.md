@@ -37,6 +37,8 @@ Examples:
 | `rev_list` | `grit_lib::revwalk::rev_list` |
 | `fetch` | `grit_lib::remote::fetch` |
 | `ignore` | `grit_lib::worktree::ignore` |
+| `pathspec` | `grit_lib::worktree::pathspec` |
+| `ident` (not under `config::ident`) | `grit_lib::ident` |
 | `sparse_checkout` | `grit_lib::index::sparse_checkout` |
 | `reflog` | `grit_lib::refs::reflog` |
 | `serve` | `grit_lib::remote::serve` |
