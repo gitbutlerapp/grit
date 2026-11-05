@@ -1189,7 +1189,7 @@ pub(crate) mod pack_cache {
         /// Packs whose header object count was matched to the index (hot read path).
         validated_pack_counts: HashSet<PathBuf>,
         /// Per `objects/pack` directory rescan count (parallel-safe; tests only).
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         test_dir_rescan_counts: HashMap<PathBuf, u64>,
     }
 
@@ -1229,13 +1229,13 @@ pub(crate) mod pack_cache {
         delta.set_byte_limit(bytes);
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     thread_local! {
         static TEST_MARKER_STAT_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     }
 
     fn marker_sidecar_is_file(path: &Path) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         TEST_MARKER_STAT_COUNT.with(|count| count.set(count.get().saturating_add(1)));
         path.is_file()
     }
@@ -1416,7 +1416,7 @@ pub(crate) mod pack_cache {
 
         let midx_pack_names = load_midx_pack_names(&pack_dir);
         with_current(|g| {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             {
                 *g.test_dir_rescan_counts
                     .entry(pack_dir.clone())
@@ -1623,7 +1623,7 @@ pub(crate) mod pack_cache {
         }
         let midx_pack_names = load_midx_pack_names(&pack_dir);
         store.with_catalog(|g| {
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             {
                 *g.test_dir_rescan_counts
                     .entry(pack_dir.clone())
@@ -2326,7 +2326,7 @@ pub fn read_pack_bytes_cached(pack_path: &Path) -> Result<Arc<PackData>> {
 /// Prefer [`Odb::invalidate_packs`](crate::odb::Odb::invalidate_packs) when an [`Odb`](crate::odb::Odb)
 /// handle is available. Tests and benchmarks use this to reset all stores in the process.
 pub fn clear_pack_cache() {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     let _guard = pack_cache_test_guard();
     clear_pack_read_info_cache();
     pack_cache::clear_thread_local_dir_indexes();
@@ -6737,7 +6737,8 @@ pub fn read_idx_object_ids(idx_path: &Path) -> Result<Vec<ObjectId>> {
     Ok(out)
 }
 
-mod pack_cache_test_sync {
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) mod pack_cache_test_sync {
     use std::cell::Cell;
     use std::sync::Mutex;
     use std::sync::MutexGuard;
@@ -6800,13 +6801,8 @@ mod pack_cache_test_sync {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn pack_cache_test_guard() -> pack_cache_test_sync::PackCacheTestGuard {
-    pack_cache_test_sync::acquire()
-}
-
-/// Serializes tests that mutate the process-global pack cache (integration tests).
-pub fn test_pack_cache_guard() -> pack_cache_test_sync::PackCacheTestGuard {
     pack_cache_test_sync::acquire()
 }
 

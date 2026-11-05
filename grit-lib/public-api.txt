@@ -10025,8 +10025,6 @@ pub fn grit_lib::objects::index_pack::install_pack_bytes(alloc::vec::Vec<u8>, &g
 pub fn grit_lib::objects::index_pack::install_pack_bytes_with_progress(alloc::vec::Vec<u8>, &grit_lib::objects::odb::Odb, &grit_lib::objects::index_pack::IngestPackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&dyn grit_lib::progress::Cancel>) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
 pub fn grit_lib::objects::index_pack::install_pack_path(&std::path::Path, &grit_lib::objects::odb::Odb, &grit_lib::objects::index_pack::IngestPackOptions) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
 pub fn grit_lib::objects::index_pack::install_pack_path_with_progress(&std::path::Path, &grit_lib::objects::odb::Odb, &grit_lib::objects::index_pack::IngestPackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&dyn grit_lib::progress::Cancel>) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
-pub fn grit_lib::objects::index_pack::last_resolved_ingest_threads_for_tests() -> core::option::Option<usize>
-pub fn grit_lib::objects::index_pack::set_ingest_thread_recording_for_tests(bool)
 pub mod grit_lib::objects::midx
 pub enum grit_lib::objects::midx::CompactError
 pub grit_lib::objects::midx::CompactError::IdenticalEndpoints
@@ -11816,7 +11814,6 @@ pub fn grit_lib::objects::pack::reprepare_pack_directory_on_miss(&std::path::Pat
 pub fn grit_lib::objects::pack::revalidate_stale_pack_bytes(&std::path::Path) -> grit_lib::error::Result<bool>
 pub fn grit_lib::objects::pack::skip_one_pack_object(&[u8], &mut usize, u64, usize) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::pack::slice_one_pack_object(&[u8], u64, usize) -> grit_lib::error::Result<&[u8]>
-pub fn grit_lib::objects::pack::test_pack_cache_guard() -> grit_lib::pack::pack_cache_test_sync::PackCacheTestGuard
 pub fn grit_lib::objects::pack::try_read_object_from_local_packs_cached(&std::path::Path, &grit_lib::objects::ObjectId, impl core::ops::function::FnMut() -> grit_lib::error::Result<grit_lib::objects::Object>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
 pub fn grit_lib::objects::pack::try_write_streaming_pack(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack_objects::PackStats>>
 pub fn grit_lib::objects::pack::verify_pack_and_collect(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::pack::VerifyObjectRecord>>
@@ -12100,10 +12097,6 @@ pub fn grit_lib::objects::pack_rev::verify_pack_rev_file(&std::path::Path, &grit
 pub fn grit_lib::objects::pack_rev::verify_pack_rev_file_contents(&[u8], &grit_lib::objects::pack::PackIndex, &str) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::objects::pack_rev::write_pack_rev_sidecar_for_index_path(&std::path::Path) -> grit_lib::error::Result<()>
 pub mod grit_lib::objects::pack_store
-pub mod grit_lib::objects::pack_store::test_hooks
-pub fn grit_lib::objects::pack_store::test_hooks::implicit_stores_created() -> usize
-pub fn grit_lib::objects::pack_store::test_hooks::legacy_stores_created() -> usize
-pub fn grit_lib::objects::pack_store::test_hooks::reset()
 pub struct grit_lib::objects::pack_store::PackStore
 impl grit_lib::objects::pack_store::PackStore
 pub fn grit_lib::objects::pack_store::PackStore::configure_delta_base_from_config(&self, core::option::Option<&grit_lib::config::ConfigSet>)

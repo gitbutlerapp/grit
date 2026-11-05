@@ -1,11 +1,4 @@
-grit_lib::index_pack::last_resolved_ingest_threads_for_tests
-grit_lib::index_pack::set_ingest_thread_recording_for_tests
 grit_lib::init_filesystem::InitFilesystemConfigOptions::force_precompose_probe
 grit_lib::init_filesystem::probe_filesystem_case_insensitive
 grit_lib::init_filesystem::probe_symlinks_supported
 grit_lib::init_filesystem::probe_trust_filemode
-grit_lib::pack::test_pack_cache_guard
-grit_lib::pack_store::test_hooks
-grit_lib::pack_store::test_hooks::implicit_stores_created
-grit_lib::pack_store::test_hooks::legacy_stores_created
-grit_lib::pack_store::test_hooks::reset

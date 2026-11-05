@@ -9,13 +9,13 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::Environment;
-use grit_lib::objects::index_pack::{
-    last_resolved_ingest_threads_for_tests, set_ingest_thread_recording_for_tests,
-};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::DefaultHttpClientFactory;
+use grit_lib::test_support::index_pack::{
+    last_resolved_ingest_threads, set_ingest_thread_recording,
+};
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -132,7 +132,7 @@ fn http_clone_honors_thread_policy_over_pack_config_for_ingest() {
         dest.clone(),
     );
 
-    set_ingest_thread_recording_for_tests(true);
+    set_ingest_thread_recording(true);
     let outcome = clone_repo(
         CloneOptions {
             environment,
@@ -147,9 +147,9 @@ fn http_clone_honors_thread_policy_over_pack_config_for_ingest() {
 
     assert_eq!(outcome.repo.thread_policy().threads_override, Some(1));
 
-    let recorded = last_resolved_ingest_threads_for_tests()
-        .expect("clone must run index-pack ingest while recording");
-    set_ingest_thread_recording_for_tests(false);
+    let recorded =
+        last_resolved_ingest_threads().expect("clone must run index-pack ingest while recording");
+    set_ingest_thread_recording(false);
     assert_eq!(
         recorded, 1,
         "received-pack ingest must honor clone thread policy (1) over pack.threads (2)"

@@ -16,37 +16,16 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 
-/// Counters and hooks for pack-store integration tests.
-pub mod test_hooks {
-    use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use crate::test_support::pack_store::{
+    record_implicit_store_created, record_legacy_store_created,
+};
 
-    static LEGACY_STORES_CREATED: AtomicUsize = AtomicUsize::new(0);
-    static IMPLICIT_STORES_CREATED: AtomicUsize = AtomicUsize::new(0);
+#[cfg(not(any(test, feature = "test-support")))]
+pub(crate) fn record_legacy_store_created() {}
 
-    /// `reset` function.
-    pub fn reset() {
-        LEGACY_STORES_CREATED.store(0, Ordering::Release);
-        IMPLICIT_STORES_CREATED.store(0, Ordering::Release);
-    }
-
-    /// `legacy_stores_created` function.
-    pub fn legacy_stores_created() -> usize {
-        LEGACY_STORES_CREATED.load(Ordering::Acquire)
-    }
-
-    /// `implicit_stores_created` function.
-    pub fn implicit_stores_created() -> usize {
-        IMPLICIT_STORES_CREATED.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn record_legacy_store_created() {
-        LEGACY_STORES_CREATED.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn record_implicit_store_created() {
-        IMPLICIT_STORES_CREATED.fetch_add(1, Ordering::Relaxed);
-    }
-}
+#[cfg(not(any(test, feature = "test-support")))]
+pub(crate) fn record_implicit_store_created() {}
 
 /// Per-`objects/` cache of pack indexes, bytes, MIDX views, and delta-base LRU state.
 ///
@@ -251,7 +230,7 @@ impl PackStore {
             if let Some(s) = i.borrow().0.as_ref() {
                 return Arc::clone(s);
             }
-            test_hooks::record_implicit_store_created();
+            record_implicit_store_created();
             let s = Arc::new(Self::new(PathBuf::from("__grit_implicit_pack_store")));
             i.borrow_mut().0 = Some(Arc::clone(&s));
             s
@@ -265,7 +244,7 @@ impl PackStore {
             if let Some(s) = map.borrow().0.get(&key) {
                 return Arc::clone(s);
             }
-            test_hooks::record_legacy_store_created();
+            record_legacy_store_created();
             let store = Arc::new(Self::new(key.clone()));
             map.borrow_mut().0.insert(key, Arc::clone(&store));
             store
@@ -285,7 +264,7 @@ impl PackStore {
                 if let Some(s) = i.borrow().0.as_ref() {
                     return Arc::clone(s);
                 }
-                test_hooks::record_implicit_store_created();
+                record_implicit_store_created();
                 let s = Arc::new(Self::new(PathBuf::from("__grit_nonstandard_pack_cache")));
                 i.borrow_mut().0 = Some(Arc::clone(&s));
                 s

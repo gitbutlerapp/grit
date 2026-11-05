@@ -17,12 +17,13 @@ use grit_lib::maintenance::{
     RepackOptions,
 };
 use grit_lib::objects::commit_graph::{build_commit_graph_bytes, CommitGraphChain};
-use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
+use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::git_fsck;
 use tempfile::TempDir;
 use time::OffsetDateTime;
@@ -143,7 +144,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
 
 #[test]
 fn repack_after_many_commits_single_pack_and_git_fsck_clean() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 30);
@@ -184,7 +185,7 @@ fn repack_after_many_commits_single_pack_and_git_fsck_clean() {
 
 #[test]
 fn gc_matches_repack_plus_prune_and_git_fsck() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 20);
@@ -311,7 +312,7 @@ fn one_commit(repo: &Repository) {
 
 #[test]
 fn gc_preserves_staged_only_blob() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
@@ -417,7 +418,7 @@ fn fsck_reports_missing_index_blob_after_corruption() {
 
 #[test]
 fn repack_keeps_reflog_only_commit_and_kept_pack() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 2);
@@ -821,7 +822,7 @@ fn gc_reports_kept_unreachable_loose_within_prune_grace() {
 
 #[test]
 fn gc_prune_expire_never_preserves_unreachable_loose_blob() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
@@ -1026,7 +1027,7 @@ fn git_verify_pack_delta_count(dir: &Path) -> usize {
 
 #[test]
 fn gc_over_existing_pack_keeps_its_deltas_and_deltifies_new_blobs() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let seed = repo_with_loose_only_edited_blob_history();
     git(seed.path(), &["repack", "-a", "-d"]);
     let packed_deltas = git_verify_pack_delta_count(seed.path());
@@ -1071,7 +1072,7 @@ fn gc_over_existing_pack_keeps_its_deltas_and_deltifies_new_blobs() {
 
 #[test]
 fn gc_repacks_loose_after_existing_pack_issue_1320() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 5);
@@ -1367,7 +1368,7 @@ fn full_gc_auto_skips_repack_but_explicit_repack_runs_on_single_pack() {
 
 #[test]
 fn repack_with_existing_pack_and_loose_uses_rewrite_not_full_delta_search() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     git(dir.path(), &["config", "gc.auto", "1"]);
@@ -1724,7 +1725,7 @@ fn gc_autopacklimit_consolidates_packs_like_git() {
 
 #[test]
 fn gc_from_loose_objects_builds_delta_compressed_pack_like_repack() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let seed = repo_with_loose_only_edited_blob_history();
 
     let grit_gc = TempDir::new().expect("gc copy");
@@ -1765,7 +1766,7 @@ fn gc_from_loose_objects_builds_delta_compressed_pack_like_repack() {
 
 #[test]
 fn index_gitlink_absent_commit_does_not_break_repack_or_fsck() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
@@ -1871,7 +1872,7 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
 
 #[test]
 fn gc_replaces_readonly_commit_graph_like_git_on_windows() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     git(dir.path(), &["commit", "--allow-empty", "-m", "one"]);
@@ -2101,7 +2102,7 @@ fn packed_repo_whose_tip_tree_is_missing() -> (TempDir, Repository, ObjectId) {
 /// Like `git prune`, nothing is walked when there is no loose object to consider.
 #[test]
 fn prune_with_no_loose_objects_skips_reachability_walk() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let (_dir, repo, commit) = packed_repo_whose_tip_tree_is_missing();
 
     let stats = prune_loose_objects(
@@ -2120,7 +2121,7 @@ fn prune_with_no_loose_objects_skips_reachability_walk() {
 /// not need the walk either.
 #[test]
 fn prune_skips_reachability_walk_when_all_loose_objects_are_recent() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let (_dir, repo, commit) = packed_repo_whose_tip_tree_is_missing();
     repo.odb()
         .write(ObjectKind::Blob, b"recent unreachable\n")
@@ -2137,7 +2138,7 @@ fn prune_skips_reachability_walk_when_all_loose_objects_are_recent() {
 /// and the prune walk, and still reports the prune as done.
 #[test]
 fn gc_on_single_fresh_pack_skips_reachability_walk() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let (_dir, repo, _commit) = packed_repo_whose_tip_tree_is_missing();
     let now = OffsetDateTime::now_utc().unix_timestamp();
 
@@ -2160,7 +2161,7 @@ fn top_commit_graph_has_bloom_filters(repo: &Repository) -> bool {
 /// has them and does not compute them from scratch otherwise.
 #[test]
 fn gc_commit_graph_keeps_existing_changed_path_choice_like_git() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     std::fs::write(dir.path().join("a.txt"), b"one\n").expect("write");
@@ -2202,7 +2203,7 @@ fn now_unix() -> i64 {
 
 #[test]
 fn gc_auto_packs_loose_objects_past_gc_auto_and_git_reads_the_result() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     std::fs::write(dir.path().join("base.txt"), b"base\n").expect("write");
@@ -2279,7 +2280,7 @@ fn pseudo_random_bytes(state: &mut u64, len: usize) -> Vec<u8> {
 fn gc_auto_delta_compresses_loose_versions_of_a_large_blob_issue_2158() {
     const ASSET_LEN: usize = 256 * 1024;
     const VERSIONS: usize = 8;
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     std::fs::write(dir.path().join("base.txt"), b"base\n").expect("write");
@@ -2389,7 +2390,7 @@ fn gc_auto_delta_compresses_loose_versions_of_a_large_blob_issue_2158() {
 
 #[test]
 fn gc_auto_consolidates_packs_past_gc_auto_pack_limit_like_git() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     for i in 0..3 {
@@ -2518,7 +2519,7 @@ fn grit_and_git_gc_auto(seed: &Path) -> (TempDir, TempDir) {
 
 #[test]
 fn gc_auto_prunes_expired_unreachable_loose_objects_like_git() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let seed = repo_with_unreachable_loose_blobs("now", false);
     let (grit_copy, git_copy) = grit_and_git_gc_auto(seed.path());
 
@@ -2540,7 +2541,7 @@ fn gc_auto_prunes_expired_unreachable_loose_objects_like_git() {
 
 #[test]
 fn gc_auto_leaves_recent_unreachable_loose_objects_loose_like_git() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let seed = repo_with_unreachable_loose_blobs("2.weeks.ago", false);
     let unreachable = git_count_objects_field(seed.path(), "count") - 2;
     let (grit_copy, git_copy) = grit_and_git_gc_auto(seed.path());
@@ -2562,7 +2563,7 @@ fn gc_auto_leaves_recent_unreachable_loose_objects_loose_like_git() {
 
 #[test]
 fn gc_auto_prunes_when_every_loose_object_is_unreachable_like_git() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let seed = repo_with_unreachable_loose_blobs("now", true);
     let (grit_copy, git_copy) = grit_and_git_gc_auto(seed.path());
 
@@ -2631,7 +2632,7 @@ fn grit_commit_all(repo: &Repository, path: &Path, message: &str) {
 
 #[test]
 fn gc_on_shared_clone_packs_only_local_objects_like_git() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let source = history_source_repo(10);
     let grit_clone_dir = TempDir::new().expect("grit clone dir");
     let git_clone_dir = TempDir::new().expect("git clone dir");
@@ -2689,7 +2690,7 @@ fn gc_on_shared_clone_packs_only_local_objects_like_git() {
 
 #[test]
 fn gc_shared_clone_dry_run_counts_local_objects_only() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let source = history_source_repo(8);
     let clone_dir = TempDir::new().expect("clone");
     shared_clone_from(source.path(), clone_dir.path());
@@ -2711,7 +2712,7 @@ fn gc_shared_clone_dry_run_counts_local_objects_only() {
 
 #[test]
 fn gc_shared_clone_recovers_from_duplicated_alternate_pack() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let source = history_source_repo(12);
     let clone_dir = TempDir::new().expect("clone");
     shared_clone_from(source.path(), clone_dir.path());
@@ -2801,7 +2802,7 @@ fn write_loose_materialize_duplicate(repo: &Repository, oid: &str) {
 
 #[test]
 fn gc_preserves_loose_duplicate_when_alternate_holds_object_loose_only() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let source = history_source_repo(3);
     assert_eq!(
         git_pack_count(&source.path().join(".git")),
@@ -2850,7 +2851,7 @@ fn gc_preserves_loose_duplicate_when_alternate_holds_object_loose_only() {
 
 #[test]
 fn gc_prunes_loose_duplicate_when_alternate_holds_object_in_pack() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let source = history_source_repo(5);
     git(source.path(), &["repack", "-a", "-d"]);
     assert!(
@@ -3293,7 +3294,7 @@ fn legacy_empty_commit_graph_file_parses_and_git_verify_accepts() {
 
 #[test]
 fn gc_after_one_commit_writes_commit_graph_both_fsck_clean() {
-    let _pack_guard = test_pack_cache_guard();
+    let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 1);

@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+#[cfg(any(test, feature = "test-support"))]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use tempfile::TempPath;
@@ -27,11 +28,14 @@ pub use crate::pack_index_build::{
     build_pack_index_records, build_pack_index_records_with_progress,
 };
 
+#[cfg(any(test, feature = "test-support"))]
 static INGEST_THREAD_RECORDING: AtomicBool = AtomicBool::new(false);
+#[cfg(any(test, feature = "test-support"))]
 static LAST_RESOLVED_INGEST_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 /// Enable recording of resolved index-pack worker counts (integration tests only).
-pub fn set_ingest_thread_recording_for_tests(enabled: bool) {
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn set_ingest_thread_recording_for_tests(enabled: bool) {
     INGEST_THREAD_RECORDING.store(enabled, Ordering::SeqCst);
     if !enabled {
         LAST_RESOLVED_INGEST_THREADS.store(0, Ordering::SeqCst);
@@ -39,7 +43,8 @@ pub fn set_ingest_thread_recording_for_tests(enabled: bool) {
 }
 
 /// Last resolved worker count from pack ingest while recording is enabled.
-pub fn last_resolved_ingest_threads_for_tests() -> Option<usize> {
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn last_resolved_ingest_threads_for_tests() -> Option<usize> {
     if !INGEST_THREAD_RECORDING.load(Ordering::SeqCst) {
         return None;
     }
@@ -47,7 +52,8 @@ pub fn last_resolved_ingest_threads_for_tests() -> Option<usize> {
     (raw > 0).then(|| raw - 1)
 }
 
-fn record_resolved_ingest_threads(threads: usize) {
+fn record_resolved_ingest_threads(#[allow(unused_variables)] threads: usize) {
+    #[cfg(any(test, feature = "test-support"))]
     if INGEST_THREAD_RECORDING.load(Ordering::SeqCst) {
         LAST_RESOLVED_INGEST_THREADS.store(threads.saturating_add(1), Ordering::SeqCst);
     }

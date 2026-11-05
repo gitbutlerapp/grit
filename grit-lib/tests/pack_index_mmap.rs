@@ -8,11 +8,12 @@ use grit_lib::maintenance::{repack_all, RepackOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{
     clear_pack_cache, parse_pack_index_bytes, read_object_from_pack, read_pack_index,
-    read_pack_index_cached, read_pack_index_no_verify, test_pack_cache_guard,
-    verify_pack_and_collect, write_v2_pack_index_with_trailer,
+    read_pack_index_cached, read_pack_index_no_verify, verify_pack_and_collect,
+    write_v2_pack_index_with_trailer,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::objects::{
     write_pack_and_index, IndexPackOptions, IndexVersion, ObjectKind as FixtureKind, PackBuilder,
     RepoFixture,
@@ -233,7 +234,7 @@ fn misordered_oid_lazy_open_verify_and_fsck_reject() {
 
 #[test]
 fn repack_with_cached_mmap_index_succeeds() {
-    let _guard = test_pack_cache_guard();
+    let _guard = pack_cache_guard();
     let repo = RepoFixture::init(grit_test_support::objects::HashAlgo::Sha1).expect("init");
     let mut builder = PackBuilder::new(grit_test_support::objects::HashAlgo::Sha1);
     for i in 0..32u8 {

@@ -1,7 +1,7 @@
 //! Library hygiene ratchet: counts anti-patterns under `grit-lib/src` and compares
 //! to [`hygiene-baseline.toml`](../hygiene-baseline.toml).
 //!
-//! `#[cfg(test)]` modules and items are stripped before counting (brace matching).
+//! `#[cfg(test)]` and `test-support` test hook modules are stripped before counting (brace matching).
 //! Lines exempted with `// hygiene: <reason>` on the same line or the line above are
 //! tracked separately and do not contribute to ratchet counts.
 
@@ -230,7 +230,7 @@ fn is_test_only_file(source: &str) -> bool {
         == Some("#![cfg(test)]")
 }
 
-/// Blank out `#[cfg(test)]` items but keep newlines so line numbers match the original file.
+/// Blank out test-only `cfg` items but keep newlines so line numbers match the original file.
 fn strip_cfg_test_modules(source: &str) -> String {
     let bytes = source.as_bytes();
     let mut keep = vec![true; bytes.len()];
@@ -260,16 +260,29 @@ fn strip_cfg_test_modules(source: &str) -> String {
         .collect()
 }
 
+fn test_only_cfg_attribute_len(bytes: &[u8], start: usize) -> Option<usize> {
+    const TEST_SUPPORT_ANY: &str = "#[cfg(any(test, feature = \"test-support\"))]";
+    const TEST_SUPPORT_FEATURE: &str = "#[cfg(feature = \"test-support\")]";
+    if starts_with(bytes, start, "#[cfg(test)]") {
+        return Some("#[cfg(test)]".len());
+    }
+    if starts_with(bytes, start, TEST_SUPPORT_ANY) {
+        return Some(TEST_SUPPORT_ANY.len());
+    }
+    if starts_with(bytes, start, TEST_SUPPORT_FEATURE) {
+        return Some(TEST_SUPPORT_FEATURE.len());
+    }
+    None
+}
+
 fn cfg_test_item_end(bytes: &[u8], start: usize) -> Option<usize> {
     let mut i = start;
     i = skip_ascii_whitespace(bytes, i)?;
     if i + 1 >= bytes.len() || bytes[i] != b'#' {
         return None;
     }
-    if !starts_with(bytes, i, "#[cfg(test)]") {
-        return None;
-    }
-    i += "#[cfg(test)]".len();
+    let cfg_len = test_only_cfg_attribute_len(bytes, i)?;
+    i += cfg_len;
     loop {
         i = skip_ascii_whitespace(bytes, i)?;
         if starts_with(bytes, i, "#[") {

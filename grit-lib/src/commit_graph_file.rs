@@ -959,9 +959,9 @@ pub struct CommitGraphChain {
     layers: Vec<CommitGraphLayer>,
 }
 
-/// Test-only constructor (tip-first layer order).
-#[doc(hidden)]
-pub fn commit_graph_chain_from_layers_for_test(layers: Vec<CommitGraphLayer>) -> CommitGraphChain {
+/// Tip-first layer order (test / `test-support` only).
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn commit_graph_chain_from_layers(layers: Vec<CommitGraphLayer>) -> CommitGraphChain {
     CommitGraphChain { layers }
 }
 

@@ -12,9 +12,10 @@ use grit_lib::objects::pack::{
     read_local_pack_indexes, read_local_pack_indexes_cached, read_object_from_pack,
     read_object_from_packs, read_pack_bytes_cached, read_pack_index, read_pack_index_no_verify,
     reprepare_pack_directory_on_miss, revalidate_stale_pack_bytes, skip_one_pack_object,
-    test_pack_cache_guard, verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
+    verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
 };
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
+use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::objects::{
     git_cat_file_batch_check, git_supports_sha256, write_pack_and_index, HashAlgo as FixtureAlgo,
     IndexPackOptions, IndexVersion, ObjectKind as FixtureKind, PackBuilder, PackBuilt, RepoFixture,
@@ -875,7 +876,7 @@ fn duplicate_index_entries_remain_readable() {
 
 #[test]
 fn large_pack_uses_mmap_backing_for_reads() {
-    let _guard = test_pack_cache_guard();
+    let _guard = pack_cache_guard();
     clear_pack_cache();
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     std::fs::create_dir_all(repo.objects_dir().join("pack")).expect("pack dir");
@@ -903,7 +904,7 @@ fn large_pack_uses_mmap_backing_for_reads() {
 
 #[test]
 fn collect_local_pack_info_and_cache_invalidation() {
-    let _guard = test_pack_cache_guard();
+    let _guard = pack_cache_guard();
     clear_pack_cache();
     run_both_algos(|algo| {
         let (repo, _pack, oids) = rich_pack_fixture(algo);
@@ -920,7 +921,7 @@ fn collect_local_pack_info_and_cache_invalidation() {
 
 #[test]
 fn warmed_pack_cache_revalidates_after_same_path_replacement() {
-    let _guard = test_pack_cache_guard();
+    let _guard = pack_cache_guard();
     clear_pack_cache();
     let repo = RepoFixture::init(FixtureAlgo::Sha1).expect("init");
     let objects = repo.objects_dir();

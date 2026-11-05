@@ -9,10 +9,10 @@ use grit_lib::error::Error;
 use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_pack_index};
-use grit_lib::objects::pack_store::test_hooks;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::pack_store;
 use grit_lib::RefStorageFormat;
 use tempfile::TempDir;
 
@@ -63,7 +63,7 @@ fn install_pack(objects_dir: &Path, stem: &str, pack: &[u8]) -> Vec<ObjectId> {
 #[test]
 fn odb_concurrent_reads() {
     clear_pack_cache();
-    test_hooks::reset();
+    pack_store::reset();
 
     let root = TempDir::new().expect("tempdir");
     let repo = Repository::init(
@@ -150,7 +150,7 @@ fn odb_concurrent_reads() {
         })
         .collect();
 
-    test_hooks::reset();
+    pack_store::reset();
 
     let stop = Arc::new(AtomicBool::new(false));
     let odb_inv = odb.clone();
@@ -186,12 +186,12 @@ fn odb_concurrent_reads() {
     invalidator.join().expect("invalidator");
 
     assert_eq!(
-        test_hooks::legacy_stores_created(),
+        pack_store::legacy_stores_created(),
         0,
         "Odb reads must not create legacy thread-local pack stores"
     );
     assert_eq!(
-        test_hooks::implicit_stores_created(),
+        pack_store::implicit_stores_created(),
         0,
         "Odb reads must not create implicit pack stores"
     );
@@ -206,8 +206,8 @@ fn odb_concurrent_reads() {
         }
     });
 
-    assert_eq!(test_hooks::legacy_stores_created(), 0);
-    assert_eq!(test_hooks::implicit_stores_created(), 0);
+    assert_eq!(pack_store::legacy_stores_created(), 0);
+    assert_eq!(pack_store::implicit_stores_created(), 0);
 }
 
 /// Regression: a thread holding `with_pack_read_context` must not return bytes after another
@@ -215,7 +215,7 @@ fn odb_concurrent_reads() {
 #[test]
 fn stale_read_after_invalidation() {
     clear_pack_cache();
-    test_hooks::reset();
+    pack_store::reset();
 
     let root = TempDir::new().expect("tempdir");
     let repo = Repository::init(
