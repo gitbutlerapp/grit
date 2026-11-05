@@ -7,13 +7,6 @@ use thiserror::Error;
 
 use crate::error::Error;
 
-/// Returns true when `s` is non-empty and begins with `-`, matching Git's
-/// `looks_like_command_line_option` (used before quoting a path for shell-backed transport).
-#[must_use]
-pub(crate) fn looks_like_command_line_option(s: &str) -> bool {
-    !s.is_empty() && s.starts_with('-')
-}
-
 /// Repository root used to resolve relative `remote.<name>.url` values — the linked or main
 /// worktree directory when known, otherwise inferred from `git_dir` (including linked
 /// worktree admin dirs via `gitdir` / `commondir`).

@@ -367,15 +367,17 @@ fn stage_with_hint(
     cancel: &dyn grit_lib::progress::Cancel,
 ) -> Result<StageOutcome> {
     let (pathspecs, pathspec_sources) = resolved.into_pathspec_lists();
-    let opts = StageOptions {
-        pathspecs,
-        pathspec_sources,
-        mode,
-        executable_hint,
-        dry_run,
-        intent_to_add,
-        force_ignored,
-        ..StageOptions::default()
+    #[allow(clippy::field_reassign_with_default)]
+    let opts = {
+        let mut o = StageOptions::default();
+        o.pathspecs = pathspecs;
+        o.pathspec_sources = pathspec_sources;
+        o.mode = mode;
+        o.executable_hint = executable_hint;
+        o.dry_run = dry_run;
+        o.intent_to_add = intent_to_add;
+        o.force_ignored = force_ignored;
+        o
     };
     stage_paths(repo, &opts, progress, cancel).map_err(map_add_error)
 }

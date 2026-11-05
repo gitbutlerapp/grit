@@ -144,7 +144,7 @@ pub fn transport_url_parse(data: &[u8]) {
         let _ = Url::parse(trimmed);
         let _ = crate::transport_path::url_is_local_not_ssh(trimmed);
         let _ = crate::transport_path::file_url_to_local_path(trimmed);
-        let _ = crate::transport_path::looks_like_command_line_option(trimmed);
+        let _ = crate::config::gitmodules::looks_like_command_line_option(trimmed);
     }
 }
 

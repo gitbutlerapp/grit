@@ -108,6 +108,7 @@ pub fn read_packet(r: &mut impl Read) -> io::Result<Option<Packet>> {
 /// Read packets from `r` until a flush or delimiter packet, or EOF.
 ///
 /// Returns the collected data lines and the terminator (`Flush`, `Delim`, or `None`).
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn read_until_flush_or_delim(
     r: &mut impl Read,
 ) -> io::Result<(Vec<String>, Option<Packet>)> {

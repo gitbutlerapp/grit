@@ -8,6 +8,7 @@
 //!
 //! See `Documentation/gitprotocol-v2.txt` and `serve.c` / `connect.c` / `fetch-pack.c` in Git.
 
+#[cfg(any(test, feature = "test-support"))]
 use std::collections::HashSet;
 
 /// A section header in a protocol-v2 `command=fetch` response.
@@ -47,6 +48,7 @@ impl FetchResponseSection {
 ///
 /// Matches gitprotocol-v2 (and upstream `upload-pack.c` after shallow/wanted-ref order was fixed).
 /// Returns true when `shallow-info` appears before `wanted-refs` in a fetch response prelude.
+#[cfg(any(test, feature = "test-support"))]
 #[must_use]
 pub fn fetch_prelude_shallow_before_wanted_refs(section_headers: &[&str]) -> bool {
     let shallow = section_headers
@@ -115,6 +117,7 @@ pub(crate) fn cap_lines_for_command_request(caps: &[String]) -> Vec<String> {
 /// Collect the space-separated feature tokens advertised by the server's v2 `fetch=` capability.
 ///
 /// Returns an empty set when the server advertises no `fetch=` capability.
+#[cfg(any(test, feature = "test-support"))]
 #[must_use]
 pub fn fetch_features(caps: &[String]) -> HashSet<String> {
     let mut features = HashSet::new();
