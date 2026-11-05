@@ -1247,11 +1247,11 @@ fn run_hook_opts_with_cancel(
             };
             if let Some(stdin) = child.stdin_mut() {
                 let mut file = file;
-                let _ = std::io::copy(&mut file, stdin);
+                let _ = crate::sigpipe::copy(&mut file, stdin);
             }
         } else if let Some(data) = opts.stdin_data {
             if let Some(stdin) = child.stdin_mut() {
-                let _ = stdin.write_all(data);
+                let _ = crate::sigpipe::write_all(stdin, data);
             }
         }
         if stdin_piped {
@@ -1826,11 +1826,11 @@ fn run_hook_opts_for_ref_context(
             };
             if let Some(stdin) = child.stdin_mut() {
                 let mut file = file;
-                let _ = std::io::copy(&mut file, stdin);
+                let _ = crate::sigpipe::copy(&mut file, stdin);
             }
         } else if let Some(data) = opts.stdin_data {
             if let Some(stdin) = child.stdin_mut() {
-                let _ = stdin.write_all(data);
+                let _ = crate::sigpipe::write_all(stdin, data);
             }
         }
         if stdin_piped {
