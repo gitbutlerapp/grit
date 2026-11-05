@@ -32,18 +32,18 @@ use crate::transport::http::HttpClient;
 pub const GITHUB_HOST: &str = "github.com";
 
 /// GitHub endpoint that issues device and user codes.
-pub const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
+pub(crate) const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 
 /// GitHub endpoint polled for the access token.
-pub const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
+pub(crate) const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
 
 /// Page where the user enters the code; used when GitHub omits
 /// `verification_uri` from its response.
-pub const VERIFICATION_URL: &str = "https://github.com/login/device";
+pub(crate) const VERIFICATION_URL: &str = "https://github.com/login/device";
 
 /// OAuth scope requested by default. `repo` covers fetching and pushing
 /// private repositories over HTTPS.
-pub const DEFAULT_SCOPE: &str = "repo";
+pub(crate) const DEFAULT_SCOPE: &str = "repo";
 
 /// Placeholder username GitHub documents for token authentication over HTTPS;
 /// GitHub authenticates by the token (the password) regardless of the name.

@@ -78,25 +78,21 @@ mod tree;
 
 pub use branch_refresh::{refresh_branch, BranchRefresh, BranchRefreshResult};
 pub use checkin::{
-    decide_checkin, graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinDecision,
-    CheckinRefusal, CheckinRule,
+    graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal, CheckinRule,
 };
-pub use graft::{graft, GraftError, Grafted};
+pub use graft::{graft, Grafted};
 pub use graft_log::GraftLog;
 pub use guard::TargetGuard;
-pub use ids::{change_keys, give_change_ids, keeps_every_commit};
-pub use landing::{land_integration, move_off_landed_branch, record_landed, Landing, MovedOff};
-pub use project::{project, project_branch, ProjectError, ProjectedCommit, Projection};
-pub use refresh::{
-    ensure_refreshable, refresh, BranchOnOldSnapshot, FollowedBranch, RefreshOutcome, RefreshedHead,
-};
+pub use ids::{give_change_ids, keeps_every_commit};
+pub use landing::{land_integration, Landing};
+pub use project::{project, project_branch, ProjectError};
+pub use refresh::{ensure_refreshable, refresh, RefreshOutcome, RefreshedHead};
 pub use store::{valid_checkout_id, CheckoutRecord, CheckoutStore, ReservedName, StoredCheckout};
 pub use target::{
-    edit_slices, integrate, missing_paths, parse_slices, read_slices, render_slices,
-    same_branch_name, target_branch, valid_slice_name, Integration, SliceEdit, SlicesEdited,
-    TargetChange, TargetRefusal, SLICES_PATH,
+    edit_slices, integrate, read_slices, same_branch_name, target_branch, Integration, SliceEdit,
+    SlicesEdited, TargetChange, TargetRefusal, SLICES_PATH,
 };
-pub use transfer::{fetch_branch, fetch_snapshot, push_for_checkin, FetchedSnapshot};
+pub use transfer::{fetch_branch, push_for_checkin};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -144,14 +140,14 @@ fn checkout_invalid_url_message(url: &str) -> String {
 pub const CHECKOUT_API: &str = ".grit/checkouts";
 
 /// Name and email of every snapshot commit's author and committer.
-pub const SNAPSHOT_IDENT: &str = "grit-checkout <snapshot@grit-checkout>";
+pub(crate) const SNAPSHOT_IDENT: &str = "grit-checkout <snapshot@grit-checkout>";
 
 /// Trailer naming the real commit a snapshot stands for.
-pub const SNAPSHOT_BASE_TRAILER: &str = "Grit-Checkout-Base";
+pub(crate) const SNAPSHOT_BASE_TRAILER: &str = "Grit-Checkout-Base";
 
 /// File in the repository's common git directory (shared by all its worktrees)
 /// that marks it as a snapshot checkout.
-pub const MARKER_FILE: &str = "grit-checkout.json";
+pub(crate) const MARKER_FILE: &str = "grit-checkout.json";
 
 const TREE_MODE: u32 = 0o040000;
 const GITLINK_MODE: u32 = 0o160000;
@@ -310,7 +306,7 @@ pub fn out_ref(id: &str, name: &str) -> String {
 /// Where the server puts its branch `name` as checkout `id` sees it (its
 /// projection, [`project_branch`]) for the checkout to fetch.
 #[must_use]
-pub fn in_ref(id: &str, name: &str) -> String {
+pub(crate) fn in_ref(id: &str, name: &str) -> String {
     format!("refs/checkouts/{id}/in/heads/{name}")
 }
 
@@ -328,7 +324,7 @@ pub fn upstream_ref(branch: &str) -> String {
 /// A checkout's `origin` fetches with it, so a plain `git fetch` or
 /// `grit fetch` there brings only snapshots, never the full history.
 #[must_use]
-pub fn snapshot_fetch_refspec(id: &str, branch: &str) -> String {
+pub(crate) fn snapshot_fetch_refspec(id: &str, branch: &str) -> String {
     format!("+{}:{}", target_ref(id), upstream_ref(branch))
 }
 
@@ -338,7 +334,7 @@ pub fn snapshot_fetch_refspec(id: &str, branch: &str) -> String {
 /// A plain `git push` or `grit push` in a checkout then lands where check-ins
 /// graft from ([`out_ref`]), never on the server's real branches.
 #[must_use]
-pub fn out_push_refspec(id: &str) -> String {
+pub(crate) fn out_push_refspec(id: &str) -> String {
     format!("+refs/heads/*:{}", out_ref(id, "*"))
 }
 
@@ -886,7 +882,7 @@ impl Dir {
 ///
 /// [`CheckoutError::MissingPath`] when `tree` has no entry at one of `paths`,
 /// and object read or write failures.
-pub fn filtered_tree(odb: &Odb, tree: ObjectId, paths: &[String]) -> Result<ObjectId> {
+pub(crate) fn filtered_tree(odb: &Odb, tree: ObjectId, paths: &[String]) -> Result<ObjectId> {
     cut_tree(odb, tree, paths, true)
 }
 
@@ -975,7 +971,7 @@ fn cut_tree(odb: &Odb, tree: ObjectId, paths: &[String], strict: bool) -> Result
 /// [`SNAPSHOT_BASE_TRAILER`] trailer. Nothing else goes in, so the same inputs
 /// always give the same commit.
 #[must_use]
-pub fn snapshot_object(
+pub(crate) fn snapshot_object(
     tree: ObjectId,
     parent: Option<ObjectId>,
     base: ObjectId,
@@ -1387,7 +1383,7 @@ impl<'a> CheckoutClient<'a> {
     }
 
     /// Ask the server to show its branch `name` to checkout `id`: its
-    /// projection, put at [`in_ref`] to fetch ([`fetch_branch`]).
+    /// projection, put at `in_ref` to fetch ([`fetch_branch`]).
     ///
     /// # Errors
     ///

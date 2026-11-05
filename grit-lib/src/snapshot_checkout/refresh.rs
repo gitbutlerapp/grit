@@ -27,9 +27,10 @@ use crate::transfer::TransferStats;
 
 use super::landing::{landed_base, prune_landed};
 use super::refs::{swap_ref_as, Swap};
+use super::transfer::fetch_snapshot;
 use super::{
-    branches_with_work, fetch_snapshot, give_change_ids, upstream_ref, CheckoutError, CheckoutInfo,
-    CheckoutMarker, Result, SnapshotRoot,
+    branches_with_work, give_change_ids, upstream_ref, CheckoutError, CheckoutInfo, CheckoutMarker,
+    Result, SnapshotRoot,
 };
 
 /// What a refresh did with `HEAD`.
@@ -416,10 +417,11 @@ mod tests {
     use crate::porcelain::pull::PullResult;
     use crate::progress::NeverCancel;
     use crate::remote::fetch::NoProgress;
+    use crate::snapshot_checkout::landing::{move_off_landed_branch, record_landed, MovedOff};
     use crate::snapshot_checkout::testing::*;
     use crate::snapshot_checkout::{
-        land_integration, move_off_landed_branch, push_for_checkin, record_landed, target_ref,
-        CheckoutClient, IntegrateResponse, IntegrateStatus, Landing, MovedOff,
+        land_integration, push_for_checkin, target_ref, CheckoutClient, IntegrateResponse,
+        IntegrateStatus, Landing,
     };
     use crate::state::InProgressOperation;
 

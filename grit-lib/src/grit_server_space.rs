@@ -25,12 +25,12 @@ use crate::transport::http::HttpClient;
 
 /// Path, under the server root, of the space endpoint: `POST
 /// .grit/space/<owner>/<project>` answers a [`Space`].
-pub const SPACE_PATH: &str = ".grit/space";
+pub(crate) const SPACE_PATH: &str = ".grit/space";
 
 /// Path, under the server root, of the integrate endpoint: `POST
 /// .grit/integrate/<owner>/<project>` with an [`IntegrateBranchRequest`]
 /// answers an [`IntegrateBranchReply`].
-pub const INTEGRATE_PATH: &str = ".grit/integrate";
+pub(crate) const INTEGRATE_PATH: &str = ".grit/integrate";
 
 const JSON_CONTENT_TYPE: &str = "application/json";
 

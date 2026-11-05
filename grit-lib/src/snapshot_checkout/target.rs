@@ -474,7 +474,7 @@ struct SliceEntry {
 /// # Errors
 ///
 /// [`CheckoutError::Protocol`] for text that is not a valid slices file.
-pub fn parse_slices(text: &str) -> Result<Vec<Slice>> {
+pub(crate) fn parse_slices(text: &str) -> Result<Vec<Slice>> {
     let file: SlicesFile = toml::from_str(text).map_err(|e| CheckoutError::Protocol {
         url: SLICES_PATH.to_owned(),
         detail: e.to_string(),
@@ -492,7 +492,7 @@ pub fn parse_slices(text: &str) -> Result<Vec<Slice>> {
 
 /// Write the slices file's text.
 #[must_use]
-pub fn render_slices(slices: &[Slice]) -> String {
+pub(crate) fn render_slices(slices: &[Slice]) -> String {
     let file = SlicesFile {
         slices: slices
             .iter()
@@ -528,7 +528,7 @@ pub fn read_slices(repo: &Repository, commit: ObjectId) -> Result<Vec<Slice>> {
 /// Whether `name` can name a slice: letters, digits, `-`, `_` and `.`, not
 /// starting with `.` or `-`.
 #[must_use]
-pub fn valid_slice_name(name: &str) -> bool {
+pub(crate) fn valid_slice_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && !name.starts_with(['.', '-'])
@@ -542,7 +542,11 @@ pub fn valid_slice_name(name: &str) -> bool {
 /// # Errors
 ///
 /// Object read failures.
-pub fn missing_paths(repo: &Repository, commit: ObjectId, paths: &[String]) -> Result<Vec<String>> {
+pub(crate) fn missing_paths(
+    repo: &Repository,
+    commit: ObjectId,
+    paths: &[String],
+) -> Result<Vec<String>> {
     let odb = repo.odb();
     let tree = odb.commit_tree(&commit)?;
     let mut missing = Vec::new();

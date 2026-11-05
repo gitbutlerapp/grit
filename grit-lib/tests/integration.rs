@@ -1109,8 +1109,6 @@ mod midx_roundtrip;
 mod midx_write_coverage;
 #[path = "mv_force_multi_source_rollback.rs"]
 mod mv_force_multi_source_rollback;
-#[path = "negotiator_tag_tip.rs"]
-mod negotiator_tag_tip;
 #[path = "nfd_pathspec_argv.rs"]
 mod nfd_pathspec_argv;
 #[path = "non_exhaustive_options_api.rs"]
@@ -1395,8 +1393,6 @@ mod push_delete_local_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "push_delete_missing_remote.rs"]
 mod push_delete_missing_remote;
-#[path = "push_delete_ref_resolve.rs"]
-mod push_delete_ref_resolve;
 #[path = "push_fast_deep_history.rs"]
 mod push_fast_deep_history;
 #[cfg(feature = "full-tests")]
@@ -1582,8 +1578,6 @@ mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
-#[path = "remote_fatal_error.rs"]
-mod remote_fatal_error;
 #[cfg(feature = "full-tests")]
 #[path = "remote_injected_ref_store.rs"]
 mod remote_injected_ref_store;

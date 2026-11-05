@@ -8,7 +8,7 @@ use crate::config::{parse_git_config_int_strict, ConfigSet};
 /// Effective `receive.unpacklimit` / `transfer.unpacklimit` / default (100), matching Git
 /// `receive-pack` (`receive` wins when set non-negative).
 #[must_use]
-pub fn receive_unpack_limit(cfg: &ConfigSet) -> i32 {
+pub(crate) fn receive_unpack_limit(cfg: &ConfigSet) -> i32 {
     let recv = cfg
         .get("receive.unpacklimit")
         .and_then(|v| parse_git_config_int_strict(&v).ok());
@@ -24,7 +24,7 @@ pub fn receive_unpack_limit(cfg: &ConfigSet) -> i32 {
 
 /// `receive.maxInputSize` as a byte cap (`0` or unset = unlimited).
 #[must_use]
-pub fn max_input_size_from_config(cfg: &ConfigSet) -> Option<u64> {
+pub(crate) fn max_input_size_from_config(cfg: &ConfigSet) -> Option<u64> {
     match cfg.get_i64("receive.maxinputsize") {
         None => None,
         Some(Ok(v)) if v <= 0 => None,

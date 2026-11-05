@@ -39,7 +39,7 @@ use crate::progress::Cancel;
 
 pub mod http;
 pub(crate) mod pending_http;
-pub mod stateless_http;
+pub(crate) mod stateless_http;
 
 /// The Git service a [`Connection`] speaks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -464,7 +464,7 @@ fn parse_ref_advertisement_line(line: &str) -> Option<(ObjectId, String, &str)> 
 
 /// Parsed `git://host[:port]/path` (path includes the leading `/`).
 #[derive(Clone, Debug)]
-pub struct GitDaemonUrl {
+pub(crate) struct GitDaemonUrl {
     /// Host name or IP literal.
     pub host: String,
     /// TCP port (defaults to 9418).
@@ -482,7 +482,7 @@ pub struct GitDaemonUrl {
 ///
 /// Returns an error if the URL is not `git://`, has an empty host, or is missing
 /// a repository path.
-pub fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
+pub(crate) fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
     let rest = url
         .strip_prefix("git://")
         .ok_or_else(|| Error::Message(format!("not a git:// URL: {url}")))?;
@@ -535,7 +535,7 @@ pub fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
 ///
 /// Holds the read and write halves of the socket (duplicated file descriptors of
 /// the same connection) plus the advertisement read on connect.
-pub struct GitDaemonConnection {
+pub(crate) struct GitDaemonConnection {
     reader: BufReader<TcpStream>,
     writer: TcpStream,
     adv: Advertisement,
@@ -747,7 +747,7 @@ impl Transport for GitDaemonTransport {
 /// already stripped for IPv6 literals); `path` is the repository path sent to
 /// the remote `git-upload-pack`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SshUrl {
+pub(crate) struct SshUrl {
     /// Host (and optional `user@`) as passed to ssh, with IPv6 brackets removed.
     pub ssh_host: String,
     /// Repository path on the remote (passed to `git-upload-pack`).
@@ -764,7 +764,7 @@ pub struct SshUrl {
 /// Mirrors Git's `url_is_local_not_ssh` (`connect.c`): a string is local unless
 /// it is `host:path` with no `/` before the first `:`.
 #[must_use]
-pub fn is_ssh_url(url: &str) -> bool {
+pub(crate) fn is_ssh_url(url: &str) -> bool {
     let u = url.trim();
     if u.starts_with("ext::") {
         return false;
@@ -789,7 +789,7 @@ pub fn is_ssh_url(url: &str) -> bool {
 ///
 /// Returns an error if the URL has an empty host or path, the host starts with
 /// `-`, or a percent-escape is malformed.
-pub fn parse_ssh_url(url: &str) -> Result<SshUrl> {
+pub(crate) fn parse_ssh_url(url: &str) -> Result<SshUrl> {
     let u = url.trim();
     if let Some(rest) = u.strip_prefix("git+ssh://") {
         return parse_ssh_url_form(rest);
@@ -1141,7 +1141,7 @@ pub fn resolve_effective_ssh_command(
 /// The child's stdin/stdout are the pkt-line stream; the advertisement is read
 /// on connect. Dropping the connection closes the pipes (signalling EOF to the
 /// remote) and reaps the child.
-pub struct SshConnection {
+pub(crate) struct SshConnection {
     child: Child,
     // `Option` so [`Connection::finish_send`] can drop stdin (sending EOF to the
     // remote `git-upload-pack`) without consuming the connection.
@@ -1922,6 +1922,19 @@ mod tests {
         let adv = read_advertisement(&mut cur).expect("response-end-only advertisement");
         assert!(!adv.saw_ref_advertisement_flush);
         assert!(!remote_handshake_complete(&adv));
+    }
+
+    #[test]
+    fn read_advertisement_err_line_is_remote_fatal() {
+        use crate::error::Error;
+        let mut wire = b"003dERR access denied or repository not exported: /srv/x.git\n".to_vec();
+        wire.extend_from_slice(b"0000");
+        let err = read_advertisement(&mut std::io::Cursor::new(wire)).expect_err("ERR");
+        assert!(matches!(err, Error::RemoteFatal { .. }));
+        assert_eq!(
+            err.to_string(),
+            "remote error: access denied or repository not exported: /srv/x.git"
+        );
     }
 
     #[test]

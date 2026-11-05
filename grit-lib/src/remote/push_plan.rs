@@ -910,7 +910,7 @@ fn current_branch_oid(repo: &Repository) -> PlanResult<(String, ObjectId)> {
 ///
 /// [`PushPlanError::NoRemote`] when nothing selects a remote and no `remote.origin.*` section
 /// is configured.
-pub fn configured_remote_for_push(
+pub(crate) fn configured_remote_for_push(
     repo: &Repository,
     config: &ConfigSet,
     remote_override: Option<&str>,

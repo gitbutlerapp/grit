@@ -31,15 +31,15 @@ use crate::transport::http::HttpClient;
 /// Path, under the server root, of the share endpoint: `POST
 /// .grit/shared/<owner>/<project>` with a [`ShareRequest`] answers a
 /// [`ShareReply`].
-pub const SHARED_PATH: &str = ".grit/shared";
+pub(crate) const SHARED_PATH: &str = ".grit/shared";
 
 /// Path, under the server root, of the accept endpoint: `POST
 /// .grit/share/accept` with a [`ShareAcceptRequest`] answers a
 /// [`ShareAcceptReply`].
-pub const ACCEPT_PATH: &str = ".grit/share/accept";
+pub(crate) const ACCEPT_PATH: &str = ".grit/share/accept";
 
 /// Path prefix, under the server root, of share links: `share/<token>`.
-pub const LINK_PATH: &str = "share";
+pub(crate) const LINK_PATH: &str = "share";
 
 /// Where other members' heads live in a member's copy:
 /// `refs/shared/<branch>/<user>`.
@@ -50,7 +50,8 @@ const JSON_CONTENT_TYPE: &str = "application/json";
 /// The ref holding `user`'s head of the shared `branch` in another member's
 /// copy.
 #[must_use]
-pub fn shared_ref(branch: &str, user: &str) -> String {
+#[allow(dead_code)]
+pub(crate) fn shared_ref(branch: &str, user: &str) -> String {
     format!("{SHARED_REFS}{branch}/{user}")
 }
 
@@ -58,7 +59,8 @@ pub fn shared_ref(branch: &str, user: &str) -> String {
 /// after any prefix, such as a remote-tracking `refs/remotes/<r>/shared/`)
 /// names. The member is the last segment; branch names may hold `/`.
 #[must_use]
-pub fn parse_shared_ref(rest: &str) -> Option<(&str, &str)> {
+#[allow(dead_code)]
+pub(crate) fn parse_shared_ref(rest: &str) -> Option<(&str, &str)> {
     let (branch, user) = rest.rsplit_once('/')?;
     (!branch.is_empty() && !user.is_empty()).then_some((branch, user))
 }
@@ -312,7 +314,8 @@ pub struct ShareIntegration {
 }
 
 /// How many days an integrated share is remembered, with its head log.
-pub const INTEGRATED_KEEP_DAYS: u32 = 14;
+#[allow(dead_code)]
+pub(crate) const INTEGRATED_KEEP_DAYS: u32 = 14;
 
 /// A share link just made: the only time its URL is shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

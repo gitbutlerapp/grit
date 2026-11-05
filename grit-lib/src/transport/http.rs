@@ -832,13 +832,16 @@ fn upload_pack_discovery_from_body_with_http(
 ///
 /// [`Error::RemoteFatal`] when the server answers with an `ERR` packet instead of an
 /// advertisement; other malformed advertisements fail with parse errors.
-pub fn discover_upload_pack_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {
+#[allow(dead_code)]
+pub(crate) fn discover_upload_pack_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {
     upload_pack_discovery_from_body(body)
 }
 
 /// Like [`discover_upload_pack_from_body`], but retains annotated-tag `^{}` peel lines
 /// (for `git ls-remote`-style ref listing).
-pub fn discover_upload_pack_for_list_refs_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {
+pub(crate) fn discover_upload_pack_for_list_refs_from_body(
+    body: &[u8],
+) -> Result<UploadPackDiscovery> {
     let stripped = strip_service_advertisement_for_discovery(body, None)?;
     let disc = parse_advertisement(stripped)?;
     let refs: Vec<(String, ObjectId)> = disc
@@ -852,7 +855,7 @@ pub fn discover_upload_pack_for_list_refs_from_body(body: &[u8]) -> Result<Uploa
 }
 
 /// Discover upload-pack for ref listing (peel lines preserved).
-pub fn discover_upload_pack_for_list_refs(
+pub(crate) fn discover_upload_pack_for_list_refs(
     client: &dyn HttpClient,
     repo_url: &str,
     git_protocol: Option<&str>,
@@ -865,7 +868,8 @@ pub fn discover_upload_pack_for_list_refs(
 /// Discover `git-upload-pack` capabilities and (for v0/v1) advertised refs.
 ///
 /// For protocol v2 the ref list is empty; use `command=ls-refs` to enumerate refs.
-pub fn discover_upload_pack(
+#[allow(dead_code)]
+pub(crate) fn discover_upload_pack(
     client: &dyn HttpClient,
     repo_url: &str,
     git_protocol: Option<&str>,
@@ -877,7 +881,7 @@ pub fn discover_upload_pack(
 }
 
 /// Discover upload-pack using an exact `Git-Protocol` header (no client default).
-pub fn discover_upload_pack_exact(
+pub(crate) fn discover_upload_pack_exact(
     client: &dyn HttpClient,
     repo_url: &str,
     git_protocol: Option<&str>,
@@ -889,7 +893,7 @@ pub fn discover_upload_pack_exact(
 
 /// Build the smart-HTTP `info/refs?service=git-upload-pack` discovery URL for a repo base.
 #[must_use]
-pub fn smart_info_refs_discovery_url(repo_base: &str) -> String {
+pub(crate) fn smart_info_refs_discovery_url(repo_base: &str) -> String {
     let base = repo_base.trim_end_matches('/');
     let mut url = format!("{base}/info/refs");
     url.push_str(if url.contains('?') { "&" } else { "?" });
@@ -900,7 +904,7 @@ pub fn smart_info_refs_discovery_url(repo_base: &str) -> String {
 
 /// Strip the `/info/refs` suffix (and query) from a discovery URL, returning the repo base.
 #[must_use]
-pub fn repo_base_from_info_refs_url(info_refs_url: &str) -> Option<String> {
+pub(crate) fn repo_base_from_info_refs_url(info_refs_url: &str) -> Option<String> {
     let path = info_refs_url.split('?').next()?;
     let base = path.strip_suffix("/info/refs")?.trim_end_matches('/');
     (!base.is_empty()).then(|| base.to_string())
@@ -910,7 +914,7 @@ pub fn repo_base_from_info_refs_url(info_refs_url: &str) -> Option<String> {
 /// discovery URL whose path matches the effective repository base (Git's
 /// `credential_from_url` after `update_url_from_redirect`).
 #[must_use]
-pub fn effective_info_refs_url_after_redirect(
+pub(crate) fn effective_info_refs_url_after_redirect(
     requested_info_refs_url: &str,
     final_url: Option<&str>,
 ) -> String {
@@ -937,7 +941,10 @@ pub fn effective_info_refs_url_after_redirect(
 /// preserve the `/info/refs` path suffix; the new base is the final URL with
 /// that suffix (and any query) removed.
 #[must_use]
-pub fn rebased_base_from_redirect(original_base: &str, final_url: Option<&str>) -> Option<String> {
+pub(crate) fn rebased_base_from_redirect(
+    original_base: &str,
+    final_url: Option<&str>,
+) -> Option<String> {
     let final_url = final_url?;
     let final_path = final_url.split('?').next().unwrap_or(final_url);
     let new_base = final_path.strip_suffix("/info/refs")?.trim_end_matches('/');
@@ -954,7 +961,7 @@ pub fn rebased_base_from_redirect(original_base: &str, final_url: Option<&str>) 
 /// distinct). Non-default ports are always included; default ports for the scheme
 /// are filled in when omitted from the URL.
 #[must_use]
-pub fn http_origin_key(url: &str) -> Option<String> {
+pub(crate) fn http_origin_key(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
     let scheme = parsed.scheme().to_ascii_lowercase();
     let host = parsed.host_str()?.to_ascii_lowercase();
@@ -964,7 +971,7 @@ pub fn http_origin_key(url: &str) -> Option<String> {
 
 /// Returns whether two URLs share the same HTTP origin (scheme, host, port).
 #[must_use]
-pub fn http_origins_match(a: &str, b: &str) -> bool {
+pub(crate) fn http_origins_match(a: &str, b: &str) -> bool {
     match (http_origin_key(a), http_origin_key(b)) {
         (Some(left), Some(right)) => left == right,
         _ => false,

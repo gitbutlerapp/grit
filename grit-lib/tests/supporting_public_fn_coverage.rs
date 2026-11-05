@@ -43,14 +43,8 @@ use grit_lib::refs::ref_namespace::{
 };
 use grit_lib::refs::refspec::parse_push_refspec;
 use grit_lib::remote::credentials::Credential;
-use grit_lib::remote::pkt_line::{
-    read_until_flush_or_delim, write_flush, write_line_to_vec, write_sideband_packet,
-};
-use grit_lib::remote::protocol::{
-    check_protocol_allowed_with, protocol_from_user, ProtocolPolicyInputs,
-};
+use grit_lib::remote::protocol::{check_protocol_allowed_with, ProtocolPolicyInputs};
 use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
-use grit_lib::remote::transport_path::looks_like_command_line_option;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::attributes::MacroTable;
 use grit_lib::worktree::crlf::{
@@ -202,9 +196,6 @@ fn protocol_transport_terminal_progress_ws_userdiff() {
 
     let inputs = ProtocolPolicyInputs::default();
     let _ = check_protocol_allowed_with("https", &inputs);
-    assert!(protocol_from_user(None));
-
-    assert!(!looks_like_command_line_option("file.txt"));
 
     let _ = ansi_supported();
     let _ = stdout_supports_color();
@@ -214,29 +205,6 @@ fn protocol_transport_terminal_progress_ws_userdiff() {
     assert!(is_space_git(b'\t'));
     assert!(ws_blank_line("   \n"));
     let _ = matcher_for_path_parsed(&config, &[], &macros, "foo.c", false);
-}
-
-#[test]
-fn pkt_line_sideband_roundtrip() {
-    let mut encoded = Vec::new();
-    write_sideband_packet(&mut encoded, 1, b"payload").expect("write sb");
-    assert_eq!(encoded, b"000c\x01payload");
-
-    let mut pkt = Vec::new();
-    write_sideband_packet(&mut pkt, 1, b"line").expect("pkt");
-    pkt.extend_from_slice(b"0000");
-    let mut cursor = Cursor::new(pkt);
-    let (lines, term) = read_until_flush_or_delim(&mut cursor).expect("read");
-    assert!(!lines.is_empty());
-    assert!(term.is_some());
-
-    let mut flush_pkt = Vec::new();
-    write_line_to_vec(&mut flush_pkt, "ok").expect("line");
-    write_flush(&mut flush_pkt).expect("flush");
-    let mut c2 = Cursor::new(flush_pkt);
-    let (lines2, term2) = read_until_flush_or_delim(&mut c2).expect("flush read");
-    assert_eq!(lines2, vec!["ok".to_owned()]);
-    assert!(term2.is_some());
 }
 
 #[test]

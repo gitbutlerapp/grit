@@ -487,7 +487,7 @@ impl FetchOptions {
 ///
 /// Returns [`Error::FetchUnshallowNotShallow`] when [`FetchDepth::Unshallow`] is
 /// requested but the repository has no shallow boundaries.
-pub fn validate_fetch_depth_local(local_git_dir: &Path, opts: &FetchOptions) -> Result<()> {
+pub(crate) fn validate_fetch_depth_local(local_git_dir: &Path, opts: &FetchOptions) -> Result<()> {
     if matches!(opts.fetch_depth, Some(FetchDepth::Unshallow)) {
         let local = crate::shallow::load_shallow_oids(local_git_dir)?;
         if local.is_empty() {
@@ -886,7 +886,7 @@ pub(crate) fn push_spec_local_ref(spec: &PushRefSpec) -> Option<String> {
 /// advertised remote branch, then an advertised remote tag, otherwise
 /// `refs/heads/<spec>` (same default as `git push <remote> :<branch>`).
 #[must_use]
-pub fn resolve_push_delete_ref(
+pub(crate) fn resolve_push_delete_ref(
     git_dir: &Path,
     remote_ref_names: &HashSet<String>,
     spec: &str,
@@ -4062,24 +4062,8 @@ fn is_default_head_under_tracking_prefix(refname: &str, tracking_prefix: &str) -
 /// Returns full ref names and their current object ids. The default-branch symref
 /// `refs/remotes/<remote>/HEAD` is never included.
 ///
-/// # Errors
-///
-/// Propagates ref listing failures.
-pub fn tracking_refs_gone_on_remote(
-    local_git_dir: &Path,
-    positive: &[RefspecItem],
-    remote_refs: &[(String, ObjectId)],
-) -> Result<Vec<(String, ObjectId)>> {
-    tracking_refs_gone_with(
-        positive,
-        remote_refs,
-        |prefix| crate::refs::list_refs(local_git_dir, prefix),
-        |name| crate::refs::resolve_ref(local_git_dir, name),
-    )
-}
-
-/// [`tracking_refs_gone_on_remote`] reading the local tracking refs through `local`'s ref
-/// store, so an injected [`crate::refs::store::RefStore`] is honoured.
+/// Reads the local tracking refs through `local`'s ref store, so an injected
+/// [`crate::refs::store::RefStore`] is honoured.
 ///
 /// # Errors
 ///
@@ -5409,5 +5393,37 @@ mod tests {
         let refused = outcome(vec![PushRefStatus::AtomicPushFailed]);
         assert!(!refused.has_updates());
         assert!(refused.has_rejections());
+    }
+
+    #[test]
+    fn resolve_push_delete_ref_prefers_remote_branch_when_local_gone() {
+        use std::collections::HashSet;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).expect("git dir");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("head");
+        let mut remote = HashSet::new();
+        remote.insert("refs/heads/old-topic".to_owned());
+        assert_eq!(
+            resolve_push_delete_ref(&git_dir, &remote, "old-topic"),
+            "refs/heads/old-topic"
+        );
+    }
+
+    #[test]
+    fn resolve_push_delete_ref_prefers_local_tag_when_remote_tag_gone() {
+        use std::collections::HashSet;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir_all(&git_dir).expect("git dir");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("head");
+        let tag_ref = git_dir.join("refs").join("tags").join("v3.0.0");
+        std::fs::create_dir_all(tag_ref.parent().unwrap()).expect("tags dir");
+        std::fs::write(tag_ref, "83352a61f6715ec3f0a297c6d6150725154fb833\n").expect("tag");
+        let remote = HashSet::new();
+        assert_eq!(
+            resolve_push_delete_ref(&git_dir, &remote, "v3.0.0"),
+            "refs/tags/v3.0.0"
+        );
     }
 }

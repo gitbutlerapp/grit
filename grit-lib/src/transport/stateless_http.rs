@@ -320,13 +320,15 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
 
     /// Repository URL used for subsequent POSTs.
     #[must_use]
-    pub fn repo_url(&self) -> &str {
+    #[allow(dead_code)]
+    pub(crate) fn repo_url(&self) -> &str {
         &self.repo_url
     }
 
     /// The server's advertised object format (`sha1` or `sha256`).
     #[must_use]
-    pub fn object_format(&self) -> &str {
+    #[allow(dead_code)]
+    pub(crate) fn object_format(&self) -> &str {
         &self.object_format
     }
 

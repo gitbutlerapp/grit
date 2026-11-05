@@ -201,7 +201,7 @@ pub fn configured_remote_for_pull(config: &ConfigSet, branch: Option<&str>) -> S
 ///
 /// A remote name; never `.`.
 #[must_use]
-pub fn configured_remote_for_fetch(config: &ConfigSet, branch: Option<&str>) -> String {
+pub(crate) fn configured_remote_for_fetch(config: &ConfigSet, branch: Option<&str>) -> String {
     branch_remote(config, branch)
         .filter(|remote| remote != ".")
         .unwrap_or_else(|| DEFAULT_REMOTE.to_owned())
@@ -804,7 +804,8 @@ pub(crate) fn fetch_head_description(remote_ref: &str, is_tag: bool, source: &st
 
 /// Score for [`refname_match_fetch_dwim`] (higher = preferred).
 #[must_use]
-pub fn refname_match_fetch_dwim(abbrev: &str, full: &str) -> u32 {
+#[allow(dead_code)]
+pub(crate) fn refname_match_fetch_dwim(abbrev: &str, full: &str) -> u32 {
     if abbrev == full {
         return 100;
     }

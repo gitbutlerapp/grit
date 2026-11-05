@@ -32,13 +32,13 @@ fn rewrite_by_suffix(config: &ConfigSet, url: &str, suffix: &str) -> Option<Stri
 
 /// Rewrite a URL for fetch semantics (`url.<base>.insteadOf`).
 #[must_use]
-pub fn rewrite_fetch_url(config: &ConfigSet, url: &str) -> String {
+pub(crate) fn rewrite_fetch_url(config: &ConfigSet, url: &str) -> String {
     rewrite_by_suffix(config, url, ".insteadof").unwrap_or_else(|| url.to_owned())
 }
 
 /// Rewrite a URL for push semantics (`pushInsteadOf` first, then `insteadOf`).
 #[must_use]
-pub fn rewrite_push_url(config: &ConfigSet, url: &str) -> String {
+pub(crate) fn rewrite_push_url(config: &ConfigSet, url: &str) -> String {
     rewrite_by_suffix(config, url, ".pushinsteadof")
         .or_else(|| rewrite_by_suffix(config, url, ".insteadof"))
         .unwrap_or_else(|| url.to_owned())

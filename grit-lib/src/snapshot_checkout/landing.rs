@@ -119,7 +119,7 @@ impl CheckoutMarker {
     /// # Returns
     ///
     /// Whether it was not noted already.
-    pub fn record_landed(&mut self, tip: ObjectId) -> bool {
+    pub(crate) fn record_landed(&mut self, tip: ObjectId) -> bool {
         let hex = tip.to_hex();
         if self.landed.contains(&hex) {
             return false;
@@ -163,7 +163,7 @@ impl CheckoutMarker {
 /// # Errors
 ///
 /// Marker write failures.
-pub fn record_landed(
+pub(crate) fn record_landed(
     repo: &Repository,
     marker: &CheckoutMarker,
     tip: ObjectId,
@@ -352,7 +352,7 @@ fn builds_on(
 ///
 /// The server's refusal, [`CheckoutError::WorkBranchTaken`] when every name
 /// it reserved is a branch here already, and ref and config failures.
-pub fn move_off_landed_branch(
+pub(crate) fn move_off_landed_branch(
     repo: &Repository,
     client: &CheckoutClient<'_>,
     branch: &str,

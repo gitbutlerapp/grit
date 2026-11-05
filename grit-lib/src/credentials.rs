@@ -71,7 +71,7 @@ pub const NON_INTERACTIVE_MESSAGE: &str = "credentials required but unavailable 
 /// The program to pass to [`HelperCredentialProvider::with_askpass`], or
 /// `None` when askpass is not configured.
 #[must_use]
-pub fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<PathBuf> {
+pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<PathBuf> {
     let program = env
         .var_os("GIT_ASKPASS")
         .or_else(|| {
@@ -735,7 +735,7 @@ fn strip_url_scheme(url: &str) -> &str {
 /// (no scheme). Userinfo is stripped only from the URL authority (the part
 /// before the first `/`, `?`, or `#`); `@` in paths, queries, and fragments is
 /// preserved. The result is safe to show in errors and logs.
-pub fn url_without_userinfo(url: &str) -> String {
+pub(crate) fn url_without_userinfo(url: &str) -> String {
     let Some((scheme, rest)) = url.split_once("://") else {
         let (authority, suffix) = split_authority_suffix(url);
         let authority = strip_userinfo_from_authority(authority);
@@ -762,7 +762,7 @@ fn strip_userinfo_from_authority(authority: &str) -> &str {
 }
 
 /// Redact credentials from URL-like `http://` / `https://` substrings in `message`.
-pub fn redact_embedded_url_credentials(message: &str) -> String {
+pub(crate) fn redact_embedded_url_credentials(message: &str) -> String {
     let mut out = String::with_capacity(message.len());
     let mut rest = message;
     while let Some(scheme_sep) = rest.find("://") {

@@ -10,7 +10,7 @@ use crate::error::Error;
 /// Returns true when `s` is non-empty and begins with `-`, matching Git's
 /// `looks_like_command_line_option` (used before quoting a path for shell-backed transport).
 #[must_use]
-pub fn looks_like_command_line_option(s: &str) -> bool {
+pub(crate) fn looks_like_command_line_option(s: &str) -> bool {
     !s.is_empty() && s.starts_with('-')
 }
 
@@ -18,7 +18,7 @@ pub fn looks_like_command_line_option(s: &str) -> bool {
 /// worktree directory when known, otherwise inferred from `git_dir` (including linked
 /// worktree admin dirs via `gitdir` / `commondir`).
 #[must_use]
-pub fn configured_remote_base(git_dir: &Path, work_tree: Option<&Path>) -> PathBuf {
+pub(crate) fn configured_remote_base(git_dir: &Path, work_tree: Option<&Path>) -> PathBuf {
     if let Some(wt) = work_tree {
         return wt.to_path_buf();
     }
@@ -40,7 +40,7 @@ pub fn configured_remote_base(git_dir: &Path, work_tree: Option<&Path>) -> PathB
 /// True when a clone source should be stored as an absolute filesystem path (scheme-less
 /// local paths only — not `file://`, HTTP, SSH, etc.).
 #[must_use]
-pub fn should_store_absolute_local_clone_url(url: &str) -> bool {
+pub(crate) fn should_store_absolute_local_clone_url(url: &str) -> bool {
     let url = url.trim();
     !url.starts_with("file://") && is_local_path_remote_url(url)
 }
@@ -48,7 +48,7 @@ pub fn should_store_absolute_local_clone_url(url: &str) -> bool {
 /// Git `url_is_local_not_ssh` (`connect.c`): local unless scp-style `host:path` with no directory
 /// separator before the first `:` (Windows drive letters and `\` separators included).
 #[must_use]
-pub fn url_is_local_not_ssh(url: &str) -> bool {
+pub(crate) fn url_is_local_not_ssh(url: &str) -> bool {
     let url = url.trim();
     let colon = url.find(':');
     match colon {
@@ -66,7 +66,7 @@ pub fn url_is_local_not_ssh(url: &str) -> bool {
 
 /// Strip the Windows verbatim `\\?\` prefix when present.
 #[must_use]
-pub fn strip_verbatim_path_prefix(path: &str) -> &str {
+pub(crate) fn strip_verbatim_path_prefix(path: &str) -> &str {
     path.strip_prefix(r"\\?\").unwrap_or(path)
 }
 
@@ -130,7 +130,7 @@ fn userinfo_host_start(authority_or_url: &str) -> usize {
 
 /// Normalize a local path for storage in `remote.*.url` (Git-style forward slashes, no `\\?\`).
 #[must_use]
-pub fn normalize_local_path_for_config(path: &Path) -> String {
+pub(crate) fn normalize_local_path_for_config(path: &Path) -> String {
     let lossy = path.to_string_lossy();
     let stripped = strip_verbatim_path_prefix(&lossy);
     #[cfg(windows)]
@@ -148,7 +148,7 @@ pub fn normalize_local_path_for_config(path: &Path) -> String {
 /// normalization). The parent of `source_path` is canonicalized when possible (Git resolves
 /// the cwd via `getcwd`).
 #[must_use]
-pub fn absolute_local_clone_source_url(source_path: &Path) -> String {
+pub(crate) fn absolute_local_clone_source_url(source_path: &Path) -> String {
     absolute_local_clone_source_url_from(source_path, &crate::environment::Environment::empty().cwd)
 }
 
@@ -170,7 +170,7 @@ fn absolute_local_clone_source_url_from(source_path: &Path, cwd: &Path) -> Strin
 /// # Errors
 ///
 /// Returns [`Error::Message`] when a `%` escape is truncated or invalid.
-pub fn file_url_to_local_path(url: &str) -> Result<String, Error> {
+pub(crate) fn file_url_to_local_path(url: &str) -> Result<String, Error> {
     let trimmed = url.trim();
     let mut path_part = trimmed
         .strip_prefix("file://")
@@ -262,7 +262,7 @@ pub(crate) fn resolve_local_clone_source_path(
 
 /// True when `url` names a local filesystem remote (not `http(s)://`, `git://`, `ssh`, or `ext::`).
 #[must_use]
-pub fn is_local_path_remote_url(url: &str) -> bool {
+pub(crate) fn is_local_path_remote_url(url: &str) -> bool {
     let url = url.trim();
     !(url.starts_with("git://")
         || url.starts_with("http://")
@@ -342,7 +342,7 @@ fn bytes_have_dir_sep(bytes: &[u8]) -> bool {
 ///
 /// Note: callers handle the `--mirror` exception (bare clone without a `.git` directory suffix)
 /// by passing `is_bare = false`, matching Git's `option_bare && !option_mirror` logic.
-pub fn git_url_basename(
+pub(crate) fn git_url_basename(
     repo: &str,
     is_bundle: bool,
     is_bare: bool,

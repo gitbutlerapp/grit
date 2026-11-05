@@ -177,7 +177,7 @@ pub const AUTO_FILTER_VALUE: &str = "auto";
 /// - `config`: merged config.
 /// - `remote`: remote name.
 #[must_use]
-pub fn stored_remote_filter_is_auto(config: &ConfigSet, remote: &str) -> bool {
+pub(crate) fn stored_remote_filter_is_auto(config: &ConfigSet, remote: &str) -> bool {
     config
         .get(&format!("remote.{remote}.partialclonefilter"))
         .is_some_and(|s| s.trim().eq_ignore_ascii_case(AUTO_FILTER_VALUE))
@@ -193,7 +193,7 @@ pub fn stored_remote_filter(config: &ConfigSet, remote: &str) -> Option<ObjectFi
 
 /// Whether `remote` is configured as a promisor partial-clone source.
 #[must_use]
-pub fn remote_is_promisor(config: &ConfigSet, remote: &str) -> bool {
+pub(crate) fn remote_is_promisor(config: &ConfigSet, remote: &str) -> bool {
     config
         .get(&format!("remote.{remote}.promisor"))
         .is_some_and(|v| v.eq_ignore_ascii_case("true"))
@@ -207,7 +207,7 @@ pub fn remote_is_promisor(config: &ConfigSet, remote: &str) -> bool {
 /// When the server lacks filter support, returns `(None, false)` so the client
 /// fetches unfiltered, matching Git's `fetch-pack.c` behavior.
 #[must_use]
-pub fn wire_filter_for_capabilities(
+pub(crate) fn wire_filter_for_capabilities(
     spec: Option<&ObjectFilterSpec>,
     v2_fetch_caps: Option<&[String]>,
     v0_v1_caps: Option<&str>,
@@ -234,7 +234,7 @@ pub fn wire_filter_for_capabilities(
 /// Fetch/clone must use upload-pack on the wire (not local ODB copy) when a filter
 /// is requested or the remote is already a promisor partial-clone source.
 #[must_use]
-pub fn fetch_requires_upload_pack(
+pub(crate) fn fetch_requires_upload_pack(
     opts_filter: Option<&ObjectFilterSpec>,
     config: &ConfigSet,
     remote_name: Option<&str>,

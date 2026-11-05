@@ -13,7 +13,6 @@ use grit_lib::config::{
     ConfigScope, ConfigSet, IncludeContext,
 };
 use grit_lib::error::{BadNumericSource, ConfigError, Error, InvalidKeyReason, SubmoduleError};
-use grit_lib::remote::protocol::try_protocol_version_from_config_value;
 use grit_test_support::git_cmd;
 use tempfile::tempdir;
 
@@ -139,19 +138,6 @@ fn entries_with_prefix_rejects_empty_and_malformed_prefixes() {
         }
     }
     assert!(set.entries_with_prefix("remote.origin").is_ok());
-}
-
-#[test]
-fn unknown_protocol_version_names_key_and_value() {
-    let err = config_error(try_protocol_version_from_config_value("3").expect_err("v3"));
-    assert_eq!(
-        err,
-        ConfigError::UnknownValue {
-            key: "protocol.version".to_owned(),
-            value: "3".to_owned(),
-        }
-    );
-    assert_eq!(try_protocol_version_from_config_value("2").expect("v2"), 2);
 }
 
 #[test]

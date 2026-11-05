@@ -31,11 +31,12 @@ pub(crate) use receive_pack::ReceiveHookScripts;
 pub(crate) use shallow_upload::{compute_shallow_response, ShallowRequest};
 
 pub use receive_pack::{
-    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, DenyCurrentBranch,
-    HookRunRecord, ReceiveHook, ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand,
-    RefUpdateRefusal, RefUpdateResult, RejectedObject, UnpackError,
+    receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, ReceiveHook,
+    ReceiveHookContext, ReceiveOutcome, ReceivePolicy, RefCommand, RefUpdateRefusal,
+    RefUpdateResult, UnpackError,
 };
-pub use ref_update_policy::{checked_out_branch, head_branch, validate_ref_update, HeadBranches};
+pub(crate) use ref_update_policy::{checked_out_branch, validate_ref_update};
+pub(crate) use ref_update_policy::{head_branch, HeadBranches};
 pub use upload_pack::{upload_pack, upload_pack_cancellable, UploadOutcome};
 
 use std::cell::RefCell;
@@ -355,7 +356,7 @@ impl ServeOptions {
 
 /// Name of the receive-pack capability that advertises a resumable push
 /// endpoint ([`ServeOptions::push_bundle`]).
-pub const PUSH_BUNDLE_CAPABILITY: &str = "pushBundle";
+pub(crate) const PUSH_BUNDLE_CAPABILITY: &str = "pushBundle";
 
 /// One ref as it appears in an advertisement.
 #[cfg(test)]

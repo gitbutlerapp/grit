@@ -128,7 +128,7 @@ pub fn protocol_from_user(raw: Option<&str>) -> bool {
 
 /// Parse a protocol version digit (`0`, `1`, or `2`).
 #[must_use]
-pub fn parse_protocol_version_digit(s: &str) -> Option<u8> {
+pub(crate) fn parse_protocol_version_digit(s: &str) -> Option<u8> {
     match s.trim() {
         "0" => Some(0),
         "1" => Some(1),
@@ -164,7 +164,7 @@ pub fn try_effective_client_protocol_version_from_config(config: &ConfigSet) -> 
 /// Version `0` means no header (classic v0 advertisement); `1` and `2` send
 /// `version=1` / `version=2` respectively.
 #[must_use]
-pub fn client_git_protocol_header_value(version: u8) -> Option<String> {
+pub(crate) fn client_git_protocol_header_value(version: u8) -> Option<String> {
     match version {
         0 => None,
         1 => Some("version=1".to_string()),
@@ -177,7 +177,9 @@ pub fn client_git_protocol_header_value(version: u8) -> Option<String> {
 /// # Errors
 ///
 /// Returns [`Error::Config`] when `protocol.version` is set to an invalid value.
-pub fn client_git_protocol_header_from_config(config: &ConfigSet) -> Result<Option<String>, Error> {
+pub(crate) fn client_git_protocol_header_from_config(
+    config: &ConfigSet,
+) -> Result<Option<String>, Error> {
     Ok(client_git_protocol_header_value(
         try_effective_client_protocol_version_from_config(config)?,
     ))
@@ -252,5 +254,21 @@ mod tests {
             try_effective_client_protocol_version_from_config(&config).expect("v0"),
             0
         );
+    }
+
+    #[test]
+    fn protocol_from_user_defaults_true() {
+        assert!(protocol_from_user(None));
+    }
+
+    #[test]
+    fn try_protocol_version_from_config_value_accepts_v2_and_rejects_unknown() {
+        use crate::error::{ConfigError, Error};
+        let err = try_protocol_version_from_config_value("3").expect_err("v3");
+        assert!(matches!(
+            err,
+            Error::Config(ConfigError::UnknownValue { .. })
+        ));
+        assert_eq!(try_protocol_version_from_config_value("2").expect("v2"), 2);
     }
 }

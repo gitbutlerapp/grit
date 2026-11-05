@@ -139,7 +139,7 @@ impl CheckinRule {
 
 /// How the server decides whether a check-in may set a branch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheckinDecision {
+pub(crate) enum CheckinDecision {
     /// The branch does not exist yet.
     Create,
     /// The branch already has the graft: it points at it, or at commits on
@@ -185,7 +185,7 @@ pub enum CheckinDecision {
 /// # Errors
 ///
 /// Ancestry walk and object read failures.
-pub fn decide_checkin(
+pub(crate) fn decide_checkin(
     repo: &Repository,
     previous: Option<ObjectId>,
     grafted: ObjectId,

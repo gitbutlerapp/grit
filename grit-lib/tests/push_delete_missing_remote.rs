@@ -1,9 +1,8 @@
 //! Push `--delete` of a ref absent on the remote is rejected (issue #1616).
 
 use grit_lib::remote::push_report::PushRefStatus;
-use grit_lib::remote::transfer::{push_local, resolve_push_delete_ref, PushOptions, PushRefSpec};
+use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
 use grit_test_support::{git, git_cmd};
-use std::collections::HashSet;
 use std::path::Path;
 
 fn git_try(dir: &Path, args: &[&str]) -> bool {
@@ -81,11 +80,6 @@ fn delete_resolves_local_tag_when_remote_tag_gone() {
     git(&local, &["push", "origin", "--delete", "v3.0.0"]);
 
     let local_git = local.join(".git");
-    let remote_names = HashSet::new();
-    assert_eq!(
-        resolve_push_delete_ref(&local_git, &remote_names, "v3.0.0"),
-        "refs/tags/v3.0.0"
-    );
 
     let outcome = push_local(
         &local_git,

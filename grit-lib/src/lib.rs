@@ -1,6 +1,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 #![deny(missing_docs)]
 #![warn(rustdoc::unescaped_backticks)]
+#![allow(rustdoc::private_intra_doc_links)]
 
 //! grit-lib — fast, linkable Git engine for Rust.
 //!

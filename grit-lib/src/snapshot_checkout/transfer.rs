@@ -20,7 +20,7 @@ use super::{
 
 impl CheckoutMarker {
     /// The server as a remote at [`Self::url`] (not `origin`), fetching only
-    /// the checkout's snapshot ([`snapshot_fetch_refspec`]).
+    /// the checkout's snapshot (`snapshot_fetch_refspec`).
     ///
     /// # Errors
     ///
@@ -82,7 +82,7 @@ pub fn push_for_checkin(
 
 /// What [`fetch_snapshot`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FetchedSnapshot {
+pub(crate) struct FetchedSnapshot {
     /// The marker, now listing the new snapshot; it has been written.
     pub marker: CheckoutMarker,
     /// The checkout's newest snapshot before.
@@ -127,7 +127,7 @@ impl FetchedSnapshot {
 /// [`CheckoutError::SnapshotMoved`] when what arrived is not `info`'s
 /// snapshot (the marker is then left as it was), [`CheckoutError::Protocol`]
 /// for an answer that names no commit, and marker write failures.
-pub fn fetch_snapshot(
+pub(crate) fn fetch_snapshot(
     repo: &Repository,
     marker: &CheckoutMarker,
     info: &CheckoutInfo,

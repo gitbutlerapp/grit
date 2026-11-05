@@ -321,3 +321,64 @@ impl<'r> SkippingNegotiator<'r> {
         Ok(known)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::SkippingNegotiator;
+    use crate::config::environment::RepositoryOptions;
+    use crate::objects::{ObjectId, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+
+    fn write(repo: &Repository, kind: ObjectKind, data: &[u8]) -> ObjectId {
+        repo.odb().write(kind, data).expect("write object")
+    }
+
+    #[test]
+    fn add_tip_accepts_annotated_tag() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            tmp.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+
+        let tree = write(&repo, ObjectKind::Tree, &[]);
+        let commit_bytes = format!(
+            "tree {tree}\n\
+             author A U Thor <a@example.com> 0 +0000\n\
+             committer A U Thor <a@example.com> 0 +0000\n\
+             \n\
+             a commit\n"
+        );
+        let commit = write(&repo, ObjectKind::Commit, commit_bytes.as_bytes());
+        let tag_bytes = format!(
+            "object {commit}\n\
+             type commit\n\
+             tag v1\n\
+             tagger A U Thor <a@example.com> 0 +0000\n\
+             \n\
+             annotated v1\n"
+        );
+        let tag = write(&repo, ObjectKind::Tag, tag_bytes.as_bytes());
+
+        let repo = Repository::open(repo.git_dir(), &RepositoryOptions::empty()).expect("open");
+        let mut neg = SkippingNegotiator::new(&repo);
+
+        neg.add_tip(tag)
+            .expect("add_tip must accept an annotated tag");
+        neg.known_common(tag)
+            .expect("known_common must accept an annotated tag");
+
+        let have = neg.next_have().expect("next_have").expect("a have");
+        assert_eq!(have, commit, "tag tip should peel to its target commit");
+
+        let reopened = Repository::open(tmp.path(), &RepositoryOptions::empty()).expect("open");
+        let mut neg = SkippingNegotiator::new(&reopened);
+        neg.add_tip(commit).expect("commit tip ok");
+        neg.add_tip(tree)
+            .expect("tree tip must be skipped, not error");
+    }
+}

@@ -12,11 +12,12 @@ pub const FLUSH: &str = "0000";
 /// Special packet type: delimiter packet (`0001`).
 pub const DELIM: &str = "0001";
 /// Special packet type: response-end packet (`0002`).
-pub const RESPONSE_END: &str = "0002";
+#[allow(dead_code)]
+pub(crate) const RESPONSE_END: &str = "0002";
 
 /// Write a single pkt-line to `w`. The data should not include a trailing
 /// newline; one is appended automatically.
-pub fn write_line(w: &mut impl Write, data: &str) -> io::Result<()> {
+pub(crate) fn write_line(w: &mut impl Write, data: &str) -> io::Result<()> {
     let len = 4 + data.len() + 1;
     writeln!(w, "{len:04x}{data}")
 }
@@ -35,7 +36,7 @@ pub fn write_flush(w: &mut impl Write) -> io::Result<()> {
 }
 
 /// Write one pkt-line with arbitrary bytes (no trailing newline added).
-pub fn write_packet_raw(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
+pub(crate) fn write_packet_raw(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     let total = payload
         .len()
         .checked_add(4)
@@ -52,7 +53,7 @@ pub fn write_packet_raw(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
 }
 
 /// Write a delimiter packet (`0001`).
-pub fn write_delim(w: &mut impl Write) -> io::Result<()> {
+pub(crate) fn write_delim(w: &mut impl Write) -> io::Result<()> {
     write!(w, "0001")
 }
 
@@ -107,7 +108,9 @@ pub fn read_packet(r: &mut impl Read) -> io::Result<Option<Packet>> {
 /// Read packets from `r` until a flush or delimiter packet, or EOF.
 ///
 /// Returns the collected data lines and the terminator (`Flush`, `Delim`, or `None`).
-pub fn read_until_flush_or_delim(r: &mut impl Read) -> io::Result<(Vec<String>, Option<Packet>)> {
+pub(crate) fn read_until_flush_or_delim(
+    r: &mut impl Read,
+) -> io::Result<(Vec<String>, Option<Packet>)> {
     let mut lines = Vec::new();
     loop {
         match read_packet(r)? {
@@ -121,7 +124,7 @@ pub fn read_until_flush_or_delim(r: &mut impl Read) -> io::Result<(Vec<String>, 
 }
 
 /// Write one sideband pkt-line on `band`.
-pub fn write_sideband_packet(
+pub(crate) fn write_sideband_packet(
     w: &mut (impl Write + ?Sized),
     band: u8,
     payload: &[u8],
@@ -134,7 +137,7 @@ pub fn write_sideband_packet(
 }
 
 /// Write payload on sideband channel 1 using the same 64k chunking as `git upload-pack`.
-pub fn write_sideband_channel1_64k(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
+pub(crate) fn write_sideband_channel1_64k(w: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     const MAX_PAYLOAD: usize = 65515;
     for chunk in payload.chunks(MAX_PAYLOAD) {
         let len = 4 + 1 + chunk.len();
@@ -203,7 +206,7 @@ impl<'a, W: Write + ?Sized + 'a> Write for SidebandChannel1Writer<'a, W> {
 }
 
 /// Parse a 4-byte hexadecimal pkt-line length prefix.
-pub fn parse_hex_len(prefix: &[u8]) -> io::Result<usize> {
+pub(crate) fn parse_hex_len(prefix: &[u8]) -> io::Result<usize> {
     let s = std::str::from_utf8(prefix)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e}")))?;
     usize::from_str_radix(s, 16)
@@ -275,5 +278,30 @@ mod tests {
     fn sideband_fatal_trims_and_decodes_lossily() {
         let err = sideband_fatal(b"pack-objects died \xff\n");
         assert_eq!(fatal_message(err), "pack-objects died \u{fffd}");
+    }
+
+    #[test]
+    fn sideband_packet_and_flush_roundtrip() {
+        use std::io::Cursor;
+
+        let mut encoded = Vec::new();
+        write_sideband_packet(&mut encoded, 1, b"payload").expect("write sb");
+        assert_eq!(encoded, b"000c\x01payload");
+
+        let mut pkt = Vec::new();
+        write_sideband_packet(&mut pkt, 1, b"line").expect("pkt");
+        pkt.extend_from_slice(b"0000");
+        let mut cursor = Cursor::new(pkt);
+        let (lines, term) = read_until_flush_or_delim(&mut cursor).expect("read");
+        assert!(!lines.is_empty());
+        assert!(term.is_some());
+
+        let mut flush_pkt = Vec::new();
+        write_line_to_vec(&mut flush_pkt, "ok").expect("line");
+        write_flush(&mut flush_pkt).expect("flush");
+        let mut c2 = Cursor::new(flush_pkt);
+        let (lines2, term2) = read_until_flush_or_delim(&mut c2).expect("flush read");
+        assert_eq!(lines2, vec!["ok".to_owned()]);
+        assert!(term2.is_some());
     }
 }

@@ -187,7 +187,7 @@ impl BundleList {
 ///
 /// HTTP failures and malformed answers, or [`Error::Cancelled`] when `cancel` fires
 /// while waiting on the server (discovery GET or `bundle-uri` POST).
-pub fn fetch_bundle_list(
+pub(crate) fn fetch_bundle_list(
     client: Arc<dyn HttpClient>,
     repo_url: &str,
     cancel: &dyn Cancel,
@@ -307,7 +307,7 @@ pub fn bundle_cache_path(cache_dir: &Path, uri: &str) -> PathBuf {
 /// - `cancel`: checked while the bundle is downloaded and unpacked. A
 ///   cancelled download is kept in `cache_dir` for the next attempt.
 #[must_use]
-pub fn seed_from_bundle_uri(
+pub(crate) fn seed_from_bundle_uri(
     repo: &Repository,
     client: Arc<dyn HttpClient>,
     repo_url: &str,
@@ -465,7 +465,7 @@ fn bundle_error(e: crate::bundle::BundleError) -> Error {
 /// # Errors
 ///
 /// Ref listing or deletion failures.
-pub fn remove_bundle_refs(repo: &Repository) -> Result<()> {
+pub(crate) fn remove_bundle_refs(repo: &Repository) -> Result<()> {
     for (name, _) in crate::refs::list_refs(repo.git_dir(), BUNDLE_REFS_PREFIX)? {
         crate::refs::delete_ref(repo.git_dir(), &name)?;
     }

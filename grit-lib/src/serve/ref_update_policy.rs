@@ -10,13 +10,13 @@ use super::{head_info, Result};
 
 /// Full ref name of the branch `HEAD` points at, bare repository or not.
 #[must_use]
-pub fn head_branch(repo: &Repository) -> Option<String> {
+pub(crate) fn head_branch(repo: &Repository) -> Option<String> {
     head_info(repo).target
 }
 
 /// Full ref name of the branch checked out in a non-bare repository, if any.
 #[must_use]
-pub fn checked_out_branch(repo: &Repository) -> Option<String> {
+pub(crate) fn checked_out_branch(repo: &Repository) -> Option<String> {
     if repo.is_bare() {
         None
     } else {
@@ -26,7 +26,7 @@ pub fn checked_out_branch(repo: &Repository) -> Option<String> {
 
 /// The branch `HEAD` points at, as the current-branch checks see it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct HeadBranches<'a> {
+pub(crate) struct HeadBranches<'a> {
     /// The full ref `HEAD` points at, bare repository or not
     /// (`receive.denyDeleteCurrent`); see [`head_branch`].
     pub head: Option<&'a str>,
@@ -46,7 +46,7 @@ pub struct HeadBranches<'a> {
 /// # Errors
 ///
 /// Propagates [`crate::odb::Odb::contains`] failures for the pushed object.
-pub fn validate_ref_update(
+pub(crate) fn validate_ref_update(
     repo: &Repository,
     object_lookup: Option<&Odb>,
     cmd: &RefCommand,
@@ -128,7 +128,7 @@ mod tests {
     use grit_test_support::{git, git_cmd};
 
     use super::{validate_ref_update, ReceivePolicy, RefCommand, RefUpdateRefusal};
-    use crate::serve::DenyCurrentBranch;
+    use crate::serve::receive_pack::DenyCurrentBranch;
 
     fn rev_parse(dir: &Path, rev: &str) -> ObjectId {
         ObjectId::from_hex(git(dir, &["rev-parse", rev]).trim()).expect("oid")

@@ -29,7 +29,7 @@ use crate::resumable::{resolve_url, ResumableError, TusUpload};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
 
 /// Packs above this size use the resumable endpoint when no threshold is set.
-pub const DEFAULT_THRESHOLD: u64 = 16 * 1024 * 1024;
+pub(crate) const DEFAULT_THRESHOLD: u64 = 16 * 1024 * 1024;
 
 /// Path appended to an upload's URL to apply it.
 pub const RECEIVE_SUFFIX: &str = "receive";
@@ -40,7 +40,7 @@ pub const RECEIVE_SUFFIX: &str = "receive";
 /// URL, with or without a leading `/` (`/push` on `https://host/repo.git` is
 /// `https://host/repo.git/push`).
 #[must_use]
-pub fn resolve_endpoint(repo_url: &str, value: &str) -> Option<String> {
+pub(crate) fn resolve_endpoint(repo_url: &str, value: &str) -> Option<String> {
     if url::Url::parse(value).is_ok() {
         return Some(value.to_owned());
     }

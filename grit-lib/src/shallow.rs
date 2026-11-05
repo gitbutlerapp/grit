@@ -93,7 +93,7 @@ pub fn load_shallow_boundaries(git_dir: &Path) -> HashSet<ObjectId> {
 
 /// Drop duplicate OIDs while preserving first-seen order.
 #[must_use]
-pub fn dedupe_shallow_list(ids: Vec<ObjectId>) -> Vec<ObjectId> {
+pub(crate) fn dedupe_shallow_list(ids: Vec<ObjectId>) -> Vec<ObjectId> {
     let mut seen = HashSet::new();
     ids.into_iter().filter(|oid| seen.insert(*oid)).collect()
 }
@@ -106,7 +106,7 @@ pub fn dedupe_shallow_list(ids: Vec<ObjectId>) -> Vec<ObjectId> {
 ///
 /// # Errors
 /// Returns an error if the `.git/shallow` file cannot be written.
-pub fn add_shallow_boundaries(
+pub(crate) fn add_shallow_boundaries(
     git_dir: &Path,
     new_boundaries: &HashSet<ObjectId>,
 ) -> std::io::Result<()> {
@@ -349,7 +349,7 @@ pub fn load_shallow_oids(git_dir: &Path) -> Result<Vec<ObjectId>> {
 ///
 /// # Errors
 /// Returns an error if the `shallow` file cannot be read or written.
-pub fn apply_shallow_updates(
+pub(crate) fn apply_shallow_updates(
     git_dir: &Path,
     shallow: &[ObjectId],
     unshallow: &[ObjectId],
@@ -434,12 +434,14 @@ pub(crate) fn read_v2_fetch_primary_line(
 }
 
 /// `read_shallow_info_section` function.
-pub fn read_shallow_info_section(r: &mut dyn Read) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
+pub(crate) fn read_shallow_info_section(
+    r: &mut dyn Read,
+) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
     read_shallow_info_section_sideband(r, false)
 }
 
 /// Like [`read_shallow_info_section`], demuxing `sideband-all` section lines when `sideband_all`.
-pub fn read_shallow_info_section_sideband(
+pub(crate) fn read_shallow_info_section_sideband(
     r: &mut dyn Read,
     sideband_all: bool,
 ) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
@@ -472,7 +474,7 @@ pub fn read_shallow_info_section_sideband(
 /// that already parses as a bare integer is passed through. Lifted from the CLI's
 /// `deepen_since_wire_value`.
 #[must_use]
-pub fn deepen_since_wire_value(since: &str) -> String {
+pub(crate) fn deepen_since_wire_value(since: &str) -> String {
     let since = since.trim();
     if since.parse::<u64>().is_ok() {
         return since.to_owned();

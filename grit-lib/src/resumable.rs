@@ -580,7 +580,7 @@ fn parse_content_range(value: Option<&str>) -> Option<(u64, Option<u64>)> {
 /// at whatever offset the server already has, so calling it again after an
 /// interruption (with the same upload URL) only sends the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TusUpload {
+pub(crate) struct TusUpload {
     /// Absolute URL of the upload.
     pub url: String,
     /// Total bytes of the upload.
@@ -745,7 +745,7 @@ fn upload_offset(response: &HttpResponse, url: &str) -> Result<u64> {
 
 /// Resolve `reference` (absolute, or relative to `base`) to an absolute URL.
 #[must_use]
-pub fn resolve_url(base: &str, reference: &str) -> Option<String> {
+pub(crate) fn resolve_url(base: &str, reference: &str) -> Option<String> {
     if let Ok(absolute) = url::Url::parse(reference) {
         return Some(absolute.to_string());
     }

@@ -2378,7 +2378,7 @@ pub(crate) fn prepare_fetch_apply_reflog(
 }
 
 /// Committer identity for fetch/clone reflog entries.
-pub fn fetch_operation_identity(
+pub(crate) fn fetch_operation_identity(
     env: &crate::environment::Environment,
     git_dir: &Path,
 ) -> Result<crate::ident::Signature> {

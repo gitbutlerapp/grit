@@ -176,7 +176,11 @@ fn upload_pack_v1_and_v2_entry_points() {
 fn sideband_band1(mut input: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
-        let len = grit_lib::remote::pkt_line::parse_hex_len(&input[..4]).expect("pkt length");
+        let len = usize::from_str_radix(
+            std::str::from_utf8(&input[..4]).expect("ascii length prefix"),
+            16,
+        )
+        .expect("pkt length");
         if len == 0 {
             return out;
         }

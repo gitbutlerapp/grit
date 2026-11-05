@@ -56,7 +56,7 @@ const REFLOG_MESSAGE: &str = "change ids: give commits made with git a change id
 /// # Errors
 ///
 /// Walk and object read failures.
-pub fn change_keys(
+pub(crate) fn change_keys(
     repo: &Repository,
     include: &[ObjectId],
     exclude: &[ObjectId],
@@ -678,7 +678,8 @@ mod tests {
 
     #[test]
     fn a_copy_counts_only_with_what_its_original_changed_outside_the_paths() {
-        use crate::snapshot_checkout::{decide_checkin, CheckinDecision, CheckinRule};
+        use crate::snapshot_checkout::checkin::{decide_checkin, CheckinDecision};
+        use crate::snapshot_checkout::CheckinRule;
 
         let co = checkout();
         let base = ObjectId::from_hex(&co.marker.roots[0].base).expect("base");

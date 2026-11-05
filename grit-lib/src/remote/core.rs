@@ -178,7 +178,7 @@ impl TryFrom<&str> for RemoteUrl {
 }
 
 /// Parse `url` into a [`RemoteUrl`] without applying config rewrites.
-pub fn parse_remote_url(url: &str) -> RemoteResult<RemoteUrl> {
+pub(crate) fn parse_remote_url(url: &str) -> RemoteResult<RemoteUrl> {
     let url = url.trim();
     if url.is_empty() {
         return Err(RemoteError::NoUrl { remote: None });
@@ -675,7 +675,7 @@ impl Remote {
     ///   credentials the server refuses stay stored for the fetch that follows to
     ///   report.
     #[must_use]
-    pub fn seed_from_bundle_uri(
+    pub(crate) fn seed_from_bundle_uri(
         &self,
         repo: &Repository,
         cache_dir: &Path,
@@ -1440,7 +1440,8 @@ fn finalize_list_refs_output(
 ///
 /// Never panics.
 #[must_use]
-pub fn query_remote_refs_in_memory(
+#[allow(dead_code)]
+pub(crate) fn query_remote_refs_in_memory(
     mut entries: Vec<RemoteRef>,
     opts: &ListRefsOptions,
     query_options: &RefQueryOptions,
@@ -1507,7 +1508,8 @@ fn ref_matches_list_opts(refname: &str, opts: &ListRefsOptions) -> bool {
 
 /// Returns `true` when `refname` matches one of `patterns`, or when `patterns` is empty.
 #[must_use]
-pub fn ref_matches_ls_remote_patterns(refname: &str, patterns: &[String]) -> bool {
+#[allow(dead_code)]
+pub(crate) fn ref_matches_ls_remote_patterns(refname: &str, patterns: &[String]) -> bool {
     patterns_match_ls_remote(refname, patterns)
 }
 
