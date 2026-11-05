@@ -3,6 +3,8 @@
 //! Removes loose objects that are already stored in a pack file, freeing
 //! disk space without losing any object data.
 
+#![allow(dead_code)]
+
 use crate::error::Result;
 use crate::odb::store::ObjectStore;
 use crate::odb::Odb;

@@ -9,6 +9,8 @@
 //! `pack/multi-pack-index.d/multi-pack-index-<sha1>.midx` with ordering in
 //! `multi-pack-index-chain` (oldest hash first, newest last).
 
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};

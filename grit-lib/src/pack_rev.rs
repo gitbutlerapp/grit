@@ -2,6 +2,8 @@
 //!
 //! Maps pack-file order (sorted by object offset) to index positions in the `.idx` OID table.
 
+#![allow(dead_code)]
+
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;

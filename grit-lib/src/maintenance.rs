@@ -2714,16 +2714,23 @@ impl Repository {
 }
 
 /// Standalone object fsck helpers.
+/// Standalone object fsck helpers (single-object checks).
 pub mod fsck {
     pub use crate::fsck_msg_policy::{
         FsckMsgLevel, ObjectFsckChecker, ObjectFsckPolicy, SkipListError,
     };
-    pub use crate::fsck_standalone::*;
+    pub use crate::fsck_standalone::{
+        fsck_object, fsck_object_with, FsckError, FsckObjectOptions,
+    };
 }
 
 /// Repository-wide fsck (object store, connectivity, refs).
 pub mod repository_fsck {
-    pub use crate::fsck::*;
+    pub use crate::fsck::{
+        format_fsck_line, fsck, issue_msg_id, issue_severity, issue_visible_by_default,
+        reachability_roots, FsckDiagnostic, FsckIssue, FsckOptions, FsckReport, FsckSeverity,
+        FsckSummary, MissingObjectReferrer,
+    };
 }
 
 #[cfg(test)]

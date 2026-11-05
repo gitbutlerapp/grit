@@ -1,5 +1,7 @@
 //! Fetch and remote helpers for on-disk bundle files (clone / `grit fetch` from a `.bundle`).
 
+#![allow(dead_code)]
+
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufWriter, Write};
@@ -127,7 +129,7 @@ pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> 
 /// # Errors
 ///
 /// Same as [`resolve_bundle_spec`] and [`plan_bundle_create`].
-pub fn plan_create_with_options(
+pub(crate) fn plan_create_with_options(
     repo: &Repository,
     options: &BundleCreateOptions,
 ) -> Result<BundleCreatePlan> {
@@ -207,7 +209,7 @@ pub fn write_bundle_spec_to_path_with_cancel(
 }
 
 /// Like [`write_bundle_with_options_with_cancel`], reporting progress through `progress`.
-pub fn write_bundle_with_options_with_progress(
+pub(crate) fn write_bundle_with_options_with_progress(
     repo: &Repository,
     path: &Path,
     options: &BundleCreateOptions,
@@ -312,7 +314,7 @@ pub fn split_revision_specs_for_bundle(tokens: &[String]) -> (Vec<String>, Vec<S
 /// # Errors
 ///
 /// Propagates bundle verification, pack ingest, refspec, and ref update failures.
-pub fn fetch_from_bundle(
+pub(crate) fn fetch_from_bundle(
     local_git_dir: &Path,
     bundle_path: &Path,
     opts: &FetchOptions,

@@ -12,6 +12,8 @@
 //! left-anchored). `pack.islandCore` (writing the core island's objects first) is not
 //! supported; it only affects object order within the pack, not which deltas are allowed.
 
+#![allow(dead_code)]
+
 use crate::config::ConfigSet;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::repo::Repository;

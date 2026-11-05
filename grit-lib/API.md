@@ -125,7 +125,7 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `apply` | 219 | 13 (cli 2, utils 1, tests 10) | 2 / 0 | keep | — | Patch parse/apply types and index application; core library surface for `grit apply`. |
 | `bench_fixture` | 137 | 7 (utils 6, tests 1) | 0 / 1 | merge into `objects::bench_fixture` | Test-only items out of the public API | Root alias duplicates canonical bench helpers; remove from supported API alongside nested fixture surface. |
 | `blame` | 337 | 25 (cli 1, utils 2, tests 22) | 5 / 1 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Blame options and results belong on the diff/rev domain; shrink nested helpers in the sweep. |
-| `bundle` | 342 | 15 (cli 1, utils 1, examples 1, http 3, tests 9) | 11 / 9 | keep | Visibility sweep: objects, maintenance, bundle | Bundle read/write and remote bundle transport are a supported domain. |
+| `bundle` | 151 | 15 (cli 1, utils 1, examples 1, http 3, tests 9) | 11 / 9 | keep | Visibility sweep: objects, maintenance, bundle | Bundle read/write and remote bundle transport; nested `bundle_remote` re-exports trimmed to consumer paths. |
 | `change_id` | 135 | 19 (cli 9, tests 10) | 2 / 0 | keep | — | Change-id header generation is a first-class cross-cutting feature. |
 | `command_runner` | 497 | 29 (cli 7, examples 2, tests 20) | 10 / 1 | keep | — | Injectable subprocess/hook runner boundary for CLI and tests. |
 | `commit` | 282 | 19 (cli 4, examples 1, tests 14) | 0 / 1 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Commit encoding, signing, and trailer parsing for porcelain and hooks. |
@@ -141,10 +141,10 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `line_range` | 45 | 1 (tests 1) | 0 / 0 | keep | — | Shared line-range parsing for blame and diff hunks. |
 | `list_limit` | 23 | 3 (cli 3) | 0 / 0 | keep | — | Shared `-n` limit parsing for list commands and library callers. |
 | `lockfile` | 146 | 11 (cli 3, examples 1, tests 7) | 0 / 1 | keep | — | Ref and index lock helpers exposed for embedding callers. |
-| `maintenance` | 1112 | 47 (cli 3, utils 2, examples 1, http 1, tests 40) | 20 / 3 | keep | Visibility sweep: objects, maintenance, bundle | Gc, repack, fsck, commit-graph, and MIDX maintenance. |
+| `maintenance` | 442 | 47 (cli 3, utils 2, examples 1, http 1, tests 40) | 20 / 3 | keep | Visibility sweep: objects, maintenance, bundle | Gc, repack, fsck, commit-graph, and MIDX maintenance; `fsck` helpers are crate-private, `repository_fsck` stays public. |
 | `notes` | 136 | 14 (cli 1, utils 1, examples 1, tests 11) | 7 / 0 | keep | — | Git notes read/write on `Repository::notes`. |
 | `object_inspect` | 114 | 12 (cli 7, tests 5) | 1 / 0 | merge into `revwalk::object_inspect` | One path for everything else the ratchet flags | Root re-export duplicates revwalk object display/resolve helpers. |
-| `objects` | 4224 | 657 (cli 58, utils 9, examples 41, protocol 4, http 6, ts 3, tests 536) | 14 / 23 | keep | Pluggable object store on Repository | ODB, packs, MIDX, promisor, and hashing; primary object domain. |
+| `objects` | 2104 | 657 (cli 58, utils 9, examples 41, protocol 4, http 6, ts 3, tests 536) | 14 / 23 | keep | Pluggable object store on Repository | ODB, packs, MIDX, promisor, and hashing; nested barrels export consumer paths only (`odb::store` unchanged). |
 | `operation` | 210 | 21 (cli 7, tests 14) | 0 / 0 | keep | — | In-progress merge/rebase/cherry-pick operation state. |
 | `pack_reuse` | 33 | 0 | 1 / 0 | merge into `objects::pack_reuse` | One path for everything else the ratchet flags | Flat root alias; canonical path is under `objects`. |
 | `pack_write` | 39 | 0 | 0 / 0 | merge into `objects::pack_write` | One path for everything else the ratchet flags | Flat root alias; canonical path is under `objects`. |

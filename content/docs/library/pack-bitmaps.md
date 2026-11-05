@@ -21,4 +21,4 @@ A blob's name-hash entry is the path from the newest tree that named it when tha
 
 ## Compatibility
 
-Integration tests in `grit-lib` round-trip against the system `git` binary (`rev-list --test-bitmap`, `--use-bitmap-index` counts). Name hashes use [`pack_name_hash`](rustdoc:grit_lib::objects::pack_name_hash::pack_name_hash) (v1) recorded during tree walks.
+Integration tests in `grit-lib` round-trip against the system `git` binary (`rev-list --test-bitmap`, `--use-bitmap-index` counts). Name hashes use Git's v1 `pack_name_hash` (recorded during tree walks inside the library).

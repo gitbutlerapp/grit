@@ -15,10 +15,10 @@ use crate::fetch::{
     parse_v2_ls_refs_response, read_v2_fetch_pack_response, NoProgress, ShallowUpdate,
 };
 use crate::index::Index;
-use crate::objects::pack::parse_pack_index_bytes;
 use crate::objects::{
     parse_commit, parse_tag, parse_tree, serialize_commit, serialize_tag, serialize_tree,
 };
+use crate::pack::parse_pack_index_bytes;
 use crate::pkt_line;
 use crate::refs::parse_packed_refs_to_map;
 use crate::refspec::parse_fetch_refspec;

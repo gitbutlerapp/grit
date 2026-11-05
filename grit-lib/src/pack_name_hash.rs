@@ -3,6 +3,8 @@
 //! These match the inline implementations in Git's `pack-objects.h` and are used
 //! for bitmap index name-hash fields and `test-tool name-hash` stability tests.
 
+#![allow(dead_code)]
+
 /// Git's legacy pack name hash (version 1): a sortable number from the last
 /// sixteen non-whitespace characters of `name`.
 #[must_use]

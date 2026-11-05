@@ -9,7 +9,6 @@ use crate::parallel::{
     ParallelOptions,
 };
 
-pub use crate::parallel::index_parallelism_from_config;
 pub use crate::parallel::{ParallelHashError, Parallelism};
 
 use super::hash_object;

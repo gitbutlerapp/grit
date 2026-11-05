@@ -311,8 +311,8 @@ mod tests {
     )]
     #[test]
     fn system_git_upload_pack_accepts_grit_written_pkt_lines() {
-        use crate::objects::promisor_remote::parse_advertisement;
         use crate::objects::ObjectId;
+        use crate::promisor_remote::parse_advertisement;
         use crate::refs::store::paths::{logs_refs_dir_path, logs_refs_subdir_path};
         use crate::refs::{ref_update_flags, verify_branch_commit_cas};
         use crate::repo::{InitOptions, Repository};

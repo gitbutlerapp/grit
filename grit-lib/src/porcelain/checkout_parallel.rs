@@ -12,8 +12,8 @@ use crate::crlf::{self, ConversionConfig};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
-use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::ObjectId;
+use crate::pack_store::PackReadContextGuard;
 use crate::parallel::{
     run_ordered_batches, try_par_map_with_local, ParallelHashError, ParallelOp, ParallelOptions,
 };

@@ -1,5 +1,7 @@
 //! Pack zlib helpers for index-pack (parallel inflate path).
 
+#![allow(dead_code)]
+
 use std::io::Read;
 
 use flate2::read::ZlibDecoder;

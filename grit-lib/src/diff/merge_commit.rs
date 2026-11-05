@@ -19,9 +19,9 @@ use crate::diff::merge_diff::{
 };
 use crate::diff::{DiffEntry, DiffOptions, DiffStatus};
 use crate::error::Result;
-use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use crate::pack_store::PackReadContextGuard;
 use crate::parallel::{try_par_map_with_local, ParallelHashError, ParallelOp, ThreadPolicy};
 use crate::repo::Repository;
 use std::sync::Arc;

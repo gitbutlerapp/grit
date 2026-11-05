@@ -3,8 +3,8 @@
 use std::num::NonZeroUsize;
 
 use crate::config::ConfigSet;
-use crate::objects::pack_store::PackReadContextGuard;
 use crate::odb::Odb;
+use crate::pack_store::PackReadContextGuard;
 use crate::parallel::{
     try_par_map_with_local, ParallelHashError, ParallelOp, ParallelOptions, ThreadPolicy,
 };

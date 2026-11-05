@@ -3,10 +3,10 @@
 //! This module implements a focused subset of pack functionality required by
 //! `count-objects` and `verify-pack`.
 
-pub use crate::pack_index::{
-    compute_fanout_from_entries, compute_fanout_from_oid_slices, pack_index_entry_matches_sha1_oid,
-    parse_pack_index_bytes, PackIndex, PackIndexEntry, PackIndexEntryRef,
-};
+#![allow(dead_code)]
+
+pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
+pub(crate) use crate::pack_index::parse_pack_index_bytes;
 
 use crate::error::{Error, Result};
 use crate::git_path::CanonicalizeExt;
@@ -2250,8 +2250,6 @@ pub(crate) mod pack_cache {
         });
     }
 }
-
-pub use pack_cache::revalidate_stale_pack_bytes;
 
 /// Route pack catalog reads to `store` without changing the active pack-read context.
 pub(crate) fn with_alternate_pack_store<R>(

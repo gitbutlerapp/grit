@@ -59,7 +59,7 @@ impl<'repo> RepositoryBundles<'repo> {
         &self,
         options: &BundleCreateOptions,
     ) -> std::result::Result<BundleCreatePlan, BundleError> {
-        let spec = crate::bundle::bundle_remote::resolve_bundle_spec(self.repo, options)
+        let spec = crate::bundle_remote::resolve_bundle_spec(self.repo, options)
             .map_err(lib_error_to_bundle_error)?;
         plan_bundle_create(self.repo, &spec)
     }
@@ -122,7 +122,7 @@ impl<'repo> RepositoryBundles<'repo> {
         progress: &mut dyn ProgressSink,
         cancel: &dyn crate::progress::Cancel,
     ) -> std::result::Result<usize, BundleError> {
-        crate::bundle::bundle_remote::write_bundle_spec_to_path_with_cancel(
+        crate::bundle_remote::write_bundle_spec_to_path_with_cancel(
             self.repo, spec, path, progress, cancel,
         )
     }
@@ -139,7 +139,7 @@ impl<'repo> RepositoryBundles<'repo> {
         progress: &mut dyn ProgressSink,
         cancel: &dyn crate::progress::Cancel,
     ) -> std::result::Result<usize, BundleError> {
-        let spec = crate::bundle::bundle_remote::resolve_bundle_spec(self.repo, options)
+        let spec = crate::bundle_remote::resolve_bundle_spec(self.repo, options)
             .map_err(lib_error_to_bundle_error)?;
         self.create_with_progress(&spec, path, progress, cancel)
     }

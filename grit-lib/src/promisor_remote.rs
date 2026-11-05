@@ -26,6 +26,8 @@
 //! The older string-based helpers ([`promisor_remote_info`], [`promisor_remote_reply`],
 //! [`parse_advertisement`]) are thin wrappers over these types.
 
+#![allow(dead_code)]
+
 use std::path::Path;
 
 use crate::config::{parse_bool, ConfigFile, ConfigScope, ConfigSet};

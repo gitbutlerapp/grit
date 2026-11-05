@@ -47,7 +47,7 @@ Examples:
 | `object_inspect` | `grit_lib::revwalk::object_inspect` |
 | `quote_path` | `grit_lib::porcelain::quote_path` |
 | `pack_reuse` | `grit_lib::objects::pack` |
-| `pack_write` | `grit_lib::objects::pack_write` |
+| `pack_write` | crate-internal (`index_pack` install helpers; no public `objects::pack_write` path) |
 | `fsmonitor` | `grit_lib::worktree::fsmonitor` |
 | `HookName`, `PostOperationHooks` | `grit_lib::command_runner::hooks` |
 | `RefStorageFormat` | `grit_lib::refs::ref_storage` |

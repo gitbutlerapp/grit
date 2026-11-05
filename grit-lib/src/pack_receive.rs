@@ -4,6 +4,8 @@
 //! (channel 1). These helpers demux that stream without holding the full pack in
 //! a `Vec` when the caller writes to disk instead.
 
+#![allow(dead_code)]
+
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};

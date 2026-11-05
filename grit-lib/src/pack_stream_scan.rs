@@ -11,17 +11,6 @@
 //! stream, which is why fetch only runs it (on a background thread) when the
 //! progress sink asks for it.
 //!
-//! ```rust
-//! use grit_lib::objects::pack_stream_scan::PackStreamScanner;
-//! use grit_lib::objects::HashAlgo;
-//!
-//! let mut scanner = PackStreamScanner::new(HashAlgo::Sha1);
-//! // An empty pack: signature, version 2, zero objects.
-//! scanner.feed(b"PACK\0\0\0\x02\0\0\0\0").unwrap();
-//! let counts = scanner.counts().unwrap();
-//! assert_eq!((counts.received, counts.total), (0, 0));
-//! assert!(scanner.is_complete());
-//! ```
 
 use flate2::{Decompress, FlushDecompress, Status};
 use thiserror::Error;

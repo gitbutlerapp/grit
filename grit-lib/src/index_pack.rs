@@ -24,9 +24,7 @@ use crate::pack_map::{PackData, ResidentBudget};
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::unpack_objects::{IngestedObjects, PackIndexRecord};
 
-pub use crate::pack_index_build::{
-    build_pack_index_records, build_pack_index_records_with_progress,
-};
+pub use crate::pack_index_build::build_pack_index_records;
 
 #[cfg(any(test, feature = "test-support"))]
 static INGEST_THREAD_RECORDING: AtomicBool = AtomicBool::new(false);

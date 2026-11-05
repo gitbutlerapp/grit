@@ -9,6 +9,8 @@
 //! Large blobs stream to the ODB without retaining payload bytes; delta bases use a
 //! bounded byte LRU so multi-object unpack stays flat in memory (streaming read).
 
+#![allow(dead_code)]
+
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read};

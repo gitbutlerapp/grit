@@ -3063,7 +3063,7 @@ The gate keeps this from regressing: `grit-utils/tests/push_http_cargo_shape_bud
 
 ## grit-lib: pack write (100k reuse vs fresh)
 
-Criterion group **`pack`** (`cargo bench -p grit-lib --bench pack_write`) rebuilds the full closure of the repacked **`pack_100k`** fixture (~100 000 objects) via [`build_pack_with_parallel_threads`](rustdoc:grit_lib::objects::pack_objects::build_pack_with_parallel_threads):
+Criterion group **`pack`** (`cargo bench -p grit-lib --bench pack_write`) rebuilds the full closure of the repacked **`pack_100k`** fixture (~100 000 objects) via the library's parallel pack builder:
 
 | Benchmark | What it measures |
 | --- | --- |

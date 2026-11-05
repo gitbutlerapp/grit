@@ -8,6 +8,8 @@
 //! `pack-abc.pack`) match Git's promisor packs: objects in those packs are treated as
 //! promised by the remote for `fsck` and `rev-list --exclude-promisor-objects`.
 
+#![allow(dead_code)]
+
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::Path;

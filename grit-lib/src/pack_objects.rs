@@ -3,6 +3,8 @@
 //! Holds object metadata (not payloads) during planning; reads object bytes from the
 //! [`Odb`] on demand when encoding.
 
+#![allow(dead_code)]
+
 use crate::environment::RepositoryOptions;
 
 use std::collections::{HashMap, HashSet, VecDeque};

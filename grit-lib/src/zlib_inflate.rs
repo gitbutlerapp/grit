@@ -1,5 +1,7 @@
 //! Reusable zlib inflate for pack and loose object reads.
 
+#![allow(dead_code)]
+
 use std::io::Read;
 
 use flate2::{Decompress, FlushDecompress, Status};

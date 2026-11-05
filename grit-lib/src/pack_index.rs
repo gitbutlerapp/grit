@@ -1,5 +1,7 @@
 //! Zero-copy in-memory representation of Git pack index (`.idx`) files.
 
+#![allow(dead_code)]
+
 use crate::error::{Error, Result};
 use crate::hash::verify_trailer;
 use crate::objects::{HashAlgo, ObjectId};
