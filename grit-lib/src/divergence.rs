@@ -16,6 +16,11 @@
 //! reworded it, amended it, dropped it, squashed it into another, or split
 //! it; commits of a side that aren't in the base are new (or pieces of a
 //! split). [`classify`] puts the two sides together into a [`Divergence`].
+//!
+//! ```rust
+//! use grit_lib::divergence::Choice;
+//! let _ = Choice::KeepMine;
+//! ```
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
