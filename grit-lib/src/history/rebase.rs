@@ -2,9 +2,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-use std::cell::Cell;
-
 use crate::branch_tracking::upstream_tracking_full_ref;
 use crate::commit_graph_file::{BloomPrecheck, CommitGraphChain};
 use crate::config::ConfigSet;
@@ -39,7 +36,7 @@ use super::types::{
 pub mod patch_id_inject {
     use std::cell::Cell;
 
-    thread_local! {
+    thread_local! { // hygiene: test-support/bench-only patch-id compute call counter
         static PATCH_ID_COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
     }
 

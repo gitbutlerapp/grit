@@ -5,7 +5,7 @@ use std::cell::RefCell;
 
 use crate::error::{Error, Result};
 
-thread_local! {
+thread_local! { // hygiene: test-support-only reftable transaction failure injection
     static INJECT: RefCell<bool> = const { RefCell::new(false) };
 }
 

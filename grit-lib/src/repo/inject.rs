@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 mod index_write_fail_inject {
     use std::cell::RefCell;
 
-    thread_local! {
+    thread_local! { // hygiene: test-support-only index write failure injection
         pub(super) static INJECT: RefCell<bool> = const { RefCell::new(false) };
         pub(super) static INJECT_REMAINING: RefCell<Option<usize>> = const { RefCell::new(None) };
     }
@@ -15,7 +15,7 @@ mod index_write_fail_inject {
 mod rewrite_apply_inject {
     use std::cell::RefCell;
 
-    thread_local! {
+    thread_local! { // hygiene: test-support-only rewrite abort injection after refs
         pub(super) static ABORT_AFTER_REFS: RefCell<bool> = const { RefCell::new(false) };
     }
 }

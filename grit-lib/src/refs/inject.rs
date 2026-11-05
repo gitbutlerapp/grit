@@ -11,7 +11,7 @@ use crate::git_path::CanonicalizeExt;
 mod reflog_fail_inject {
     use std::cell::RefCell;
 
-    thread_local! {
+    thread_local! { // hygiene: test-support-only reflog failure injection
         pub(super) static INJECT: RefCell<Option<String>> = const { RefCell::new(None) };
     }
 }
@@ -40,6 +40,7 @@ mod branch_ref_pause_inject {
         pub cv: Condvar,
     }
 
+    // hygiene: test-support-only branch-ref commit pause injection slot
     static PAUSE_BEFORE_COMMIT: OnceLock<Mutex<Option<Arc<PauseGate>>>> = OnceLock::new();
 
     pub fn pause_slot() -> &'static Mutex<Option<Arc<PauseGate>>> {
@@ -91,6 +92,7 @@ mod ref_store_batch_pause_inject {
 
     pub type PauseSlot = Option<(usize, PathBuf, std::sync::Arc<PauseGate>)>;
 
+    // hygiene: test-support-only ref-store batch pause injection slot
     static PAUSE_AFTER_REF_WRITE: OnceLock<Mutex<PauseSlot>> = OnceLock::new();
 
     pub fn pause_slot() -> &'static Mutex<PauseSlot> {
@@ -123,6 +125,7 @@ struct RefStorePauseTestSerial {
     holder: Option<ThreadId>,
 }
 
+// hygiene: test-support-only serialization for ref-store batch pause tests
 static REF_STORE_PAUSE_TEST_SERIAL: Mutex<RefStorePauseTestSerial> =
     Mutex::new(RefStorePauseTestSerial { holder: None });
 
@@ -190,6 +193,7 @@ struct PauseInjectionOwner {
     holder: Option<ThreadId>,
 }
 
+// hygiene: test-support-only serialization for ref pause injection tests
 static PAUSE_INJECTION_OWNER: Mutex<PauseInjectionOwner> =
     Mutex::new(PauseInjectionOwner { holder: None });
 
