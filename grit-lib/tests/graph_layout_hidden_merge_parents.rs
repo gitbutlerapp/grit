@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::graph::rewrite_display_parents;
+use grit_lib::revwalk::rewrite_display_parents;
 use support::{build_commit_dag, git};
 
 #[test]

@@ -2,7 +2,25 @@
 
 #[test]
 fn prelude_items_resolve_at_domain_paths() {
-    use grit_lib::prelude::*;
+    use grit_lib::prelude::{
+        resolve_initial_branch as prelude_resolve_initial_branch,
+        CollectingDiagnostics as PreludeCollectingDiagnostics,
+        CommandRunner as PreludeCommandRunner, ConfigSet as PreludeConfigSet,
+        DiagnosticSink as PreludeDiagnosticSink, DiscoveryInfo as PreludeDiscoveryInfo,
+        Environment as PreludeEnvironment, Error as PreludeError, Index as PreludeIndex,
+        InitOptions as PreludeInitOptions, InitOutcome as PreludeInitOutcome,
+        MidxError as PreludeMidxError, NullDiagnostics as PreludeNullDiagnostics,
+        Object as PreludeObject, ObjectId as PreludeObjectId, ObjectInfo as PreludeObjectInfo,
+        ObjectKind as PreludeObjectKind, Odb as PreludeOdb,
+        OwnershipCheck as PreludeOwnershipCheck, OwnershipContext as PreludeOwnershipContext,
+        OwnershipError as PreludeOwnershipError, OwnershipStatus as PreludeOwnershipStatus,
+        RecordingRunner as PreludeRecordingRunner, Repository as PreludeRepository,
+        RepositoryBuilder as PreludeRepositoryBuilder,
+        RepositoryOptions as PreludeRepositoryOptions, Result as PreludeResult,
+        SystemCommandRunner as PreludeSystemCommandRunner,
+        SystemOwnershipCheck as PreludeSystemOwnershipCheck, Trace as PreludeTrace,
+        Warning as PreludeWarning,
+    };
 
     use grit_lib::command_runner::{CommandRunner, RecordingRunner, SystemCommandRunner};
     use grit_lib::config::environment::{Environment, RepositoryOptions};
@@ -22,37 +40,55 @@ fn prelude_items_resolve_at_domain_paths() {
         RepositoryBuilder,
     };
 
-    let _ = (
-        std::any::type_name::<RecordingRunner>(),
-        std::any::type_name::<SystemCommandRunner>(),
-        std::any::type_name::<ConfigSet>(),
-        std::any::type_name::<CollectingDiagnostics>(),
-        std::any::type_name::<NullDiagnostics>(),
-        std::any::type_name::<Trace>(),
-        std::any::type_name::<Warning>(),
-        std::any::type_name::<Environment>(),
-        std::any::type_name::<RepositoryOptions>(),
-        std::any::type_name::<Error>(),
-        std::any::type_name::<MidxError>(),
-        std::any::type_name::<Result<()>>(),
-        std::any::type_name::<Index>(),
-        std::any::type_name::<Odb>(),
-        std::any::type_name::<Object>(),
-        std::any::type_name::<ObjectId>(),
-        std::any::type_name::<ObjectInfo>(),
-        std::any::type_name::<ObjectKind>(),
-        std::any::type_name::<OwnershipContext>(),
-        std::any::type_name::<OwnershipError>(),
-        std::any::type_name::<OwnershipStatus>(),
-        std::any::type_name::<SystemOwnershipCheck>(),
-        std::any::type_name::<Repository>(),
-        std::any::type_name::<RepositoryBuilder>(),
-        std::any::type_name::<InitOptions>(),
-        std::any::type_name::<InitOutcome>(),
-        std::any::type_name::<DiscoveryInfo>(),
-        std::any::type_name::<dyn CommandRunner>(),
-        std::any::type_name::<dyn DiagnosticSink>(),
-        std::any::type_name::<dyn OwnershipCheck>(),
+    fn assert_same<T, U>() {
+        assert_eq!(std::any::type_name::<T>(), std::any::type_name::<U>());
+    }
+
+    assert_same::<PreludeConfigSet, ConfigSet>();
+    assert_same::<PreludeCollectingDiagnostics, CollectingDiagnostics>();
+    assert_same::<PreludeNullDiagnostics, NullDiagnostics>();
+    assert_same::<PreludeTrace, Trace>();
+    assert_same::<PreludeWarning, Warning>();
+    assert_same::<PreludeEnvironment, Environment>();
+    assert_same::<PreludeRepositoryOptions, RepositoryOptions>();
+    assert_same::<PreludeError, Error>();
+    assert_same::<PreludeMidxError, MidxError>();
+    assert_same::<PreludeResult<()>, Result<()>>();
+    assert_same::<PreludeIndex, Index>();
+    assert_same::<PreludeOdb, Odb>();
+    assert_same::<PreludeObject, Object>();
+    assert_same::<PreludeObjectId, ObjectId>();
+    assert_same::<PreludeObjectInfo, ObjectInfo>();
+    assert_same::<PreludeObjectKind, ObjectKind>();
+    assert_same::<PreludeOwnershipContext, OwnershipContext>();
+    assert_same::<PreludeOwnershipError, OwnershipError>();
+    assert_same::<PreludeOwnershipStatus, OwnershipStatus>();
+    assert_same::<PreludeSystemOwnershipCheck, SystemOwnershipCheck>();
+    assert_same::<PreludeRecordingRunner, RecordingRunner>();
+    assert_same::<PreludeSystemCommandRunner, SystemCommandRunner>();
+    assert_same::<PreludeRepository, Repository>();
+    assert_same::<PreludeRepositoryBuilder, RepositoryBuilder>();
+    assert_same::<PreludeInitOptions, InitOptions>();
+    assert_same::<PreludeInitOutcome, InitOutcome>();
+    assert_same::<PreludeDiscoveryInfo, DiscoveryInfo>();
+
+    assert_eq!(
+        std::any::type_name::<dyn PreludeCommandRunner>(),
+        std::any::type_name::<dyn CommandRunner>()
     );
-    let _ = resolve_initial_branch;
+    assert_eq!(
+        std::any::type_name::<dyn PreludeDiagnosticSink>(),
+        std::any::type_name::<dyn DiagnosticSink>()
+    );
+    assert_eq!(
+        std::any::type_name::<dyn PreludeOwnershipCheck>(),
+        std::any::type_name::<dyn OwnershipCheck>()
+    );
+
+    type ResolveInitialBranch = fn(&Environment, Option<&str>) -> grit_lib::error::Result<String>;
+    let from_prelude: ResolveInitialBranch = prelude_resolve_initial_branch;
+    let from_domain: ResolveInitialBranch = resolve_initial_branch;
+    assert_eq!(from_prelude as *const (), from_domain as *const ());
+
+    let _ = std::any::type_name::<PreludeRepository>();
 }

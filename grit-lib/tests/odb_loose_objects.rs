@@ -8,7 +8,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
-use grit_lib::objects::odb::store::loose::read_loose_object_info;
+use grit_lib::objects::odb::store::read_loose_object_info;
 use grit_lib::objects::odb::{
     hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb, WriteOptions, BULK_NEW_LOOSE_WRITE,
 };

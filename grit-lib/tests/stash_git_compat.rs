@@ -46,7 +46,7 @@ fn stash_options(include_untracked: bool, message: Option<&str>) -> StashPushOpt
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
-        mode: grit_lib::porcelain::stash::StashMode::default(),
+        mode: grit_lib::stash::StashMode::default(),
     }
 }
 

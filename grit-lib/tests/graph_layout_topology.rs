@@ -7,8 +7,8 @@ use std::collections::HashSet;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::graph::{rewrite_display_parents, GraphCommitInput, GraphLayout};
 use grit_lib::revwalk::{list_commits_for_log_graph, RevWalkListOptions};
+use grit_lib::revwalk::{rewrite_display_parents, GraphCommitInput, GraphLayout};
 use support::{build_commit_dag, git};
 
 #[test]

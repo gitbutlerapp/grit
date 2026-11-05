@@ -11,10 +11,10 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Through
 use grit_lib::diff::{count_changes_with_algorithm, diff_trees};
 use grit_lib::refs::branch_tracking::TipComparison;
 use grit_lib::refs::write_ref;
-use grit_lib::revwalk::filter::CommitFilterBuilder;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::CommitFilterBuilder;
 use grit_lib::revwalk::{
     group_commits_by_author_from_rev, mailmap_for_grouping, DescribeOptions, GroupByAuthorOptions,
     RevWalkListOptions,

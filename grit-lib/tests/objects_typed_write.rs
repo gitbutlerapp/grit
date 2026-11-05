@@ -1,11 +1,12 @@
 //! Typed tree/commit creation through [`grit_lib::objects::Objects`], cross-checked with
 //! system `git fsck --strict` and `git cat-file` (issue #1746).
 
+use grit_lib::change_id::{change_id, ChangeId};
 use grit_lib::error::Error;
 use grit_lib::ident::{parse_signature, Signature, SignatureError, SignatureField};
 use grit_lib::objects::{
-    change_id, serialize_commit, serialize_tree, ChangeId, CommitData, HashAlgo, NewCommit,
-    ObjectId, ObjectKind, TreeEntry, TreeEntryError,
+    serialize_commit, serialize_tree, CommitData, HashAlgo, NewCommit, ObjectId, ObjectKind,
+    TreeEntry, TreeEntryError,
 };
 use grit_lib::path_validate::PathComponentError;
 use grit_lib::repo::{InitOptions, Repository};
