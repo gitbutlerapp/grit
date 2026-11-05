@@ -21,7 +21,9 @@ use crate::index_pack::ObjectKindCounts;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::odb::{Odb, WriteOptions};
+use crate::pack::{decode_pack_object_size_varint, decode_pack_object_size_varint_from_first};
 use crate::progress::{poll_cancel, Cancel, NullProgress, ProgressPhase, ProgressSink};
+use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
 use flate2::{Decompress, FlushDecompress, Status};
 
@@ -1608,14 +1610,9 @@ impl<'a> PackReader<'a> {
     pub(crate) fn read_type_size(&mut self) -> Result<(u8, usize)> {
         let c = self.read_byte()?;
         let type_code = (c >> 4) & 0x7;
-        let mut size = (c & 0x0f) as usize;
-        let mut shift = 4u32;
-        let mut cur = c;
-        while cur & 0x80 != 0 {
-            cur = self.read_byte()?;
-            size |= ((cur & 0x7f) as usize) << shift;
-            shift += 7;
-        }
+        let size_u64 = decode_pack_object_size_varint(c, self.data, &mut self.pos)?;
+        let size = usize::try_from(size_u64)
+            .map_err(|_| Error::CorruptObject(format!("pack object size overflow: {size_u64}")))?;
         Ok((type_code, size))
     }
 
@@ -1651,25 +1648,21 @@ pub(crate) fn decompress_zlib_at_into(
     expected_size: usize,
     out: &mut Vec<u8>,
 ) -> Result<usize> {
-    out.clear();
-    out.reserve(expected_size);
     let slice = pack.get(offset..).ok_or_else(|| {
         Error::CorruptObject(format!(
             "pack stream truncated: need zlib at offset {offset}"
         ))
     })?;
-    let mut decoder = ZlibDecoder::new(slice);
-    decoder
-        .read_to_end(out)
-        .map_err(|e| Error::Zlib(e.to_string()))?;
-    if out.len() != expected_size {
-        return Err(Error::CorruptObject(format!(
-            "decompressed {} bytes but expected {}",
-            out.len(),
-            expected_size
-        )));
-    }
-    Ok(decoder.total_in() as usize)
+    let mut pos = 0usize;
+    ZlibInflateScratch::default().decompress_fixed_into(
+        slice,
+        &mut pos,
+        u64::try_from(expected_size).map_err(|_| {
+            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+        })?,
+        out,
+    )?;
+    Ok(pos)
 }
 
 /// Decompress a zlib stream at `offset` in `pack` without advancing a [`PackReader`].
@@ -1801,14 +1794,9 @@ impl<'a> StreamingPackReader<'a> {
     fn read_type_size(&mut self) -> Result<(u8, usize)> {
         let c = self.read_byte()?;
         let type_code = (c >> 4) & 0x7;
-        let mut size = (c & 0x0f) as usize;
-        let mut shift = 4u32;
-        let mut cur = c;
-        while cur & 0x80 != 0 {
-            cur = self.read_byte()?;
-            size |= ((cur & 0x7f) as usize) << shift;
-            shift += 7;
-        }
+        let size_u64 = decode_pack_object_size_varint_from_first(c, || self.read_byte())?;
+        let size = usize::try_from(size_u64)
+            .map_err(|_| Error::CorruptObject(format!("pack object size overflow: {size_u64}")))?;
         Ok((type_code, size))
     }
 
