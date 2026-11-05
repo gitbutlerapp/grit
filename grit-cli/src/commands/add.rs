@@ -372,11 +372,10 @@ fn stage_with_hint(
         pathspec_sources,
         mode,
         executable_hint,
-        staging_thresholds: None,
         dry_run,
         intent_to_add,
         force_ignored,
-        skip_pathspec_ignore_check: false,
+        ..StageOptions::default()
     };
     stage_paths(repo, &opts, progress, cancel).map_err(map_add_error)
 }

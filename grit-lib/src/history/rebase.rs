@@ -46,7 +46,7 @@ pub mod patch_id_inject {
         PATCH_ID_COMPUTE_CALLS.with(Cell::get)
     }
 
-    /// Clears the patch-id computation counter for this thread.
+    /// Clears the per-thread patch-id compute counter (for test isolation).
     pub fn reset_patch_id_compute_call_count() {
         PATCH_ID_COMPUTE_CALLS.with(|c| c.set(0));
     }

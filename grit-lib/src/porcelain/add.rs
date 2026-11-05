@@ -81,8 +81,10 @@ pub struct StageOptions {
     /// Force executable or non-executable mode for explicitly listed regular files (see [`StageExecutableHint`]).
     pub executable_hint: StageExecutableHint,
     /// Override bulk/parallel staging thresholds (integration tests only; use test_support knobs with the test-support feature).
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub staging_thresholds: Option<IndexStagingThresholds>,
+    #[cfg(not(any(test, feature = "test-support")))]
+    pub(crate) staging_thresholds: Option<IndexStagingThresholds>,
     /// When true, hash worktree blobs without writing loose objects (commit `--dry-run`); also
     /// classifies paths without persisting the index or UNTR when used from `grit add --dry-run`.
     pub dry_run: bool,
@@ -91,8 +93,10 @@ pub struct StageOptions {
     /// Stage explicitly named ignored paths instead of returning [`Error::PathspecIgnored`].
     pub force_ignored: bool,
     /// Skip [`Error::PathspecIgnored`] validation (integration tests only; use test_support knobs with the test-support feature).
-    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-support"))]
     pub skip_pathspec_ignore_check: bool,
+    #[cfg(not(any(test, feature = "test-support")))]
+    pub(crate) skip_pathspec_ignore_check: bool,
 }
 
 /// Paths returned by [`stage`] (repository-relative, `/` separators).

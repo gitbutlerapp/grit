@@ -291,7 +291,7 @@
 - Every public function has at least one test.
 - The docs site library guide is complete.
 
-**Status (factory #6908, branch `factory/fuzz-ratchet-close-6908`):** Fuzz entry points live under **`test_support::fuzz`**; **`unstable-bench-helpers`** and **`public-api-test-items.allow`** are removed. The test-hook ratchet requires **zero** offenders in **`public-api.txt`** and in the **`--document-hidden-items`** rustdoc listing; remaining test knobs use **`test_support::knobs`** or **`pub(crate)`** fields. Grit no longer reads **`GIT_TEST_*`** into **`Environment`**.
+**Status (factory #6908, branch `factory/fuzz-ratchet-close-6908`):** Fuzz entry points live under **`test_support::fuzz`**; the deprecated bench-helper Cargo alias and **`public-api-test-items.allow`** are removed. The test-hook ratchet requires **zero** offenders in **`public-api.txt`** and in the **`--document-hidden-items`** rustdoc listing; remaining test knobs use **`test_support::knobs`** or **`pub(crate)`** fields. Grit no longer reads **`GIT_TEST_*`** into **`Environment`**.
 
 ## 18. grit-cli output contract: --json and --markdown
 *Workstream: CLI*
