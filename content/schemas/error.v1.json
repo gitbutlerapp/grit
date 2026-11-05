@@ -349,6 +349,13 @@
           "type": "string"
         },
         {
+          "description": "`refs/tags/<name>` does not exist.",
+          "enum": [
+            "tag_not_found"
+          ],
+          "type": "string"
+        },
+        {
           "description": "`merge --abort`, `rebase --continue`, `pick --continue`, or similar with nothing paused.",
           "enum": [
             "no_operation_in_progress"

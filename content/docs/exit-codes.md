@@ -77,6 +77,7 @@ $ grit push --json
 | `empty_commit_message` | `grit commit -m ''`, empty `-F`, or a hook that cleared the message. |
 | `identity_unknown` | Author or committer identity could not be resolved (`hint` names `grit config --global user.name` / `user.email`). |
 | `tag_already_exists` | Create tag when the name already exists (hint mentions `--force`). |
+| `tag_not_found` | Delete or verify a tag when `refs/tags/<name>` does not exist. |
 | `no_operation_in_progress` | `merge --abort`, `rebase --continue`, `pick --continue`, or similar when nothing is paused; the `error` text names the operation. |
 | `pathspec_no_match` | `grit add`, `rm`, `restore`, `commit -- <paths>`, or stash path selection with no matching files. |
 | `stash_not_found` | `grit stash pop` / `apply` / `drop` with an empty stash or an invalid index (`hint` for empty stash). |

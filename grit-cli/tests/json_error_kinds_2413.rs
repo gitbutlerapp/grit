@@ -80,6 +80,13 @@ fn json_error_kinds_for_ci_failures() {
         "tag_already_exists"
     );
 
+    let err = json_err(&fixture, &["--json", "tag", "-d", "nope"]);
+    assert_eq!(err["kind"], "tag_not_found");
+    assert!(err["error"]
+        .as_str()
+        .unwrap_or("")
+        .contains("no tag named 'nope'"));
+
     for args in [
         &["--json", "merge", "--abort"][..],
         &["--json", "rebase", "--continue"][..],
