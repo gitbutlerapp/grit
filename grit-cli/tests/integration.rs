@@ -597,6 +597,9 @@ mod rm_mv_clean_cli;
 #[cfg(feature = "full-tests")]
 #[path = "serve_bundles_cli.rs"]
 mod serve_bundles_cli;
+#[cfg(unix)]
+#[path = "serve_hook_sigpipe.rs"]
+mod serve_hook_sigpipe;
 #[cfg(feature = "full-tests")]
 #[path = "shallow_maintenance_cli.rs"]
 mod shallow_maintenance_cli;

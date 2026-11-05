@@ -2625,6 +2625,9 @@ fn talks_to_remotes(command: &Command) -> bool {
             | Command::Sync
             | Command::Share { .. }
             | Command::Slice { .. }
+            | Command::Serve { .. }
+            | Command::ReceivePack { .. }
+            | Command::UploadPack { .. }
     )
 }
 
