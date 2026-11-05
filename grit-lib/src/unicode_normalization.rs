@@ -50,13 +50,13 @@ pub fn precompose_utf8_path(path: &str) -> Cow<'_, str> {
     }
 }
 
-/// Probe whether creating a file under `git_dir` with an NFC filename makes the NFD spelling
+/// Whether creating a file under `git_dir` with an NFC filename makes the NFD spelling
 /// visible as the same path (macOS / HFS+ style).
 ///
 /// Matches Git's `probe_utf8_pathname_composition` / `UTF8_NFD_TO_NFC` test prerequisite.
-/// Uses `create_new` like Git's `O_EXCL`: if the probe filename already exists (e.g. copied from
-/// an init template), the probe is skipped and the existing file is left untouched.
-pub fn probe_filesystem_normalizes_nfd_to_nfc(git_dir: &Path) -> std::io::Result<bool> {
+/// Uses `create_new` like Git's `O_EXCL`: if the filename already exists (e.g. copied from
+/// an init template), detection is skipped and the existing file is left untouched.
+pub(crate) fn filesystem_precomposes_unicode(git_dir: &Path) -> std::io::Result<bool> {
     const NFC: &str = "\u{00e4}";
     const NFD: &str = "\u{0061}\u{0308}";
     let nfc_path: PathBuf = git_dir.join(NFC);
@@ -242,7 +242,7 @@ mod tests {
         fs::create_dir_all(&git_dir).expect("mkdir");
         const NFC: &str = "\u{00e4}";
         fs::write(git_dir.join(NFC), b"from-template").expect("template file");
-        assert!(!probe_filesystem_normalizes_nfd_to_nfc(&git_dir).expect("probe"));
+        assert!(!filesystem_precomposes_unicode(&git_dir).expect("detect"));
         assert_eq!(fs::read(git_dir.join(NFC)).expect("read"), b"from-template");
     }
 }

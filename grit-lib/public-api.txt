@@ -2304,9 +2304,74 @@ pub fn grit_lib::config::ident_resolve::resolve_loose_committer_identity_with<E:
 pub fn grit_lib::config::ident_resolve::resolve_name_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
 pub fn grit_lib::config::ident_resolve::resolve_signature_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> core::result::Result<grit_lib::ident::Signature, grit_lib::config::ident_resolve::IdentityError>
 pub mod grit_lib::config::init_filesystem
+#[non_exhaustive] pub enum grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+pub grit_lib::config::init_filesystem::FilesystemCapabilitiesError::Io(core::io::error::Error)
+impl core::convert::From<core::io::error::Error> for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilitiesError::from(core::io::error::Error) -> Self
+impl core::error::Error for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilitiesError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilitiesError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilitiesError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+impl core::marker::Send for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+impl core::marker::Sync for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+impl core::marker::Unpin for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+impl core::marker::UnsafeUnpin for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::config::init_filesystem::FilesystemCapabilitiesError
+#[non_exhaustive] pub enum grit_lib::config::init_filesystem::PrecomposeDetection
+pub grit_lib::config::init_filesystem::PrecomposeDetection::Always
+pub grit_lib::config::init_filesystem::PrecomposeDetection::Platform
+impl core::clone::Clone for grit_lib::config::init_filesystem::PrecomposeDetection
+pub fn grit_lib::config::init_filesystem::PrecomposeDetection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::cmp::PartialEq for grit_lib::config::init_filesystem::PrecomposeDetection
+pub fn grit_lib::config::init_filesystem::PrecomposeDetection::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::config::init_filesystem::PrecomposeDetection
+pub fn grit_lib::config::init_filesystem::PrecomposeDetection::default() -> Self
+impl core::fmt::Debug for grit_lib::config::init_filesystem::PrecomposeDetection
+pub fn grit_lib::config::init_filesystem::PrecomposeDetection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::marker::StructuralPartialEq for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::marker::Freeze for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::marker::Send for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::marker::Sync for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::marker::Unpin for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::marker::UnsafeUnpin for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::init_filesystem::PrecomposeDetection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::init_filesystem::PrecomposeDetection
+#[non_exhaustive] pub struct grit_lib::config::init_filesystem::FilesystemCapabilities
+pub grit_lib::config::init_filesystem::FilesystemCapabilities::case_insensitive: bool
+pub grit_lib::config::init_filesystem::FilesystemCapabilities::precomposes_unicode: bool
+pub grit_lib::config::init_filesystem::FilesystemCapabilities::symlinks: bool
+pub grit_lib::config::init_filesystem::FilesystemCapabilities::trust_filemode: bool
+impl grit_lib::config::init_filesystem::FilesystemCapabilities
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::detect(&std::path::Path) -> grit_lib::config::init_filesystem::FilesystemCapabilitiesResult<Self>
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::detect_case_insensitive(&std::path::Path) -> grit_lib::config::init_filesystem::FilesystemCapabilitiesResult<bool>
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::detect_precomposes_unicode(&std::path::Path) -> grit_lib::config::init_filesystem::FilesystemCapabilitiesResult<bool>
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::detect_symlinks_supported(&std::path::Path) -> grit_lib::config::init_filesystem::FilesystemCapabilitiesResult<bool>
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::detect_trust_filemode(&std::path::Path) -> grit_lib::config::init_filesystem::FilesystemCapabilitiesResult<bool>
+impl core::clone::Clone for grit_lib::config::init_filesystem::FilesystemCapabilities
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::cmp::PartialEq for grit_lib::config::init_filesystem::FilesystemCapabilities
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::config::init_filesystem::FilesystemCapabilities
+pub fn grit_lib::config::init_filesystem::FilesystemCapabilities::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::marker::StructuralPartialEq for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::marker::Freeze for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::marker::Send for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::marker::Sync for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::marker::Unpin for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::marker::UnsafeUnpin for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::init_filesystem::FilesystemCapabilities
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::init_filesystem::FilesystemCapabilities
 pub struct grit_lib::config::init_filesystem::InitFilesystemConfigOptions
-pub grit_lib::config::init_filesystem::InitFilesystemConfigOptions::force_precompose_probe: bool
 pub grit_lib::config::init_filesystem::InitFilesystemConfigOptions::is_reinit: bool
+pub grit_lib::config::init_filesystem::InitFilesystemConfigOptions::precompose_detection: grit_lib::config::init_filesystem::PrecomposeDetection
 impl core::clone::Clone for grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 pub fn grit_lib::config::init_filesystem::InitFilesystemConfigOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::config::init_filesystem::InitFilesystemConfigOptions
@@ -2322,9 +2387,7 @@ impl core::marker::UnsafeUnpin for grit_lib::config::init_filesystem::InitFilesy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 pub fn grit_lib::config::init_filesystem::apply_init_filesystem_config(&std::path::Path, grit_lib::config::init_filesystem::InitFilesystemConfigOptions, &grit_lib::config::environment::Environment) -> grit_lib::error::Result<()>
-pub fn grit_lib::config::init_filesystem::probe_filesystem_case_insensitive(&std::path::Path) -> core::io::error::Result<bool>
-pub fn grit_lib::config::init_filesystem::probe_symlinks_supported(&std::path::Path) -> core::io::error::Result<bool>
-pub fn grit_lib::config::init_filesystem::probe_trust_filemode(&std::path::Path) -> core::io::error::Result<bool>
+pub type grit_lib::config::init_filesystem::FilesystemCapabilitiesResult<T> = core::result::Result<T, grit_lib::config::init_filesystem::FilesystemCapabilitiesError>
 pub mod grit_lib::config::mailmap
 pub struct grit_lib::config::mailmap::MailmapEntry
 pub grit_lib::config::mailmap::MailmapEntry::canonical_email: core::option::Option<alloc::string::String>
@@ -26323,7 +26386,7 @@ impl core::fmt::Debug for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::remote::HttpClientFactory for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
-pub fn grit_lib::remote::DefaultHttpClientFactory::create_for_probe(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
+pub fn grit_lib::remote::DefaultHttpClientFactory::create_for_preflight(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
 impl core::marker::Freeze for grit_lib::remote::DefaultHttpClientFactory
 impl core::marker::Send for grit_lib::remote::DefaultHttpClientFactory
 impl core::marker::Sync for grit_lib::remote::DefaultHttpClientFactory
@@ -26502,10 +26565,10 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::RemoteSummary
 pub const grit_lib::remote::DEFAULT_REMOTE: &str
 pub trait grit_lib::remote::HttpClientFactory: core::marker::Send + core::marker::Sync
 pub fn grit_lib::remote::HttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
-pub fn grit_lib::remote::HttpClientFactory::create_for_probe(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
+pub fn grit_lib::remote::HttpClientFactory::create_for_preflight(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
 impl grit_lib::remote::HttpClientFactory for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
-pub fn grit_lib::remote::DefaultHttpClientFactory::create_for_probe(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
+pub fn grit_lib::remote::DefaultHttpClientFactory::create_for_preflight(&self, &grit_lib::config::ConfigSet) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>>
 pub fn grit_lib::remote::fold_peeled_refs(&[grit_lib::remote::RemoteRef]) -> alloc::vec::Vec<grit_lib::remote::PeeledRemoteRef>
 pub fn grit_lib::remote::inspect_remote(&grit_lib::repo::Repository, &str, &grit_lib::remote::InspectOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::RemoteSummary, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::list_refs_from_git_dir(&std::path::Path, core::option::Option<&grit_lib::objects::odb::Odb>, &grit_lib::remote::ListRefsOptions) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<grit_lib::remote::RemoteRef>>

@@ -1167,7 +1167,7 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
 /// asked for a probe client for the push-plan advertisement and a normal client
 /// for the push, so only the push rejects the refused credential.
 #[test]
-fn custom_factories_build_the_push_plan_probe_with_create_for_probe() {
+fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
     use grit_lib::config::environment::{Environment, RepositoryOptions};
     use grit_lib::remote::push_plan::{load_push_plan_context, open_push_destination};
     use grit_lib::remote::transport::http::HttpClient;
@@ -1202,7 +1202,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_probe() {
                     .with_credential_provider(Box::new(self.provider.clone())),
             ))
         }
-        fn create_for_probe(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+        fn create_for_preflight(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
             self.probes.fetch_add(1, Ordering::SeqCst);
             Ok(Box::new(
                 UreqHttpClient::from_config(config)

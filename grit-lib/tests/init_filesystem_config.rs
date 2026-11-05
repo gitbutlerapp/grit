@@ -4,7 +4,7 @@ use std::fs;
 
 use grit_lib::config::environment::Environment;
 use grit_lib::config::init_filesystem::{
-    apply_init_filesystem_config, InitFilesystemConfigOptions,
+    apply_init_filesystem_config, InitFilesystemConfigOptions, PrecomposeDetection,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;
@@ -22,7 +22,7 @@ fn init_sets_precomposeunicode_when_options_force_probe() {
     apply_init_filesystem_config(
         &td.path().join(".git"),
         InitFilesystemConfigOptions {
-            force_precompose_probe: true,
+            precompose_detection: PrecomposeDetection::Always,
             ..InitFilesystemConfigOptions::default()
         },
         &Environment::empty(),

@@ -1,16 +1,43 @@
 //! Init-time filesystem capability config (issue #916 / #910).
 
-use grit_lib::config::init_filesystem::probe_trust_filemode;
+use grit_lib::config::init_filesystem::FilesystemCapabilities;
 use grit_lib::diff::{diff_index_to_worktree, mode_from_metadata};
 use grit_lib::index::{Index, MODE_EXECUTABLE};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use std::fs;
+use std::process::Command;
 use tempfile::TempDir;
 
+fn config_bool(text: &str, key: &str) -> Option<bool> {
+    let needle = format!("{key} = ");
+    text.lines()
+        .find(|line| line.trim().starts_with(&needle))
+        .map(|line| {
+            let v = line.split('=').nth(1).unwrap_or("").trim();
+            matches!(v, "true" | "yes" | "on" | "1")
+        })
+}
+
+fn git_config_bool(repo: &TempDir, key: &str) -> bool {
+    let out = Command::new("git")
+        .args(["-C", repo.path().to_str().expect("utf8"), "config", key])
+        .output()
+        .expect("git config");
+    assert!(
+        out.status.success(),
+        "git config {key}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    matches!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "true" | "yes" | "on" | "1"
+    )
+}
+
 #[test]
-fn init_writes_probed_filemode() {
+fn init_writes_detected_filemode() {
     let root = TempDir::new().expect("tempdir");
     Repository::init(
         root.path(),
@@ -20,17 +47,47 @@ fn init_writes_probed_filemode() {
     )
     .expect("init");
     let git_dir = root.path().join(".git");
-    let probed = probe_trust_filemode(&git_dir).expect("probe");
+    let detected = FilesystemCapabilities::detect_trust_filemode(&git_dir).expect("detect");
     let text = fs::read_to_string(git_dir.join("config")).expect("config");
-    let expected = if probed {
-        "filemode = true"
-    } else {
-        "filemode = false"
-    };
-    assert!(
-        text.contains(expected),
-        "config must match probe_trust_filemode ({probed}):\n{text}"
+    assert_eq!(
+        config_bool(&text, "filemode"),
+        Some(detected),
+        "config must match detect_trust_filemode ({detected}):\n{text}"
     );
+    assert_eq!(git_config_bool(&root, "core.filemode"), detected);
+}
+
+#[test]
+fn init_config_matches_full_capability_detection() {
+    let root = TempDir::new().expect("tempdir");
+    Repository::init(
+        root.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+    )
+    .expect("init");
+    let git_dir = root.path().join(".git");
+    let caps = FilesystemCapabilities::detect(&git_dir).expect("detect");
+    let text = fs::read_to_string(git_dir.join("config")).expect("config");
+
+    assert_eq!(config_bool(&text, "filemode"), Some(caps.trust_filemode));
+    assert_eq!(git_config_bool(&root, "core.filemode"), caps.trust_filemode);
+
+    if text.contains("symlinks = false") {
+        assert!(!caps.symlinks);
+        assert!(!git_config_bool(&root, "core.symlinks"));
+    }
+
+    if text.contains("ignorecase = true") {
+        assert!(caps.case_insensitive);
+        assert!(git_config_bool(&root, "core.ignorecase"));
+    }
+
+    if text.contains("precomposeunicode = true") {
+        assert!(caps.precomposes_unicode);
+        assert!(git_config_bool(&root, "core.precomposeunicode"));
+    }
 }
 
 #[test]
@@ -69,21 +126,21 @@ fn filemode_false_suppresses_executable_mode_only_diff() {
 }
 
 #[test]
-fn probe_filemode_is_consistent_on_repeat() {
+fn trust_filemode_detection_is_consistent_on_repeat() {
     let td = TempDir::new().expect("tempdir");
     let git_dir = td.path().join(".git");
     fs::create_dir_all(&git_dir).expect("mkdir");
     fs::write(git_dir.join("config"), "[core]\n").expect("config");
-    let first = probe_trust_filemode(&git_dir).expect("probe");
-    let second = probe_trust_filemode(&git_dir).expect("probe");
+    let first = FilesystemCapabilities::detect_trust_filemode(&git_dir).expect("detect");
+    let second = FilesystemCapabilities::detect_trust_filemode(&git_dir).expect("detect");
     assert_eq!(
         first, second,
-        "probe must be deterministic for the same git directory"
+        "detection must be deterministic for the same git directory"
     );
 }
 
 #[test]
-fn init_local_filemode_follows_probe_not_global() {
+fn init_local_filemode_follows_detection_not_global() {
     let global = TempDir::new().expect("global config dir");
     fs::write(global.path().join("config"), "[core]\n\tfilemode = false\n").expect("global config");
 
@@ -104,16 +161,12 @@ fn init_local_filemode_follows_probe_not_global() {
     std::env::remove_var("GIT_CONFIG_SYSTEM");
 
     let git_dir = root.path().join(".git");
-    let probed = probe_trust_filemode(&git_dir).expect("probe");
+    let detected = FilesystemCapabilities::detect_trust_filemode(&git_dir).expect("detect");
     let text = fs::read_to_string(git_dir.join("config")).expect("config");
-    let expected = if probed {
-        "filemode = true"
-    } else {
-        "filemode = false"
-    };
-    assert!(
-        text.contains(expected),
-        "local init must write probed filemode even when global disables it:\n{text}"
+    assert_eq!(
+        config_bool(&text, "filemode"),
+        Some(detected),
+        "local init must write detected filemode even when global disables it:\n{text}"
     );
 }
 

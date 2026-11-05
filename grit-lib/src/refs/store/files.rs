@@ -170,8 +170,10 @@ impl FilesRefStore {
                     return cfg.ignore_case();
                 }
             }
-            crate::init_filesystem::probe_filesystem_case_insensitive(&self.common_dir)
-                .unwrap_or(false)
+            crate::init_filesystem::FilesystemCapabilities::detect_case_insensitive(
+                &self.common_dir,
+            )
+            .unwrap_or(false)
         })
     }
 

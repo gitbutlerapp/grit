@@ -743,6 +743,8 @@ mod files_store_review_fixes;
 #[cfg(feature = "full-tests")]
 #[path = "files_store_win32_reserved_refs.rs"]
 mod files_store_win32_reserved_refs;
+#[path = "filesystem_capabilities_public_coverage.rs"]
+mod filesystem_capabilities_public_coverage;
 #[cfg(feature = "full-tests")]
 #[path = "filter_required_git_compat.rs"]
 mod filter_required_git_compat;

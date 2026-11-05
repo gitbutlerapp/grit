@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::parse_config_parameters;
 use crate::environment::Environment;
-use crate::unicode_normalization::probe_filesystem_normalizes_nfd_to_nfc;
+use crate::init_filesystem::FilesystemCapabilities;
 
 fn parse_ceiling_directories_paths(env: &Environment) -> Vec<PathBuf> {
     let Some(raw) = env.git_ceiling_directories.as_deref() else {
@@ -218,7 +218,7 @@ pub fn effective_core_precomposeunicode_with_config(
 /// passed when the FS does not alias.
 #[must_use]
 pub fn filesystem_nfd_nfc_aliases(git_dir: &Path) -> bool {
-    probe_filesystem_normalizes_nfd_to_nfc(git_dir).unwrap_or(false)
+    FilesystemCapabilities::detect_precomposes_unicode(git_dir).unwrap_or(false)
 }
 
 /// NFC-normalize command-line path arguments (Git's `precompose_argv_prefix`).

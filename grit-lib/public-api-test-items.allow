@@ -1,16 +1,6 @@
 grit_lib::config::environment::Environment::git_test_no_write_rev_index
 grit_lib::config::environment::Environment::git_test_reftable_autocompaction
 grit_lib::config::environment::Environment::git_test_utf8_nfd_to_nfc
-grit_lib::config::init_filesystem::InitFilesystemConfigOptions::force_precompose_probe
-grit_lib::config::init_filesystem::probe_filesystem_case_insensitive
-grit_lib::config::init_filesystem::probe_symlinks_supported
-grit_lib::config::init_filesystem::probe_trust_filemode
-grit_lib::init_filesystem::InitFilesystemConfigOptions::force_precompose_probe
-grit_lib::init_filesystem::probe_filesystem_case_insensitive
-grit_lib::init_filesystem::probe_symlinks_supported
-grit_lib::init_filesystem::probe_trust_filemode
 grit_lib::prelude::Environment::git_test_no_write_rev_index
 grit_lib::prelude::Environment::git_test_reftable_autocompaction
 grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc
-grit_lib::remote::DefaultHttpClientFactory::create_for_probe
-grit_lib::remote::HttpClientFactory::create_for_probe

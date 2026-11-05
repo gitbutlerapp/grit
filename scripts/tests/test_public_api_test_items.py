@@ -31,6 +31,13 @@ class PublicApiTestItemWordSplitterTests(unittest.TestCase):
     def test_bench_fixture_matches(self) -> None:
         self.assertTrue(pa.path_violates_test_item_rule("grit_lib::bench_fixture"))
 
+    def test_create_for_preflight_does_not_match(self) -> None:
+        self.assertFalse(
+            pa.path_violates_test_item_rule(
+                "grit_lib::remote::HttpClientFactory::create_for_preflight"
+            )
+        )
+
     def test_create_for_probe_matches(self) -> None:
         self.assertTrue(
             pa.path_violates_test_item_rule(

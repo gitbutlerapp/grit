@@ -63,7 +63,7 @@ impl HttpClientFactory for NoHttp {
         Err(RemoteError::UnsupportedScheme)
     }
 
-    fn create_for_probe(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create_for_preflight(&self, _: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
         Err(RemoteError::UnsupportedScheme)
     }
 }

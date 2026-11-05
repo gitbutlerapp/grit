@@ -366,6 +366,7 @@ required-features = ["full-tests"]
 [[test]]
 name = "init_filesystem_capabilities"
 path = "tests/init_filesystem_capabilities.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "matrix_credentials"

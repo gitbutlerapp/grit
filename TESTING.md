@@ -147,6 +147,8 @@ cargo test -p grit-lib --features http-ureq --test matrix_credentials
 
 Add `-- --nocapture` and look for `SKIP:` lines to confirm nothing was skipped.
 
+Init-time filesystem capability detection is covered by [`grit-lib/tests/init_filesystem_capabilities.rs`](grit-lib/tests/init_filesystem_capabilities.rs) (`full-tests`, separate `[[test]]` target because it compares grit init config with system `git config`). It exercises [`FilesystemCapabilities`](grit-lib/src/init_filesystem.rs) against the `core.filemode`, `core.symlinks`, `core.ignorecase`, and `core.precomposeunicode` values grit writes.
+
 ### Parser fuzzing (`grit-lib/fuzz`)
 
 `grit-lib/fuzz/` is a **standalone** `cargo-fuzz` crate (not a workspace member; **nightly Rust only**). It exercises parser entry points in [`grit_lib::fuzz`](grit-lib/src/fuzz/mod.rs) for trees, commits, tags, the index, pkt-lines, protocol v2 responses, config, refspecs, ref names, transport URLs, dates, pack `.idx` files, and `packed-refs`.

@@ -315,19 +315,19 @@ pub trait HttpClientFactory: Send + Sync {
     /// # Errors
     ///
     /// Returns an error when the client cannot be constructed.
-    fn create_for_probe(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>>;
+    fn create_for_preflight(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>>;
 }
 
-/// An [`HttpClientFactory`] whose clients are all [probes](HttpClientFactory::create_for_probe)
+/// An [`HttpClientFactory`] whose clients are all [preflight clients](HttpClientFactory::create_for_preflight)
 /// of the factory a request would otherwise use (the caller's, or the default one).
-pub(crate) struct ProbeHttpClientFactory<'a> {
+pub(crate) struct PreflightHttpClientFactory<'a> {
     inner: Option<&'a dyn HttpClientFactory>,
     #[cfg(feature = "http-ureq")]
     default: DefaultHttpClientFactory,
 }
 
-impl<'a> ProbeHttpClientFactory<'a> {
-    /// Probes of `inner`, or of the default factory for `repo` when there is none.
+impl<'a> PreflightHttpClientFactory<'a> {
+    /// Preflight clients for `inner`, or for the default factory for `repo` when there is none.
     pub(crate) fn new(inner: Option<&'a dyn HttpClientFactory>, repo: &Repository) -> Self {
         #[cfg(not(feature = "http-ureq"))]
         let _ = repo;
@@ -339,14 +339,14 @@ impl<'a> ProbeHttpClientFactory<'a> {
     }
 }
 
-impl HttpClientFactory for ProbeHttpClientFactory<'_> {
+impl HttpClientFactory for PreflightHttpClientFactory<'_> {
     fn create(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
         if let Some(inner) = self.inner {
-            return inner.create_for_probe(config);
+            return inner.create_for_preflight(config);
         }
         #[cfg(feature = "http-ureq")]
         {
-            self.default.create_for_probe(config)
+            self.default.create_for_preflight(config)
         }
         #[cfg(not(feature = "http-ureq"))]
         {
@@ -355,7 +355,7 @@ impl HttpClientFactory for ProbeHttpClientFactory<'_> {
         }
     }
 
-    fn create_for_probe(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create_for_preflight(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
         self.create(config)
     }
 }
@@ -440,7 +440,7 @@ impl HttpClientFactory for DefaultHttpClientFactory {
         self.client(config, Box::new(self.credential_provider(config)))
     }
 
-    fn create_for_probe(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
+    fn create_for_preflight(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
         self.client(
             config,
             Box::new(KeepRejectedCredentials(self.credential_provider(config))),
@@ -671,7 +671,7 @@ impl Remote {
     /// - `cancel`: checked while the bundle is downloaded and unpacked; a
     ///   cancelled seed comes back as `Failed`, so callers check `cancel` again.
     /// - `http_factory`: builds the HTTP client, as for [`Self::fetch`]. Seeding is
-    ///   best-effort, so it uses a [probe client](HttpClientFactory::create_for_probe):
+    ///   best-effort, so it uses a [preflight client](HttpClientFactory::create_for_preflight):
     ///   credentials the server refuses stay stored for the fetch that follows to
     ///   report.
     #[must_use]
@@ -694,7 +694,7 @@ impl Remote {
         if !enabled {
             return BundleSeed::NotOffered;
         }
-        let probe = ProbeHttpClientFactory::new(http_factory, repo);
+        let probe = PreflightHttpClientFactory::new(http_factory, repo);
         let client = match http_client(Some(&probe), repo) {
             Ok(c) => c,
             Err(e) => {
