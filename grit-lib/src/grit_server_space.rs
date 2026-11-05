@@ -56,7 +56,7 @@ pub struct Space {
     #[serde(default)]
     pub followed: Vec<String>,
     /// Branches of the space shared with other users
-    /// ([`crate::grit_server_share`]): each member's head is theirs alone, so
+    /// ([`crate::remote::grit_server_share`]): each member's head is theirs alone, so
     /// a push replaces it without `--force`, and the other members' heads
     /// are fetched from `refs/shared/<branch>/<user>`.
     #[serde(default)]
