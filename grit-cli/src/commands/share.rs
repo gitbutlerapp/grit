@@ -83,6 +83,22 @@ pub struct DivergenceChangeJson {
     pub paths: Vec<String>,
 }
 
+/// One way out of a divergence.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ResolveOptionJson {
+    /// Its stable id: `combine`, `keep_mine`, `keep_theirs`, `keep_both`,
+    /// `keep_amended`, `drop`, `my_order`, `their_order`, `my_split`,
+    /// `their_split`, `restore` or `resolve`.
+    pub id: String,
+    /// What it does.
+    pub label: String,
+    /// What it leaves out (kept in the share's log), or `null` when it keeps
+    /// every change: such an option is safe to choose without asking.
+    pub loses: Option<String>,
+    /// The command that applies it.
+    pub command: String,
+}
+
 /// How another member's head diverged from yours
 /// ([`grit_lib::divergence`]).
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -107,11 +123,36 @@ pub struct DivergenceJson {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub also: Vec<String>,
+    /// The ways out, the recommended one first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub options: Vec<ResolveOptionJson>,
 }
 
 impl DivergenceJson {
-    pub(crate) fn from_divergence(d: &grit_lib::divergence::Divergence, them: &str) -> Self {
+    pub(crate) fn from_divergence(
+        d: &grit_lib::divergence::Divergence,
+        them: &str,
+        branch: &str,
+        remote: &str,
+    ) -> Self {
+        let options = d
+            .options(them)
+            .into_iter()
+            .map(|o| ResolveOptionJson {
+                id: o.choice.id().to_owned(),
+                label: o.label,
+                loses: o.loses,
+                command: match o.choice {
+                    grit_lib::divergence::Choice::Resolve => {
+                        format!("grit rebase {remote}/shared/{branch}/{them}")
+                    }
+                    choice => format!("grit share resolve {branch} {} --with {them}", choice.id()),
+                },
+            })
+            .collect();
         Self {
+            options,
             scenario: d.scenario.code().to_owned(),
             summary: d.summary(them),
             needs_decision: d.scenario.needs_decision(),
@@ -157,11 +198,28 @@ impl DivergenceJson {
                 c.subject
             );
         }
-        if self.needs_decision {
-            outln!(
-                w,
-                "{indent}  Someone has to decide what to do: nothing is lost either way, since every head stays in the share's log."
-            );
+        if !self.options.is_empty() {
+            outln!(w, "{indent}  options");
+            let width = self
+                .options
+                .iter()
+                .map(|o| o.label.len())
+                .max()
+                .unwrap_or(0);
+            for (i, o) in self.options.iter().enumerate() {
+                let loses = o
+                    .loses
+                    .as_deref()
+                    .map(|l| format!("  (leaves out {l})"))
+                    .unwrap_or_default();
+                outln!(
+                    w,
+                    "{indent}    {}  {:<width$}  {}{loses}",
+                    i + 1,
+                    o.label,
+                    o.command
+                );
+            }
         }
         Ok(())
     }
@@ -192,6 +250,25 @@ impl DivergenceJson {
             let paths: Vec<String> = self.conflicts.iter().map(|p| format!("`{p}`")).collect();
             outln!(w, "{indent}  - Conflicts in {}", paths.join(", "));
         }
+        if !self.options.is_empty() {
+            outln!(w);
+            outln!(
+                w,
+                "{indent}| Option | What it does | Leaves out | Command |"
+            );
+            outln!(w, "{indent}| --- | --- | --- | --- |");
+            for (i, o) in self.options.iter().enumerate() {
+                let recommended = if i == 0 { " (recommended)" } else { "" };
+                outln!(
+                    w,
+                    "{indent}| `{}`{recommended} | {} | {} | `{}` |",
+                    o.id,
+                    o.label,
+                    o.loses.as_deref().unwrap_or("nothing"),
+                    o.command
+                );
+            }
+        }
         Ok(())
     }
 }
@@ -207,6 +284,21 @@ pub(crate) fn explain(
     ours: ObjectId,
     theirs: ObjectId,
 ) -> Option<DivergenceJson> {
+    let (floor, base) = comparison(repo, remote, branch, user, ours, theirs)?;
+    let d = grit_lib::divergence::classify(repo, &floor, base, ours, theirs).ok()?;
+    Some(DivergenceJson::from_divergence(&d, user, branch, remote))
+}
+
+/// What comparing two heads needs: the floor (the base branch's commits)
+/// and the last head both had.
+pub(crate) fn comparison(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+    user: &str,
+    ours: ObjectId,
+    theirs: ObjectId,
+) -> Option<(Vec<ObjectId>, Option<ObjectId>)> {
     let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true).ok()?;
     let mut floor = Vec::new();
     if let Some(base) = config.get(&format!("branch.{branch}.sharedBase")) {
@@ -227,8 +319,87 @@ pub(crate) fn explain(
     let theirs_seen = seen(&format!("refs/remotes/{remote}/shared/{branch}/{user}"));
     let base =
         grit_lib::divergence::common_base(repo, ours, theirs, &ours_seen, &theirs_seen).ok()?;
+    Some((floor, base))
+}
+
+/// Put your branch and `user`'s head back together as `choice` says,
+/// without moving anything: the new head, or why not.
+pub(crate) fn put_together(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+    user: &str,
+    ours: ObjectId,
+    theirs: ObjectId,
+    choice: grit_lib::divergence::Choice,
+) -> Result<std::result::Result<ObjectId, String>> {
+    let (floor, base) =
+        comparison(repo, remote, branch, user, ours, theirs).context("comparing the two heads")?;
+    let made = grit_lib::divergence::combine(repo, &floor, base, ours, theirs, choice)
+        .context("putting the two heads together")?;
+    Ok(match made.head {
+        Some(head) => Ok(head),
+        None => Err(format!(
+            "{} conflicts in {}",
+            made.stopped_at
+                .map(|s| format!("\"{s}\""))
+                .unwrap_or_else(|| "a commit".to_owned()),
+            made.conflicts.join(", ")
+        )),
+    })
+}
+
+/// Move your `branch` to `head`. When it is checked out, the working tree
+/// follows, keeping local changes (`grit reset --keep`, which refuses
+/// rather than overwrite them).
+pub(crate) fn move_branch(repo: &Repository, branch: &str, head: ObjectId) -> Result<()> {
+    let checked_out = matches!(
+        grit_lib::state::resolve_head_for_repository(repo),
+        Ok(grit_lib::state::HeadState::Branch { short_name, .. }) if short_name == branch
+    );
+    if checked_out {
+        crate::commands::reset::run(Some(head.to_hex()), false, false, false, true, false, None)
+            .with_context(|| format!("moving {branch} (it is checked out)"))?;
+    } else {
+        grit_lib::refs::write_ref(repo.git_dir(), &format!("refs/heads/{branch}"), &head)
+            .with_context(|| format!("moving {branch}"))?;
+    }
+    Ok(())
+}
+
+/// When `user`'s head and yours can be put together without losing
+/// anything, and that changes yours, do it: the new head of your branch.
+pub(crate) fn auto_combine(
+    repo: &Repository,
+    remote: &str,
+    branch: &str,
+    user: &str,
+    ours: ObjectId,
+    theirs: ObjectId,
+) -> Option<ObjectId> {
+    let (floor, base) = comparison(repo, remote, branch, user, ours, theirs)?;
     let d = grit_lib::divergence::classify(repo, &floor, base, ours, theirs).ok()?;
-    Some(DivergenceJson::from_divergence(&d, user))
+    if !d.scenario.diverged() || d.scenario.needs_decision() {
+        return None;
+    }
+    let head = put_together(
+        repo,
+        remote,
+        branch,
+        user,
+        ours,
+        theirs,
+        grit_lib::divergence::Choice::Combine,
+    )
+    .ok()?
+    .ok()?;
+    // Yours already has everything theirs does: nothing to do here; they
+    // take yours when they sync.
+    if head == ours {
+        return None;
+    }
+    move_branch(repo, branch, head).ok()?;
+    Some(head)
 }
 
 /// A member of a share, as `grit share` reports it.
@@ -667,6 +838,243 @@ pub fn revoke(branch: &str, link: &str) -> Result<ShareOutcome> {
         },
     )?;
     Ok(outcome(&here, "revoke", reply, false))
+}
+
+/// Result of `grit share resolve`.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ShareResolveOutcome {
+    /// The shared branch.
+    pub branch: String,
+    /// The member whose head yours was put together with.
+    pub with: String,
+    /// What the two heads added up to, before.
+    pub scenario: String,
+    /// What happened, in a sentence.
+    pub summary: String,
+    /// The option applied, or omitted when none was (a decision is needed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
+    /// Your head before.
+    pub previous: String,
+    /// Your head afterwards, when it moved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub head: Option<String>,
+    /// Whether your head was pushed.
+    pub pushed: bool,
+    /// What to run next, when the option is done by hand.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+    /// The ways out, when a decision is needed and none was chosen.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub options: Vec<ResolveOptionJson>,
+}
+
+impl ShareResolveOutcome {
+    /// Whether a decision is still needed: nothing was chosen.
+    pub fn needs_decision(&self) -> bool {
+        self.option.is_none() && !self.options.is_empty()
+    }
+}
+
+/// `grit share resolve`.
+pub fn resolve(
+    branch: &str,
+    option: Option<&str>,
+    with: Option<&str>,
+    mode: OutputMode,
+) -> Result<ShareResolveOutcome> {
+    let here = here()?;
+    fetch(&here.remote, mode)?;
+    let Some(ours) = tips(&here.repo, "refs/heads/")?.get(branch).copied() else {
+        bail!("there is no branch {branch} here");
+    };
+    let heads = crate::commands::sync::shared_heads(&here.repo, &here.remote, branch)?;
+    if heads.is_empty() {
+        bail!("{branch} isn't shared here, or nobody else has pushed a head of it yet");
+    }
+    let diverged: Vec<(String, ObjectId)> = heads
+        .into_iter()
+        .filter(|(user, tip)| {
+            with.is_none_or(|w| w == user)
+                && compare(&here.repo, Some(ours), *tip) == HeadRelation::Diverged
+        })
+        .collect();
+    let (user, theirs) = match (diverged.as_slice(), with) {
+        ([one], _) => one.clone(),
+        ([], Some(w)) => {
+            bail!("{w}'s head of {branch} hasn't diverged from yours: `grit sync` brings it in")
+        }
+        ([], None) => {
+            bail!("nobody's head of {branch} has diverged from yours: `grit sync` brings theirs in")
+        }
+        (many, None) => bail!(
+            "several heads of {branch} diverged from yours ({}): name one with --with <user>",
+            many.iter()
+                .map(|(u, _)| u.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+        (_, Some(w)) => bail!("{w} isn't on {branch}"),
+    };
+    let report = explain(&here.repo, &here.remote, branch, &user, ours, theirs)
+        .context("comparing the two heads")?;
+    let mut outcome = ShareResolveOutcome {
+        branch: branch.to_owned(),
+        with: user.clone(),
+        scenario: report.scenario.clone(),
+        summary: report.summary.clone(),
+        option: None,
+        previous: ours.to_hex(),
+        head: None,
+        pushed: false,
+        next: None,
+        options: Vec::new(),
+    };
+    let chosen = match option {
+        Some(id) => id.to_owned(),
+        None if !report.needs_decision => "combine".to_owned(),
+        None => {
+            outcome.options = report.options;
+            return Ok(outcome);
+        }
+    };
+    let Some(choice) = grit_lib::divergence::Choice::parse(&chosen) else {
+        let ids: Vec<&str> = report.options.iter().map(|o| o.id.as_str()).collect();
+        bail!(
+            "{chosen:?} isn't an option here; choose one of: {}",
+            ids.join(", ")
+        );
+    };
+    if !report.options.iter().any(|o| o.id == chosen) {
+        let ids: Vec<&str> = report.options.iter().map(|o| o.id.as_str()).collect();
+        bail!(
+            "{chosen} isn't an option for {} ({}); choose one of: {}",
+            report.scenario,
+            report.summary,
+            ids.join(", ")
+        );
+    }
+    outcome.option = Some(chosen);
+    if choice == grit_lib::divergence::Choice::Resolve {
+        outcome.next = Some(format!(
+            "grit rebase {}/shared/{branch}/{user}, settle the conflicts and `grit rebase --continue`, then `grit push`",
+            here.remote
+        ));
+        return Ok(outcome);
+    }
+    let head = match put_together(&here.repo, &here.remote, branch, &user, ours, theirs, choice)? {
+        Ok(head) => head,
+        Err(why) => bail!(
+            "{why}: choose another option, or resolve it by hand with `grit share resolve {branch} resolve --with {user}`"
+        ),
+    };
+    if head != ours {
+        move_branch(&here.repo, branch, head)?;
+    }
+    outcome.head = Some(head.to_hex());
+    if let Some(Some(why)) = push(&here.remote, &[branch.to_owned()], mode)?.get(branch) {
+        bail!(
+            "{branch} is at {} here, but pushing it was refused: {why}",
+            short_hex(&head.to_hex())
+        );
+    }
+    outcome.pushed = true;
+    Ok(outcome)
+}
+
+impl HumanRender for ShareResolveOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "{} ({})", self.summary, self.scenario);
+        match (&self.option, &self.head) {
+            (None, _) => {
+                outln!(w, "! Choose what to do:");
+                let width = self
+                    .options
+                    .iter()
+                    .map(|o| o.label.len())
+                    .max()
+                    .unwrap_or(0);
+                for (i, o) in self.options.iter().enumerate() {
+                    let loses = o
+                        .loses
+                        .as_deref()
+                        .map(|l| format!("  (leaves out {l})"))
+                        .unwrap_or_default();
+                    outln!(w, "  {}  {:<width$}  {}{loses}", i + 1, o.label, o.command);
+                }
+            }
+            (Some(option), Some(head)) => {
+                let moved = if *head == self.previous {
+                    format!("{} stays at {}", self.branch, short_hex(head))
+                } else {
+                    format!(
+                        "{} {} → {}",
+                        self.branch,
+                        short_hex(&self.previous),
+                        short_hex(head)
+                    )
+                };
+                outln!(w, "✓ {option} with {}'s head: {moved}", self.with);
+                if self.pushed {
+                    outln!(w, "✓ pushed your head");
+                }
+            }
+            (Some(option), None) => {
+                outln!(
+                    w,
+                    "· {option}: {}",
+                    self.next.as_deref().unwrap_or_default()
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for ShareResolveOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        outln!(w, "## Resolve `{}` with `{}`", self.branch, self.with);
+        outln!(w);
+        outln!(w, "**Scenario:** `{}`. {}", self.scenario, self.summary);
+        outln!(w);
+        match (&self.option, &self.head) {
+            (None, _) => {
+                outln!(w, "| Option | What it does | Leaves out | Command |");
+                outln!(w, "| --- | --- | --- | --- |");
+                for (i, o) in self.options.iter().enumerate() {
+                    let recommended = if i == 0 { " (recommended)" } else { "" };
+                    outln!(
+                        w,
+                        "| `{}`{recommended} | {} | {} | `{}` |",
+                        o.id,
+                        o.label,
+                        o.loses.as_deref().unwrap_or("nothing"),
+                        o.command
+                    );
+                }
+                outln!(w);
+                outln!(w, "Exit status 3: a decision is needed.");
+            }
+            (Some(option), Some(head)) => {
+                outln!(
+                    w,
+                    "Applied `{option}`: `{}` is now `{}`{}.",
+                    self.branch,
+                    short_hex(head),
+                    if self.pushed { ", pushed" } else { "" }
+                );
+            }
+            (Some(option), None) => {
+                outln!(
+                    w,
+                    "`{option}` is done by hand: {}",
+                    self.next.as_deref().unwrap_or_default()
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// `grit share accept`.

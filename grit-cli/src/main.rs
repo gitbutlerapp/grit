@@ -838,6 +838,17 @@ enum ShareAction {
         /// The shared branch.
         branch: String,
     },
+    /// Put your head and another member's back together after they diverged.
+    Resolve {
+        /// The shared branch.
+        branch: String,
+        /// The option to apply, such as `combine` or `keep_both` (default: `combine`,
+        /// when nothing would be lost; otherwise the options are listed).
+        option: Option<String>,
+        /// The member whose head to resolve with (needed when several diverged).
+        #[arg(long, value_name = "USER")]
+        with: Option<String>,
+    },
     /// Revoke a share link.
     Revoke {
         /// The shared branch.
@@ -2898,6 +2909,21 @@ fn dispatch(
             ),
             ShareAction::Leave { branch } => {
                 emit_success(commands::share::leave(&branch, opts.mode)?, opts, ctx)
+            }
+            ShareAction::Resolve {
+                branch,
+                option,
+                with,
+            } => {
+                let outcome = commands::share::resolve(
+                    &branch,
+                    option.as_deref(),
+                    with.as_deref(),
+                    opts.mode,
+                )?;
+                let status = ExitStatus::from_shared(false, outcome.needs_decision());
+                emit_success(outcome, opts, ctx)?;
+                Ok(status)
             }
             ShareAction::Revoke { branch, link } => {
                 emit_success(commands::share::revoke(&branch, &link)?, opts, ctx)

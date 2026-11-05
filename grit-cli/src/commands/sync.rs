@@ -691,6 +691,30 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
                 pulled_from = Some(user.clone());
             }
         }
+        // A head that diverged from yours, but goes together with it
+        // without losing anything: combine them, and push the result.
+        let mut combined_with = Vec::new();
+        if is_shared {
+            for (user, tip) in shared_heads(&repo, &setup.remote, name)? {
+                let Some(mine) = ours else { break };
+                if crate::commands::share::compare(&repo, Some(mine), tip)
+                    != crate::commands::share::HeadRelation::Diverged
+                {
+                    continue;
+                }
+                if let Some(head) = crate::commands::share::auto_combine(
+                    &repo,
+                    &setup.remote,
+                    name,
+                    &user,
+                    mine,
+                    tip,
+                ) {
+                    ours = Some(head);
+                    combined_with.push(user);
+                }
+            }
+        }
         let action = match (ours, theirs) {
             (Some(ours), None) if merged(ours) => continue,
             (None, Some(theirs)) if merged(theirs) => continue,
@@ -728,6 +752,10 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
             (None, None) => continue,
         };
         let message = match (action, &pulled_from) {
+            _ if !combined_with.is_empty() => Some(format!(
+                "combined with {}'s head, which went together with yours without losing anything",
+                combined_with.join("'s and ")
+            )),
             (SyncAction::Diverged, _) => Some(format!(
                 "{name} and {}/{name} each have commits the other lacks: switch to it and run `grit pull --rebase`, then sync again",
                 setup.remote

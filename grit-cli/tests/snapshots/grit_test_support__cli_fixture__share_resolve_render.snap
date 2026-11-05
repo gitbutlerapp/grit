@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs. (amended_both_conflicting)\n! Choose what to do:\n  1  keep both: carol's version, then yours as a commit on top    grit share resolve pairing keep_both --with carol\n  2  rebase onto carol's head and resolve the conflicts yourself  grit rebase origin/shared/pairing/carol\n  3  keep yours                                                   grit share resolve pairing keep_mine --with carol  (leaves out carol's changes since you last agreed)\n  4  keep carol's                                                 grit share resolve pairing keep_theirs --with carol  (leaves out your changes since you last agreed)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"pairing\",\"with\":\"carol\",\"scenario\":\"amended_both_conflicting\",\"summary\":\"You and carol both amended \\\"Add the history RPC\\\", and the edits overlap in src/rpc.rs.\",\"previous\":\"538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8\",\"pushed\":false,\"options\":[{\"id\":\"keep_both\",\"label\":\"keep both: carol's version, then yours as a commit on top\",\"loses\":null,\"command\":\"grit share resolve pairing keep_both --with carol\"},{\"id\":\"resolve\",\"label\":\"rebase onto carol's head and resolve the conflicts yourself\",\"loses\":null,\"command\":\"grit rebase origin/shared/pairing/carol\"},{\"id\":\"keep_mine\",\"label\":\"keep yours\",\"loses\":\"carol's changes since you last agreed\",\"command\":\"grit share resolve pairing keep_mine --with carol\"},{\"id\":\"keep_theirs\",\"label\":\"keep carol's\",\"loses\":\"your changes since you last agreed\",\"command\":\"grit share resolve pairing keep_theirs --with carol\"}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Resolve `pairing` with `carol`\n\n**Scenario:** `amended_both_conflicting`. You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs.\n\n| Option | What it does | Leaves out | Command |\n| --- | --- | --- | --- |\n| `keep_both` (recommended) | keep both: carol's version, then yours as a commit on top | nothing | `grit share resolve pairing keep_both --with carol` |\n| `resolve` | rebase onto carol's head and resolve the conflicts yourself | nothing | `grit rebase origin/shared/pairing/carol` |\n| `keep_mine` | keep yours | carol's changes since you last agreed | `grit share resolve pairing keep_mine --with carol` |\n| `keep_theirs` | keep carol's | your changes since you last agreed | `grit share resolve pairing keep_theirs --with carol` |\n\nExit status 3: a decision is needed.\n",
+    "stderr": ""
+  }
+}
