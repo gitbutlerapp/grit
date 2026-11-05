@@ -2,6 +2,3 @@ grit_lib::init_filesystem::InitFilesystemConfigOptions::force_precompose_probe
 grit_lib::init_filesystem::probe_filesystem_case_insensitive
 grit_lib::init_filesystem::probe_symlinks_supported
 grit_lib::init_filesystem::probe_trust_filemode
-grit_lib::repo::set_test_inject_index_write_fail
-grit_lib::repo::set_test_inject_index_write_fail_remaining
-grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs
