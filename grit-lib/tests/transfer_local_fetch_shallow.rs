@@ -427,3 +427,111 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
         git(&client, &["fsck", "--strict"]);
     }
 }
+
+fn count_pack_files(git_dir: &Path) -> usize {
+    std::fs::read_dir(git_dir.join("objects/pack"))
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+/// Shallow local fetch then `--unshallow` over a repacked multi-commit remote with on-disk
+/// deltas must transfer history, stay fsck-clean, and match system `git`.
+#[test]
+fn unshallow_from_repacked_remote_with_deltas_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote_wt = tmp.path().join("remote-wt");
+    std::fs::create_dir_all(&remote_wt).unwrap();
+    git(&remote_wt, &["init", "-q", "-b", "main", "."]);
+    for i in 0..8 {
+        let mut body = String::from("shared prefix for delta reuse\n");
+        body.push_str(&"x".repeat(2048));
+        body.push_str(&format!("-{i}\n"));
+        std::fs::write(remote_wt.join("blob.txt"), body).unwrap();
+        git(&remote_wt, &["add", "blob.txt"]);
+        git(
+            &remote_wt,
+            &["commit", "-qm", &format!("similar blobs {i}")],
+        );
+    }
+    git(
+        &remote_wt,
+        &[
+            "repack",
+            "-q",
+            "-a",
+            "-d",
+            "-f",
+            "--window=10",
+            "--depth=50",
+        ],
+    );
+    let remote_git = remote_wt.join(".git");
+    assert_eq!(
+        git(&remote_wt, &["rev-list", "--count", "HEAD"]).trim(),
+        "8",
+        "fixture must have eight commits"
+    );
+
+    let shallow = tmp.path().join("shallow");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            &format!("file://{}", remote_git.display()),
+            shallow.to_str().unwrap(),
+        ],
+    );
+    let shallow_git = shallow.join(".git");
+    assert!(shallow_git.join("shallow").is_file());
+    assert_eq!(git(&shallow, &["rev-list", "--count", "HEAD"]).trim(), "1");
+    let packs_before = count_pack_files(&shallow_git);
+
+    let comparison = tmp.path().join("comparison");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            &format!("file://{}", remote_git.display()),
+            comparison.to_str().unwrap(),
+        ],
+    );
+    git(&comparison, &["fetch", "--unshallow"]);
+
+    let mut fetch_opts = FetchOptions::new();
+    fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+    fetch_opts.fetch_depth = Some(FetchDepth::Unshallow);
+    let outcome =
+        fetch_local(&shallow_git, &remote_git, &fetch_opts).expect("unshallow fetch_local");
+    assert!(
+        outcome.transfer.objects > 0,
+        "unshallow must install objects from the remote; got {:?}",
+        outcome.transfer
+    );
+    assert!(
+        count_pack_files(&shallow_git) > packs_before,
+        "unshallow must add at least one pack"
+    );
+
+    assert!(
+        !shallow_git.join("shallow").exists(),
+        "unshallow must remove shallow boundaries"
+    );
+    assert_eq!(
+        git(&shallow, &["rev-list", "--count", "HEAD"]).trim(),
+        git(&comparison, &["rev-list", "--count", "HEAD"]).trim(),
+        "history depth must match git after unshallow"
+    );
+    assert_eq!(git(&shallow, &["rev-list", "--count", "HEAD"]).trim(), "8");
+    git_fsck_clean(&shallow);
+    git_fsck_clean(&comparison);
+}
