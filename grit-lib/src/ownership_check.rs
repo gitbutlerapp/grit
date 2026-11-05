@@ -151,9 +151,11 @@ impl OwnershipCheck for SystemOwnershipCheck {
 /// Treat every path as not owned so `safe.directory` always applies.
 ///
 /// Used in crate tests; embedders typically implement [`OwnershipCheck`] directly.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct ForeignOwnershipCheck;
 
+#[cfg(test)]
 impl OwnershipCheck for ForeignOwnershipCheck {
     fn always_apply_safe_directory(&self) -> bool {
         true
