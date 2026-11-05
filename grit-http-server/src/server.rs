@@ -806,7 +806,7 @@ async fn post_dispatch(
         cancel: Some(cancel),
         ..grit_protocol::ServeSession::none()
     };
-    let (response, _follow_up) = smart_http::rpc_holding(
+    let (response, _follow_up) = smart_http::rpc_holding_with_cancel(
         found.repo.path,
         service,
         protocol_version,
