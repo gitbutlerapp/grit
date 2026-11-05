@@ -21,29 +21,28 @@ fn log_detail_modes_include_totals_in_json() {
     std::fs::write(dir.path().join("a.txt"), b"a\nb\n").expect("write");
     commit_all(dir.path(), "two");
 
-    for (flag, expect_ins) in [
-        (&["-p"][..], true),
-        (&["--name-only"][..], false),
-        (&["--name-status"][..], false),
-        (&["--stat"][..], true),
-    ] {
-        let mut args = vec!["log", "--json", "--limit", "1"];
-        args.extend_from_slice(flag);
-        let out = grit(dir.path(), &args);
-        assert!(out.ok(), "{}: {}", flag.join(" "), out.dump("log json"));
+    for flag in ["-p", "--stat", "--numstat"] {
+        let out = grit(dir.path(), &["log", "--json", "--limit", "1", flag]);
+        assert!(out.ok(), "{flag}: {}", out.dump("log json"));
         let json: Value = serde_json::from_str(out.stdout.trim()).expect("json");
         let entry = &json["commits"][0];
-        assert!(entry.get("files").is_some(), "{flag:?} missing files");
+        assert!(entry.get("files").is_some(), "{flag} missing files");
         let totals = entry
             .get("totals")
             .expect("totals")
             .as_object()
             .expect("totals object");
-        assert!(totals.contains_key("files_changed"));
-        if expect_ins {
-            assert!(totals.contains_key("insertions"));
-            assert!(totals.contains_key("deletions"));
-        }
+        assert_eq!(totals["files_changed"], 1);
+        assert_eq!(totals["insertions"], 1);
+        assert_eq!(totals["deletions"], 0);
+    }
+
+    for flag in ["--name-only", "--name-status"] {
+        let out = grit(dir.path(), &["log", "--json", "--limit", "1", flag]);
+        assert!(out.ok(), "{flag}: {}", out.dump("log json"));
+        let entry = &serde_json::from_str::<Value>(out.stdout.trim()).expect("json")["commits"][0];
+        assert!(entry.get("files").is_some(), "{flag} missing files");
+        assert!(entry.get("totals").is_none(), "{flag} should omit totals");
     }
 }
 
@@ -297,6 +296,72 @@ fn log_p_skips_merge_patches_like_git() {
         files.is_empty(),
         "merge commit should have no patch files: {files:?}"
     );
+
+    for flag in ["--stat", "--numstat", "--name-only", "--name-status"] {
+        let out = grit(dir.path(), &["log", "--json", flag, "--limit", "1"]);
+        assert!(out.ok(), "{flag}: {}", out.dump("log merge json"));
+        let entry = &serde_json::from_str::<Value>(out.stdout.trim()).expect("json")["commits"][0];
+        let files = entry["files"].as_array().expect("files");
+        assert!(
+            files.is_empty(),
+            "{flag} merge should list no files: {files:?}"
+        );
+        if flag == "--name-only" || flag == "--name-status" {
+            assert!(entry.get("totals").is_none(), "{flag} totals");
+        } else {
+            let totals = entry["totals"].as_object().expect("totals");
+            assert_eq!(totals["files_changed"], 0);
+            assert_eq!(totals["insertions"], 0);
+            assert_eq!(totals["deletions"], 0);
+        }
+    }
+}
+
+#[test]
+fn log_json_totals_and_merge_files_consistent_across_detail_modes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("a.txt"), b"one\n").expect("write");
+    commit_all(dir.path(), "c1");
+    git(dir.path(), &["checkout", "-b", "side"]);
+    std::fs::write(dir.path().join("b.txt"), b"side\n").expect("write");
+    commit_all(dir.path(), "side");
+    git(dir.path(), &["checkout", "main"]);
+    std::fs::write(dir.path().join("a.txt"), b"one\ntwo\n").expect("write");
+    commit_all(dir.path(), "c2");
+    git(dir.path(), &["merge", "--no-edit", "side"]);
+
+    for flag in ["-p", "--name-status", "--name-only", "--stat", "--numstat"] {
+        let out = grit(dir.path(), &["log", "--json", "-n", "3", flag]);
+        assert!(out.ok(), "{flag}: {}", out.dump("log json"));
+        let commits = serde_json::from_str::<Value>(out.stdout.trim()).expect("json")["commits"]
+            .as_array()
+            .expect("commits")
+            .clone();
+        let merge = commits
+            .iter()
+            .find(|c| c["subject"].as_str() == Some("Merge branch 'side'"))
+            .or_else(|| {
+                commits
+                    .iter()
+                    .find(|c| c["subject"].as_str().unwrap_or("").starts_with("Merge"))
+            })
+            .expect("merge commit");
+        assert!(
+            merge["files"].as_array().expect("files").is_empty(),
+            "{flag} merge files"
+        );
+        let non_merge = commits
+            .iter()
+            .find(|c| c["subject"].as_str() == Some("c2"))
+            .expect("c2");
+        if flag == "--name-only" || flag == "--name-status" {
+            assert!(non_merge.get("totals").is_none(), "{flag} totals");
+        } else {
+            let totals = non_merge["totals"].as_object().expect("totals");
+            assert_eq!(totals["insertions"], 1, "{flag}");
+        }
+    }
 }
 
 #[test]
