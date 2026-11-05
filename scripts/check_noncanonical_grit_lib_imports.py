@@ -14,6 +14,8 @@ MAP_FILE = ROOT / "grit-lib" / "canonical-modules.toml"
 FLAT_USE = re.compile(r"\bgrit_lib::([a-z_][a-z0-9_]*)")
 GROUP_START = re.compile(r"\bgrit_lib::\{")
 
+IDENT_CONTINUE = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
 
 def parse_map() -> dict[str, str]:
     text = MAP_FILE.read_text(encoding="utf-8")
@@ -83,6 +85,160 @@ def first_flat_module_in_use_item(item: str) -> str | None:
     return m.group(1)
 
 
+def _char_literal_end(text: str, start: int) -> int | None:
+    """If text[start] is `'`, return index after a char literal or None."""
+    if start >= len(text) or text[start] != "'":
+        return None
+    j = start + 1
+    if j >= len(text):
+        return None
+    if text[j] == "\\":
+        j += 1
+        if j >= len(text):
+            return None
+        j += 1
+    elif text[j] == "'":
+        return None
+    else:
+        j += 1
+    if j < len(text) and text[j] == "'":
+        return j + 1
+    return None
+
+
+def _quoted_string_end(text: str, quote_start: int) -> int | None:
+    """Return index after a "..." string starting at quote_start, or None."""
+    if quote_start >= len(text) or text[quote_start] != '"':
+        return None
+    i = quote_start + 1
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if ch == "\\":
+            i += 2
+            continue
+        if ch == '"':
+            return i + 1
+        i += 1
+    return None
+
+
+def _raw_string_end(text: str, start: int) -> int | None:
+    """Return index after r#*"..."#* or br#*"..."#* starting at start."""
+    i = start
+    n = len(text)
+    if i < n and text[i] == "b":
+        i += 1
+    if i + 1 >= n or text[i] != "r":
+        return None
+    i += 1
+    hash_count = 0
+    while i < n and text[i] == "#":
+        hash_count += 1
+        i += 1
+    if i >= n or text[i] != '"':
+        return None
+    i += 1
+    closing = f'"{("#" * hash_count)}'
+    end = text.find(closing, i)
+    if end == -1:
+        return None
+    return end + len(closing)
+
+
+def _byte_or_plain_string_end(text: str, start: int) -> int | None:
+    """Return index after b"..." or "..." starting at start."""
+    i = start
+    if i < len(text) and text[i] == "b":
+        i += 1
+    if i >= len(text) or text[i] != '"':
+        return None
+    return _quoted_string_end(text, i)
+
+
+def scrub_rust_literals(text: str) -> str:
+    """Replace string/char literals with spaces; keep lifetimes, labels, and comments intact."""
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    in_line_comment = False
+    block_comment_depth = 0
+
+    while i < n:
+        if in_line_comment:
+            out.append(text[i])
+            if text[i] == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+
+        if block_comment_depth > 0:
+            if i + 1 < n and text[i : i + 2] == "/*":
+                out.append("/*")
+                block_comment_depth += 1
+                i += 2
+                continue
+            if i + 1 < n and text[i : i + 2] == "*/":
+                out.append("*/")
+                block_comment_depth -= 1
+                i += 2
+                continue
+            out.append(text[i])
+            i += 1
+            continue
+
+        if i + 1 < n and text[i : i + 2] == "//":
+            out.append("//")
+            in_line_comment = True
+            i += 2
+            continue
+        if i + 1 < n and text[i : i + 2] == "/*":
+            out.append("/*")
+            block_comment_depth = 1
+            i += 2
+            continue
+
+        raw_end = _raw_string_end(text, i)
+        if raw_end is not None:
+            out.append(" " * (raw_end - i))
+            i = raw_end
+            continue
+        if text[i] == "b" and i + 1 < n and text[i + 1] == "'":
+            end = _char_literal_end(text, i + 1)
+            if end is not None:
+                out.append(" " * (end - i))
+                i = end
+                continue
+        if text[i] == "b":
+            str_end = _byte_or_plain_string_end(text, i)
+            if str_end is not None and str_end > i + 1:
+                out.append(" " * (str_end - i))
+                i = str_end
+                continue
+        if text[i] == '"':
+            str_end = _quoted_string_end(text, i)
+            if str_end is not None:
+                out.append(" " * (str_end - i))
+                i = str_end
+                continue
+        if text[i] == "'":
+            char_end = _char_literal_end(text, i)
+            if char_end is not None:
+                out.append(" " * (char_end - i))
+                i = char_end
+                continue
+            j = i + 1
+            if j < n and (text[j].isalpha() or text[j] == "_"):
+                while j < n and text[j] in IDENT_CONTINUE:
+                    j += 1
+                out.append(text[i:j])
+                i = j
+                continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
+
 def grit_lib_group_bodies(text: str) -> list[tuple[int, str]]:
     """Return (1-based line number of '{', brace body) for each grit_lib::{...} group."""
     groups: list[tuple[int, str]] = []
@@ -122,15 +278,20 @@ def find_violations_in_text(
     rel: str, text: str, mapping: dict[str, str]
 ) -> list[tuple[str, int, str, str, str]]:
     violations: list[tuple[str, int, str, str, str]] = []
+    scrubbed = scrub_rust_literals(text)
     lines = text.splitlines()
+    scrubbed_lines = scrubbed.splitlines()
+    if len(scrubbed_lines) < len(lines):
+        scrubbed_lines.extend([""] * (len(lines) - len(scrubbed_lines)))
 
-    for line_no, line in enumerate(lines, 1):
-        for flat in flat_modules_in_line(line):
+    for line_no, scrub_line in enumerate(scrubbed_lines, 1):
+        orig_line = lines[line_no - 1] if line_no <= len(lines) else ""
+        for flat in flat_modules_in_line(scrub_line):
             expected = canonical_grit_lib_prefix(flat, mapping)
             if expected is not None:
-                violations.append((rel, line_no, flat, expected, line.strip()))
+                violations.append((rel, line_no, flat, expected, orig_line.strip()))
 
-    for line_no, body in grit_lib_group_bodies(text):
+    for line_no, body in grit_lib_group_bodies(scrubbed):
         snippet = lines[line_no - 1].strip() if line_no <= len(lines) else "use grit_lib::{...}"
         for flat in flat_modules_in_group_body(body):
             expected = canonical_grit_lib_prefix(flat, mapping)
