@@ -450,6 +450,8 @@ pub struct Repository {
     test_assume_different_owner: bool,
     thread_policy: crate::parallel::ThreadPolicy,
     hook_stdio: crate::hooks::HookStdio,
+    /// Working tree a checkout clones files out of, when reflink checkout is on.
+    checkout_reference_tree: Option<std::path::PathBuf>,
 }
 
 const _: () = {
@@ -672,6 +674,7 @@ impl Repository {
             test_assume_different_owner: options.test_assume_different_owner,
             thread_policy: options.thread_policy,
             hook_stdio: options.hook_stdio,
+            checkout_reference_tree: options.checkout_reference_tree.clone(),
         })
     }
 
@@ -686,6 +689,16 @@ impl Repository {
     pub fn with_thread_policy(mut self, policy: crate::parallel::ThreadPolicy) -> Self {
         self.thread_policy = policy;
         self
+    }
+
+    /// Working tree a checkout clones files out of, when reflink checkout is enabled.
+    ///
+    /// Set through
+    /// [`RepositoryOptions::checkout_reference_tree`](crate::environment::RepositoryOptions::checkout_reference_tree);
+    /// `None` means every file is written from the object database as usual.
+    #[must_use]
+    pub fn checkout_reference_tree(&self) -> Option<&Path> {
+        self.checkout_reference_tree.as_deref()
     }
 
     /// Return this handle's shared cache arena.
@@ -828,6 +841,7 @@ impl Repository {
             open_for_serving: false,
             promisor_fetcher: self.caches().promisor_fetcher(),
             hook_stdio: self.hook_stdio,
+            checkout_reference_tree: self.checkout_reference_tree.clone(),
         }
     }
 
@@ -928,6 +942,7 @@ impl Repository {
             test_assume_different_owner: self.test_assume_different_owner,
             thread_policy: self.thread_policy,
             hook_stdio: self.hook_stdio,
+            checkout_reference_tree: self.checkout_reference_tree.clone(),
         };
         repo.caches().configure_filter_subprocess(
             &repo.environment,
@@ -1934,6 +1949,7 @@ impl Repository {
             test_assume_different_owner: options.test_assume_different_owner,
             thread_policy: options.thread_policy,
             hook_stdio: options.hook_stdio,
+            checkout_reference_tree: options.checkout_reference_tree.clone(),
         };
         repo.refresh_config_session()?;
         if options.validate_repository_format {

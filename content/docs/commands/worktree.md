@@ -50,6 +50,16 @@ While `grit worktree add` is checking out files, Ctrl+C (or `SIGTERM` / `SIGHUP`
 
 `grit worktree repair` fixes broken `.git` / `gitdir` links after a manual directory move. With no paths, grit repairs every registered linked worktree from the open repository.
 
+## Reflink checkout
+
+When `GRIT_CHECKOUT_REFERENCE_TREE` (or the Git-compatible `GIT_CHECKOUT_REFERENCE_TREE`) names another checkout of the same repository, each file the checkout writes is first tried as a reflink: the file at the same relative path is `FICLONE`d out of that tree, then hashed and compared with the blob being checked out, and kept only on an exact match. A mismatch, any error, a file below 4 KiB, a path whose attributes would rewrite the content on the way out (CRLF conversion, `ident`, a smudge filter) and every platform that is not Linux fall back to the ordinary write, which is unchanged — so a stale or dirty reference tree costs a syscall and never produces a wrong file. Large checkouts of a repository that already has a working copy become cheaper in I/O and compressor work, at the price of hashing each cloned file once.
+
+```console
+$ GRIT_CHECKOUT_REFERENCE_TREE=/srv/project/wt-main grit worktree add /srv/project/wt-topic -b topic
+```
+
+The reference tree is read once per repository open, not per file. Library callers set [`RepositoryOptions::checkout_reference_tree`](rustdoc:grit_lib::config::environment::RepositoryOptions::checkout_reference_tree) (or call [`RepositoryOptions::from_process`](rustdoc:grit_lib::config::environment::RepositoryOptions::from_process), which reads the same variables) and the checkout reads [`Repository::checkout_reference_tree`](rustdoc:grit_lib::repo::Repository::checkout_reference_tree).
+
 ## Options
 
 ### `list`

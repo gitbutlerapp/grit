@@ -16,6 +16,7 @@ mod core;
 mod error;
 pub(crate) mod io_error;
 mod move_repair;
+pub(crate) mod reflink;
 pub(crate) mod symlink;
 
 pub use core::*;

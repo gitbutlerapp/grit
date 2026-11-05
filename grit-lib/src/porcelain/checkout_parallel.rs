@@ -22,9 +22,9 @@ use crate::unicode_normalization::precompose_utf8_path;
 use crate::worktree_rules::WorktreeRules;
 
 use super::{
-    read_blob_unless_streamed, stream_checkout_entry, worktree_bytes_from_index_blob,
-    write_checkout_entry, CheckoutJournal, DelayedCheckoutTarget, LeadingDirCache,
-    WorktreeFileContent,
+    read_blob_unless_streamed, stream_checkout_entry, try_reflink_checkout_path,
+    worktree_bytes_from_index_blob, write_checkout_entry, CheckoutJournal, DelayedCheckoutTarget,
+    LeadingDirCache, WorktreeFileContent,
 };
 
 /// Parallel-eligible checkout jobs buffered before the first flush, so a cancellation that
@@ -381,6 +381,11 @@ fn write_prepared_job(
     dir_cache: &mut LeadingDirCache,
 ) -> Result<IndexEntry> {
     job.mark_touched();
+    if let Some(entry) =
+        try_reflink_checkout_path(repo, work_tree, &job.path, job.mode, job.oid, dir_cache)?
+    {
+        return Ok(entry);
+    }
     let Some(bytes) = bytes else {
         return stream_checkout_entry(
             repo, work_tree, &job.path, job.mode, job.change, dir_cache, job.oid,
@@ -469,6 +474,11 @@ fn materialize_write_job_serial(
     delayed: &mut DelayedProcessCheckout,
 ) -> Result<WriteJobOutcome> {
     job.mark_touched();
+    if let Some(entry) =
+        try_reflink_checkout_path(repo, work_tree, &job.path, job.mode, job.oid, dir_cache)?
+    {
+        return Ok(WriteJobOutcome::Index(entry));
+    }
     let Some(object) = read_blob_unless_streamed(
         repo,
         rules.conversion(),
