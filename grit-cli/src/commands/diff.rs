@@ -66,7 +66,7 @@ const FG_ADD_NUM: &str = "38;5;71"; // added line number
                                     // and dark-themed terminals (the default fg would be dark-on-dark in light mode).
 const FG_ON_DIFF: &str = "38;5;231";
 
-/// Aggregate line counts for `--stat` / `--numstat` JSON.
+/// Aggregate line counts for `--stat`, `--numstat`, `--shortstat`, and `-p` JSON (omitted for `--name-only` / `--name-status`).
 #[derive(Serialize, JsonSchema, Clone, Copy)]
 pub struct DiffTotalsJson {
     pub files_changed: usize,
