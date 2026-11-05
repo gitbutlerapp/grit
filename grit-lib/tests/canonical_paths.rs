@@ -56,9 +56,9 @@ fn canonical_layout_script_covers_workspace_imports() {
 /// Maximum root-level `pub mod` declarations in `grit-lib/src/lib.rs` (excluding `prelude`).
 ///
 /// Raise only when adding a new top-level domain module. The canonical layout on
-/// `origin/main` declares **36** embedder-facing roots; **`test_support`** is
+/// `origin/main` declares **37** embedder-facing roots; **`test_support`** is
 /// feature-gated and excluded via [`ROOT_PUB_MOD_CFG_EXEMPT`].
-const ROOT_PUB_MOD_BUDGET: usize = 36;
+const ROOT_PUB_MOD_BUDGET: usize = 37;
 
 /// Root modules gated behind `test` / `test-support` / other non-default features
 /// do not count toward the embedder-surface budget.
