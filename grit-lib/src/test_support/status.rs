@@ -2,7 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 
-static BEFORE_OPPORTUNISTIC_INDEX_WRITE: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = // hygiene: test-support status race hook
+static BEFORE_OPPORTUNISTIC_INDEX_WRITE: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> =
+    // hygiene: test-support status race hook
     Mutex::new(None);
 
 /// Run `hook` immediately before an opportunistic index write in [`crate::porcelain::status::status`].
