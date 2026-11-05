@@ -194,6 +194,45 @@ fn trailing_slash_on_existing_file_matches_git() {
 }
 
 #[test]
+fn root_anchored_star_suffix_matches_git_check_ignore() {
+    use std::fs;
+
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_test_support::unique_tmp;
+
+    let home = unique_tmp("ignore", "anchor-suffix-home");
+    let root = unique_tmp("ignore", "anchor-suffix");
+    fs::create_dir_all(&home).expect("home");
+    assert!(
+        t0008::hermetic_git(&home, &root, &["init"])
+            .status
+            .success(),
+        "git init"
+    );
+    fs::create_dir_all(root.join("sub")).expect("sub dir");
+    fs::write(root.join(".gitignore"), "/*.log\n").expect("gitignore");
+    fs::write(root.join("root.log"), b"a").expect("root.log");
+    fs::write(root.join("sub/nested.log"), b"b").expect("nested.log");
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&root),
+    )
+    .expect("open");
+    let index = repo.index_handle().load().expect("index");
+
+    for path in ["root.log", "sub/nested.log"] {
+        let git_map = git_check_ignore_verbose_batch(&home, &root, &[path]);
+        let git = git_map
+            .get(path)
+            .unwrap_or_else(|| panic!("git missing {path}"));
+        let results = grit_ignore_check(&repo, &index, &[path.to_owned()]);
+        assert_eq!(results.len(), 1);
+        assert_match_eq(path, git, results[0].ignored, &results[0].matched);
+    }
+}
+
+#[test]
 fn trailing_slash_directory_hint_matches_git() {
     use std::fs;
 

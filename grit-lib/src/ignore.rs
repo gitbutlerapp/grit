@@ -1180,8 +1180,24 @@ fn pattern_matches_kind(
 ) -> bool {
     match kind {
         IgnorePatternKind::Literal(lit) => eq_fold(text, lit, ignore_case),
-        IgnorePatternKind::Prefix(prefix) => starts_with_fold(text, prefix, ignore_case),
-        IgnorePatternKind::Suffix(suffix) => ends_with_fold(text, suffix, ignore_case),
+        IgnorePatternKind::Prefix(prefix) => {
+            if !starts_with_fold(text, prefix, ignore_case) {
+                return false;
+            }
+            !pathname || !text[prefix.len()..].contains('/')
+        }
+        IgnorePatternKind::Suffix(suffix) => {
+            if !ends_with_fold(text, suffix, ignore_case) {
+                return false;
+            }
+            if !pathname {
+                return true;
+            }
+            let Some(head_len) = text.len().checked_sub(suffix.len()) else {
+                return true;
+            };
+            !text[..head_len].contains('/')
+        }
         IgnorePatternKind::Wild => {
             let mut flags = if pathname { WM_PATHNAME } else { 0 };
             if ignore_case {
@@ -1963,6 +1979,35 @@ mod gitignore_glob_tests {
     fn nested_dir_star_extension() {
         assert!(!pathname_pattern_matches("foo/bar/*.c", "foo/bar/baz/x.c"));
     }
+
+    #[test]
+    fn pathname_suffix_star_does_not_cross_slashes() {
+        assert!(pathname_pattern_matches("*.log", "root.log"));
+        assert!(!pathname_pattern_matches("*.log", "sub/nested.log"));
+    }
+
+    #[test]
+    fn root_anchored_suffix_patterns_match_one_segment() {
+        let rule = |line: &str| rule(line, "");
+        assert!(rule_matches(&rule("/*.log"), "root.log", false, false));
+        assert!(!rule_matches(
+            &rule("/*.log"),
+            "sub/nested.log",
+            false,
+            false
+        ));
+        assert!(rule_matches(&rule("/*"), "only", false, false));
+        assert!(!rule_matches(&rule("/*"), "sub/nested", false, false));
+        assert!(rule_matches(&rule("/keep*"), "keep-out", false, false));
+        assert!(!rule_matches(&rule("/keep*"), "keep/out", false, false));
+        assert!(rule_matches(&rule("/*.LOG"), "root.log", false, true));
+        assert!(!rule_matches(
+            &rule("/*.LOG"),
+            "sub/nested.log",
+            false,
+            true
+        ));
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -2222,6 +2267,28 @@ mod pattern_list_tests {
         assert_eq!(list.is_ignored("debug.log", false, false), None);
         assert_eq!(list.is_ignored("debug.log", false, true), Some(true));
         assert_eq!(list.is_ignored("build", true, true), Some(true));
+    }
+
+    #[test]
+    fn root_anchored_star_suffix_in_pattern_list() {
+        let list = IgnorePatternList::parse(b"/*.log\n", "");
+        assert_eq!(list.is_ignored("root.log", false, false), Some(true));
+        assert_eq!(list.is_ignored("sub/nested.log", false, false), None);
+        assert_eq!(list.is_ignored("sub/keep.txt", false, false), None);
+    }
+
+    #[test]
+    fn nested_gitignore_root_anchored_suffix() {
+        let list = IgnorePatternList::parse(b"/*.dat\n", "sub");
+        assert_eq!(list.is_ignored("sub/a.dat", false, false), Some(true));
+        assert_eq!(list.is_ignored("sub/deeper/b.dat", false, false), None);
+    }
+
+    #[test]
+    fn negated_root_anchored_suffix() {
+        let list = IgnorePatternList::parse(b"*.log\n!/*.log\n", "");
+        assert_eq!(list.is_ignored("root.log", false, false), Some(false));
+        assert_eq!(list.is_ignored("sub/nested.log", false, false), Some(true));
     }
 }
 
