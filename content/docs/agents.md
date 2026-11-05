@@ -15,7 +15,7 @@ Pass **`--json`** on every command when something other than a human reads the r
 - **stderr** carries progress lines, auth prompts, and human-style `error: …` diagnostics. Parsers should read **stdout only** for the outcome.
 - The process still exits non-zero on failure, so you can branch on the exit code **or** the presence of an `error` key.
 
-Use **`--filter`** with a [jq](https://jqlang.org)-like expression to narrow the JSON without piping through `jq`. It requires `--json`. Multiple filter results become one JSON array.
+Use **`--filter`** with a [jq](https://jqlang.org)-like expression to narrow the JSON without piping through `jq`. It requires `--json`. Iterator-style filters (for example `.commits[].oid` or `.staged[].path`) always emit a JSON array, including `[]` when nothing matches. Singular filters such as `.branch` or `{branch, clean}` emit one value; a missing field is `null`.
 
 ```console
 $ grit status --json --filter '{branch, clean}'

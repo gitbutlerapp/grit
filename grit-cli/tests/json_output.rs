@@ -2552,6 +2552,40 @@ fn json_filter_maps_commit_subjects() -> TestResult {
 }
 
 #[test]
+fn json_filter_one_commit_oid_is_array() -> TestResult {
+    let scratch = Scratch::new("filter-one")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "v0\n");
+    gs_ok(&repo, &["commit", "only"]);
+
+    let out = gs(&repo, ["--json", "--filter", ".commits[].oid", "log"]);
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let v: Value = serde_json::from_str(&out.stdout).unwrap();
+    assert!(
+        v.is_array(),
+        "iterator filter must always be an array: {}",
+        out.stdout
+    );
+    assert_eq!(v.as_array().unwrap().len(), 1);
+
+    let empty = gs(
+        &repo,
+        [
+            "--json",
+            "--filter",
+            ".commits[] | select(.subject == \"missing\")",
+            "log",
+        ],
+    );
+    assert_eq!(empty.status, Some(0), "{}", empty.dump());
+    let v: Value = serde_json::from_str(&empty.stdout).unwrap();
+    assert_eq!(v, serde_json::json!([]));
+    Ok(())
+}
+
+#[test]
 fn schema_top_level_keys_are_stable() -> TestResult {
     let scratch = Scratch::new("schema")?;
     let seed = scratch.child("seed");

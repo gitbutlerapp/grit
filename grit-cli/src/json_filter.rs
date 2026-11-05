@@ -2,12 +2,14 @@
 //!
 //! [`write_json_filter`] evaluates a jq expression against serialized JSON bytes
 //! using the [jaq](https://github.com/01mf02/jaq) engine and writes the result
-//! directly to a writer. When a filter yields multiple values, they are wrapped
-//! in a JSON array so stdout still carries a single JSON value (matching the
-//! `--json` contract).
+//! directly to a writer. Iterator-style filters (path `[]`, comma, `select`, and
+//! similar) always produce a JSON array so scripts see a stable type; singular
+//! filters still emit one value as-is (including `null` for a missing field).
 
 use anyhow::{bail, Context, Result};
-use jaq_core::load::{Arena, File, Loader};
+use jaq_core::load::parse::{BinaryOp, Term};
+use jaq_core::load::{parse, Arena, File, Loader};
+use jaq_core::path::{Opt, Part};
 use jaq_core::{data, unwrap_valr, Compiler, Ctx, Vars};
 use jaq_json::{read, write, Num, Val};
 use serde_json::Value;
@@ -24,8 +26,9 @@ use crate::json_to_jaq;
 ///
 /// # Returns
 ///
-/// The filtered JSON value. A filter that emits zero values yields `null`; one
-/// value is returned as-is; multiple values are returned as a JSON array.
+/// The filtered JSON value. Iterator-style filters always return a JSON array
+/// (`[]`, `[x]`, or `[x, …]`). Other filters emit zero values as `null`, one
+/// value as-is, and two or more values as a JSON array.
 ///
 /// # Errors
 ///
@@ -37,10 +40,6 @@ pub fn apply_json_filter(input: &Value, filter: &str) -> Result<Value> {
     serde_json::from_slice(&buf).context("parsing filtered JSON output")
 }
 
-/// Evaluate `filter` on `input_json` and write compact JSON to `w` (no trailing newline).
-///
-/// A filter that emits zero values writes `null`; one value is written as-is;
-/// multiple values are written as a JSON array.
 /// Evaluate `filter` on serialized JSON bytes (tests and byte-oriented callers).
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn write_json_filter(w: &mut dyn Write, input_json: Vec<u8>, filter: &str) -> Result<()> {
@@ -50,6 +49,9 @@ pub fn write_json_filter(w: &mut dyn Write, input_json: Vec<u8>, filter: &str) -
 }
 
 /// Evaluate `filter` on an already-built jaq value and write compact JSON to `w`.
+///
+/// Iterator-style filters always write a JSON array. Singular filters write
+/// `null` for zero values, one value as-is, and wrap two or more values in an array.
 pub fn write_json_filter_val(w: &mut dyn Write, input_val: Val, filter: &str) -> Result<()> {
     let filter = filter.trim();
     if filter.is_empty() {
@@ -69,23 +71,108 @@ pub fn write_json_filter_val(w: &mut dyn Write, input_val: Val, filter: &str) ->
     }
 
     let pp = write::Pp::default();
-    match vals.len() {
-        0 => w.write_all(b"null").context("writing filter output")?,
-        1 => write::write(w, &pp, 0, &vals[0])
-            .map_err(|e| anyhow::anyhow!("writing filter output: {e}"))?,
-        _ => {
-            w.write_all(b"[").context("writing filter output")?;
-            for (i, val) in vals.iter().enumerate() {
-                if i > 0 {
-                    w.write_all(b",").context("writing filter output")?;
-                }
-                write::write(w, &pp, 0, val)
-                    .map_err(|e| anyhow::anyhow!("writing filter output: {e}"))?;
+    let stream = filter_yields_stream(filter).unwrap_or(false);
+    if stream || vals.len() > 1 {
+        w.write_all(b"[").context("writing filter output")?;
+        for (i, val) in vals.iter().enumerate() {
+            if i > 0 {
+                w.write_all(b",").context("writing filter output")?;
             }
-            w.write_all(b"]").context("writing filter output")?;
+            write::write(w, &pp, 0, val)
+                .map_err(|e| anyhow::anyhow!("writing filter output: {e}"))?;
+        }
+        w.write_all(b"]").context("writing filter output")?;
+    } else {
+        match vals.len() {
+            0 => w.write_all(b"null").context("writing filter output")?,
+            1 => write::write(w, &pp, 0, &vals[0])
+                .map_err(|e| anyhow::anyhow!("writing filter output: {e}"))?,
+            _ => unreachable!(),
         }
     }
     Ok(())
+}
+
+/// Whether a successfully parsed filter can emit a variable number of values.
+fn filter_yields_stream(filter: &str) -> Option<bool> {
+    let term = parse(filter, |p| p.term())?;
+    Some(term_yields_stream(&term))
+}
+
+fn term_yields_stream(term: &Term<&str>) -> bool {
+    match term {
+        Term::Recurse => true,
+        Term::Path(base, path) => {
+            term_yields_stream(base)
+                || path.0.iter().any(|(part, opt)| {
+                    matches!(opt, Opt::Optional)
+                        || match part {
+                            Part::Range(start, end) => {
+                                start.as_ref().is_some_and(term_yields_stream)
+                                    || end.as_ref().is_some_and(term_yields_stream)
+                                    || matches!((start.as_ref(), end.as_ref()), (None, None))
+                            }
+                            Part::Index(idx) => term_yields_stream(idx),
+                        }
+                })
+        }
+        Term::Neg(inner) | Term::Label(_, inner) => term_yields_stream(inner),
+        Term::BinOp(left, op, right) => match op {
+            BinaryOp::Comma => true,
+            _ => term_yields_stream(left) || term_yields_stream(right),
+        },
+        Term::Fold(kind, _, _, _) => *kind == "foreach",
+        Term::TryCatch(try_, catch) => {
+            catch.is_none()
+                || term_yields_stream(try_)
+                || catch.as_ref().is_some_and(|c| term_yields_stream(c))
+        }
+        Term::IfThenElse(branches, else_) => {
+            branches
+                .iter()
+                .any(|(cond, then_)| term_yields_stream(cond) || term_yields_stream(then_))
+                || else_.as_ref().is_some_and(|e| term_yields_stream(e))
+        }
+        Term::Def(_, body) => term_yields_stream(body),
+        Term::Call(name, args) => call_yields_stream(name, args),
+        Term::Obj(pairs) => pairs.iter().any(|(key, val)| {
+            term_yields_stream(key) || val.as_ref().is_some_and(|v| term_yields_stream(v))
+        }),
+        Term::Str(_, parts) => parts.iter().any(
+            |part| matches!(part, jaq_core::load::lex::StrPart::Term(t) if term_yields_stream(t)),
+        ),
+        Term::Break(_) | Term::Id | Term::Num(_) | Term::Var(_) | Term::Arr(_) => false,
+    }
+}
+
+fn call_yields_stream(name: &str, args: &[Term<&str>]) -> bool {
+    const SINGULAR: &[&str] = &[
+        "map",
+        "map_values",
+        "keys",
+        "length",
+        "add",
+        "to_entries",
+        "flatten",
+        "unique",
+        "sort",
+        "group_by",
+    ];
+    if SINGULAR.contains(&name) {
+        return false;
+    }
+    const INDEX_LIKE: &[&str] = &["first", "last", "nth"];
+    if INDEX_LIKE.contains(&name) {
+        return args.iter().any(term_yields_stream);
+    }
+    const GENERATOR: &[&str] = &[
+        "select", "empty", "range", "recurse", "inputs", "limit", "while", "repeat", "paths",
+        "foreach",
+    ];
+    if GENERATOR.contains(&name) {
+        return true;
+    }
+    args.iter().any(term_yields_stream)
 }
 
 fn compile_filter(filter: &str) -> Result<jaq_core::Filter<data::JustLut<Val>>> {
@@ -203,6 +290,75 @@ mod tests {
         });
         let out = apply_json_filter(&input, ".commits[].oid").unwrap();
         assert_eq!(out, json!(["aaa", "bbb"]));
+    }
+
+    #[test]
+    fn iterator_filter_wraps_one_element() {
+        let input = json!({
+            "commits": [{"oid": "aaa", "subject": "one"}]
+        });
+        let out = apply_json_filter(&input, ".commits[].oid").unwrap();
+        assert_eq!(out, json!(["aaa"]));
+    }
+
+    #[test]
+    fn iterator_filter_empty_match_is_array() {
+        let input = json!({
+            "commits": [{"oid": "aaa", "subject": "one"}]
+        });
+        let out = apply_json_filter(&input, ".commits[] | select(.subject == \"nope\")").unwrap();
+        assert_eq!(out, json!([]));
+    }
+
+    #[test]
+    fn map_select_empty_is_singular_array_not_null() {
+        let input = json!({
+            "commits": [{"oid": "aaa", "subject": "one"}]
+        });
+        let out =
+            apply_json_filter(&input, ".commits | map(select(.subject == \"nope\"))").unwrap();
+        assert_eq!(out, json!([]));
+    }
+
+    #[test]
+    fn singular_field_stays_scalar() {
+        let input = json!({"branch": "main", "upstream": null});
+        assert_eq!(apply_json_filter(&input, ".branch").unwrap(), json!("main"));
+        assert_eq!(apply_json_filter(&input, ".upstream").unwrap(), json!(null));
+    }
+
+    #[test]
+    fn index_accessor_stays_scalar() {
+        let input = json!({
+            "commits": [{"oid": "aaa", "refs": [{"name": "main"}]}]
+        });
+        assert_eq!(
+            apply_json_filter(&input, ".commits[0].oid").unwrap(),
+            json!("aaa")
+        );
+    }
+
+    #[test]
+    fn nested_iterator_filter_wraps_one_element() {
+        let input = json!({
+            "commits": [{"oid": "aaa", "refs": [{"name": "main"}]}]
+        });
+        let out = apply_json_filter(&input, ".commits[0].refs[].name").unwrap();
+        assert_eq!(out, json!(["main"]));
+    }
+
+    #[test]
+    fn staged_paths_iterator_empty_is_array() {
+        let input = json!({"staged": []});
+        let out = apply_json_filter(&input, ".staged[].path").unwrap();
+        assert_eq!(out, json!([]));
+    }
+
+    #[test]
+    fn reduce_over_iterator_input_stays_singular() {
+        let input = json!({"staged": [{"path": "a"}]});
+        let out = apply_json_filter(&input, "reduce .staged[].path as $x (\"\"; . + $x)").unwrap();
+        assert_eq!(out, json!("a"));
     }
 
     #[test]
