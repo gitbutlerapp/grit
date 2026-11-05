@@ -54,8 +54,8 @@ pub mod pack {
         clear_pack_cache, hash_object_bytes, oid_bytes_to_hex, read_alternates_recursive,
         read_idx_object_ids, read_local_pack_indexes, read_object_from_pack_at_offset,
         read_object_from_packs, read_pack_index, read_pack_index_cached,
-        read_packed_delta_dependency, skip_one_pack_object, SingleLocalPackReader,
-        write_v2_pack_index, write_v2_pack_index_with_trailer, PackIndex, PackIndexEntryRef,
+        read_packed_delta_dependency, skip_one_pack_object, write_v2_pack_index,
+        write_v2_pack_index_with_trailer, PackIndex, PackIndexEntryRef, SingleLocalPackReader,
         DEFAULT_PACK_DEPTH,
     };
     pub use crate::pack_reuse_root::*;

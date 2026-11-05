@@ -2713,15 +2713,12 @@ impl Repository {
     }
 }
 
-/// Standalone object fsck helpers.
 /// Standalone object fsck helpers (single-object checks).
 pub mod fsck {
     pub use crate::fsck_msg_policy::{
         FsckMsgLevel, ObjectFsckChecker, ObjectFsckPolicy, SkipListError,
     };
-    pub use crate::fsck_standalone::{
-        fsck_object, fsck_object_with, FsckError, FsckObjectOptions,
-    };
+    pub use crate::fsck_standalone::{fsck_object, fsck_object_with, FsckError, FsckObjectOptions};
 }
 
 /// Repository-wide fsck (object store, connectivity, refs).

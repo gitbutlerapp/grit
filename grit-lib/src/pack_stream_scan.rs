@@ -323,6 +323,17 @@ mod tests {
     }
 
     #[test]
+    fn empty_pack_reports_zero_objects_and_completes() {
+        let mut scanner = PackStreamScanner::new(HashAlgo::Sha1);
+        scanner
+            .feed(b"PACK\0\0\0\x02\0\0\0\0")
+            .expect("empty pack header");
+        let counts = scanner.counts().expect("header parsed");
+        assert_eq!((counts.received, counts.total), (0, 0));
+        assert!(scanner.is_complete());
+    }
+
+    #[test]
     fn counts_a_whole_pack_fed_at_once() {
         let mut scanner = PackStreamScanner::new(HashAlgo::Sha1);
         scanner.feed(&sample_pack()).expect("scan");

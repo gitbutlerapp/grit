@@ -282,6 +282,11 @@ fn packed_type_to_kind(pt: PackedType) -> Result<ObjectKind> {
 mod tests {
     use super::*;
     use crate::objects::ObjectKind;
+
+    #[test]
+    fn install_pack_options_default() {
+        let _ = InstallPackOptions::default();
+    }
     use crate::odb::Odb;
     use crate::pack::read_pack_index;
     use crate::transfer::{build_pack, PackBuildOptions};
