@@ -445,3 +445,101 @@ fn pull_markdown_merge_conflict_quotes_control_bytes_in_paths() {
         "expected newline quoting in pull markdown conflict:\n{text}"
     );
 }
+
+const BACKTICK_FILE: &str = "a`b.txt";
+const BACKTICK_INLINE: &str = "``a`b.txt``";
+const BACKTICK_SPEC_INLINE: &str = "``HEAD:a`b.txt``";
+
+fn assert_no_broken_backtick_path_span(text: &str, context: &str) {
+    assert!(
+        !text.contains("- `a`b.txt`"),
+        "broken single-backtick name-only span in {context}:\n{text}"
+    );
+    assert!(
+        !text.contains("- `A\ta`b.txt`"),
+        "broken single-backtick name-status span in {context}:\n{text}"
+    );
+}
+
+#[test]
+fn markdown_inline_code_escapes_backticks_in_paths_and_specs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    config_repo(dir.path());
+    git_commit_file(dir.path(), BACKTICK_FILE, "a\n", "x");
+
+    let spec = format!("HEAD:{BACKTICK_FILE}");
+
+    for args in [
+        &["diff", "HEAD", "--name-only", "--markdown"][..],
+        &["log", "--name-only", "--markdown", "-1"][..],
+        &["log", "--name-status", "--markdown", "-1"][..],
+    ] {
+        let out = Command::new(GRIT)
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .expect("grit");
+        assert!(
+            out.status.success(),
+            "grit {args:?} stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let text = String::from_utf8_lossy(&out.stdout);
+        let has_doubled_backtick =
+            text.contains(BACKTICK_INLINE) || text.contains("``A\ta`b.txt``");
+        assert!(
+            has_doubled_backtick,
+            "expected doubled-backtick path in grit {args:?}:\n{text}"
+        );
+        assert_no_broken_backtick_path_span(&text, &format!("grit {args:?}"));
+    }
+
+    let blame = Command::new(GRIT)
+        .args(["blame", BACKTICK_FILE, "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("grit blame");
+    assert!(blame.status.success());
+    let blame_text = String::from_utf8_lossy(&blame.stdout);
+    assert!(
+        blame_text.contains(&format!("## Blame: {BACKTICK_INLINE}")),
+        "blame heading:\n{blame_text}"
+    );
+
+    let cat = Command::new(GRIT)
+        .args(["cat", &spec, "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("grit cat");
+    assert!(cat.status.success());
+    let cat_text = String::from_utf8_lossy(&cat.stdout);
+    assert!(
+        cat_text.contains(&format!("**spec:** {BACKTICK_SPEC_INLINE}")),
+        "cat spec:\n{cat_text}"
+    );
+
+    let resolve = Command::new(GRIT)
+        .args(["resolve", &spec, "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("grit resolve");
+    assert!(resolve.status.success());
+    let resolve_text = String::from_utf8_lossy(&resolve.stdout);
+    assert!(
+        resolve_text.contains(BACKTICK_SPEC_INLINE),
+        "resolve spec cell:\n{resolve_text}"
+    );
+
+    let show = Command::new(GRIT)
+        .args(["show", &spec, "--markdown"])
+        .current_dir(dir.path())
+        .output()
+        .expect("grit show");
+    assert!(show.status.success());
+    let show_text = String::from_utf8_lossy(&show.stdout);
+    assert!(
+        show_text.contains(&format!("## {BACKTICK_SPEC_INLINE}")),
+        "show path heading:\n{show_text}"
+    );
+}

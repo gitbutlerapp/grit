@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::context;
+use crate::markdown::{escape_table_cell, format_inline_code};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::revision_errors::map_resolve_error;
 
@@ -117,12 +118,8 @@ impl MarkdownRender for VerifyResolveOutcome {
         outln!(w, "## Resolve (verify)\n");
         outln!(w, "| Spec | OID |");
         outln!(w, "| --- | --- |");
-        outln!(
-            w,
-            "| `{}` | `{}` |",
-            self.spec.replace('|', "\\|"),
-            self.oid
-        );
+        let spec_cell = format_inline_code(&escape_table_cell(&self.spec));
+        outln!(w, "| {spec_cell} | `{}` |", self.oid);
         Ok(())
     }
 }
@@ -162,26 +159,22 @@ impl MarkdownRender for ResolveOutcome {
             outln!(w, "| --- | --- |");
             for row in &self.results {
                 let ref_cell = row.ref_display.as_deref().unwrap_or("");
-                outln!(
-                    w,
-                    "| `{}` | {} |",
-                    row.spec.replace('|', "\\|"),
-                    ref_cell.replace('|', "\\|")
-                );
+                let spec_cell = format_inline_code(&escape_table_cell(&row.spec));
+                outln!(w, "| {spec_cell} | {} |", escape_table_cell(ref_cell));
             }
         } else {
             outln!(w, "| Spec | OID | Kind | Size | Ref |");
             outln!(w, "| --- | --- | --- | ---: | --- |");
             for row in &self.results {
                 let ref_cell = row.ref_name.as_deref().unwrap_or("");
+                let spec_cell = format_inline_code(&escape_table_cell(&row.spec));
                 outln!(
                     w,
-                    "| `{}` | `{}` | {} | {} | {} |",
-                    row.spec.replace('|', "\\|"),
+                    "| {spec_cell} | `{}` | {} | {} | {} |",
                     row.oid.as_deref().unwrap_or(""),
                     row.kind.as_deref().unwrap_or(""),
                     row.size.map(|s| s.to_string()).unwrap_or_default(),
-                    ref_cell.replace('|', "\\|")
+                    escape_table_cell(ref_cell)
                 );
             }
         }
