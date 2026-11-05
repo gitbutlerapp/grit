@@ -3,6 +3,8 @@
 //! Callers that need "the commit at this id" or "the root tree of this commit" share these
 //! [`Odb`] methods instead of reading the object, checking its kind and parsing it by hand.
 
+use std::path::Path;
+
 use crate::error::{Error, Result};
 use crate::objects::{
     commit_through_subject_len, parse_commit, CommitData, CommitRef, ObjectId, ObjectKind,
@@ -77,18 +79,86 @@ impl Odb {
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit_through_subject(&self, oid: &ObjectId) -> Result<Vec<u8>> {
         if self.custom_primary.is_none() {
-            if let Some(data) =
-                crate::pack::pack_cache::try_read_commit_through_subject_via_single_pack_reader(
-                    &self.objects_dir,
-                    oid,
-                )?
+            if crate::pack_store::PackStore::has_context() {
+                let active = crate::pack_store::PackStore::active_for_reads();
+                let active_dir = active.objects_dir();
+                if active_dir != self.objects_dir.as_path() {
+                    if let Some(data) =
+                        self.try_read_commit_through_subject_in_dir(active_dir, oid)?
+                    {
+                        return Ok(data);
+                    }
+                }
+            }
+            let primary_empty = crate::pack::pack_cache::primary_has_verified_empty_listing(
+                self.objects_dir.as_path(),
+            );
+            if primary_empty && self.alternates_enabled {
+                if let Some(data) = self.try_read_commit_through_subject_from_alternates(oid)? {
+                    return Ok(data);
+                }
+            } else if let Some(data) =
+                self.try_read_commit_through_subject_in_dir(self.objects_dir.as_path(), oid)?
             {
-                return Ok(through_subject(data));
+                return Ok(data);
+            } else if self.alternates_enabled {
+                if let Some(data) = self.try_read_commit_through_subject_from_alternates(oid)? {
+                    return Ok(data);
+                }
             }
         }
         let object = self.read(oid)?;
         expect_commit(oid, object.kind)?;
         Ok(through_subject(object.data))
+    }
+
+    fn try_read_commit_through_subject_from_alternates(
+        &self,
+        oid: &ObjectId,
+    ) -> Result<Option<Vec<u8>>> {
+        for alt in self.file_alternate_dirs_snapshot().iter() {
+            if let Some(data) = self.try_read_commit_through_subject_in_dir(alt, oid)? {
+                return Ok(Some(data));
+            }
+        }
+        for alt in self.env_alternate_dirs_snapshot().iter() {
+            if let Some(data) = self.try_read_commit_through_subject_in_dir(alt, oid)? {
+                return Ok(Some(data));
+            }
+        }
+        Ok(None)
+    }
+
+    fn try_read_commit_through_subject_in_dir(
+        &self,
+        objects_dir: &Path,
+        oid: &ObjectId,
+    ) -> Result<Option<Vec<u8>>> {
+        let read = || -> Result<Option<Vec<u8>>> {
+            if let Some(data) =
+                crate::pack::pack_cache::try_read_commit_through_subject_via_single_pack_reader(
+                    objects_dir,
+                    oid,
+                )?
+            {
+                return Ok(Some(through_subject(data)));
+            }
+            let mut header = Vec::new();
+            if crate::pack::read_packed_commit_header_block_into(objects_dir, oid, &mut header)?
+                && !header.is_empty()
+            {
+                return Ok(Some(through_subject(header)));
+            }
+            Ok(None)
+        };
+        let alternate_already_pinned = objects_dir != self.objects_dir.as_path()
+            && crate::pack::pack_cache::alternate_read_store()
+                .is_some_and(|store| store.objects_dir() == objects_dir);
+        if objects_dir == self.objects_dir.as_path() || alternate_already_pinned {
+            read()
+        } else {
+            self.with_objects_dir_pack_read_access(objects_dir, read)
+        }
     }
 }
 

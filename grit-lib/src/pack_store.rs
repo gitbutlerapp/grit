@@ -437,6 +437,7 @@ impl PackReadContextGuard {
 
 impl Drop for PackReadContextGuard {
     fn drop(&mut self) {
+        crate::pack::pack_cache::clear_alternate_pack_read_store();
         let bounded = CURRENT.with(|c| c.borrow().0.as_ref().is_some_and(|s| s.bounded_reads()));
         if bounded {
             // Operation-local pack bytes/indexes must not outlive their cache through

@@ -40,9 +40,19 @@ impl std::fmt::Debug for FilesSource {
 }
 
 impl FilesSource {
+    fn with_pack_access<R>(&self, f: impl FnOnce() -> R) -> R {
+        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            f()
+        } else if PackStore::has_context() {
+            pack::with_alternate_pack_store(self.packs.pack_store().clone(), f)
+        } else {
+            PackStore::with_context(self.packs.pack_store().clone(), f)
+        }
+    }
+
     fn skip_loose_probe_after_empty_warmup(&self, oid: &ObjectId) -> bool {
-        self.loose.may_skip_open_for(oid)
-            && pack::pack_cache::trusted_verified_empty_pack_listing(&self.objects_dir)
+        pack::pack_cache::trusted_verified_empty_pack_listing(&self.objects_dir)
+            && self.loose.cached_absent_loose_path(oid)
     }
 
     /// Open a files source for `pack_store`'s directory.
@@ -352,11 +362,7 @@ impl FilesSource {
                 None => LocalSizedRead::Missing,
             })
         };
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            probe()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), probe)
-        }
+        self.with_pack_access(probe)
     }
 
     fn read_with_pack_retry(&self, oid: &ObjectId) -> Result<Option<Object>> {
@@ -450,12 +456,7 @@ impl FilesSource {
         populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<ObjectKind>> {
-        let mut read = || self.read_with_pack_retry_into(oid, populate_delta_lru, buf);
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            read()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), read)
-        }
+        self.with_pack_access(|| self.read_with_pack_retry_into(oid, populate_delta_lru, buf))
     }
 
     /// See [`crate::odb::Odb::read_packed_commit_header_block_into`].
@@ -464,12 +465,9 @@ impl FilesSource {
         oid: &ObjectId,
         buf: &mut Vec<u8>,
     ) -> Result<bool> {
-        let mut read = || pack::read_packed_commit_header_block_into(&self.objects_dir, oid, buf);
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            read()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), read)
-        }
+        self.with_pack_access(|| {
+            pack::read_packed_commit_header_block_into(&self.objects_dir, oid, buf)
+        })
     }
 
     /// See [`crate::odb::Odb::read_packed_commit_header_blocks`].
@@ -478,12 +476,9 @@ impl FilesSource {
         oids: &[ObjectId],
         found: impl FnMut(usize, &[u8]),
     ) -> Result<()> {
-        let read = || pack::read_packed_commit_header_blocks(&self.objects_dir, oids, found);
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            read()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), read)
-        }
+        self.with_pack_access(|| {
+            pack::read_packed_commit_header_blocks(&self.objects_dir, oids, found)
+        })
     }
 }
 
@@ -493,12 +488,7 @@ impl ObjectStore for FilesSource {
     }
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            return self.read_with_pack_retry(oid);
-        }
-        PackStore::with_context(self.packs.pack_store().clone(), || {
-            self.read_with_pack_retry(oid)
-        })
+        self.with_pack_access(|| self.read_with_pack_retry(oid))
     }
 
     fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
@@ -506,12 +496,7 @@ impl ObjectStore for FilesSource {
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            return self.read_info_with_pack_retry(oid);
-        }
-        PackStore::with_context(self.packs.pack_store().clone(), || {
-            self.read_info_with_pack_retry(oid)
-        })
+        self.with_pack_access(|| self.read_info_with_pack_retry(oid))
     }
 
     fn contains(&self, oid: &ObjectId) -> Result<bool> {
@@ -521,12 +506,7 @@ impl ObjectStore for FilesSource {
         if self.loose.object_path(oid).is_file() {
             return Ok(true);
         }
-        let check = || self.contains_in_packs(oid);
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            check()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), check)
-        }
+        self.with_pack_access(|| self.contains_in_packs(oid))
     }
 
     fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
@@ -547,11 +527,7 @@ impl ObjectStore for FilesSource {
                 })
                 .collect()
         };
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            probe()
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), probe)
-        }
+        self.with_pack_access(probe)
     }
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
@@ -562,7 +538,7 @@ impl ObjectStore for FilesSource {
                 reader: Box::new(std::io::Cursor::new(Vec::<u8>::new())),
             }));
         }
-        PackStore::with_context(self.packs.pack_store().clone(), || {
+        self.with_pack_access(|| {
             if self.use_midx {
                 match self.midx.open_stream(oid) {
                     Ok(Some(stream)) => return Ok(Some(stream)),
@@ -583,7 +559,7 @@ impl ObjectStore for FilesSource {
 
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
         let mut seen = HashSet::new();
-        PackStore::with_context(self.packs.pack_store().clone(), || {
+        self.with_pack_access(|| {
             let mut layer = |store: &dyn ObjectStore| -> Result<bool> {
                 super::for_each_propagate_break(store, &mut |oid| {
                     if !seen.insert(*oid) {
@@ -606,17 +582,11 @@ impl ObjectStore for FilesSource {
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
         ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
         let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
-        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            files_lookup_prefix_layers(self, prefix, limit, out, &mut seen)
-        } else {
-            PackStore::with_context(self.packs.pack_store().clone(), || {
-                files_lookup_prefix_layers(self, prefix, limit, out, &mut seen)
-            })
-        }
+        self.with_pack_access(|| files_lookup_prefix_layers(self, prefix, limit, out, &mut seen))
     }
 
     fn refresh(&self) -> Result<bool> {
-        PackStore::with_context(self.packs.pack_store().clone(), || {
+        self.with_pack_access(|| {
             let mut changed = self.packs.refresh()?;
             if self.midx.refresh()? {
                 changed = true;
@@ -639,9 +609,7 @@ impl WritableObjectStore for FilesSource {
         if self.loose.freshen(oid)? {
             return Ok(true);
         }
-        PackStore::with_context(self.packs.pack_store().clone(), || {
-            self.packs.freshen_pack_containing(oid)
-        })
+        self.with_pack_access(|| self.packs.freshen_pack_containing(oid))
     }
 }
 

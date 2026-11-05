@@ -163,14 +163,26 @@ pub(crate) fn abbreviate_object_id_known(
 fn non_promisor_pack_count(repo: &Repository) -> Result<usize> {
     Ok(repo
         .odb()
-        .local_pack_indexes()?
+        .pack_indexes_for_display()?
         .iter()
         .filter(|idx| !idx.is_promisor)
         .count())
 }
 
 fn needs_whole_odb_disambiguation(repo: &Repository) -> Result<bool> {
-    Ok(non_promisor_pack_count(repo)? > 1 || repo.odb().has_secondary_object_stores())
+    let odb = repo.odb();
+    if non_promisor_pack_count(repo)? > 1 {
+        return Ok(true);
+    }
+    if odb.has_secondary_object_stores() {
+        let local = odb.local_pack_indexes()?;
+        if !local.is_empty() {
+            return Ok(true);
+        }
+        // Empty primary: pack neighbors are enough only when alternates have no loose objects.
+        return Ok(odb.alternates_may_hold_loose_objects());
+    }
+    Ok(false)
 }
 
 fn disambiguation_len_from_packs(
@@ -181,7 +193,7 @@ fn disambiguation_len_from_packs(
 ) -> Result<Option<usize>> {
     let odb = repo.odb();
     let mut len = min_len;
-    let indexes = odb.local_pack_indexes()?;
+    let indexes = odb.pack_indexes_for_display()?;
     if indexes.is_empty() {
         return Ok(None);
     }
@@ -224,22 +236,33 @@ fn fanout_may_have_loose(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commit::resolve_core_abbrev_len;
     use crate::config::environment::RepositoryOptions;
-    use crate::objects::ObjectKind;
+    use crate::objects::{ObjectId, ObjectKind};
     use crate::repo::Repository;
     use std::path::Path;
     use std::process::Command;
     use tempfile::TempDir;
 
     fn git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git")
+        let out = git_output(dir, args);
+        assert!(out.status.success(), "git {args:?}");
+    }
+
+    fn git_stdout(dir: &Path, args: &[&str]) -> String {
+        let out = git_output(dir, args);
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    fn git_output(dir: &Path, args: &[&str]) -> std::process::Output {
+        Command::new("git")
             .current_dir(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .output()
-            .expect("git");
-        assert!(out.status.success(), "git {args:?}");
+            .expect("git")
     }
 
     #[test]
@@ -332,6 +355,77 @@ PY"#;
         assert_eq!(walked.len(), 1);
         assert_eq!(abbreviated.len(), 1);
         assert!(std::sync::Arc::ptr_eq(&walked[0], &abbreviated[0]));
+        Ok(())
+    }
+
+    /// Borrow-only shared clone with a loose alternate object sharing a short prefix must
+    /// extend abbreviations like Git, not stop at pack neighbors alone.
+    #[test]
+    fn shared_clone_abbrev_extends_when_alternate_has_loose_prefix_collision() -> Result<()> {
+        let upstream = TempDir::new().expect("tempdir");
+        let up = upstream.path();
+        git(up, &["init", "-q", "-b", "main"]);
+        std::fs::write(up.join("seed.txt"), b"seed\n").expect("write");
+        git(up, &["add", "seed.txt"]);
+        git(up, &["commit", "-qm", "seed"]);
+        git(up, &["gc", "--quiet"]);
+        let commit_hex = git_stdout(up, &["rev-parse", "HEAD"]);
+        let commit_oid = ObjectId::from_hex(&commit_hex).expect("commit oid");
+        let prefix4 = &commit_hex[..4];
+
+        let upstream_repo =
+            Repository::discover(Some(up), &RepositoryOptions::empty()).expect("open upstream");
+        let mut wrote_colliding_loose = false;
+        for i in 0..200_000u32 {
+            let data = format!("shared-clone abbrev collision probe {i}\n");
+            let blob_oid = upstream_repo
+                .odb()
+                .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
+                .expect("write loose blob");
+            let blob_hex = blob_oid.to_hex();
+            if blob_hex.starts_with(prefix4) && blob_hex != commit_hex {
+                wrote_colliding_loose = true;
+                break;
+            }
+        }
+        assert!(
+            wrote_colliding_loose,
+            "could not synthesize a loose blob sharing the commit's 4-hex prefix"
+        );
+
+        let clone_root = TempDir::new().expect("clone tempdir");
+        let clone = clone_root.path();
+        let status = Command::new("git")
+            .args([
+                "clone",
+                "--shared",
+                &up.to_string_lossy(),
+                &clone.to_string_lossy(),
+            ])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("clone");
+        assert!(status.success(), "git clone --shared failed");
+        git(clone, &["config", "core.abbrev", "4"]);
+
+        let expected = git_stdout(clone, &["log", "--oneline", "-n", "1"]);
+        let expected_abbrev = expected.split_whitespace().next().expect("git log abbrev");
+
+        let repo = Repository::discover(Some(clone), &RepositoryOptions::empty()).expect("open");
+        let min_len =
+            resolve_core_abbrev_len(&repo.config()?.clone(), repo.odb()).expect("abbrev len");
+        assert_eq!(min_len, 4, "fixture must use core.abbrev=4");
+        let grit_abbrev = OidAbbrevBatch::new(min_len).abbrev_known(&repo, commit_oid)?;
+        assert_eq!(
+            grit_abbrev, expected_abbrev,
+            "grit abbrev must match git when alternate loose shares the short prefix \
+             (git line {expected:?})"
+        );
+        assert!(
+            grit_abbrev.len() > 4,
+            "abbrev must extend past core.abbrev when a loose alternate object collides"
+        );
         Ok(())
     }
 }

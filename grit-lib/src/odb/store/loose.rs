@@ -26,15 +26,25 @@ use crate::zlib_inflate::{
 const STREAM_CHUNK: usize = 128 * 1024;
 
 fn objects_dir_mtime(objects_dir: &Path) -> SystemTime {
+    #[cfg(test)]
+    crate::hot_path_test_metrics::record_loose_objects_root_metadata_for_active_scope();
     fs::metadata(objects_dir)
         .and_then(|m| m.modified())
         .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 fn fanout_dir_mtime(objects_dir: &Path, prefix: &str) -> SystemTime {
+    #[cfg(test)]
+    crate::hot_path_test_metrics::record_loose_fanout_metadata_for_active_scope();
     fs::metadata(objects_dir.join(prefix))
         .and_then(|m| m.modified())
         .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+fn loose_fanout_is_dir(objects_dir: &Path, prefix: &str) -> bool {
+    #[cfg(test)]
+    crate::hot_path_test_metrics::record_loose_path_exists_probe_for_active_scope();
+    objects_dir.join(prefix).is_dir()
 }
 
 fn loose_fanout_prefix(objects_dir: &Path, path: &Path) -> Option<String> {
@@ -87,7 +97,23 @@ impl LooseNegativeCache {
         }
     }
 
+    /// Whether `path` is known absent from a prior miss with no filesystem probes.
+    fn peek_known_absent(&self, objects_dir: &Path, path: &Path) -> bool {
+        if self.absent_paths.contains(path) {
+            return true;
+        }
+        if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
+            if self.absent_fanout.contains(&prefix) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn may_skip_open(&mut self, objects_dir: &Path, path: &Path) -> bool {
+        if self.peek_known_absent(objects_dir, path) {
+            return true;
+        }
         self.sync_root(objects_dir);
         if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
             self.sync_fanout(objects_dir, &prefix);
@@ -105,8 +131,7 @@ impl LooseNegativeCache {
         }
         self.absent_paths.insert(path.to_path_buf());
         if let Some(prefix) = loose_fanout_prefix(objects_dir, path) {
-            let fanout_dir = objects_dir.join(&prefix);
-            if !fanout_dir.is_dir() {
+            if !loose_fanout_is_dir(objects_dir, &prefix) {
                 self.absent_fanout.insert(prefix);
             }
         }
@@ -163,9 +188,13 @@ impl LooseStore {
             .is_some_and(|mut guard| guard.may_skip_open(&self.objects_dir, path))
     }
 
-    /// Whether a prior miss recorded `oid`'s loose path (or fanout) as absent.
-    pub(crate) fn may_skip_open_for(&self, oid: &ObjectId) -> bool {
-        self.open_may_be_absent(&self.object_path(oid))
+    /// Memory-only negative-cache hit for `oid` (no filesystem metadata).
+    pub(crate) fn cached_absent_loose_path(&self, oid: &ObjectId) -> bool {
+        let path = self.object_path(oid);
+        self.negative_cache
+            .lock()
+            .ok()
+            .is_some_and(|guard| guard.peek_known_absent(&self.objects_dir, &path))
     }
 
     fn record_absent_path(&self, path: &Path) {
