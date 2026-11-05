@@ -32,7 +32,7 @@ A branch you [share](../share/) with other people works differently, because eac
 - the other members' heads are fetched too, as `<remote>/shared/<branch>/<user>`, and reported under the branch with how each compares with yours;
 - when another member's head builds on yours, your branch is fast-forwarded to it (to the furthest such head, when they are on one line) and then pushed as your head (`took bob's head, which builds on yours`);
 - when your branch here and your head in your space have diverged (you amended or rebased here), your head is replaced: it is yours alone, and the server keeps the old one in the share's log;
-- a member's head that has diverged from yours is reported, with the command to rebase onto it.
+- a member's head that has diverged from yours, but goes together with it without losing anything, is combined with yours, and the result pushed (`combined with bob's head, ...`). One that needs a decision is reported with its options (see [`grit share resolve`](../share/#resolving-a-divergence)), and sync exits `3`.
 
 Sync works in a clone. In a [snapshot checkout](../checkout/), send branches with [`grit checkin`](../checkin/) and update with [`grit pull`](../pull/). You need to be signed in to the server ([`grit login`](../auth/)).
 

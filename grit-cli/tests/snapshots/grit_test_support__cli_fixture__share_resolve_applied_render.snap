@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs. (amended_both_conflicting)\n✓ keep_both with carol's head: pairing 538e7ad → 9a0b1c2\n✓ pushed your head\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"pairing\",\"with\":\"carol\",\"scenario\":\"amended_both_conflicting\",\"summary\":\"You and carol both amended \\\"Add the history RPC\\\", and the edits overlap in src/rpc.rs.\",\"option\":\"keep_both\",\"previous\":\"538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8\",\"head\":\"9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b\",\"pushed\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Resolve `pairing` with `carol`\n\n**Scenario:** `amended_both_conflicting`. You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs.\n\nApplied `keep_both`: `pairing` is now `9a0b1c2`, pushed.\n",
+    "stderr": ""
+  }
+}

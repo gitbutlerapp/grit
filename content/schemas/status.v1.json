@@ -217,6 +217,13 @@
           "description": "Whether someone has to decide what to do. When `false`, the heads can be put together without losing anything.",
           "type": "boolean"
         },
+        "options": {
+          "description": "The ways out, the recommended one first.",
+          "items": {
+            "$ref": "#/definitions/ResolveOptionJson"
+          },
+          "type": "array"
+        },
         "scenario": {
           "description": "The scenario's stable code, such as `amended_both_conflicting`.",
           "type": "string"
@@ -367,6 +374,36 @@
         "date",
         "email",
         "name"
+      ],
+      "type": "object"
+    },
+    "ResolveOptionJson": {
+      "description": "One way out of a divergence.",
+      "properties": {
+        "command": {
+          "description": "The command that applies it.",
+          "type": "string"
+        },
+        "id": {
+          "description": "Its stable id: `combine`, `keep_mine`, `keep_theirs`, `keep_both`, `keep_amended`, `drop`, `my_order`, `their_order`, `my_split`, `their_split`, `restore` or `resolve`.",
+          "type": "string"
+        },
+        "label": {
+          "description": "What it does.",
+          "type": "string"
+        },
+        "loses": {
+          "description": "What it leaves out (kept in the share's log), or `null` when it keeps every change: such an option is safe to choose without asking.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "id",
+        "label"
       ],
       "type": "object"
     },

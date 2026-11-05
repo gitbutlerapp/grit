@@ -64,6 +64,15 @@ pub struct PushSharedBranch {
     pub branch: String,
     /// The other members' heads, compared with yours.
     pub heads: Vec<crate::commands::sync::SharedHead>,
+    /// Members whose diverged heads went together with yours without losing
+    /// anything: combined into your branch here, and pushed again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub combined: Vec<String>,
+    /// Your head afterwards, when combining moved it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(default)]
+    pub head: Option<String>,
 }
 
 impl PushOutcome {
@@ -221,6 +230,18 @@ impl HumanRender for PushOutcome {
             outln!(w, "  added remote origin → {url}");
         }
         for s in &self.shared {
+            if !s.combined.is_empty() {
+                outln!(
+                    w,
+                    "✓ combined {} with {}'s head (nothing lost) and pushed it{}",
+                    s.branch,
+                    s.combined.join("'s and "),
+                    s.head
+                        .as_deref()
+                        .map(|h| format!(": {}", grit_lib::objects::short_hex(h)))
+                        .unwrap_or_default()
+                );
+            }
             for h in &s.heads {
                 outln!(
                     w,
@@ -245,6 +266,17 @@ impl MarkdownRender for PushOutcome {
         markdown::print_push_results(w, &self.remote, self.kind, self.dry_run, &self.results)?;
         for s in &self.shared {
             writeln!(w, "\n## Shared branch `{}`\n", s.branch)?;
+            if !s.combined.is_empty() {
+                writeln!(
+                    w,
+                    "Combined with {}'s head (nothing lost) and pushed the result{}.\n",
+                    s.combined.join("'s and "),
+                    s.head
+                        .as_deref()
+                        .map(|h| format!(", `{}`", grit_lib::objects::short_hex(h)))
+                        .unwrap_or_default()
+                )?;
+            }
             if s.heads.is_empty() {
                 writeln!(w, "Nobody else has pushed a head yet.")?;
             }
@@ -499,18 +531,57 @@ pub fn run(
             if crate::commands::sync::fetch_shared_heads(&repo, &tracking, mode).is_err() {
                 continue;
             }
-            let ours =
+            let heads_now = |ours: Option<ObjectId>| -> Vec<crate::commands::sync::SharedHead> {
+                crate::commands::sync::shared_heads(&repo, &tracking, name)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(user, tip)| {
+                        crate::commands::sync::SharedHead::new(
+                            &repo, &tracking, name, user, ours, tip,
+                        )
+                    })
+                    .collect()
+            };
+            let mut ours =
                 grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{name}")).ok();
-            let heads = crate::commands::sync::shared_heads(&repo, &tracking, name)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(user, tip)| {
-                    crate::commands::sync::SharedHead::new(&repo, &tracking, name, user, ours, tip)
-                })
-                .collect();
+            let mut heads = heads_now(ours);
+            // Heads that go together with yours without losing anything:
+            // combine them here, and push the result.
+            let mut combined = Vec::new();
+            for h in &heads {
+                let (Some(mine), Some(d)) = (ours, &h.divergence) else {
+                    continue;
+                };
+                if d.needs_decision {
+                    continue;
+                }
+                let Ok(tip) = h.tip.parse::<ObjectId>() else {
+                    continue;
+                };
+                if let Some(head) =
+                    crate::commands::share::auto_combine(&repo, &tracking, name, &h.user, mine, tip)
+                {
+                    ours = Some(head);
+                    combined.push(h.user.clone());
+                }
+            }
+            let mut head = None;
+            if !combined.is_empty() {
+                let again = crate::commands::sync::push(&plan.remote, &[name.to_owned()], mode)?;
+                if let Some(Some(why)) = again.get(name) {
+                    anyhow::bail!(
+                        "combined {name} with {}'s head here, but pushing it was refused: {why}",
+                        combined.join(" and ")
+                    );
+                }
+                head = ours.map(|o| o.to_hex());
+                heads = heads_now(ours);
+            }
             shared.push(PushSharedBranch {
                 branch: name.to_owned(),
                 heads,
+                combined,
+                head,
             });
         }
     }

@@ -497,7 +497,44 @@ fn sample_divergence() -> crate::commands::share::DivergenceJson {
         }],
         conflicts: vec!["src/rpc.rs".to_owned()],
         also: Vec::new(),
+        options: sample_options(),
     }
+}
+
+fn sample_options() -> Vec<crate::commands::share::ResolveOptionJson> {
+    use crate::commands::share::ResolveOptionJson;
+    let opt = |id: &str, label: &str, loses: Option<&str>| ResolveOptionJson {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        loses: loses.map(str::to_owned),
+        command: if id == "resolve" {
+            "grit rebase origin/shared/pairing/carol".to_owned()
+        } else {
+            format!("grit share resolve pairing {id} --with carol")
+        },
+    };
+    vec![
+        opt(
+            "keep_both",
+            "keep both: carol's version, then yours as a commit on top",
+            None,
+        ),
+        opt(
+            "resolve",
+            "rebase onto carol's head and resolve the conflicts yourself",
+            None,
+        ),
+        opt(
+            "keep_mine",
+            "keep yours",
+            Some("carol's changes since you last agreed"),
+        ),
+        opt(
+            "keep_theirs",
+            "keep carol's",
+            Some("your changes since you last agreed"),
+        ),
+    ]
 }
 
 /// A sync of a clone of an organization's project: the target fast-forwarded,
@@ -651,4 +688,28 @@ fn share_render() {
         cloned: true,
     };
     snapshot_modes("share_accept_render", &accepted);
+
+    use crate::commands::share::ShareResolveOutcome;
+    let asked = ShareResolveOutcome {
+        branch: "pairing".to_owned(),
+        with: "carol".to_owned(),
+        scenario: "amended_both_conflicting".to_owned(),
+        summary: "You and carol both amended \"Add the history RPC\", and the edits overlap in src/rpc.rs."
+            .to_owned(),
+        option: None,
+        previous: "538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8".to_owned(),
+        head: None,
+        pushed: false,
+        next: None,
+        options: sample_options(),
+    };
+    snapshot_modes("share_resolve_render", &asked);
+    let applied = ShareResolveOutcome {
+        option: Some("keep_both".to_owned()),
+        head: Some("9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b".to_owned()),
+        pushed: true,
+        options: Vec::new(),
+        ..asked
+    };
+    snapshot_modes("share_resolve_applied_render", &applied);
 }

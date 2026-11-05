@@ -180,6 +180,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "share.resolve",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "share.revoke",
         CommandContract {
             kind: CommandKind::Mutation,
@@ -1080,6 +1088,12 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "clone-remote",
         "share leave has no `--dry-run` yet",
+    ),
+    (
+        "share.resolve",
+        ContractRule::DryRun,
+        "clone-remote",
+        "share resolve has no `--dry-run` yet",
     ),
     (
         "share.revoke",

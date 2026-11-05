@@ -1184,3 +1184,553 @@ pub fn classify(
         matched_without_ids,
     })
 }
+
+/// A way of putting two diverged heads back together. The ids are stable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Choice {
+    /// Every change from both sides, combined commit by commit: their
+    /// commits kept as they are where possible, yours replayed on top.
+    Combine,
+    /// Your head as it is.
+    KeepMine,
+    /// Their head as it is.
+    KeepTheirs,
+    /// For a commit both amended: their version, then your amendment as a
+    /// commit of its own on top.
+    KeepBoth,
+    /// Where one side dropped a commit the other amended: keep the amended
+    /// version.
+    KeepAmended,
+    /// Where one side dropped a commit the other amended: drop it.
+    Drop,
+    /// Both reordered: your order.
+    MyOrder,
+    /// Both reordered: their order.
+    TheirOrder,
+    /// Both split a commit: your pieces.
+    MySplit,
+    /// Both split a commit: their pieces.
+    TheirSplit,
+    /// One head dropped most of the branch: bring the dropped commits back.
+    Restore,
+    /// Resolve it by hand: rebase onto their head and settle the conflicts.
+    Resolve,
+}
+
+impl Choice {
+    /// The stable id, such as `keep_both`.
+    #[must_use]
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Combine => "combine",
+            Self::KeepMine => "keep_mine",
+            Self::KeepTheirs => "keep_theirs",
+            Self::KeepBoth => "keep_both",
+            Self::KeepAmended => "keep_amended",
+            Self::Drop => "drop",
+            Self::MyOrder => "my_order",
+            Self::TheirOrder => "their_order",
+            Self::MySplit => "my_split",
+            Self::TheirSplit => "their_split",
+            Self::Restore => "restore",
+            Self::Resolve => "resolve",
+        }
+    }
+
+    /// The choice with id `id`.
+    #[must_use]
+    pub fn parse(id: &str) -> Option<Self> {
+        [
+            Self::Combine,
+            Self::KeepMine,
+            Self::KeepTheirs,
+            Self::KeepBoth,
+            Self::KeepAmended,
+            Self::Drop,
+            Self::MyOrder,
+            Self::TheirOrder,
+            Self::MySplit,
+            Self::TheirSplit,
+            Self::Restore,
+            Self::Resolve,
+        ]
+        .into_iter()
+        .find(|c| c.id() == id)
+    }
+}
+
+/// One way out of a divergence, as offered for its scenario.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolveOption {
+    /// What it does.
+    pub choice: Choice,
+    /// What it does, in a few words.
+    pub label: String,
+    /// What it leaves out, or `None` when it keeps every change. What it
+    /// leaves out is never lost: every head stays in the share's log.
+    pub loses: Option<String>,
+}
+
+impl Divergence {
+    /// The ways out of this divergence, the recommended one first.
+    #[must_use]
+    pub fn options(&self, them: &str) -> Vec<ResolveOption> {
+        let opt = |choice, label: &str, loses: Option<String>| ResolveOption {
+            choice,
+            label: label.to_owned(),
+            loses,
+        };
+        let theirs_lost = Some(format!("{them}'s changes since you last agreed"));
+        let mine_lost = Some("your changes since you last agreed".to_owned());
+        let keep_mine = opt(Choice::KeepMine, "keep yours", theirs_lost.clone());
+        let keep_theirs = opt(
+            Choice::KeepTheirs,
+            &format!("keep {them}'s"),
+            mine_lost.clone(),
+        );
+        let resolve = opt(
+            Choice::Resolve,
+            &format!("rebase onto {them}'s head and resolve the conflicts yourself"),
+            None,
+        );
+        if !self.scenario.diverged() {
+            return Vec::new();
+        }
+        match self.scenario {
+            Scenario::AmendedBothConflicting => vec![
+                opt(
+                    Choice::KeepBoth,
+                    &format!("keep both: {them}'s version, then yours as a commit on top"),
+                    None,
+                ),
+                resolve,
+                keep_mine,
+                keep_theirs,
+            ],
+            Scenario::AddedBothConflict
+            | Scenario::SplitOneAmendedOtherSpanning
+            | Scenario::NoChangeIds
+            | Scenario::MergeCommit => vec![resolve, keep_mine, keep_theirs],
+            Scenario::DroppedOneAmendedOther => vec![
+                opt(Choice::KeepAmended, "keep the amended commit", None),
+                opt(
+                    Choice::Drop,
+                    "drop it",
+                    Some("the amendment to the dropped commit".to_owned()),
+                ),
+                keep_mine,
+                keep_theirs,
+            ],
+            Scenario::ReorderedBoth => vec![
+                opt(Choice::MyOrder, "your order", None),
+                opt(Choice::TheirOrder, &format!("{them}'s order"), None),
+                keep_mine,
+                keep_theirs,
+            ],
+            Scenario::SplitBoth => vec![
+                opt(Choice::MySplit, "your split", None),
+                opt(Choice::TheirSplit, &format!("{them}'s split"), None),
+                keep_mine,
+                keep_theirs,
+            ],
+            Scenario::SquashedBothDifferently => vec![keep_mine, keep_theirs],
+            Scenario::ResetOne => vec![
+                opt(Choice::Restore, "bring the dropped commits back", None),
+                keep_mine,
+                keep_theirs,
+            ],
+            _ => vec![
+                opt(Choice::Combine, "combine both", None),
+                keep_mine,
+                keep_theirs,
+            ],
+        }
+    }
+}
+
+/// What putting two heads together made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Combined {
+    /// The new head, when it worked.
+    pub head: Option<ObjectId>,
+    /// Paths that conflicted, when it didn't.
+    pub conflicts: Vec<String>,
+    /// The commit whose changes conflicted, when it didn't.
+    pub stopped_at: Option<String>,
+}
+
+/// One commit to make: a version's changes, perhaps with another
+/// version's amendment folded in.
+struct Step {
+    version: Version,
+    /// Apply what `other` changed relative to `from` too.
+    fold: Option<(Version, Version)>,
+    /// Use this message instead of the version's.
+    message: Option<String>,
+    /// Write it as a new change, with an id of its own.
+    new_change: bool,
+    /// Replay what it changes relative to this version, not its parent.
+    against: Option<Version>,
+}
+
+/// Put `ours` and `theirs` back together as `choice` says (see
+/// [`classify`] for `floor` and `base`).
+///
+/// [`Choice::Resolve`] makes nothing: it is done by hand.
+///
+/// # Errors
+///
+/// Fails when the object database can't be read or written.
+pub fn combine(
+    repo: &Repository,
+    floor: &[ObjectId],
+    base: Option<ObjectId>,
+    ours: ObjectId,
+    theirs: ObjectId,
+    choice: Choice,
+) -> Result<Combined> {
+    let done = |head| Combined {
+        head: Some(head),
+        conflicts: Vec::new(),
+        stopped_at: None,
+    };
+    match choice {
+        Choice::KeepMine => return Ok(done(ours)),
+        Choice::KeepTheirs => return Ok(done(theirs)),
+        Choice::Resolve => {
+            return Ok(Combined {
+                head: None,
+                conflicts: Vec::new(),
+                stopped_at: None,
+            })
+        }
+        _ => {}
+    }
+    if is_ancestor(repo, theirs, ours)? {
+        return Ok(done(ours));
+    }
+    if is_ancestor(repo, ours, theirs)? {
+        return Ok(done(theirs));
+    }
+    let base = match base {
+        Some(b) => Some(b),
+        None => merge_bases_first_vs_rest(repo, ours, &[theirs])?
+            .first()
+            .copied(),
+    };
+    let mut base_seq = match base {
+        Some(b) => sequence(repo, b, floor)?,
+        None => Vec::new(),
+    };
+    let mut ours_seq = sequence(repo, ours, floor)?;
+    let mut theirs_seq = sequence(repo, theirs, floor)?;
+    let ours_side = compare_side(repo, &mut base_seq, &mut ours_seq)?;
+    let theirs_side = compare_side(repo, &mut base_seq, &mut theirs_seq)?;
+
+    // Their commits keep their place, and yours go on top, unless only you
+    // reordered (or you chose your order): then yours lead.
+    let moved = |side: &Side| side.did.values().any(|d| *d == Did::Moved);
+    let ours_lead = match choice {
+        Choice::MyOrder => true,
+        Choice::TheirOrder => false,
+        _ => moved(&ours_side) && !moved(&theirs_side),
+    };
+    let (lead_seq, lead, follow_seq, follow) = if ours_lead {
+        (&ours_seq, &ours_side, &theirs_seq, &theirs_side)
+    } else {
+        (&theirs_seq, &theirs_side, &ours_seq, &ours_side)
+    };
+    // Whose pieces of a commit both split.
+    let lead_split = match choice {
+        Choice::MySplit => ours_lead,
+        Choice::TheirSplit => !ours_lead,
+        _ => true,
+    };
+    let find = |seq: &[Version], key: &str| seq.iter().find(|v| v.key == key).cloned();
+    let base_has = |key: &str| base_seq.iter().any(|v| v.key == key);
+    // Whether `side` dropped `key` and that drop stands.
+    let dropped = |side: &Side, other: &Side, key: &str| -> bool {
+        let gone = matches!(side.did.get(key), Some(Did::Dropped));
+        let other_amended = matches!(other.did.get(key), Some(Did::Amended | Did::Reworded));
+        match choice {
+            Choice::Restore => false,
+            Choice::KeepAmended => gone && !other_amended,
+            _ => gone,
+        }
+    };
+
+    let mut steps: Vec<Step> = Vec::new();
+    let mut placed: HashSet<String> = HashSet::new();
+    for v in lead_seq {
+        if placed.contains(&v.key) {
+            continue;
+        }
+        let key = v.key.clone();
+        if !base_has(&key) {
+            // The lead's own new commit, or a piece of its split.
+            if let Some(Did::SplitFrom(from)) = lead.did.get(&key) {
+                if !lead_split && matches!(follow.did.get(from), Some(Did::Split(_))) {
+                    continue;
+                }
+            }
+            placed.insert(key);
+            steps.push(Step {
+                version: v.clone(),
+                fold: None,
+                message: None,
+                new_change: false,
+                against: None,
+            });
+            continue;
+        }
+        if dropped(follow, lead, &key) {
+            placed.insert(key);
+            continue;
+        }
+        let lead_did = lead.did.get(&key).cloned().unwrap_or(Did::Unchanged);
+        let follow_did = follow.did.get(&key).cloned().unwrap_or(Did::Unchanged);
+        let base_v = find(&base_seq, &key);
+        let follow_v = find(follow_seq, &key);
+        match (&lead_did, &follow_did) {
+            // The follower squashed it away: its squashed commit carries it.
+            (_, Did::SquashedInto(_)) => {
+                placed.insert(key);
+                continue;
+            }
+            // The follower split it, and its split wins: its pieces, in its
+            // order.
+            (
+                Did::Unchanged | Did::Moved | Did::Amended | Did::Reworded | Did::Split(_),
+                Did::Split(pieces),
+            ) if !lead_split || !matches!(lead_did, Did::Split(_)) => {
+                for piece in follow_seq.iter().filter(|p| pieces.contains(&p.key)) {
+                    if placed.insert(piece.key.clone()) {
+                        steps.push(Step {
+                            version: piece.clone(),
+                            fold: None,
+                            message: None,
+                            new_change: false,
+                            against: None,
+                        });
+                    }
+                }
+                if let (Did::Amended, Some(base_v)) = (&lead_did, &base_v) {
+                    if let Some(last) = steps.last_mut() {
+                        last.fold = Some((base_v.clone(), v.clone()));
+                    }
+                }
+                placed.insert(key);
+                continue;
+            }
+            _ => {}
+        }
+        let mut step = Step {
+            version: v.clone(),
+            fold: None,
+            message: None,
+            new_change: false,
+            against: None,
+        };
+        match (&lead_did, &follow_did, &follow_v, &base_v) {
+            // Only the follower changed it: its version.
+            (Did::Unchanged | Did::Moved, Did::Amended | Did::Reworded, Some(fv), _) => {
+                step.version = fv.clone();
+            }
+            // Both changed it.
+            (Did::Amended | Did::Reworded, Did::Amended | Did::Reworded, Some(fv), Some(bv)) => {
+                if choice == Choice::KeepBoth {
+                    steps.push(step);
+                    steps.push(Step {
+                        version: fv.clone(),
+                        fold: None,
+                        message: None,
+                        new_change: true,
+                        against: Some(v.clone()),
+                    });
+                    placed.insert(key);
+                    continue;
+                }
+                if fv.patch != bv.patch {
+                    step.fold = Some((bv.clone(), fv.clone()));
+                }
+                if fv.message != bv.message && v.message == bv.message {
+                    step.message = Some(fv.message.clone());
+                }
+            }
+            // The follower squashed another commit into this one: its
+            // version holds both.
+            (_, Did::Unchanged, Some(fv), _) if fv.patch != v.patch => {
+                if lead_did == Did::Unchanged {
+                    step.version = fv.clone();
+                } else if let Some(bv) = &base_v {
+                    step.fold = Some((bv.clone(), fv.clone()));
+                }
+            }
+            _ => {}
+        }
+        placed.insert(key);
+        steps.push(step);
+    }
+    // Commits of the base the lead dropped but the follower kept and
+    // changed (or that are restored), then the follower's new commits.
+    for v in follow_seq {
+        if placed.contains(&v.key) {
+            continue;
+        }
+        if base_has(&v.key) {
+            let lead_dropped = dropped(lead, follow, &v.key);
+            let lead_squashed = matches!(lead.did.get(&v.key), Some(Did::SquashedInto(_)));
+            if lead_dropped || lead_squashed {
+                continue;
+            }
+        }
+        if let Some(Did::SplitFrom(from)) = follow.did.get(&v.key) {
+            if lead_split && matches!(lead.did.get(from), Some(Did::Split(_))) {
+                continue;
+            }
+        }
+        placed.insert(v.key.clone());
+        steps.push(Step {
+            version: v.clone(),
+            fold: None,
+            message: None,
+            new_change: false,
+            against: None,
+        });
+    }
+    if choice == Choice::Restore {
+        for b in &base_seq {
+            if !placed.contains(&b.key) {
+                placed.insert(b.key.clone());
+                steps.push(Step {
+                    version: b.clone(),
+                    fold: None,
+                    message: None,
+                    new_change: false,
+                    against: None,
+                });
+            }
+        }
+    }
+
+    // Build on the newer of the two heads' roots.
+    let root = |seq: &[Version]| seq.first().and_then(|v| v.parent);
+    let mut tip = match (root(&ours_seq), root(&theirs_seq)) {
+        (Some(a), Some(b)) if a != b => {
+            if is_ancestor(repo, a, b)? {
+                b
+            } else {
+                a
+            }
+        }
+        (Some(a), _) | (None, Some(a)) => a,
+        (None, None) => return Ok(done(ours)),
+    };
+    for step in steps {
+        match replay(repo, tip, &step)? {
+            Ok(Some(next)) => tip = next,
+            Ok(None) => {}
+            Err(conflicts) => {
+                return Ok(Combined {
+                    head: None,
+                    conflicts,
+                    stopped_at: Some(step.version.subject.clone()),
+                })
+            }
+        }
+    }
+    Ok(done(tip))
+}
+
+/// Make `step` on `tip`: the new tip, `None` when it changes nothing
+/// there, or the conflicting paths.
+fn replay(
+    repo: &Repository,
+    tip: ObjectId,
+    step: &Step,
+) -> Result<std::result::Result<Option<ObjectId>, Vec<String>>> {
+    let v = &step.version;
+    if v.parent == Some(tip) && step.fold.is_none() && step.message.is_none() && !step.new_change {
+        return Ok(Ok(Some(v.oid)));
+    }
+    let odb = repo.odb();
+    let tip_tree = odb.commit_tree(&tip)?;
+    let parent_tree = match (&step.against, v.parent) {
+        (Some(against), _) => against.tree,
+        (None, Some(p)) => odb.commit_tree(&p)?,
+        (None, None) => tip_tree,
+    };
+    let mut tree = if v.parent == Some(tip) && step.against.is_none() {
+        v.tree
+    } else {
+        let found = tree_conflicts_with_result(repo, parent_tree, tip_tree, v.tree)?;
+        match found {
+            Ok(tree) => tree,
+            Err(paths) => return Ok(Err(paths)),
+        }
+    };
+    if let Some((from, other)) = &step.fold {
+        match tree_conflicts_with_result(repo, from.tree, tree, other.tree)? {
+            Ok(t) => tree = t,
+            Err(paths) => return Ok(Err(paths)),
+        }
+    }
+    if step.new_change {
+        // Only what this version changes beyond the tip.
+        if tree == tip_tree {
+            return Ok(Ok(None));
+        }
+    } else if tree == tip_tree && !v.lines.as_ref().is_some_and(HashSet::is_empty) {
+        // Its changes are there already.
+        return Ok(Ok(None));
+    }
+    let mut data = odb.read_commit(&v.oid)?;
+    data.tree = tree;
+    data.parents = vec![tip];
+    if let Some(message) = &step.message {
+        data.message = message.clone();
+    }
+    data.extra_headers = crate::objects::remove_header_lines(&data.extra_headers, |key| {
+        key == b"gpgsig" || key == b"gpgsig-sha256" || key == b"mergetag"
+    });
+    if step.new_change {
+        let id = crate::change_id::ChangeId::derived_from_commit_id(&v.oid);
+        crate::change_id::set_change_id(&mut data, &id);
+    }
+    let oid = odb.write(
+        crate::objects::ObjectKind::Commit,
+        &crate::objects::serialize_commit(&data),
+    )?;
+    Ok(Ok(Some(oid)))
+}
+
+/// Merge `ours` and `theirs` over `base` (trees): the result, or the
+/// conflicting paths.
+fn tree_conflicts_with_result(
+    repo: &Repository,
+    base: ObjectId,
+    ours: ObjectId,
+    theirs: ObjectId,
+) -> Result<std::result::Result<ObjectId, Vec<String>>> {
+    let merged = merge_trees_three_way(
+        repo,
+        base,
+        ours,
+        theirs,
+        MergeFavor::default(),
+        WhitespaceMergeOptions::default(),
+        None,
+        TreeMergeConflictPresentation::default(),
+        DirectoryRenameMode::from_repo(repo)?,
+    )?;
+    let mut paths: Vec<String> = crate::operation::conflicts_from_tree_merge(&merged)
+        .into_iter()
+        .map(|c| c.path)
+        .collect();
+    if paths.is_empty() {
+        return Ok(Ok(merged.result_tree));
+    }
+    paths.sort();
+    paths.dedup();
+    Ok(Err(paths))
+}

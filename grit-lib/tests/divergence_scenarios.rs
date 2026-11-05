@@ -686,3 +686,207 @@ fn every_scenario_has_a_code_and_a_rank() {
     assert_eq!(all[0], Scenario::MergeCommit);
     assert!(all.iter().take_while(|s| s.needs_decision()).count() == 10);
 }
+
+use grit_lib::divergence::{combine, Choice};
+
+/// The file at `path` in commit `c`, or `None`.
+fn file(f: &Fixture, c: &str, path: &str) -> Option<String> {
+    let out = Command::new("git")
+        .current_dir(&f.dir)
+        .args(["show", &format!("{c}:{path}")])
+        .output()
+        .unwrap();
+    out.status
+        .success()
+        .then(|| String::from_utf8(out.stdout).unwrap())
+}
+
+/// Subjects from `main` (exclusive) to `head`, oldest first.
+fn subjects(f: &Fixture, main: &str, head: &str) -> Vec<String> {
+    git_in(
+        &f.dir,
+        &[
+            "log",
+            "--reverse",
+            "--format=%s",
+            &format!("{main}..{head}"),
+        ],
+        None,
+        None,
+    )
+    .lines()
+    .map(str::to_owned)
+    .collect()
+}
+
+fn combined(
+    f: &Fixture,
+    main: &str,
+    base: &str,
+    ours: &str,
+    theirs: &str,
+    choice: Choice,
+) -> String {
+    let c = combine(
+        &f.repo(),
+        &[oid(main)],
+        Some(oid(base)),
+        oid(ours),
+        oid(theirs),
+        choice,
+    )
+    .unwrap();
+    assert!(c.conflicts.is_empty(), "{c:?}");
+    c.head.unwrap().to_hex()
+}
+
+#[test]
+fn combining_keeps_both_sides_changes() {
+    let Base { f, main, a, b } = base();
+    // Both added: theirs stays as it is, ours goes on top, so they can
+    // fast-forward to it.
+    let ours = f.commit(Some(&b), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
+    let theirs = f.commit(Some(&b), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
+    let head = combined(&f, &main, &b, &ours, &theirs, Choice::Combine);
+    assert_eq!(
+        subjects(&f, &main, &head),
+        ["Add A", "Add C", "Add F", "Add E"]
+    );
+    assert_eq!(
+        git_in(&f.dir, &["merge-base", &theirs, &head], None, None),
+        theirs
+    );
+    assert_eq!(file(&f, &head, "e.txt").as_deref(), Some("e\n"));
+
+    // They amended C; we added: our commit on their amended C.
+    let amended = f.commit(
+        Some(&a),
+        &[
+            ("c.txt", Some("c1\nC2\nc3\n")),
+            ("d.txt", Some("d1\nd2\nd3\n")),
+        ],
+        "Add C",
+        Some(&id('m')),
+    );
+    let head = combined(&f, &main, &b, &ours, &amended, Choice::Combine);
+    assert_eq!(subjects(&f, &main, &head), ["Add A", "Add C", "Add E"]);
+    assert_eq!(file(&f, &head, "c.txt").as_deref(), Some("c1\nC2\nc3\n"));
+    assert_eq!(file(&f, &head, "e.txt").as_deref(), Some("e\n"));
+
+    // Both amended C, in different files: one C with both amendments.
+    let ours_c = f.commit(
+        Some(&a),
+        &[
+            ("c.txt", Some("c1\nc2\nc3\n")),
+            ("d.txt", Some("d1\nD2\nd3\n")),
+        ],
+        "Add C",
+        Some(&id('m')),
+    );
+    let head = combined(&f, &main, &b, &ours_c, &amended, Choice::Combine);
+    assert_eq!(subjects(&f, &main, &head), ["Add A", "Add C"]);
+    assert_eq!(file(&f, &head, "c.txt").as_deref(), Some("c1\nC2\nc3\n"));
+    assert_eq!(file(&f, &head, "d.txt").as_deref(), Some("d1\nD2\nd3\n"));
+
+    // They dropped C; we added: C stays out.
+    let theirs_drop = f.commit(Some(&a), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
+    let head = combined(&f, &main, &b, &ours, &theirs_drop, Choice::Combine);
+    assert_eq!(subjects(&f, &main, &head), ["Add A", "Add F", "Add E"]);
+    assert_eq!(file(&f, &head, "c.txt"), None);
+}
+
+#[test]
+fn choices_for_decisions() {
+    let Base { f, main, a, b } = base();
+    let amend = |c: &str, msg: &str| {
+        f.commit(
+            Some(&a),
+            &[("c.txt", Some(c)), ("d.txt", Some("d1\nd2\nd3\n"))],
+            msg,
+            Some(&id('m')),
+        )
+    };
+    let ours = amend("c1\nOURS\nc3\n", "Add C");
+    let theirs = amend("c1\nTHEIRS\nc3\n", "Add C");
+    // Combining conflicts.
+    let c = combine(
+        &f.repo(),
+        &[oid(&main)],
+        Some(oid(&b)),
+        oid(&ours),
+        oid(&theirs),
+        Choice::Combine,
+    )
+    .unwrap();
+    assert_eq!(c.head, None);
+    assert_eq!(c.conflicts, ["c.txt"]);
+    // Keeping both: theirs, then ours on top.
+    let head = combined(&f, &main, &b, &ours, &theirs, Choice::KeepBoth);
+    assert_eq!(subjects(&f, &main, &head), ["Add A", "Add C", "Add C"]);
+    assert_eq!(file(&f, &head, "c.txt").as_deref(), Some("c1\nOURS\nc3\n"));
+    assert_eq!(
+        file(&f, &format!("{head}~1"), "c.txt").as_deref(),
+        Some("c1\nTHEIRS\nc3\n")
+    );
+    // Keeping one side.
+    assert_eq!(
+        combined(&f, &main, &b, &ours, &theirs, Choice::KeepMine),
+        ours
+    );
+    assert_eq!(
+        combined(&f, &main, &b, &ours, &theirs, Choice::KeepTheirs),
+        theirs
+    );
+
+    // We dropped C, they amended it.
+    let dropped = f.commit(Some(&a), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
+    let head = combined(&f, &main, &b, &dropped, &theirs, Choice::KeepAmended);
+    assert_eq!(
+        file(&f, &head, "c.txt").as_deref(),
+        Some("c1\nTHEIRS\nc3\n")
+    );
+    assert_eq!(file(&f, &head, "e.txt").as_deref(), Some("e\n"));
+    let head = combined(&f, &main, &b, &dropped, &theirs, Choice::Drop);
+    assert_eq!(file(&f, &head, "c.txt"), None);
+    assert_eq!(file(&f, &head, "e.txt").as_deref(), Some("e\n"));
+}
+
+#[test]
+fn choosing_an_order() {
+    let (f, main, b) = three();
+    let ours = order(&f, &main, &['C', 'A', 'F'], None);
+    let theirs = order(&f, &main, &['A', 'F', 'C'], None);
+    let head = combined(&f, &main, &b, &ours, &theirs, Choice::MyOrder);
+    assert_eq!(subjects(&f, &main, &head), ["Add C", "Add A", "Add F"]);
+    let head = combined(&f, &main, &b, &ours, &theirs, Choice::TheirOrder);
+    assert_eq!(subjects(&f, &main, &head), ["Add A", "Add F", "Add C"]);
+    // We reorder, they amend A: our order, their A.
+    let amended = order(&f, &main, &['A', 'C', 'F'], Some('A'));
+    let head = combined(&f, &main, &b, &ours, &amended, Choice::Combine);
+    assert_eq!(subjects(&f, &main, &head), ["Add C", "Add A", "Add F"]);
+    assert_eq!(file(&f, &head, "a.txt").as_deref(), Some("a amended\n"));
+}
+
+#[test]
+fn every_scenario_offers_options() {
+    let Base { f, main, a, b } = base();
+    let ours = f.commit(Some(&b), &[("e.txt", Some("e\n"))], "Add E", Some(&id('n')));
+    let theirs = f.commit(Some(&a), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
+    let d = classify(
+        &f.repo(),
+        &[oid(&main)],
+        Some(oid(&b)),
+        oid(&ours),
+        oid(&theirs),
+    )
+    .unwrap();
+    let options = d.options("alice");
+    assert_eq!(options[0].choice, Choice::Combine);
+    assert_eq!(options[0].loses, None);
+    assert!(options
+        .iter()
+        .any(|o| o.choice == Choice::KeepTheirs && o.loses.is_some()));
+    for choice in options.iter().map(|o| o.choice) {
+        assert_eq!(Choice::parse(choice.id()), Some(choice));
+    }
+}
