@@ -202,7 +202,6 @@ jobs:
   semver-check:
     name: semver-check
     runs-on: ubuntu-latest
-    continue-on-error: true # Make blocking at 0.6.0: delete continue-on-error
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

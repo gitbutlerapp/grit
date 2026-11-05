@@ -232,7 +232,7 @@ The first run may install the pinned nightly toolchain and `cargo-public-api` (O
 
 ## Semver check
 
-[`scripts/semver-check.sh`](scripts/semver-check.sh) runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) **`check-release`** on **`grit-lib`** with **`--features http-ureq`** (same surface as the public API snapshot; no `test-support`). The baseline git revision defaults to the latest **`v*`** tag reachable from **`HEAD`** (`SEMVER_BASELINE` overrides). Pin: **`CARGO_SEMVER_CHECKS_VERSION`** in the script.
+[`scripts/semver-check.sh`](scripts/semver-check.sh) runs [`cargo-semver-checks`](https://github.com/obi1kenobi/cargo-semver-checks) **`check-release`** on **`grit-lib`** with **`--features http-ureq`** (same surface as the public API snapshot; no `test-support`). Until **0.6.0**, the baseline git revision comes from **`semver_baseline`** in [`grit-lib/api-ratchet.toml`](grit-lib/api-ratchet.toml) (bump it when you regenerate **`public-api.txt`** after an intentional API change). Override with **`SEMVER_BASELINE`**, or fall back to the latest **`v*`** tag when the pin is absent. Pin: **`CARGO_SEMVER_CHECKS_VERSION`** in the script.
 
 **Check locally (same as CI semver-check job):**
 

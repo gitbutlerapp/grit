@@ -15,7 +15,7 @@ usage() {
 	cat <<EOF
 Usage: $(basename "$0") <check|ensure-deps>
 
-  check        Run cargo semver-checks against the baseline tag (see SEMVER_BASELINE)
+  check        Run cargo semver-checks (baseline: SEMVER_BASELINE, api-ratchet semver_baseline, else latest v* tag)
   ensure-deps  Install pinned cargo-semver-checks (for CI and local runs)
 EOF
 }
@@ -44,9 +44,24 @@ ensure_cargo_semver_checks() {
 	fi
 }
 
+read_ratchet_semver_baseline() {
+	local ratchet="${REPO}/grit-lib/api-ratchet.toml"
+	local line=""
+	[[ -f "${ratchet}" ]] || return 1
+	line="$(grep -E '^semver_baseline[[:space:]]*=' "${ratchet}" 2>/dev/null | head -1)" || return 1
+	[[ -n "${line}" ]] || return 1
+	printf '%s\n' "${line}" | sed -n 's/.*=[[:space:]]*"\([^"]*\)".*/\1/p'
+}
+
 baseline_rev() {
 	if [[ -n "${SEMVER_BASELINE:-}" ]]; then
 		printf '%s\n' "${SEMVER_BASELINE}"
+		return 0
+	fi
+	local pinned=""
+	pinned="$(read_ratchet_semver_baseline || true)"
+	if [[ -n "${pinned}" ]]; then
+		printf '%s\n' "${pinned}"
 		return 0
 	fi
 	git -C "${REPO}" describe --tags --abbrev=0 --match 'v*'
@@ -84,7 +99,7 @@ run_check() {
 	cd "${REPO}"
 	local log
 	log="$(mktemp)"
-	trap 'rm -f "${log}"' EXIT
+	trap "rm -f '${log}'" EXIT
 	set +e
 	# Uses the workspace toolchain (rust-toolchain.toml). cargo-semver-checks 0.51.0
 	# supports rustdoc JSON from Rust 1.99.0; no pinned nightly override needed.
