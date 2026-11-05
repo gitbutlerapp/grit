@@ -187,12 +187,12 @@ pub(crate) fn load_change(
 ) -> Result<FileChange> {
     let (new_bytes, new_binary) = match worktree {
         Some(side) => load_worktree_new_side(odb, &entry, side)?,
-        None => load_new_side(odb, &entry, None)?,
+        None => load_new_side(odb, &entry)?,
     };
     let (old_bytes, old_binary) = if new_binary {
         (old_side_without_payload(odb, &entry, worktree)?, false)
     } else {
-        load_old_side(odb, &entry, None)?
+        load_old_side(odb, &entry)?
     };
     Ok(FileChange::from_entry(
         entry,
@@ -256,7 +256,7 @@ fn load_worktree_new_side(
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     let Some(path) = entry.new_path.as_deref().or(entry.old_path.as_deref()) else {
-        return load_new_side(odb, entry, None);
+        return load_new_side(odb, entry);
     };
     // Working-tree entries often carry only a hash of the normalized file, and the blob is not
     // in the object database until it is staged, so always read the live file.

@@ -10,6 +10,7 @@ use grit_lib::diff::{
 use grit_lib::objects::{ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::counters::track_blob_reads;
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -130,9 +131,9 @@ fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
         .tree_to_tree(Some(&old), Some(&new))
         .expect("entries");
     let counter = Arc::new(AtomicUsize::new(0));
+    let _reads = track_blob_reads(Arc::clone(&counter));
     let config = repo.config().expect("config");
-    let mut opts = DiffOptions::default();
-    opts.blob_read_counter = Some(Arc::clone(&counter));
+    let opts = DiffOptions::default();
     let _ = build_file_diffs(
         repo.odb(),
         entries,
@@ -280,8 +281,8 @@ fn tree_metadata_matrix_matches_git_without_reading_blobs() {
                 .expect("metadata diff");
             for detail in [DiffDetail::NameOnly, DiffDetail::NameStatus] {
                 let counter = Arc::new(AtomicUsize::new(0));
-                let mut opts = DiffOptions::default().with_renames(RenameDetection::Off);
-                opts.blob_read_counter = Some(Arc::clone(&counter));
+                let _reads = track_blob_reads(Arc::clone(&counter));
+                let opts = DiffOptions::default().with_renames(RenameDetection::Off);
                 let out = build_file_diffs(
                     repo.odb(),
                     entries.clone(),

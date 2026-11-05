@@ -29,7 +29,7 @@ bare_urls = "deny"
 [features]
 # Tests that start the system `git` or build heavy fixtures run only with this
 # feature (`make test-full`, the nightly CI job); see TESTING.md.
-full-tests = []
+full-tests = ["test-support"]
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport
 # (`transport::http::ureq_client`). Off by default so embedders can bring their
 # own HTTP stack.

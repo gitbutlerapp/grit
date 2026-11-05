@@ -73,19 +73,6 @@ pub struct RenameDetection {
     pub copies: bool,
 }
 
-/// Test hook type so [`StatusOptions`] stays `Debug`/`Clone`.
-#[derive(Clone)]
-#[doc(hidden)]
-pub struct BeforeOpportunisticIndexWriteHook(
-    #[doc(hidden)] pub std::sync::Arc<dyn Fn() + Send + Sync>,
-);
-
-impl std::fmt::Debug for BeforeOpportunisticIndexWriteHook {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("<before_opportunistic_index_write>")
-    }
-}
-
 /// Inputs that drive **what** `status` computes.
 ///
 /// The CLI translates clap arguments and config (`status.showUntrackedFiles`,
@@ -122,9 +109,6 @@ pub struct StatusOptions {
     /// read-only status (for example when `GIT_OPTIONAL_LOCKS=0`) set this to `false`; the
     /// default is `true`.
     pub write_index: bool,
-    /// Test hook invoked immediately before an opportunistic index write (deterministic races).
-    #[doc(hidden)]
-    pub before_opportunistic_index_write: Option<BeforeOpportunisticIndexWriteHook>,
 }
 
 /// Map `status.showUntrackedFiles` to [`UntrackedMode`].
@@ -174,7 +158,6 @@ impl Default for StatusOptions {
             now_unix_seconds: None,
             count_stash: false,
             write_index: true,
-            before_opportunistic_index_write: None,
         }
     }
 }
@@ -2524,9 +2507,7 @@ pub fn status(
         // The refresh pass already re-hashed every racily clean entry and invalidated the
         // ones whose content changed, so the write must not hash them a second time.
         index.skip_racy_smudge_on_write = true;
-        if let Some(hook) = &opts.before_opportunistic_index_write {
-            (hook.0)();
-        }
+        crate::test_probe_hooks::hooks::before_opportunistic_index_write();
         let written = repo.try_write_index_at(&index_path, &mut index);
         index.skip_racy_smudge_on_write = false;
         if written? {
@@ -4079,7 +4060,9 @@ mod status_op_tests {
     )]
     #[test]
     fn status_scan_stats_each_tracked_path_once() {
-        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::test_support::counters::{
+            reset_worktree_metadata_probe, worktree_metadata_probe_count,
+        };
 
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();

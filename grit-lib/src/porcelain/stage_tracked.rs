@@ -1539,7 +1539,9 @@ mod tests {
 
     #[test]
     fn staging_scan_stats_each_tracked_path_once() {
-        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::test_support::counters::{
+            reset_worktree_metadata_probe, worktree_metadata_probe_count,
+        };
 
         let (_dir, repo) = init_repo();
         let wt = repo.work_tree().unwrap();

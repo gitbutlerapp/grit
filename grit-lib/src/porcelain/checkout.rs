@@ -50,8 +50,6 @@ mod checkout_journal;
 mod checkout_parallel;
 pub(crate) use checkout_journal::CheckoutJournal;
 use checkout_journal::SharedCheckoutDeleteRollback;
-#[cfg(test)]
-pub use checkout_journal::{checkout_spool_probe_count, reset_checkout_spool_probe};
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
     cancellable_chunks, cancellable_chunks_cancel_friendly, execute_write_jobs,

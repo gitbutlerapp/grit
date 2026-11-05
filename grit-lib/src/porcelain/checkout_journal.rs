@@ -12,8 +12,6 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(test)]
-use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 
 use super::{
@@ -585,61 +583,6 @@ fn restore_spooled_directory(
     Ok(())
 }
 
-#[cfg(test)]
-static CHECKOUT_SPOOL_PROBE: AtomicUsize = AtomicUsize::new(0);
-
-#[cfg(test)]
-static CHECKOUT_SPOOL_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0);
-
-/// Serializes unit tests that share the spool probe counters.
-#[cfg(test)]
-static CHECKOUT_SPOOL_PROBE_SERIAL: Mutex<bool> = Mutex::new(false);
-
-/// Keeps checkout spool probing armed for one test; disarms on drop.
-#[cfg(test)]
-#[doc(hidden)]
-pub struct CheckoutSpoolProbeScope {
-    _serial: MutexGuard<'static, bool>,
-}
-
-#[cfg(test)]
-impl Drop for CheckoutSpoolProbeScope {
-    fn drop(&mut self) {
-        *self._serial = false;
-        CHECKOUT_SPOOL_PROBE_ACTIVE.store(0, Ordering::Release);
-    }
-}
-
-/// Reset and return a guard that counts checkout delete spools until dropped.
-#[cfg(test)]
-#[doc(hidden)]
-pub fn reset_checkout_spool_probe() -> CheckoutSpoolProbeScope {
-    let mut serial = CHECKOUT_SPOOL_PROBE_SERIAL
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    assert!(
-        !*serial,
-        "checkout spool probe already armed in another test"
-    );
-    *serial = true;
-    CHECKOUT_SPOOL_PROBE.store(0, Ordering::Relaxed);
-    CHECKOUT_SPOOL_PROBE_ACTIVE.store(1, Ordering::Release);
-    CheckoutSpoolProbeScope { _serial: serial }
-}
-
-#[cfg(test)]
-#[doc(hidden)]
-pub fn checkout_spool_probe_count() -> usize {
-    CHECKOUT_SPOOL_PROBE.load(Ordering::Relaxed)
-}
-
-#[cfg(test)]
-fn record_checkout_spool_probe() {
-    if CHECKOUT_SPOOL_PROBE_ACTIVE.load(Ordering::Acquire) != 0 {
-        CHECKOUT_SPOOL_PROBE.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
 fn move_worktree_entry_to_spool(
     abs: &Path,
     stash: &Path,
@@ -648,15 +591,13 @@ fn move_worktree_entry_to_spool(
     // `stash` sits directly in the spool directory: entry names never contain a separator.
     match fs::rename(abs, stash) {
         Ok(()) => {
-            #[cfg(test)]
-            record_checkout_spool_probe();
+            crate::test_probe_hooks::hooks::checkout_spool_delete();
             Ok(())
         }
         Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
             cross_device_move_to_spool(abs, stash, kind)?;
             fs::remove_file(abs)?;
-            #[cfg(test)]
-            record_checkout_spool_probe();
+            crate::test_probe_hooks::hooks::checkout_spool_delete();
             Ok(())
         }
         Err(err) => Err(err),

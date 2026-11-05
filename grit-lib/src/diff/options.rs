@@ -109,9 +109,6 @@ pub struct DiffOptions {
     pub word_level_inline: bool,
     /// Expand hunks to enclosing function boundaries (`git diff -W`).
     pub function_context: bool,
-    /// When set, incremented on each blob ODB read during tree content loading (tests only).
-    #[doc(hidden)]
-    pub blob_read_counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
     /// For [`super::diff_paths`] only: count lines via [`super::line_change_counts`] without hunks.
     pub(crate) no_index_stat_only: bool,
 }
@@ -128,7 +125,6 @@ impl Default for DiffOptions {
             whitespace: WhitespaceMode::default(),
             word_level_inline: true,
             function_context: false,
-            blob_read_counter: None,
             no_index_stat_only: false,
         }
     }

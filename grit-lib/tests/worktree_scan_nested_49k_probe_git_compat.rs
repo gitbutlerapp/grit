@@ -8,7 +8,9 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+use grit_lib::test_support::counters::{
+    reset_worktree_metadata_probe, worktree_metadata_probe_count,
+};
 use grit_test_support::git;
 
 const LEAF_DIRS: usize = 8 * 8 * 8 * 8;

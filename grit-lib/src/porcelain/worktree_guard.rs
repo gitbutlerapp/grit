@@ -2785,7 +2785,7 @@ mod tests {
     fn delete_only_tree_diff_paths_skip_worktree_stat_when_index_matches_head() {
         use crate::objects::{serialize_commit, CommitData, ObjectKind};
         use crate::refs;
-        use crate::worktree_scan::{
+        use crate::test_support::counters::{
             reset_worktree_metadata_probe, worktree_metadata_probe_count,
             worktree_read_dir_probe_count,
         };
@@ -3096,7 +3096,9 @@ mod tests {
     fn local_change_diffs_for_tree_changes_limits_worktree_probes() {
         use crate::objects::{serialize_commit, CommitData, ObjectKind};
         use crate::refs;
-        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::test_support::counters::{
+            reset_worktree_metadata_probe, worktree_metadata_probe_count,
+        };
         use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
         let tmp = TempDir::new().expect("tempdir");

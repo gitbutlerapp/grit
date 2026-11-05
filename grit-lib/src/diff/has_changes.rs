@@ -1,7 +1,6 @@
 //! Fast change detection for diffs without building hunks.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::config::ConfigSet;
@@ -20,14 +19,6 @@ use crate::pathspec::PathspecMatcher;
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
 use crate::worktree::worktree_rules::WorktreeRules;
-
-/// Hook for tests that assert early exit while scanning worktree diffs.
-#[doc(hidden)]
-pub static WORKTREE_HAS_CHANGES_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
-
-/// Hook for tests that assert `Diff::has_changes` was (not) invoked.
-#[doc(hidden)]
-pub static HAS_CHANGES_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 fn opts_need_content_compare(opts: &DiffOptions) -> bool {
     opts.whitespace.is_active()
@@ -231,7 +222,7 @@ fn worktree_has_changes(
     };
 
     if index_backed {
-        WORKTREE_HAS_CHANGES_ENTRIES_SCANNED.store(0, Ordering::SeqCst);
+        crate::test_probe_hooks::hooks::reset_worktree_has_changes_scan();
         let content_compare = opts_need_content_compare(opts);
         let (entries, _) = diff_index_to_worktree_with_options(
             repo.odb(),
@@ -249,7 +240,7 @@ fn worktree_has_changes(
             },
         )?;
         for entry in &entries {
-            WORKTREE_HAS_CHANGES_ENTRIES_SCANNED.fetch_add(1, Ordering::SeqCst);
+            crate::test_probe_hooks::hooks::worktree_has_changes_entry_scanned();
             if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
                 continue;
             }
@@ -378,7 +369,7 @@ impl<'repo> super::handle::Diff<'repo> {
         pathspecs: &[String],
         opts: DiffOptions,
     ) -> Result<bool> {
-        HAS_CHANGES_CALL_COUNT.fetch_add(1, Ordering::SeqCst);
+        crate::test_probe_hooks::hooks::has_changes_call();
         let repo = self.repository();
         let matcher = repo.pathspec_matcher(pathspecs)?;
         match target {

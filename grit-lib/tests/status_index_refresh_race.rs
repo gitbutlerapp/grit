@@ -6,10 +6,9 @@ use std::process::Command;
 use std::sync::Arc;
 
 use grit_lib::porcelain::commit::create_commit;
-use grit_lib::porcelain::status::{
-    status, BeforeOpportunisticIndexWriteHook, StatusOptions, UntrackedMode,
-};
+use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::test_support::status::set_before_opportunistic_index_write_hook;
 
 use crate::support::{assert_git_fsck_strict, git, open_grit_repo};
 
@@ -45,13 +44,14 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
         let req = grit_test_support::commit_request("race", "A <a@b.c> 1 +0000");
         create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit in hook");
     });
+    set_before_opportunistic_index_write_hook(Some(hook));
 
     let repo = open_grit_repo(dir);
     let mut opts = StatusOptions::default();
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
-    opts.before_opportunistic_index_write = Some(BeforeOpportunisticIndexWriteHook(hook));
     status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
+    set_before_opportunistic_index_write_hook(None);
 
     assert!(
         git_diff_cached_names(dir).is_empty(),

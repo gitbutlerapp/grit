@@ -1258,7 +1258,7 @@ fn load_patch_blob_side(
     if is_missing || oid == zero_oid() || oid == empty_blob_oid() {
         return Ok((Vec::new(), false));
     }
-    let (side, binary) = load_odb_blob_side_for_diff(odb, &oid, path, None, force_read_content)?;
+    let (side, binary) = load_odb_blob_side_for_diff(odb, &oid, path, force_read_content)?;
     Ok((side.data, binary))
 }
 

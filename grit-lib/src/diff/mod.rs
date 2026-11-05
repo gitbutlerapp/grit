@@ -53,9 +53,7 @@ pub use detail::{line_change_counts, DiffDetail, DiffTotals, LineStat};
 pub use files::{build_file_diffs, build_file_diffs_streaming, name_status_line, DiffFilesOutput};
 pub use filter::{DiffFilter, InvalidDiffFilter};
 pub use handle::Diff;
-pub use has_changes::{
-    text_sides_differ, HAS_CHANGES_CALL_COUNT, WORKTREE_HAS_CHANGES_ENTRIES_SCANNED,
-};
+pub use has_changes::text_sides_differ;
 pub use hunk_id::{
     hunk_ids, hunk_ids_with_duplicate_peers, peer_hunks_by_primary_path, peer_scope_includes_path,
     DiffSide, HunkId, HunkIdError,

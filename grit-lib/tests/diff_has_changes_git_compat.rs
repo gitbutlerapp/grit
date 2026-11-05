@@ -3,8 +3,11 @@
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::{DiffOptions, DiffTarget, WORKTREE_HAS_CHANGES_ENTRIES_SCANNED};
+use grit_lib::diff::{DiffOptions, DiffTarget};
 use grit_lib::repo::Repository;
+use grit_lib::test_support::counters::{
+    reset_worktree_has_changes_entries_scanned, worktree_has_changes_entries_scanned,
+};
 use grit_test_support::git;
 
 fn open_repo(root: &std::path::Path) -> Repository {
@@ -292,12 +295,12 @@ fn has_changes_short_circuits_after_first_changed_entry() {
     git(root, &["commit", "-qm", "init"]);
     std::fs::write(root.join("a.txt"), "a-dirty\n").expect("write");
     let repo = open_repo(root);
-    WORKTREE_HAS_CHANGES_ENTRIES_SCANNED.store(0, std::sync::atomic::Ordering::SeqCst);
+    reset_worktree_has_changes_entries_scanned();
     assert!(repo
         .diff()
         .has_changes(&DiffTarget::WorktreeVsIndex, &[], DiffOptions::default())
         .expect("has_changes"));
-    let scanned = WORKTREE_HAS_CHANGES_ENTRIES_SCANNED.load(std::sync::atomic::Ordering::SeqCst);
+    let scanned = worktree_has_changes_entries_scanned();
     assert!(
         scanned <= 1,
         "expected early stop after first changed file, scanned {scanned} entries"

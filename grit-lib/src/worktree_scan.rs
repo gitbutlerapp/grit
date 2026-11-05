@@ -21,7 +21,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,90 +73,9 @@ impl StatBoundaryPoll<'_> {
 /// leaf directories (issue #1231).
 const LIST_PARENT_DIRECTORIES: bool = cfg!(windows);
 
-/// Test hook: incremented once per worktree metadata syscall used by directory scans.
-static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
-
-/// Test hook: `read_dir` calls during directory-grouped blob scans.
-static WORKTREE_READ_DIR_PROBE: AtomicUsize = AtomicUsize::new(0);
-
-/// Test hook: `core.ignorecase` worktree path resolutions that probe the filesystem.
-static WORKTREE_PATH_RESOLVE_PROBE: AtomicUsize = AtomicUsize::new(0);
-
-/// Only syscalls under this root are counted, so tests scanning other worktrees in
-/// parallel do not inflate a probing test's counts.
-static WORKTREE_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0);
-// hygiene: test-only probe root for integration switch regressions
-static WORKTREE_PROBE_ROOT: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
-
-/// Serializes probing tests; each owns the counters while its scope is alive.
-// hygiene: test-only probe serialization for integration switch regressions
-static WORKTREE_PROBE_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Keeps worktree syscall probing armed for one test; disarms on drop.
-#[doc(hidden)]
-pub struct WorktreeProbeScope {
-    _serial: std::sync::MutexGuard<'static, ()>,
-}
-
-impl Drop for WorktreeProbeScope {
-    fn drop(&mut self) {
-        *WORKTREE_PROBE_ROOT
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = None;
-        WORKTREE_PROBE_ACTIVE.store(0, Ordering::Release);
-    }
-}
-
-/// Zero the probe counters and count only syscalls on paths under `root`.
-#[doc(hidden)]
-pub fn reset_worktree_metadata_probe(root: &Path) -> WorktreeProbeScope {
-    let serial = WORKTREE_PROBE_SERIAL
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    *WORKTREE_PROBE_ROOT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = Some(root.to_path_buf());
-    WORKTREE_METADATA_PROBE.store(0, Ordering::Relaxed);
-    WORKTREE_READ_DIR_PROBE.store(0, Ordering::Relaxed);
-    WORKTREE_PATH_RESOLVE_PROBE.store(0, Ordering::Relaxed);
-    WORKTREE_PROBE_ACTIVE.store(1, Ordering::Release);
-    WorktreeProbeScope { _serial: serial }
-}
-
-fn probe_counts(path: &Path) -> bool {
-    if WORKTREE_PROBE_ACTIVE.load(Ordering::Acquire) == 0 {
-        return false;
-    }
-    WORKTREE_PROBE_ROOT
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_deref()
-        .is_some_and(|root| path.starts_with(root))
-}
-
-/// Returns metadata syscall probes recorded since [`reset_worktree_metadata_probe`].
-#[doc(hidden)]
-pub fn worktree_metadata_probe_count() -> usize {
-    WORKTREE_METADATA_PROBE.load(Ordering::Relaxed)
-}
-
-/// Returns `read_dir` probes recorded since [`reset_worktree_metadata_probe`].
-#[cfg(test)]
-pub(crate) fn worktree_read_dir_probe_count() -> usize {
-    WORKTREE_READ_DIR_PROBE.load(Ordering::Relaxed)
-}
-
-/// Returns `core.ignorecase` path resolutions recorded since [`reset_worktree_metadata_probe`].
-#[doc(hidden)]
-pub fn worktree_path_resolve_probe_count() -> usize {
-    WORKTREE_PATH_RESOLVE_PROBE.load(Ordering::Relaxed)
-}
-
 /// Counts one filesystem-probing `core.ignorecase` path resolution for `path`.
 pub(crate) fn probe_worktree_path_resolution(path: &Path) {
-    if probe_counts(path) {
-        WORKTREE_PATH_RESOLVE_PROBE.fetch_add(1, Ordering::Relaxed);
-    }
+    crate::test_probe_hooks::hooks::worktree_path_resolve(path);
 }
 
 /// Minimum tracked blob entries before parallel stat preload is considered.
@@ -200,21 +119,13 @@ pub(crate) fn stat_scan_thread_count(
     policy.index_stat_preload_threads(config, blob_count, options.stat_parallel_threads)
 }
 
-fn probe_worktree_metadata_call(_path: &Path) {
-    if probe_counts(_path) {
-        WORKTREE_METADATA_PROBE.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
 fn dir_entry_metadata(entry: &fs::DirEntry) -> io::Result<fs::Metadata> {
-    if WORKTREE_PROBE_ACTIVE.load(Ordering::Acquire) != 0 {
-        probe_worktree_metadata_call(&entry.path());
-    }
+    crate::test_probe_hooks::hooks::worktree_metadata(&entry.path());
     entry.metadata()
 }
 
 fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
-    probe_worktree_metadata_call(path);
+    crate::test_probe_hooks::hooks::worktree_metadata(path);
     fs::symlink_metadata(path)
 }
 
@@ -1082,7 +993,6 @@ where
     F: FnMut(usize, &[u8], BlobDiskLookup) -> Result<()>,
 {
     use std::os::fd::AsRawFd;
-    let count_probes = probe_counts(abs_dir);
     let mut name = Vec::new();
     for &entry_index in entry_indices {
         boundary.poll_stride(cancel_stride)?;
@@ -1099,9 +1009,7 @@ where
         name.extend_from_slice(file_name);
         name.push(0);
         let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
-        if count_probes {
-            WORKTREE_METADATA_PROBE.fetch_add(1, Ordering::Relaxed);
-        }
+        crate::test_probe_hooks::hooks::worktree_metadata(abs_dir);
         // SAFETY: directory owns a valid fd; name is NUL-terminated and stat points to
         // writable storage. AT_SYMLINK_NOFOLLOW preserves lstat semantics for the file.
         let result = unsafe {
@@ -1194,9 +1102,7 @@ fn lookup_lone_blob_in_directory(
     index_file_name: &[u8],
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
-    if probe_counts(abs_dir) {
-        WORKTREE_READ_DIR_PROBE.fetch_add(1, Ordering::Relaxed);
-    }
+    crate::test_probe_hooks::hooks::worktree_read_dir(abs_dir);
     let rd = match fs::read_dir(abs_dir) {
         Ok(rd) => rd,
         Err(e)
@@ -1783,9 +1689,7 @@ enum DirectoryReadOutcome {
 
 /// `expected` sizes the map up front (the tracked entries in this directory).
 fn read_directory_map(abs_dir: &Path, expected: usize) -> Result<DirectoryReadOutcome> {
-    if probe_counts(abs_dir) {
-        WORKTREE_READ_DIR_PROBE.fetch_add(1, Ordering::Relaxed);
-    }
+    crate::test_probe_hooks::hooks::worktree_read_dir(abs_dir);
     match fs::read_dir(abs_dir) {
         Ok(rd) => {
             let mut on_disk = DirectoryMap::with_capacity(expected);
@@ -2033,7 +1937,7 @@ mod tests {
             );
         }
         let plan = group_blob_entries_by_dir(&index, false);
-        let _probe = reset_worktree_metadata_probe(wt);
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(wt);
         let dir_abs = |dir: &[u8]| {
             if dir.is_empty() {
                 wt.to_path_buf()
@@ -2060,27 +1964,27 @@ mod tests {
         #[cfg(windows)]
         {
             assert!(
-                worktree_read_dir_probe_count() >= CHAINS,
+                crate::test_support::counters::worktree_read_dir_probe_count() >= CHAINS,
                 "Windows deep leaf dirs should read_dir each parent (got {} read_dirs)",
-                worktree_read_dir_probe_count()
+                crate::test_support::counters::worktree_read_dir_probe_count()
             );
             assert!(
-                worktree_metadata_probe_count() <= CHAINS + 5,
+                crate::test_support::counters::worktree_metadata_probe_count() <= CHAINS + 5,
                 "read_dir scan should stat via DirEntry metadata, got {}",
-                worktree_metadata_probe_count()
+                crate::test_support::counters::worktree_metadata_probe_count()
             );
         }
         #[cfg(not(windows))]
         {
             assert_eq!(
-                worktree_read_dir_probe_count(),
+                crate::test_support::counters::worktree_read_dir_probe_count(),
                 0,
                 "Unix single-file leaf dirs should use direct stat, not read_dir"
             );
             assert!(
-                worktree_metadata_probe_count() <= CHAINS + 5,
+                crate::test_support::counters::worktree_metadata_probe_count() <= CHAINS + 5,
                 "direct stat scan budget exceeded: {}",
-                worktree_metadata_probe_count()
+                crate::test_support::counters::worktree_metadata_probe_count()
             );
         }
     }
@@ -2104,7 +2008,7 @@ mod tests {
             }
         }
         let plan = group_blob_entries_by_dir(&index, false);
-        let _probe = reset_worktree_metadata_probe(&wt);
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(&wt);
         let wt_dir = wt.clone();
         let dir_abs = move |dir: &[u8]| {
             if dir.is_empty() {
@@ -2141,21 +2045,21 @@ mod tests {
         assert_eq!(seen, DIRS * FILES_PER_DIR);
         #[cfg(windows)]
         assert!(
-            worktree_read_dir_probe_count() >= DIRS,
+            crate::test_support::counters::worktree_read_dir_probe_count() >= DIRS,
             "parallel preload must read_dir each multi-file parent (got {} read_dirs)",
-            worktree_read_dir_probe_count()
+            crate::test_support::counters::worktree_read_dir_probe_count()
         );
         #[cfg(not(windows))]
         assert_eq!(
-            worktree_read_dir_probe_count(),
+            crate::test_support::counters::worktree_read_dir_probe_count(),
             0,
             "Unix stats tracked paths directly instead of listing parents"
         );
         let tracked = DIRS * FILES_PER_DIR;
         assert!(
-            worktree_metadata_probe_count() <= tracked + DIRS + 8,
+            crate::test_support::counters::worktree_metadata_probe_count() <= tracked + DIRS + 8,
             "metadata probes {} exceeded budget for grouped scan",
-            worktree_metadata_probe_count()
+            crate::test_support::counters::worktree_metadata_probe_count()
         );
     }
 
@@ -2192,7 +2096,7 @@ mod tests {
             );
         }
         let plan = group_blob_entries_by_dir(&index, false);
-        let _probe = reset_worktree_metadata_probe(&wt);
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(&wt);
         let wt_dir = wt.clone();
         let dir_abs = move |dir: &[u8]| {
             if dir.is_empty() {
@@ -2221,9 +2125,9 @@ mod tests {
         .unwrap();
         assert_eq!(seen, FILES);
         assert!(
-            worktree_metadata_probe_count() <= FILES + 4,
+            crate::test_support::counters::worktree_metadata_probe_count() <= FILES + 4,
             "listed files should stat via read_dir entries, not a path probe each (got {} probes)",
-            worktree_metadata_probe_count()
+            crate::test_support::counters::worktree_metadata_probe_count()
         );
     }
 
@@ -2246,7 +2150,7 @@ mod tests {
             }
         }
         let plan = group_blob_entries_by_dir(&index, false);
-        let _probe = reset_worktree_metadata_probe(&wt);
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(&wt);
         let wt_dir = wt.clone();
         let dir_abs = move |dir: &[u8]| {
             if dir.is_empty() {
@@ -2283,15 +2187,15 @@ mod tests {
         assert_eq!(seen, DIRS * FILES_PER_DIR);
         let expected_read_dirs = if LIST_PARENT_DIRECTORIES { DIRS } else { 0 };
         assert_eq!(
-            worktree_read_dir_probe_count(),
+            crate::test_support::counters::worktree_read_dir_probe_count(),
             expected_read_dirs,
             "each dense parent directory is listed once on Windows and never elsewhere"
         );
         let tracked = DIRS * FILES_PER_DIR;
         assert!(
-            worktree_metadata_probe_count() <= tracked + DIRS + 8,
+            crate::test_support::counters::worktree_metadata_probe_count() <= tracked + DIRS + 8,
             "metadata probes {} exceeded budget for grouped scan",
-            worktree_metadata_probe_count()
+            crate::test_support::counters::worktree_metadata_probe_count()
         );
     }
 
@@ -2352,7 +2256,7 @@ mod tests {
             }
         }
         assert_eq!(seen.len(), FILES);
-        let _probe = reset_worktree_metadata_probe(&wt);
+        let _probe = crate::test_support::counters::reset_worktree_metadata_probe(&wt);
         let mut rescanned = 0usize;
         for_each_blob_by_directory_parallel(
             &index,
@@ -2388,9 +2292,9 @@ mod tests {
         .unwrap();
         assert_eq!(rescanned, FILES);
         assert!(
-            worktree_metadata_probe_count() <= FILES + 4,
+            crate::test_support::counters::worktree_metadata_probe_count() <= FILES + 4,
             "parallel fat-dir scan should stat about once per file, got {}",
-            worktree_metadata_probe_count()
+            crate::test_support::counters::worktree_metadata_probe_count()
         );
     }
 

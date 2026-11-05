@@ -1975,7 +1975,9 @@ mod tests {
     )]
     #[test]
     fn hard_reset_all_modified_tree_diff_skips_redundant_worktree_stat_scan() {
-        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::test_support::counters::{
+            reset_worktree_metadata_probe, worktree_metadata_probe_count,
+        };
 
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
@@ -2043,7 +2045,9 @@ mod tests {
     )]
     #[test]
     fn hard_reset_all_modified_stat_clean_does_not_spool_worktree() {
-        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+        use crate::test_support::counters::{
+            checkout_spool_probe_count, reset_checkout_spool_probe,
+        };
 
         const FILES: usize = 50;
 
@@ -2111,7 +2115,9 @@ mod tests {
     )]
     #[test]
     fn back_to_back_hard_resets_hash_racy_paths_instead_of_spooling() {
-        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+        use crate::test_support::counters::{
+            checkout_spool_probe_count, reset_checkout_spool_probe,
+        };
 
         const FILES: usize = 100;
 
@@ -2181,7 +2187,9 @@ mod tests {
     )]
     #[test]
     fn hard_reset_tree_diff_spools_stat_dirty_path_for_rollback() {
-        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
+        use crate::test_support::counters::{
+            checkout_spool_probe_count, reset_checkout_spool_probe,
+        };
 
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();
@@ -2221,8 +2229,10 @@ mod tests {
     #[test]
     fn cancelled_wide_hard_reset_restores_racy_same_size_worktree_bytes() {
         use crate::error::Error;
-        use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
         use crate::progress::{Cancel, FlagCancel, ProgressPhase, ProgressSink};
+        use crate::test_support::counters::{
+            checkout_spool_probe_count, reset_checkout_spool_probe,
+        };
 
         const FILES: usize = 65;
 
@@ -2358,7 +2368,9 @@ mod tests {
     )]
     #[test]
     fn hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once() {
-        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+        use crate::test_support::counters::{
+            reset_worktree_metadata_probe, worktree_metadata_probe_count,
+        };
 
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path();

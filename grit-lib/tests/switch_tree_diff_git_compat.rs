@@ -1551,7 +1551,9 @@ fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
 
 #[test]
 fn switch_scoped_worktree_diff_limits_metadata_probes() {
-    use grit_lib::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+    use grit_lib::test_support::counters::{
+        reset_worktree_metadata_probe, worktree_metadata_probe_count,
+    };
 
     let tmp = tempfile::tempdir().expect("tempdir");
     git(tmp.path(), &["init", "-q", "-b", "main", "."]);

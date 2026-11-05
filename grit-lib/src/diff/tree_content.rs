@@ -15,7 +15,6 @@ use crate::parallel::{try_par_map_with_local, ParallelHashError};
 use crate::parallel::{ParallelOp, ParallelOptions, ThreadPolicy};
 use std::num::NonZeroUsize;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use super::detail::{line_change_counts, LineStat};
@@ -23,10 +22,8 @@ use super::structured::{structured_file_diff, SideBytes, StructuredFileDiff};
 use super::DiffEntry;
 use super::DiffOptions;
 
-fn note_blob_read(counter: Option<&AtomicUsize>) {
-    if let Some(c) = counter {
-        c.fetch_add(1, Ordering::Relaxed);
-    }
+fn note_blob_read() {
+    crate::test_probe_hooks::hooks::diff_blob_read();
 }
 
 fn collect_tree_diff_blob_oids(entries: &[DiffEntry]) -> Vec<ObjectId> {
@@ -144,8 +141,8 @@ pub fn tree_diff_contents_parallel(
     let est_bytes = entries.len().saturating_mul(8192);
     let rows = parallel_map_indices(odb, entries.len(), par_opts, est_bytes, |i| {
         let entry = &entries[i];
-        let (old_bytes, old_bin) = load_old_side(odb, entry, None)?;
-        let (new_bytes, new_bin) = load_new_side(odb, entry, None)?;
+        let (old_bytes, old_bin) = load_old_side(odb, entry)?;
+        let (new_bytes, new_bin) = load_new_side(odb, entry)?;
         Ok::<TreeDiffContent, Error>(TreeDiffContent {
             entry: entry.clone(),
             old_bytes,
@@ -180,7 +177,6 @@ pub fn tree_diff_stat_parallel(
     prefetch_tree_diff_blobs(odb, &entries)?;
     let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let line_diff_opts = diff_options;
-    let blob_counter = line_diff_opts.blob_read_counter.clone();
     let store = odb.pack_store_for(odb.objects_dir());
     let rows = try_par_map_with_local(
         &entries,
@@ -188,12 +184,11 @@ pub fn tree_diff_stat_parallel(
         0,
         || PackReadContextGuard::install(Arc::clone(&store)),
         move |_ctx, entry| {
-            let blob_reads = blob_counter.as_deref();
             if !entry.old_oid.is_zero()
                 && entry.old_oid == entry.new_oid
                 && entry.old_mode == entry.new_mode
             {
-                let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
+                let (old_bytes, old_bin) = load_old_side(odb, entry)?;
                 let binary = old_bin;
                 let size = old_bytes.byte_len();
                 return Ok((
@@ -208,8 +203,8 @@ pub fn tree_diff_stat_parallel(
                     size,
                 ));
             }
-            let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
-            let (new_bytes, new_bin) = load_new_side(odb, entry, blob_reads)?;
+            let (old_bytes, old_bin) = load_old_side(odb, entry)?;
+            let (new_bytes, new_bin) = load_new_side(odb, entry)?;
             let binary = old_bin || new_bin;
             let old_size = old_bytes.byte_len();
             let new_size = new_bytes.byte_len();
@@ -241,12 +236,11 @@ pub fn tree_diff_structured_entry(
     entry: &DiffEntry,
     diff_options: &DiffOptions,
 ) -> Result<TreeDiffStructured> {
-    let blob_reads = diff_options.blob_read_counter.as_deref();
     if !entry.old_oid.is_zero()
         && entry.old_oid == entry.new_oid
         && entry.old_mode == entry.new_mode
     {
-        let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
+        let (old_bytes, old_bin) = load_old_side(odb, entry)?;
         let size = old_bytes.byte_len();
         return Ok(TreeDiffStructured {
             entry: entry.clone(),
@@ -263,8 +257,8 @@ pub fn tree_diff_structured_entry(
             patch_bytes: None,
         });
     }
-    let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
-    let (new_bytes, new_bin) = load_new_side(odb, entry, blob_reads)?;
+    let (old_bytes, old_bin) = load_old_side(odb, entry)?;
+    let (new_bytes, new_bin) = load_new_side(odb, entry)?;
     let binary = old_bin || new_bin;
     let old_size = old_bytes.byte_len();
     let new_size = new_bytes.byte_len();
@@ -380,11 +374,7 @@ pub fn tree_diff_structured_parallel(
     }
 }
 
-pub(crate) fn load_old_side(
-    odb: &Odb,
-    e: &DiffEntry,
-    blob_reads: Option<&AtomicUsize>,
-) -> Result<(SideBytes, bool)> {
+pub(crate) fn load_old_side(odb: &Odb, e: &DiffEntry) -> Result<(SideBytes, bool)> {
     if e.old_mode == FileMode::GITLINK {
         return Ok((
             SideBytes::from_bytes(gitlink_line(&e.old_oid).into_bytes()),
@@ -395,14 +385,10 @@ pub(crate) fn load_old_side(
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     let path = e.old_path.as_deref().or(e.new_path.as_deref());
-    load_odb_blob_side_for_diff(odb, &e.old_oid, path, blob_reads, false)
+    load_odb_blob_side_for_diff(odb, &e.old_oid, path, false)
 }
 
-pub(crate) fn load_new_side(
-    odb: &Odb,
-    e: &DiffEntry,
-    blob_reads: Option<&AtomicUsize>,
-) -> Result<(SideBytes, bool)> {
+pub(crate) fn load_new_side(odb: &Odb, e: &DiffEntry) -> Result<(SideBytes, bool)> {
     if e.new_mode == FileMode::GITLINK {
         return Ok((
             SideBytes::from_bytes(gitlink_line(&e.new_oid).into_bytes()),
@@ -413,7 +399,7 @@ pub(crate) fn load_new_side(
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     let path = e.new_path.as_deref().or(e.old_path.as_deref());
-    load_odb_blob_side_for_diff(odb, &e.new_oid, path, blob_reads, false)
+    load_odb_blob_side_for_diff(odb, &e.new_oid, path, false)
 }
 
 /// Text a gitlink side contributes to a patch: `Subproject commit <hex>\n`,
@@ -502,7 +488,6 @@ pub fn load_odb_blob_side_for_diff(
     odb: &Odb,
     oid: &ObjectId,
     path: Option<&str>,
-    blob_reads: Option<&AtomicUsize>,
     force_read_content: bool,
 ) -> Result<(SideBytes, bool)> {
     if *oid == ObjectId::zero() {
@@ -516,7 +501,7 @@ pub fn load_odb_blob_side_for_diff(
             return Ok((SideBytes::empty_with_size(info.size), true));
         }
     }
-    note_blob_read(blob_reads);
+    note_blob_read();
     #[cfg(test)]
     odb.hot_path_metrics().record_blob_content_read();
     let data = odb.read(oid)?.data;

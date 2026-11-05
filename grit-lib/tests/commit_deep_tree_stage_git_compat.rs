@@ -12,7 +12,9 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+use grit_lib::test_support::counters::{
+    reset_worktree_metadata_probe, worktree_metadata_probe_count,
+};
 use grit_test_support::git;
 
 fn init_repo(root: &std::path::Path) {
