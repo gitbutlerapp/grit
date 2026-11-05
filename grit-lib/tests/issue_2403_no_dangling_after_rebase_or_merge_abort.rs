@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
@@ -12,7 +13,6 @@ use grit_lib::revwalk::history::{
     start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
     RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 use grit_test_support::objects::git_supports_sha256;
 

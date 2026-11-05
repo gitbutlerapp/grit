@@ -16,7 +16,7 @@ fn init_preserves_template_file_at_probe_nfc_name() {
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files)
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files)
             .with_template_dir(Some(tmpl.path().to_path_buf())),
     )
     .expect("init");

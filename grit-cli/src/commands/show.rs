@@ -15,11 +15,11 @@ use crate::revision_errors::map_resolve_error;
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::diff::DiffMerges;
-use grit_lib::object_inspect::{
+use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::revwalk::object_inspect::{
     abbreviate_for_display, format_tree_entries_cat_file_p, tree_entry_cat_file_type,
     tree_entry_mode_cat_file_p, RevisionLabel,
 };
-use grit_lib::objects::{ObjectId, ObjectKind};
 use schemars::JsonSchema;
 use serde::Serialize;
 

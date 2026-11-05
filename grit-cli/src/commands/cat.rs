@@ -5,10 +5,10 @@ use std::io::{self, Write};
 use crate::revision_errors::map_resolve_error;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use grit_lib::object_inspect::{
+use grit_lib::objects::{Object, ObjectKind};
+use grit_lib::revwalk::object_inspect::{
     format_tree_entries_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
 };
-use grit_lib::objects::{Object, ObjectKind};
 use schemars::JsonSchema;
 use serde::Serialize;
 

@@ -46,7 +46,7 @@ fn apply_opts() -> ApplyOptions {
         identity: support::reflog_signature("Dropper <drop@grit.test>"),
         reflog_message: "history drop".into(),
         record_operation: None,
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 
@@ -249,7 +249,7 @@ fn drop_conflict_changes_nothing() {
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let ident = committer(5);

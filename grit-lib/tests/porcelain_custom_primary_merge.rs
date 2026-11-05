@@ -81,7 +81,7 @@ fn switch_to(repo: &Repository, branch: &str) {
                 oid,
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut NullProgress,
         &NeverCancel,

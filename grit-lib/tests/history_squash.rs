@@ -49,7 +49,7 @@ fn apply_plan(repo: &Repository, plan: &RewritePlan) {
             identity: support::reflog_signature("Squasher <s@grit.test>"),
             reflog_message: "history squash".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

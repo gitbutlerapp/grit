@@ -6,11 +6,13 @@ use std::path::Path;
 
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
+use grit_lib::objects;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use grit_lib::refs;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
-use grit_lib::{objects, refs, RefStorageFormat};
 use grit_test_support::git_cmd;
 use support::{
     assert_porcelain_v2_matches_git, git_status_porcelain_v2_lines, grit_status_porcelain_v2_lines,

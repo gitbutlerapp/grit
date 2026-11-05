@@ -1,9 +1,9 @@
 //! Prefix lookup must see collisions across pack and loose layers (Git disambiguate parity).
 
-use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::odb::BULK_NEW_LOOSE_WRITE;
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::object_inspect::abbreviate_for_display;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;

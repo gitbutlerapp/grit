@@ -8,7 +8,7 @@ use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
 
 fn assert_git_diff_files_clean(repo_root: &Path) {
     let root = repo_root.to_str().expect("utf-8 path");
@@ -56,7 +56,7 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     if !preload_index {

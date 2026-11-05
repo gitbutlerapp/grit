@@ -712,7 +712,7 @@ fn build_merge_options(run: &MergeRunOptions) -> Result<MergeOptions> {
         favor,
         conflict_style,
         allow_unrelated: run.allow_unrelated_histories,
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         verify: if run.no_verify {
             HookPolicy::SkipVerify
         } else {

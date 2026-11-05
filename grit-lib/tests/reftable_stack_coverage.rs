@@ -58,7 +58,7 @@ fn autocompaction_after_many_appends_and_manual_compact() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -116,7 +116,7 @@ fn compact_unlocked_suffix_when_middle_table_locked() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -178,7 +178,7 @@ fn read_write_options_manual_config_fallback() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -202,7 +202,7 @@ fn compact_prefix_after_deletion_with_multiple_tables() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -256,7 +256,7 @@ fn stack_write_ref_deletion_value() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -279,7 +279,7 @@ fn geometric_partial_compaction_ref_indices_within_table_headers() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");

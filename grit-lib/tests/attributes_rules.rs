@@ -835,7 +835,7 @@ fn t0003_cached_without_index_entries_is_empty() {
 
 #[test]
 fn quoted_attribute_patterns_roundtrip_with_git() {
-    use grit_lib::quote_path::quote_c_style;
+    use grit_lib::porcelain::quote_path::quote_c_style;
 
     let root = tempfile::tempdir().expect("tempdir");
     let wt = root.path();

@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{Diff, RenameDetection, UncommittedDiff};
 use grit_lib::error::{Error, OverwriteReason};
@@ -18,7 +19,6 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::PostOperationHooks;
 use grit_test_support::{git_hash_object_literally, HashAlgo as FixtureAlgo};
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";

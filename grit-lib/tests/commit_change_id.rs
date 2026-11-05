@@ -891,7 +891,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
             identity: ident(),
             reflog_message: "reword".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

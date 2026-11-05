@@ -58,7 +58,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
                 .unwrap_or_else(|| panic!("guide identity must parse as a signature")),
             reflog_message: "history reword".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

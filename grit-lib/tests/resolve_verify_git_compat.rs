@@ -2,8 +2,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use grit_lib::object_inspect::ResolveError;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::object_inspect::ResolveError;
 
 use crate::support;
 

@@ -9,12 +9,12 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::{
     Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RebaseSessionError,
     RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::RefStorageFormat;
 
 const FILES: usize = 300;
 const MAX_LATE_CANCEL_RATIO: f64 = 3.0;
@@ -148,7 +148,7 @@ fn run_rebase(
             identity: "T <t@t> 0 +0000".parse().expect("sig"),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Skip,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };

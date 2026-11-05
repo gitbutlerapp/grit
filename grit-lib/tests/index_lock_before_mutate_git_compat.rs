@@ -10,6 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
@@ -19,7 +20,6 @@ use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
-use grit_lib::PostOperationHooks;
 use tempfile::TempDir;
 
 fn git(root: &Path, args: &[&str]) -> String {

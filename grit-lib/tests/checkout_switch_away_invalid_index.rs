@@ -58,7 +58,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
         &SwitchOptions {
             mode,
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

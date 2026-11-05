@@ -7,12 +7,12 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::refs_fsck::{format_refs_fsck_line, refs_fsck, RefsFsckIssue};
 use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
-use grit_lib::RefStorageFormat;
 use tempfile::tempdir;
 
 #[test]
@@ -22,7 +22,7 @@ fn refs_fsck_reports_bad_symref_and_formats_line() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -90,7 +90,7 @@ fn refs_fsck_reports_packed_refs_out_of_order_under_sorted_header() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");

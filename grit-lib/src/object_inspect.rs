@@ -4,7 +4,7 @@
 //! [`Repository::read_object_for_display`] loads and parses object bytes for programmatic use.
 //!
 //! ```rust
-//! use grit_lib::object_inspect::ResolveError;
+//! use grit_lib::revwalk::object_inspect::ResolveError;
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;

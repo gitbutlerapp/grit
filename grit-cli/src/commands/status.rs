@@ -4,7 +4,6 @@
 use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::gitbutler::{GitButlerWorkspace, WorkspaceStanding};
-use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::status::{
@@ -17,6 +16,7 @@ use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, Standing, StandingHeader, StandingOptions,
     StatusHeader, StatusIntegrationAction, StatusIntegrationHint, TrackedComparison,
 };
+use grit_lib::revwalk::object_inspect::abbreviate_for_display;
 use grit_lib::state::{detect_in_progress, HeadState, InProgressOperation, NextStep};
 use schemars::JsonSchema;
 use serde::Serialize;

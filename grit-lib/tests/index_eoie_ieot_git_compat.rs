@@ -143,7 +143,7 @@ fn grit_write_git_accepts(version: u32) {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let mut cfg_text = fs::read_to_string(repo.git_dir().join("config")).expect("config");
@@ -207,7 +207,7 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let mut cfg_text = fs::read_to_string(repo.git_dir().join("config")).expect("config");
@@ -271,7 +271,7 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let mut cfg_text = fs::read_to_string(repo.git_dir().join("config")).expect("config");

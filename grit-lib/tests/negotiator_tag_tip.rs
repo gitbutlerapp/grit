@@ -26,7 +26,7 @@ fn add_tip_accepts_annotated_tag() {
         &InitOptions::new()
             .with_bare(true)
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
 

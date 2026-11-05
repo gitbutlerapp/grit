@@ -13,7 +13,7 @@ fn repository_config_load_and_reload_hits_cache() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");

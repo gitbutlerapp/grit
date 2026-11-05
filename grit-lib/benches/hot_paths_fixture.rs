@@ -59,7 +59,7 @@ impl HotPathsFixture {
             dir.path(),
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("init hot-path bench repo");
         populate_worktree(dir.path(), file_count, dir_count);
@@ -432,7 +432,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
                 oid: fx.wide_switch_tip,
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -446,7 +446,7 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
                 oid: fx.main_head_oid,
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

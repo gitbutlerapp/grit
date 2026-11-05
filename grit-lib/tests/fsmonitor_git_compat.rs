@@ -10,7 +10,7 @@ use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::NeverCancel;
 use grit_lib::repo::Repository;
-use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
 use grit_test_support::git;
 
 fn isolated_git(dir: &Path, args: &[&str]) -> String {

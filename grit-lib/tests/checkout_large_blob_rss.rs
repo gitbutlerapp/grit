@@ -142,7 +142,7 @@ fn materialize_without_loading(packed: bool) {
                     oid,
                 },
                 dry_run: false,
-                hooks: grit_lib::PostOperationHooks::Run,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,

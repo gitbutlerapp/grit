@@ -487,7 +487,7 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
             identity: test_sig(),
             reflog_message: "rebase: continue".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Skip,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };

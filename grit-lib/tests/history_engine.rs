@@ -413,7 +413,7 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let ident = committer(24);
@@ -769,7 +769,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let ident = committer(7);
@@ -827,7 +827,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let ident = committer(8);

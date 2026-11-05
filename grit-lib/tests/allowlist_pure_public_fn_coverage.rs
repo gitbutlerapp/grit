@@ -66,7 +66,7 @@ fn init_repo(dir: &Path) -> Repository {
         dir,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init")
 }

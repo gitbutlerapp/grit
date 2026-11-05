@@ -128,7 +128,7 @@ fn write_ref_rejects_invalid_branch_names_without_loose_files() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = repo.git_dir().to_path_buf();
@@ -157,7 +157,7 @@ fn write_ref_accepts_refs_heads_head_like_git() {
         worktree,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let tip = seed_empty_commit(worktree);

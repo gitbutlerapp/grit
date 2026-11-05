@@ -122,7 +122,7 @@ fn rebase_stop_and_status_report_the_same_conflict() {
             identity: IDENT.parse().expect("identity"),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };

@@ -123,7 +123,7 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
                 oid: ObjectId::from_hex(commit.trim()).expect("commit oid"),
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut SlowProgress,
         &NeverCancel,

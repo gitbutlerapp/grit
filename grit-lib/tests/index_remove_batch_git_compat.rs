@@ -91,7 +91,7 @@ fn grit_index_batch_remove_replace_matches_git_ls_files_and_fsck() {
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let payload = b"index-compat-payload\n";

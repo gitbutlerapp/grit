@@ -12,6 +12,7 @@ use std::thread;
 
 use grit_lib::error::Error;
 use grit_lib::objects::{HashAlgo, ObjectId};
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::reflog::{list_reflog_refs, read_reflog, reflog_exists, ReflogEntry};
 use grit_lib::refs::reftable::{
     read_write_options, reftable_append_reflog, reftable_delete_ref,
@@ -25,7 +26,6 @@ use grit_lib::refs::store::{
 use grit_lib::refs::{read_head, read_symbolic_ref, resolve_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, HeadState};
-use grit_lib::RefStorageFormat;
 
 use support::{
     build_commit_dag, git, git_empty_commit_oid, git_for_each_ref_peeled, git_fsck_strict,

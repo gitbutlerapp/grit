@@ -6,12 +6,12 @@ use std::sync::OnceLock;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::list_refs_for_repository;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::revwalk::rev_parse::resolve_revision;
-use grit_lib::RefStorageFormat;
 use tempfile::TempDir;
 
 fn git_fsck_ok(git_dir: &std::path::Path) {

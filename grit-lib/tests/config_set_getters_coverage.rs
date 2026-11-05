@@ -59,7 +59,7 @@ fn bool_or_and_core_bool_accessors_read_repo_config() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -97,7 +97,7 @@ fn load_cascade_hits_local_and_global_layers() {
         &repo,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = repo.join(".git");
@@ -144,7 +144,7 @@ fn effective_log_refs_config_and_i64_errors() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");

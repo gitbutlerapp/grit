@@ -8,13 +8,13 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use grit_lib::command_runner::hooks::HookName;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
-use grit_lib::HookName;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Msg Source <msg@example.com> 1700000000 +0000".to_owned();

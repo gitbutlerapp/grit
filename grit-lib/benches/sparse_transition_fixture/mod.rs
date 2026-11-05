@@ -71,7 +71,7 @@ pub fn bench_sparse_transitions(c: &mut Criterion) {
                                 reflog_to_label: target.to_string(),
                             },
                             dry_run: false,
-                            hooks: grit_lib::PostOperationHooks::Skip,
+                            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
                         },
                         &mut NullProgress,
                         &NeverCancel,

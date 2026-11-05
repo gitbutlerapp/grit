@@ -3,8 +3,8 @@
 use std::io::Write;
 
 use anyhow::{Context, Result};
-use grit_lib::object_inspect::{abbreviate_for_display, ResolvedObject};
 use grit_lib::objects::ObjectKind;
+use grit_lib::revwalk::object_inspect::{abbreviate_for_display, ResolvedObject};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use schemars::JsonSchema;
 use serde::Serialize;

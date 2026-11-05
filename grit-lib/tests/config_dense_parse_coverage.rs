@@ -56,7 +56,7 @@ fn load_includes_system_global_and_local_layers() {
         &repo,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = repo.join(".git");
@@ -137,7 +137,7 @@ fn includeif_onbranch_misses_when_branch_differs() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("other".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");

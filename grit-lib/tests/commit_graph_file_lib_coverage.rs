@@ -23,7 +23,7 @@ fn one_commit_repo() -> (tempfile::TempDir, Repository, ObjectId) {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let mut index = Index::new();
@@ -99,7 +99,7 @@ fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<Object
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let mk = |parents: Vec<ObjectId>, t: i64| -> ObjectId {
@@ -225,7 +225,7 @@ fn commit_tree_high_bit_and_parse_graph_dump() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let mut index = Index::new();
@@ -379,7 +379,7 @@ fn two_parent_graph_commit_matches_object() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
@@ -453,7 +453,7 @@ fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");

@@ -6,7 +6,7 @@
 //! default true).
 //!
 //! ```rust
-//! use grit_lib::quote_path::quote_c_style;
+//! use grit_lib::porcelain::quote_path::quote_c_style;
 //! # fn main() {
 //! assert_eq!(quote_c_style("bell\x07.txt", true), "\"bell\\a.txt\"");
 //! # }

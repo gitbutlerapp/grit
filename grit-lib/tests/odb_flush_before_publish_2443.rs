@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
@@ -36,7 +37,6 @@ use grit_lib::revwalk::history::{
     RewriteOptions,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision;
-use grit_lib::PostOperationHooks;
 
 #[derive(Clone, Default)]
 struct DurabilityState {

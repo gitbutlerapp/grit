@@ -8,6 +8,7 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
@@ -20,7 +21,6 @@ use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::repo::{Repository, RepositoryBuilder};
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
-use grit_lib::PostOperationHooks;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 const USER_CONFIG: &str = "[user]\n\tname = T\n\temail = t@e.x\n";

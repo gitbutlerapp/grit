@@ -87,7 +87,7 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     write_linear_commits(&repo, 80);

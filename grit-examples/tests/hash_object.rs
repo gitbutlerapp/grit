@@ -12,7 +12,7 @@ fn hash_object_writes_file_contents_as_blob() -> Result<()> {
         temp.path(),
         &InitOptions::new()
             .with_initial_branch("main")
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )?;
     let input_path = temp.path().join("hello.txt");
     let contents = b"hello from grit examples\n";

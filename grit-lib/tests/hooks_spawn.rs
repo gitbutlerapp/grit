@@ -535,7 +535,7 @@ fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
                 reflog_to_label: "HEAD~1".into(),
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

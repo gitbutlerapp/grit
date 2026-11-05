@@ -63,7 +63,7 @@ mod unix {
                     oid: del_oid,
                 },
                 dry_run: false,
-                hooks: grit_lib::PostOperationHooks::Skip,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,

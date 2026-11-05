@@ -469,7 +469,7 @@ pub fn run_custom_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
         repo_root,
         &InitOptions::new()
             .with_initial_branch("main")
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )?;
     let git_dir = repo_root.join(".git");
     let objects_dir = git_dir.join("objects");

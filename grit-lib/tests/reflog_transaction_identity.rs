@@ -7,12 +7,12 @@ use crate::support;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::commit_ref_update_on_store;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
     RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::RefStorageFormat;
 use support::require_reftable_git;
 use tempfile::TempDir;
 

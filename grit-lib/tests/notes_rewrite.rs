@@ -1,5 +1,6 @@
 //! Notes copy onto rewritten commits (`notes.rewriteRef`), checked with system `git`.
 
+use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::read_notes_tree;
 use grit_lib::objects::ObjectId;
@@ -11,7 +12,6 @@ use grit_lib::revwalk::history::{
     RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions, SquashMessage,
     SquashOptions, StartRebaseOptions,
 };
-use grit_lib::{HookName, PostOperationHooks};
 use grit_test_support::git;
 
 const IDENT: &str = "Notes Tester <notes@grit.test> 1700000000 +0000";

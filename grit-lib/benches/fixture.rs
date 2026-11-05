@@ -348,7 +348,7 @@ fn build_large_pack_index(objects_dir: &Path, object_count: usize) -> (PackIndex
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init repo");
     let mut parent = None;

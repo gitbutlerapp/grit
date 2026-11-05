@@ -8,8 +8,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{status, IgnoredMode, StatusModel, StatusOptions, UntrackedMode};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::RefStorageFormat;
 use grit_test_support::forced_parallel_policy;
 use grit_test_support::git;
 
@@ -311,7 +311,7 @@ fn untracked_cache_enabled_matches_serial() {
 
 #[test]
 fn large_index_stat_refresh_parallel_matches_serial() {
-    use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+    use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
@@ -394,7 +394,7 @@ fn git_untracked_and_ignored(root: &Path, untracked_files: &str) -> (Vec<String>
 /// to split below the top level; its result must match the serial walk and system `git`.
 #[test]
 fn single_top_level_directory_split_walk_matches_serial_and_git() {
-    use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+    use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

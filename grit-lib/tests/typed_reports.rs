@@ -57,7 +57,7 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = repo.git_dir().to_path_buf();
@@ -158,7 +158,7 @@ fn prune_packed_reports_removed_paths_dry_run_and_real() {
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     fs::write(tmp.path().join("x.txt"), "payload\n").expect("write");
@@ -224,7 +224,7 @@ fn rerere_records_then_reuses_resolution() {
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let cfg_path = tmp.path().join(".git/config");

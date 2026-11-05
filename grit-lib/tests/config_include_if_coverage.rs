@@ -29,7 +29,7 @@ fn includeif_onbranch_matches_current_branch() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("feature/x".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -55,7 +55,7 @@ fn includeif_hasconfig_remote_url() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -142,7 +142,7 @@ impl HasconfigFixture {
             &repo,
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("init");
         let git_dir = repo.join(".git");
@@ -451,7 +451,7 @@ fn includeif_gitdir_icase_matches() {
         &repo,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = repo.join(".git");

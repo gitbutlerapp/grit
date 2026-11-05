@@ -20,7 +20,7 @@ use grit_lib::porcelain::stage_tracked::{
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
-use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
 use grit_test_support::git;
 
 /// Worktree mtime well before the index write, so entries are not racily clean.

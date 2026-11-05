@@ -2,6 +2,7 @@
 
 use std::process::Command;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
@@ -11,7 +12,6 @@ use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
-use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 
 fn switch_existing(

@@ -332,7 +332,7 @@ fn issue_2468_rebase_replays_git_rr_cache() {
             identity: ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };

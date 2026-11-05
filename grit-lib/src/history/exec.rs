@@ -2173,7 +2173,7 @@ mod tests {
                 identity: "T <t@t> 2 +0000".parse().expect("identity"),
                 reflog_message: "rebase".into(),
                 record_operation: None,
-                hooks: crate::PostOperationHooks::Skip,
+                hooks: crate::hooks::PostOperationHooks::Skip,
             },
             &mut NullProgress,
             &NeverCancel,

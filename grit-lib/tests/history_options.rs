@@ -33,7 +33,7 @@ fn apply_opts() -> ApplyOptions {
         identity: support::reflog_signature("OptsHarness <opts@grit.test>"),
         reflog_message: "history options".into(),
         record_operation: None,
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 

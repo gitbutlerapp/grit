@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::command_runner::hooks::HookError;
+use grit_lib::command_runner::hooks::{HookName, PostOperationHooks};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
@@ -27,7 +28,6 @@ use grit_lib::revwalk::history::{
     RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
     RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::{HookName, PostOperationHooks};
 
 const IDENT: &str = "Hook Tester <hooks@grit.test> 1700000000 +0000";
 const LOGGED_HOOKS: [&str; 6] = [

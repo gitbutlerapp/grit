@@ -22,13 +22,13 @@ use grit_lib::porcelain::switch::{
 };
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{resolve_head_for_repository, HeadState};
-use grit_lib::RefStorageFormat;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -99,7 +99,7 @@ fn switch_to(repo: &Repository, branch: &str) {
                 oid,
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -278,7 +278,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
                 reflog_to_label: "HEAD~1".into(),
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -582,7 +582,7 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
                 oid: tip,
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -609,7 +609,7 @@ fn detached_switch_installs_head_when_store_has_none() {
                 reflog_to_label: "main".into(),
             },
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,

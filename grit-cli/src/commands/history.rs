@@ -4,6 +4,7 @@ use std::io::{self, Write};
 
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error as LibError;
@@ -24,7 +25,6 @@ use grit_lib::revwalk::history::{
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
-use grit_lib::PostOperationHooks;
 use schemars::JsonSchema;
 use serde::Serialize;
 

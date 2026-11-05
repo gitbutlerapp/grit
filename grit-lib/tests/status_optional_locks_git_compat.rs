@@ -175,7 +175,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
             identity: support::reflog_signature("Applier <apply@grit.test>"),
             reflog_message: "history rewrite".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         }
     }
 

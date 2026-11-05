@@ -62,7 +62,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
 

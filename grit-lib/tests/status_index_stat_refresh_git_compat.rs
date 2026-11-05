@@ -16,7 +16,7 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::worktree::PARALLEL_STAT_MIN_ENTRIES;
 use grit_test_support::git;
 
 fn sparse_directory_placeholder_count(index: &Index) -> usize {

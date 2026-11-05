@@ -714,7 +714,7 @@ fn t0600_expire_on_symref_not_referent() {
         worktree,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = worktree.join(".git");

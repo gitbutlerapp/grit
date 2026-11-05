@@ -333,7 +333,7 @@ fn indexed_to_json(repo: &Repository, entry: &IndexedReflogEntry, now: i64) -> R
     let committer = signature.as_ref().map(person_from_signature);
     let new_hex = entry.entry.new_oid.to_hex();
     let abbreviated_oid =
-        grit_lib::object_inspect::abbreviate_for_display(repo, entry.entry.new_oid, true)
+        grit_lib::revwalk::object_inspect::abbreviate_for_display(repo, entry.entry.new_oid, true)
             .unwrap_or_else(|_| new_hex.clone());
     ReflogListEntry {
         index: entry.index,

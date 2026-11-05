@@ -5,6 +5,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
@@ -14,7 +15,6 @@ use grit_lib::refs::store::RawRef;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, resolve_head_for_repository, HeadState};
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
-use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 
 fn open(path: &Path) -> Repository {

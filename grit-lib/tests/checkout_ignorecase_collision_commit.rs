@@ -13,9 +13,9 @@ use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
-use grit_lib::RefStorageFormat;
 
 fn enable_ignorecase(repo: &Repository, root: &Path) {
     fs::write(

@@ -101,7 +101,7 @@ fn switch_create_over_a_ref_directory_names_the_ref() {
             &SwitchOptions {
                 mode,
                 dry_run: false,
-                hooks: grit_lib::PostOperationHooks::Run,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,

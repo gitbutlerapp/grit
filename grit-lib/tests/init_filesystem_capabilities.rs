@@ -43,7 +43,7 @@ fn init_writes_detected_filemode() {
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = root.path().join(".git");
@@ -154,7 +154,7 @@ fn init_local_filemode_follows_detection_not_global() {
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     std::env::remove_var("GIT_CONFIG_GLOBAL");
@@ -181,7 +181,7 @@ fn separate_git_dir_honors_filemode_false_in_external_config() {
         work.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files)
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files)
             .with_separate_git_dir(Some(git_dir.path().to_path_buf())),
     )
     .expect("init");

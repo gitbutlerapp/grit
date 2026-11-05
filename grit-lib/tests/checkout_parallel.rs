@@ -290,7 +290,7 @@ fn parallel_matches_serial_crlf_and_ident() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     fs::write(
@@ -319,7 +319,7 @@ fn parallel_matches_serial_gitlink_and_replacements() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let wt = repo.work_tree().expect("wt");
@@ -470,7 +470,7 @@ fn ignorecase_collision_uses_serial_path_and_matches() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     fs::write(
@@ -508,7 +508,7 @@ fn parallel_pool_error_rolls_back_every_job() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     enable_parallel_checkout_config(root);
@@ -589,7 +589,7 @@ fn missing_blob_error_rolls_back_earlier_write() {
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let wt = repo.work_tree().expect("wt");

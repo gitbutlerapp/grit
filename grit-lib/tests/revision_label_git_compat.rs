@@ -4,10 +4,10 @@
 mod support;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::object_inspect::RevisionLabel;
 use grit_lib::objects::ObjectKind;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
+use grit_lib::revwalk::object_inspect::RevisionLabel;
 use support::{each_backend, git, Backend};
 
 #[test]

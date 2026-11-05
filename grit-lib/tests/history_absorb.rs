@@ -39,7 +39,7 @@ fn apply_opts() -> ApplyOptions {
         identity: support::reflog_signature("Absorb <a@grit.test>"),
         reflog_message: "history absorb".into(),
         record_operation: None,
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 

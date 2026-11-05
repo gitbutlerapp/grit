@@ -4,10 +4,10 @@ use std::io::Write;
 
 use anyhow::Result;
 use grit_lib::commit::resolve_core_abbrev_len;
-use grit_lib::object_inspect::abbreviate_for_display;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::OidAbbrevBatch;
+use grit_lib::revwalk::object_inspect::abbreviate_for_display;
+use grit_lib::revwalk::object_inspect::OidAbbrevBatch;
 
 use crate::context::CommitSummary;
 

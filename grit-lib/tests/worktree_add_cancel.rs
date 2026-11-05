@@ -6,11 +6,11 @@ use std::time::Duration;
 
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::{FlagCancel, NeverCancel, NullProgress};
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::{
     add_linked_worktree_with_cancel, list_worktrees, AddLinkedWorktreeOptions, WorktreeBranch,
 };
-use grit_lib::RefStorageFormat;
 
 const IDENT: &str = "T <t@t> 0 +0000";
 

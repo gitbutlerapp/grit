@@ -2,8 +2,8 @@
 
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::RefStorageFormat;
 
 fn make_entry(path: &str, oid: ObjectId, stage: u8) -> IndexEntry {
     let mut e = IndexEntry {

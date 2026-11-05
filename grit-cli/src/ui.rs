@@ -10,7 +10,7 @@ use crate::output::outln;
 
 use grit_lib::config::git_path::{relative_path_for_display, user_display_path};
 use grit_lib::diff::{DiffEntry, DiffStatus};
-use grit_lib::quote_path::quote_path_for_display;
+use grit_lib::porcelain::quote_path::quote_path_for_display;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::pathdiff;
 

@@ -4,7 +4,7 @@
 
 use std::process::Command;
 
-use grit_lib::quote_path::quote_c_style;
+use grit_lib::porcelain::quote_path::quote_c_style;
 
 fn init_git_repo(wt: &std::path::Path) {
     assert!(Command::new("git")

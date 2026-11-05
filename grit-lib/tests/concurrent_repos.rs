@@ -59,7 +59,7 @@ fn prepare_repo(
         &root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
 
@@ -358,7 +358,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             &root,
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("init");
         let home = base.path().join(format!("home-{name}-{iter}"));

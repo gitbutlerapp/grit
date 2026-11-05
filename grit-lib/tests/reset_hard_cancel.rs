@@ -3,12 +3,13 @@
 use crate::support;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
+use grit_lib::objects;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::{Cancel, FlagCancel, ProgressPhase, ProgressSink};
 use grit_lib::refs;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::{objects, RefStorageFormat};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 struct CancelHardResetOnFiles {

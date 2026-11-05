@@ -81,7 +81,7 @@ grit-lib = { version = "0.5", features = ["http-ureq"] }
 ```rust
 use grit_lib::repo::{init_repository, Repository};
 use grit_lib::state::resolve_head;
-use grit_lib::RefStorageFormat;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 
 let dir = tempfile::tempdir()?;
 let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)?;

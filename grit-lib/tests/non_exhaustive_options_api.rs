@@ -5,8 +5,8 @@ use grit_lib::diagnostics::NullDiagnostics;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::maintenance::{repack_all, GcOptions, RepackOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::RefStorageFormat;
 use std::sync::Arc;
 use tempfile::TempDir;
 

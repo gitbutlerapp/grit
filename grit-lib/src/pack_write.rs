@@ -5,7 +5,7 @@
 //! on disk without shelling out to `git index-pack`.
 //!
 //! ```rust
-//! use grit_lib::pack_write::InstallPackOptions;
+//! use grit_lib::objects::pack_write::InstallPackOptions;
 //! # fn main() {
 //! let _ = InstallPackOptions::default();
 //! # }

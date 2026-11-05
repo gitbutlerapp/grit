@@ -59,7 +59,7 @@ fn fetch_from_git_bundle_matches_git_fetch() {
         dest.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     git_configure_user(dest.path());
@@ -275,7 +275,7 @@ fn literal_bundle_fetch_writes_fetch_head() {
         dest.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     git_configure_user(dest.path());
@@ -309,7 +309,7 @@ fn literal_bundle_fetch_writes_fetch_head() {
         git_only.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     git_configure_user(git_only.path());

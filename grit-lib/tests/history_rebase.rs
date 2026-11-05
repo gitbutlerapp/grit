@@ -114,7 +114,7 @@ fn apply_plan(repo: &Repository, plan: &grit_lib::revwalk::history::RewritePlan)
             identity: support::reflog_signature("Test <t@grit.test>"),
             reflog_message: "rebase onto".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -564,7 +564,7 @@ fn rebase_onto_bare_repository() {
         dir.path(),
         &InitOptions::new()
             .with_bare(true)
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init bare");
     let ident = PINNED_COMMITTER;

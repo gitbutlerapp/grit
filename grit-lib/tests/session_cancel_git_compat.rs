@@ -241,7 +241,7 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
             identity: IDENT.parse().expect("signature"),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Skip,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };

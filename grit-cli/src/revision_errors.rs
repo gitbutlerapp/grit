@@ -2,7 +2,7 @@
 
 use anyhow::Error as AnyhowError;
 use grit_lib::error::Error as LibError;
-use grit_lib::object_inspect::ResolveError;
+use grit_lib::revwalk::object_inspect::ResolveError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 
 use crate::json_error;

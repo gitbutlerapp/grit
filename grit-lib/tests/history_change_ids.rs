@@ -171,7 +171,7 @@ fn apply_plan(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePlan)
             identity: support::reflog_signature("Rewriter <r@grit.test>"),
             reflog_message: "history change-id test".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -253,7 +253,7 @@ fn history_change_ids_survive_every_rewrite() {
             identity: support::reflog_signature("Rewriter <r@grit.test>"),
             reflog_message: "fixup".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &grit_lib::revwalk::history::staged_fixup_paths(&grit).expect("staged"),
     )
@@ -298,7 +298,7 @@ fn history_change_ids_survive_every_rewrite() {
             identity: support::reflog_signature("Rewriter <r@grit.test>"),
             reflog_message: "absorb".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
     )
     .expect("apply absorb");
@@ -599,7 +599,7 @@ fn fixup_hunks_preserves_change_id() {
             identity: support::reflog_signature("Rewriter <r@grit.test>"),
             reflog_message: "fixup hunks".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &selection,
         &[],

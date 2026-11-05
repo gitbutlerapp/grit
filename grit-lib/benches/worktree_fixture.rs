@@ -140,14 +140,14 @@ fn build_status_nested_l_fixtures(base: &Path) -> (Repository, Repository) {
         &nested_root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("nested status repo");
     let plain_repo = Repository::init(
         &plain_root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("plain status repo");
     populate(nested_repo.work_tree().expect("wt"), true);
@@ -303,7 +303,7 @@ impl WorktreeBenchFixtures {
             &ignore_root,
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("ignore repo init");
         let wt = ignore_repo.work_tree().expect("work tree");
@@ -325,7 +325,7 @@ impl WorktreeBenchFixtures {
             &attr_root,
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("attr repo init");
         let attr_wt = attr_repo.work_tree().expect("work tree");
@@ -346,7 +346,7 @@ impl WorktreeBenchFixtures {
             &scan_100k_root,
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("scan 100k repo init");
         let scan_100k_wt = scan_repo_100k.work_tree().expect("work tree");
@@ -380,7 +380,7 @@ impl WorktreeBenchFixtures {
             &untracked_root,
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )
         .expect("untracked walk repo init");
         let untracked_wt = untracked_walk_repo.work_tree().expect("work tree");

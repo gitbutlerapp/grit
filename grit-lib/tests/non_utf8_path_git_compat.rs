@@ -7,6 +7,7 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::process::Command;
 
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::diff_index_to_worktree;
 use grit_lib::index::untracked_cache::{parse_untracked_extension, UntrackedCacheDir};
@@ -25,7 +26,6 @@ use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath;
-use grit_lib::PostOperationHooks;
 use grit_test_support::git;
 
 const BAD_NAME: &[u8] = b"bad\xffname.txt";

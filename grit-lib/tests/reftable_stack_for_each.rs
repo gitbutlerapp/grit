@@ -44,7 +44,7 @@ fn stacked_tables_for_each_matches_git_with_override_and_deletion() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
@@ -154,7 +154,7 @@ fn stacked_tables_prefix_for_each_stops_early() {
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Reftable),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable),
     )
     .expect("init");
     let git_dir = dir.path().join(".git");

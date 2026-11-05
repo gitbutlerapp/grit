@@ -16,6 +16,8 @@ use grit_lib::porcelain::merge::{
 };
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::refs;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     abort_rebase, continue_rebase, start_rebase, start_rebase_with_exec, ApplyOptions, EmptyPolicy,
@@ -24,7 +26,6 @@ use grit_lib::revwalk::history::{
 };
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{read_orig_head_for_repository, write_orig_head};
-use grit_lib::{refs, RefStorageFormat};
 use grit_test_support::{git, git_cmd};
 use tempfile::TempDir;
 
@@ -319,7 +320,7 @@ fn rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             identity: ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Skip,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         pre_rebase: PreRebase::Skip,
     }

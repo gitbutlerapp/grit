@@ -197,7 +197,7 @@ mod unix {
                     oid: fx.other_oid,
                 },
                 dry_run: false,
-                hooks: grit_lib::PostOperationHooks::Skip,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
             &mut NullProgress,
             &NeverCancel,

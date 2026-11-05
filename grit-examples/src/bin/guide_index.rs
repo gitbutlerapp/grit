@@ -38,7 +38,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
             temp.path(),
             &InitOptions::new()
                 .with_initial_branch("main")
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )?;
         let path = temp.path().join("hello.txt");
         fs::write(&path, b"staged from the library guide\n").map_err(grit_lib::error::Error::Io)?;

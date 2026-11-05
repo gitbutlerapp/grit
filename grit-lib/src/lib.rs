@@ -100,7 +100,7 @@
 //!   Backends are pluggable via the ODB abstraction on [`objects::Objects`].
 //! - **References ([`refs`])** — loose files, `packed-refs`, and reftable stacks;
 //!   reflog read/write and ref storage format selection live in the same module.
-//!   [`RefStorageFormat`] selects the on-disk ref layout at init.
+//!   [`refs::ref_storage::RefStorageFormat`] selects the on-disk ref layout at init.
 //!
 //! # Network and bundles
 //!
@@ -390,8 +390,6 @@ pub(crate) mod worktree_rules;
 mod worktree_rules_tests;
 mod worktree_scan;
 pub use crate::heap::release_unused_heap;
-pub use crate::hooks::{HookName, PostOperationHooks};
-pub use worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 pub(crate) mod write_tree;
 pub(crate) mod ws;
 pub(crate) mod zlib_inflate;
@@ -404,14 +402,12 @@ pub mod test_support;
 #[doc(hidden)]
 pub mod fuzz;
 
-pub use ref_storage::RefStorageFormat;
-
-pub use crate::oid_abbrev::OidAbbrevBatch;
-pub use objects::pack_reuse;
-pub use objects::pack_write;
-pub use porcelain::quote_path;
-pub use revwalk::object_inspect;
-pub use worktree::fsmonitor;
+pub(crate) use crate::oid_abbrev::OidAbbrevBatch;
+pub(crate) use objects::{pack_reuse, pack_write};
+pub(crate) use porcelain::quote_path;
+pub(crate) use ref_storage::RefStorageFormat;
+pub(crate) use revwalk::object_inspect;
+pub(crate) use worktree::fsmonitor;
 
 #[cfg(feature = "unstable-bench-helpers")]
 pub use pack_receive::{read_sideband_pack_to, PackReceiveTarget};

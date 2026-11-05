@@ -18,13 +18,13 @@ use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource}
 use grit_lib::progress::{
     Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     continue_rebase, start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome,
     RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
-use grit_lib::RefStorageFormat;
 
 const IDENT: &str = "Cancel Test <cancel@example.com> 1700000000 +0000";
 const FILES: usize = 300;
@@ -668,7 +668,7 @@ fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             identity: IDENT.parse().expect("signature"),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Skip,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     }

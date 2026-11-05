@@ -61,6 +61,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
 use grit_lib::refs::query_reachability::{ref_points_at, resolve_commit_filter_target};
 use grit_lib::refs::ref_storage::detect_format;
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::{
     list_refs_glob_for_repository, reftable::verify_ref_transaction_batch_reftable, write_ref,
     RefBatchItem,
@@ -71,7 +72,6 @@ use grit_lib::repo::ensure_core_bare;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress};
-use grit_lib::RefStorageFormat;
 use tempfile::tempdir;
 
 fn init_repo(dir: &Path) -> Repository {

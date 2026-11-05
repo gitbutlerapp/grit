@@ -10,10 +10,10 @@ use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPac
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_pack_index};
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::pack_store;
-use grit_lib::RefStorageFormat;
 use tempfile::TempDir;
 
 fn assert_send_sync<T: Send + Sync>() {}

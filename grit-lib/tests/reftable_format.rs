@@ -614,8 +614,8 @@ fn setup_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
 fn reftable_stack_write_resolve_list_and_delete() {
     let (_dir, git_dir) = setup_reftable_git_dir();
     assert_eq!(
-        grit_lib::RefStorageFormat::detect(&git_dir).expect("detect"),
-        grit_lib::RefStorageFormat::Reftable
+        grit_lib::refs::ref_storage::RefStorageFormat::detect(&git_dir).expect("detect"),
+        grit_lib::refs::ref_storage::RefStorageFormat::Reftable
     );
     let oid = oid(0x42);
     reftable_write_ref(&git_dir, "refs/heads/main", &oid, None, None).expect("write");

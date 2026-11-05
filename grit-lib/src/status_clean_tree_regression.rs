@@ -13,7 +13,7 @@ use crate::environment::RepositoryOptions;
 use crate::porcelain::status::{status, StatusOptions, UntrackedMode};
 use crate::progress::{NeverCancel, NullProgress};
 use crate::repo::Repository;
-use crate::PARALLEL_STAT_MIN_ENTRIES;
+use crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 
 /// Worktree mtime well before the index write, so no entry is racily clean.
 const OLD_MTIME: i64 = 1_600_000_000;

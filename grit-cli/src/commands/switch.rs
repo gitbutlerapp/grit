@@ -1,6 +1,7 @@
 //! `grit switch` — move to another branch, remote branch, or detached commit.
 
 use anyhow::{bail, Result};
+use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::short_hex;
 use grit_lib::porcelain::branch::{upstream_tracking_display, TrackMode};
@@ -9,7 +10,6 @@ use grit_lib::porcelain::switch::{
     SwitchMode, SwitchOptions,
 };
 use grit_lib::state::{status_operation, wt_status_get_state, HeadState};
-use grit_lib::PostOperationHooks;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;

@@ -39,7 +39,7 @@ fn simple_bins_cover_a_tiny_commit_workflow() -> Result<()> {
         temp.path(),
         &InitOptions::new()
             .with_initial_branch("main")
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )?;
     fs::write(temp.path().join("hello.txt"), "hello\n")?;
 

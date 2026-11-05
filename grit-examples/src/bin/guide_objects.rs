@@ -79,7 +79,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
             temp.path(),
             &InitOptions::new()
                 .with_initial_branch("main")
-                .with_ref_storage(grit_lib::RefStorageFormat::Files),
+                .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
         )?;
         open_repo(temp.path())?
     };

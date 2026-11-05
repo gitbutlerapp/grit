@@ -62,7 +62,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
             identity: test_ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     }
@@ -1786,7 +1786,7 @@ fn stacked_branches_move_atomically_after_continue() {
             identity: test_ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };
@@ -1860,7 +1860,7 @@ fn git_rebase_continue_leaves_stacked_branch_untouched_on_primary_conflict() {
             identity: test_ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };
@@ -1944,7 +1944,7 @@ fn git_rebase_continue_todo_excludes_descendant_merge_commit() {
             identity: test_ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };
@@ -2038,7 +2038,7 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
             &SwitchOptions {
                 mode,
                 dry_run,
-                hooks: grit_lib::PostOperationHooks::Run,
+                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::NeverCancel,
@@ -2095,7 +2095,7 @@ fn switch_refuses_during_merge_conflict() {
         &SwitchOptions {
             mode,
             dry_run: false,
-            hooks: grit_lib::PostOperationHooks::Run,
+            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
@@ -4114,7 +4114,7 @@ fn rebase_apply_with_record() -> grit_lib::revwalk::history::ApplyOptions {
         identity: test_ident(),
         reflog_message: "rebase".into(),
         record_operation: Some("rebase".into()),
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 
@@ -4123,7 +4123,7 @@ fn undo_opts() -> grit_lib::revwalk::history::ApplyOptions {
         identity: test_ident(),
         reflog_message: "history undo".into(),
         record_operation: None,
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 

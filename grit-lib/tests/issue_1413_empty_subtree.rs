@@ -70,7 +70,7 @@ fn apply_opts() -> ApplyOptions {
         identity: support::reflog_signature("Tester <t@grit.test>"),
         reflog_message: "history drop".into(),
         record_operation: None,
-        hooks: grit_lib::PostOperationHooks::Run,
+        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
     }
 }
 

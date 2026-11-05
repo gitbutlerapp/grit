@@ -16,7 +16,7 @@ fn init_sets_precomposeunicode_when_options_force_probe() {
         td.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     apply_init_filesystem_config(
@@ -42,7 +42,7 @@ fn second_init_does_not_overwrite_local_config() {
         td.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("init");
     let config_path = td.path().join(".git/config");
@@ -54,7 +54,7 @@ fn second_init_does_not_overwrite_local_config() {
         td.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )
     .expect("reinit");
 
