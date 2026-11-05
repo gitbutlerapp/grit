@@ -216,6 +216,7 @@ pub(crate) mod github_auth;
 pub(crate) mod grit_server_auth;
 pub(crate) mod grit_server_share;
 pub(crate) mod grit_server_space;
+mod heap;
 pub(crate) mod line_interner;
 pub mod line_range;
 mod oid_abbrev;
@@ -384,6 +385,7 @@ pub(crate) mod worktree_ref;
 pub(crate) mod worktree_rules;
 mod worktree_rules_tests;
 mod worktree_scan;
+pub use crate::heap::release_unused_heap;
 pub use crate::hooks::{HookName, PostOperationHooks};
 #[cfg(test)]
 pub use crate::porcelain::checkout::{checkout_spool_probe_count, reset_checkout_spool_probe};
