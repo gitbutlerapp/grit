@@ -166,8 +166,7 @@ pub mod prelude {
     pub use crate::objects::odb::Odb;
     pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
     pub use crate::ownership_check::{
-        ForeignOwnershipCheck, OwnershipCheck, OwnershipContext, OwnershipError, OwnershipStatus,
-        SystemOwnershipCheck,
+        OwnershipCheck, OwnershipContext, OwnershipError, OwnershipStatus, SystemOwnershipCheck,
     };
     pub use crate::repo::{
         resolve_initial_branch, DiscoveryInfo, InitOptions, InitOutcome, Repository,

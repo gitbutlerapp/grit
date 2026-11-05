@@ -5,18 +5,36 @@
 //! [`SystemOwnershipCheck`] to model sandboxes, containers, or test harnesses.
 //!
 //! ```rust
+//! use std::path::Path;
 //! use std::sync::Arc;
 //!
 //! use grit_lib::config::environment::RepositoryOptions;
-//! use grit_lib::ownership_check::{ForeignOwnershipCheck, OwnershipCheck, SystemOwnershipCheck};
+//! use grit_lib::ownership_check::{
+//!     OwnershipCheck, OwnershipContext, OwnershipStatus, SystemOwnershipCheck,
+//! };
 //! use grit_lib::repo::{InitOptions, Repository};
+//!
+//! /// Treat every path as foreign so `safe.directory` always applies (tests/sandboxes).
+//! struct SandboxForeign;
+//!
+//! impl OwnershipCheck for SandboxForeign {
+//!     fn always_apply_safe_directory(&self) -> bool {
+//!         true
+//!     }
+//!     fn status(
+//!         &self,
+//!         _path: &Path,
+//!         _context: &OwnershipContext,
+//!     ) -> Result<OwnershipStatus, grit_lib::ownership_check::OwnershipError> {
+//!         Ok(OwnershipStatus::NotOwned)
+//!     }
+//! }
 //!
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! Repository::init(dir.path(), &InitOptions::default())?;
 //!
-//! let options = RepositoryOptions::empty()
-//!     .with_ownership_check(Arc::new(ForeignOwnershipCheck));
+//! let options = RepositoryOptions::empty().with_ownership_check(Arc::new(SandboxForeign));
 //! let err = Repository::discover(Some(dir.path()), &options).unwrap_err();
 //! assert!(matches!(err, grit_lib::error::Error::DubiousOwnership(_)));
 //!
@@ -132,9 +150,9 @@ impl OwnershipCheck for SystemOwnershipCheck {
 
 /// Treat every path as not owned so `safe.directory` always applies.
 ///
-/// Useful in tests and embedders that model repositories as always foreign.
+/// Used in crate tests; embedders typically implement [`OwnershipCheck`] directly.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ForeignOwnershipCheck;
+pub(crate) struct ForeignOwnershipCheck;
 
 impl OwnershipCheck for ForeignOwnershipCheck {
     fn always_apply_safe_directory(&self) -> bool {
@@ -155,13 +173,13 @@ static DEFAULT_OWNERSHIP_CHECK: LazyLock<Arc<dyn OwnershipCheck>> =
 
 /// Shared [`SystemOwnershipCheck`] used by [`RepositoryOptions`](crate::config::environment::RepositoryOptions) defaults.
 #[must_use]
-pub fn default_ownership_check() -> Arc<dyn OwnershipCheck> {
+pub(crate) fn default_ownership_check() -> Arc<dyn OwnershipCheck> {
     Arc::clone(&DEFAULT_OWNERSHIP_CHECK)
 }
 
 /// Whether `check` is the shared default [`SystemOwnershipCheck`] instance.
 #[must_use]
-pub fn is_default_ownership_check(check: &Arc<dyn OwnershipCheck>) -> bool {
+pub(crate) fn is_default_ownership_check(check: &Arc<dyn OwnershipCheck>) -> bool {
     Arc::ptr_eq(check, &DEFAULT_OWNERSHIP_CHECK)
 }
 
@@ -191,7 +209,6 @@ mod tests {
 
     use super::*;
     use crate::config::environment::RepositoryOptions;
-    use crate::environment::Environment;
     use crate::repo::{InitOptions, Repository};
 
     #[test]
@@ -234,5 +251,29 @@ mod tests {
         let options =
             RepositoryOptions::empty().with_ownership_check(Arc::new(ForeignOwnershipCheck));
         assert!(!options.uses_default_ownership_check());
+    }
+
+    #[test]
+    fn ownership_check_default_allows_owned_repo() {
+        let td = tempfile::tempdir().unwrap();
+        Repository::init(td.path(), &InitOptions::default()).unwrap();
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = td.path().to_path_buf();
+        let options = RepositoryOptions::with_environment(env)
+            .with_ownership_check(Arc::new(SystemOwnershipCheck));
+        Repository::discover(Some(td.path()), &options).expect("owned repo opens");
+    }
+
+    #[test]
+    fn ownership_check_foreign_repo_requires_safe_directory() {
+        let td = tempfile::tempdir().unwrap();
+        Repository::init(td.path(), &InitOptions::default()).unwrap();
+        let mut env = crate::environment::Environment::empty();
+        env.cwd = td.path().to_path_buf();
+        env.git_config_nosystem = Some("true".into());
+        let options = RepositoryOptions::with_environment(env)
+            .with_ownership_check(Arc::new(ForeignOwnershipCheck));
+        let err = Repository::discover(Some(td.path()), &options).unwrap_err();
+        assert!(matches!(err, crate::error::Error::DubiousOwnership(_)));
     }
 }

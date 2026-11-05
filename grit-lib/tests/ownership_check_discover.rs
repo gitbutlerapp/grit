@@ -1,39 +1,30 @@
-//! Ownership check injection for discovery and `safe.directory`.
+//! Ownership check compatibility with system `git` (`safe.directory`).
 
 use std::process::Command;
-use std::sync::Arc;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
-use grit_lib::ownership_check::{ForeignOwnershipCheck, SystemOwnershipCheck};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::ownership_check::{OwnershipCheck, OwnershipContext, OwnershipStatus};
+use grit_lib::repo::Repository;
+use std::path::Path;
+use std::sync::Arc;
 use tempfile::TempDir;
 
-#[test]
-fn ownership_check_default_allows_owned_repo() {
-    let td = TempDir::new().expect("tempdir");
-    Repository::init(td.path(), &InitOptions::default()).expect("init");
-    let mut env = Environment::empty();
-    env.cwd = td.path().to_path_buf();
-    let options = RepositoryOptions::with_environment(env)
-        .with_ownership_check(Arc::new(SystemOwnershipCheck));
-    Repository::discover(Some(td.path()), &options).expect("owned repo opens");
-}
+#[derive(Default)]
+struct TreatAllForeign;
 
-#[test]
-fn ownership_check_foreign_repo_requires_safe_directory() {
-    let td = TempDir::new().expect("tempdir");
-    Repository::init(td.path(), &InitOptions::default()).expect("init");
-    let mut env = Environment::empty();
-    env.cwd = td.path().to_path_buf();
-    env.git_config_nosystem = Some("true".into());
-    let options = RepositoryOptions::with_environment(env)
-        .with_ownership_check(Arc::new(ForeignOwnershipCheck));
-    let err = Repository::discover(Some(td.path()), &options).unwrap_err();
-    assert!(
-        matches!(err, Error::DubiousOwnership(_)),
-        "expected dubious ownership, got {err:?}"
-    );
+impl OwnershipCheck for TreatAllForeign {
+    fn always_apply_safe_directory(&self) -> bool {
+        true
+    }
+
+    fn status(
+        &self,
+        _path: &Path,
+        _context: &OwnershipContext,
+    ) -> Result<OwnershipStatus, grit_lib::ownership_check::OwnershipError> {
+        Ok(OwnershipStatus::NotOwned)
+    }
 }
 
 #[test]
@@ -62,8 +53,8 @@ fn ownership_check_foreign_repo_matches_git_safe_directory_rejection() {
     let mut env = Environment::empty();
     env.cwd = repo_root.clone();
     env.git_config_nosystem = Some("true".into());
-    let options = RepositoryOptions::with_environment(env)
-        .with_ownership_check(Arc::new(ForeignOwnershipCheck));
+    let options =
+        RepositoryOptions::with_environment(env).with_ownership_check(Arc::new(TreatAllForeign));
     let grit_err = Repository::discover(Some(&repo_root), &options).unwrap_err();
     assert!(
         matches!(grit_err, Error::DubiousOwnership(_)),

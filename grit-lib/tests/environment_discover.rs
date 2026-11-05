@@ -293,11 +293,27 @@ fn safe_directory_from_environment_global_config() {
     );
     assert!(std::env::var("GIT_TEST_ASSUME_DIFFERENT_OWNER").is_err());
 
-    use grit_lib::ownership_check::ForeignOwnershipCheck;
+    use grit_lib::ownership_check::{OwnershipCheck, OwnershipContext, OwnershipStatus};
+    use std::path::Path;
     use std::sync::Arc;
 
-    let options = RepositoryOptions::with_environment(env)
-        .with_ownership_check(Arc::new(ForeignOwnershipCheck));
+    #[derive(Default)]
+    struct TreatAllForeign;
+    impl OwnershipCheck for TreatAllForeign {
+        fn always_apply_safe_directory(&self) -> bool {
+            true
+        }
+        fn status(
+            &self,
+            _path: &Path,
+            _context: &OwnershipContext,
+        ) -> Result<OwnershipStatus, grit_lib::ownership_check::OwnershipError> {
+            Ok(OwnershipStatus::NotOwned)
+        }
+    }
+
+    let options =
+        RepositoryOptions::with_environment(env).with_ownership_check(Arc::new(TreatAllForeign));
     let repo = Repository::discover(Some(&repo_root), &options)
         .expect("discover must honor safe.directory from Environment global config");
     repo.enforce_safe_directory()

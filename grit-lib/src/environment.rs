@@ -1178,9 +1178,8 @@ impl RepositoryOptions {
     /// Replace the ownership check used during discovery and clone safety checks.
     ///
     /// The default [`crate::ownership_check::SystemOwnershipCheck`] compares the effective Unix
-    /// uid against repository paths. [`crate::ownership_check::ForeignOwnershipCheck`] treats
-    /// every repository as foreign so `safe.directory` always applies (useful in sandboxes and
-    /// tests).
+    /// uid against repository paths. Custom implementations can treat repositories as always
+    /// foreign so `safe.directory` always applies (sandboxes and tests).
     #[must_use]
     pub fn with_ownership_check(mut self, check: Arc<dyn OwnershipCheck>) -> Self {
         self.ownership_check = check;

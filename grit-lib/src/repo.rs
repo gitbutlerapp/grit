@@ -3639,13 +3639,18 @@ fn path_owned(
     ownership_check: &dyn crate::ownership_check::OwnershipCheck,
     context: &crate::ownership_check::OwnershipContext,
     path: &Path,
+    missing_worktree_is_owned: bool,
 ) -> Result<bool> {
     use crate::ownership_check::{OwnershipError, OwnershipStatus};
     match ownership_check.status(path, context) {
         Ok(OwnershipStatus::Owned) => Ok(true),
         Ok(OwnershipStatus::NotOwned) => Ok(false),
         Err(OwnershipError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
-            Ok(true)
+            if missing_worktree_is_owned {
+                Ok(true)
+            } else {
+                Err(Error::Io(source))
+            }
         }
         Err(OwnershipError::Io { source, .. }) => Err(Error::Io(source)),
     }
@@ -3663,14 +3668,14 @@ fn ensure_valid_ownership(
     let context = crate::ownership_check::OwnershipContext::from_environment(environment);
     if !ownership_check.always_apply_safe_directory() {
         let gitfile_ok = gitfile
-            .map(|p| path_owned(ownership_check, &context, p))
+            .map(|p| path_owned(ownership_check, &context, p, false))
             .transpose()?
             .unwrap_or(true);
         let wt_ok = match worktree {
             None => true,
-            Some(wt) => path_owned(ownership_check, &context, wt)?,
+            Some(wt) => path_owned(ownership_check, &context, wt, true)?,
         };
-        let gd_ok = path_owned(ownership_check, &context, gitdir)?;
+        let gd_ok = path_owned(ownership_check, &context, gitdir, false)?;
         if gitfile_ok && wt_ok && gd_ok {
             return Ok(());
         }
@@ -4770,5 +4775,25 @@ mod config_session_tests {
             repo.config().unwrap().get("user.name").as_deref(),
             Some("Other")
         );
+    }
+}
+
+#[cfg(test)]
+mod ownership_safe_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use std::io;
+
+    #[test]
+    fn verify_safe_for_clone_source_errors_when_git_dir_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        fs::remove_dir_all(repo.git_dir()).unwrap();
+        let err = repo.verify_safe_for_clone_source().unwrap_err();
+        match err {
+            Error::Io(e) => assert_eq!(e.kind(), io::ErrorKind::NotFound),
+            other => panic!("expected Io(NotFound), got {other:?}"),
+        }
     }
 }
