@@ -8,7 +8,7 @@
 //! use std::path::Path;
 //! use std::sync::Arc;
 //!
-//! use grit_lib::config::environment::RepositoryOptions;
+//! use grit_lib::config::environment::{Environment, RepositoryOptions};
 //! use grit_lib::ownership_check::{
 //!     OwnershipCheck, OwnershipContext, OwnershipStatus, SystemOwnershipCheck,
 //! };
@@ -34,11 +34,18 @@
 //! let dir = tempfile::tempdir()?;
 //! Repository::init(dir.path(), &InitOptions::default())?;
 //!
-//! let options = RepositoryOptions::empty().with_ownership_check(Arc::new(SandboxForeign));
+//! let mut env = Environment::empty();
+//! env.cwd = dir.path().to_path_buf();
+//! env.git_config_nosystem = Some("true".into());
+//! let options = RepositoryOptions::with_environment(env)
+//!     .with_ownership_check(Arc::new(SandboxForeign));
 //! let err = Repository::discover(Some(dir.path()), &options).unwrap_err();
 //! assert!(matches!(err, grit_lib::error::Error::DubiousOwnership(_)));
 //!
-//! let owned = RepositoryOptions::empty().with_ownership_check(Arc::new(SystemOwnershipCheck));
+//! let mut owned_env = Environment::empty();
+//! owned_env.cwd = dir.path().to_path_buf();
+//! let owned = RepositoryOptions::with_environment(owned_env)
+//!     .with_ownership_check(Arc::new(SystemOwnershipCheck));
 //! let _repo = Repository::discover(Some(dir.path()), &owned)?;
 //! # Ok(())
 //! # }
