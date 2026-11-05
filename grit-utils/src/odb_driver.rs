@@ -275,7 +275,7 @@ pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
     })
 }
 
-/// Nearest annotated tag for `HEAD` ([`RevWalk::describe`]).
+/// Nearest annotated tag for `HEAD` ([`grit_lib::revwalk::RevWalk::describe`]).
 pub fn rev_walk_describe_head(repo: &Repository) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
         let described = repo
