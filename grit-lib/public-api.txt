@@ -23613,6 +23613,7 @@ pub fn grit_lib::remote::receive_pack::max_input_size_from_config(&grit_lib::con
 pub fn grit_lib::remote::receive_pack::pack_object_count(&[u8]) -> core::option::Option<u32>
 pub fn grit_lib::remote::receive_pack::receive_unpack_limit(&grit_lib::config::ConfigSet) -> i32
 pub fn grit_lib::remote::receive_pack::should_use_unpack_objects(&[u8], &grit_lib::config::ConfigSet) -> bool
+pub fn grit_lib::remote::redact_url_for_display(&str) -> alloc::string::String
 pub mod grit_lib::remote::resumable
 pub enum grit_lib::remote::resumable::ResumableDownloadDest
 pub grit_lib::remote::resumable::ResumableDownloadDest::Private(std::path::PathBuf)
