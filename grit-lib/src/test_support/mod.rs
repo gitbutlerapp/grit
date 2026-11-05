@@ -33,3 +33,9 @@ pub mod commit_graph;
 pub mod index_pack;
 pub mod pack;
 pub mod pack_store;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod fuzz;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod knobs;

@@ -10,6 +10,7 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match;
 use grit_test_support::git;
 
 /// Same as [`grit_lib`]'s UNTR auto-cache entry threshold (see `untracked_cache` module).
@@ -120,7 +121,7 @@ fn allow_empty_still_stages_dirty_tracked_files() {
 
     let repo = open_repo(root);
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage like commit");
-    let mut req = commit_req("marker").skip_pre_commit_tree_match(true);
+    let mut req = commit_skip_pre_commit_tree_match(commit_req("marker"), true);
     req.allow_empty = true;
     let outcome = create_commit(&repo, &req, &mut NullProgress, &NeverCancel)
         .expect("allow-empty after stage");
@@ -261,7 +262,7 @@ fn commit_worktree_req(message: &str) -> CommitRequest {
     req.author = Some(id.parse().expect("signature"));
     req.committer = Some(id.parse().expect("signature"));
     req.assume_worktree_synced = true;
-    req.skip_pre_commit_tree_match(true)
+    req = commit_skip_pre_commit_tree_match(req, true)
 }
 
 /// Tracked edit in `d0000` and a new nested untracked file under an unrelated directory tree.

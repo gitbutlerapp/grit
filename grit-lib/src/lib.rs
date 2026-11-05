@@ -116,6 +116,7 @@
 //! | *(none)* | — | Core library: ODB, refs, index, diff, merge, local transport |
 //! | `http-ureq` | disabled | [`ureq`](https://docs.rs/ureq) HTTP client for smart-HTTP fetch/push (rustls) |
 //! | `http-ureq-native-tls` | disabled | Platform TLS for `http-ureq` (Secure Transport on macOS); use instead of rustls on Apple targets |
+//! | `test-support` | disabled | Unstable test_support module for workspace tests and internal tooling only (outside semver) |
 //!
 //! Enable HTTP in `Cargo.toml`:
 //!
@@ -400,18 +401,12 @@ pub(crate) mod test_probe_hooks;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
-#[doc(hidden)]
-pub mod fuzz;
-
 pub(crate) use crate::oid_abbrev::OidAbbrevBatch;
 pub(crate) use objects::pack_reuse;
 pub(crate) use porcelain::quote_path;
 pub(crate) use ref_storage::RefStorageFormat;
 pub(crate) use revwalk::object_inspect;
 pub(crate) use worktree::fsmonitor;
-
-#[cfg(feature = "unstable-bench-helpers")]
-pub use pack_receive::{read_sideband_pack_to, PackReceiveTarget};
 
 #[cfg(test)]
 pub(crate) mod hot_path_test_metrics;

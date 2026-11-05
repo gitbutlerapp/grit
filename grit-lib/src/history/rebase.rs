@@ -31,9 +31,9 @@ use super::types::{
     RewrittenCommit,
 };
 
-#[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
-/// Test and bench hooks counting patch-id computations during rebase planning.
+#[cfg(any(test, feature = "test-support"))]
 pub mod patch_id_inject {
+    //! Test-support hook for counting patch-id computations during rebase.
     use std::cell::Cell;
 
     thread_local! { // hygiene: test-support/bench-only patch-id compute call counter
@@ -1235,7 +1235,7 @@ fn compute_patch_id_recorded(
     commit_oid: &ObjectId,
     mode: PatchIdMode,
 ) -> Result<Option<ObjectId>, crate::error::Error> {
-    #[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
+    #[cfg(any(test, feature = "test-support"))]
     patch_id_inject::record_patch_id_compute_call();
     compute_patch_id(algo, odb, commit_oid, mode)
 }

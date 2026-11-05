@@ -12,7 +12,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_API_SCRIPT = Path(__file__).resolve().parent / "public-api.sh"
 SNAPSHOT_PATH = ROOT / "grit-lib" / "public-api.txt"
-ALLOWLIST_PATH = ROOT / "grit-lib" / "public-api-test-items.allow"
 HIDDEN_OFFENDERS_PATH = ROOT / "grit-lib" / "public-api-test-items.hidden-offenders"
 DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
 
@@ -191,8 +190,8 @@ def ensure_rustdoc_json_with_hidden_items(*, nightly: str, output: Path) -> None
         output.write_bytes(generated.read_bytes())
 
 
-def check_test_items_allowlist() -> tuple[bool, str]:
-    """Verify allowlist matches snapshot + hidden rustdoc offenders; list is shrink-only."""
+def check_test_items_zero() -> tuple[bool, str]:
+    """Fail when snapshot or hidden rustdoc paths look like test/bench/fixture hooks."""
     snapshot_text = SNAPSHOT_PATH.read_text(encoding="utf-8")
     snapshot_offenders = offending_paths_from_snapshot_text(snapshot_text)
     pins = parse_pins()
@@ -202,53 +201,26 @@ def check_test_items_allowlist() -> tuple[bool, str]:
     )
     offenders = set(snapshot_offenders)
     offenders |= offending_paths_from_rustdoc_json(DEFAULT_RUSTDOC_JSON)
-    hidden_expected = sorted(offenders - snapshot_offenders)
-
-    allow_raw = ALLOWLIST_PATH.read_text(encoding="utf-8")
-    allow = {
-        line.strip()
-        for line in allow_raw.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    }
-    allow_sorted = sorted(allow)
-    file_lines = [
-        line.strip()
-        for line in allow_raw.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
-    if file_lines != allow_sorted:
-        return False, "public-api-test-items.allow must be sorted (one path per line)"
 
     if HIDDEN_OFFENDERS_PATH.is_file():
-        hidden_file = [
+        hidden_file = {
             line.strip()
             for line in HIDDEN_OFFENDERS_PATH.read_text(encoding="utf-8").splitlines()
             if line.strip() and not line.strip().startswith("#")
-        ]
-        if hidden_file != hidden_expected:
+        }
+        if hidden_file:
             return (
                 False,
-                "public-api-test-items.hidden-offenders is out of date "
-                "(regenerate from allowlist minus snapshot offenders)",
+                "public-api-test-items.hidden-offenders must be empty; remove hooks instead",
             )
-    elif hidden_expected:
-        return False, "missing grit-lib/public-api-test-items.hidden-offenders"
 
-    missing = sorted(offenders - allow)
-    stale = sorted(allow - offenders)
-    if missing or stale:
-        parts: list[str] = []
-        if missing:
-            parts.append(
-                "paths missing from allowlist:\n"
-                + "\n".join(f"  {path}" for path in missing)
-            )
-        if stale:
-            parts.append(
-                "stale allowlist entries:\n" + "\n".join(f"  {path}" for path in stale)
-            )
-        return False, "\n".join(parts)
-    return True, ""
+    if not offenders:
+        return True, ""
+    return (
+        False,
+        "public API must not expose test/bench/fixture hooks (see TESTING.md); offenders:\n"
+        + "\n".join(f"  {path}" for path in sorted(offenders)),
+    )
 
 
 def compare_snapshot_files(
@@ -271,7 +243,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{key}={value}")
         return 0
     if len(args) == 1 and args[0] == "check-test-items":
-        ok, message = check_test_items_allowlist()
+        ok, message = check_test_items_zero()
         if not ok:
             sys.stderr.write(message)
             if not message.endswith("\n"):

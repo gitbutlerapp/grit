@@ -1649,9 +1649,10 @@ fn http_fetch_rss_child_process() {
     std::fs::create_dir_all(&work).expect("work dir");
     git(&work, &["init", "-q", "-b", "main", "."]);
     let git_dir = work.join(".git");
-    let mut opts = FetchOptions::new()
-        .initial_remote_fetch(true)
-        .pack_spool_only(true);
+    let mut opts = grit_lib::test_support::knobs::fetch_options_pack_spool_only(
+        FetchOptions::new().initial_remote_fetch(true),
+        true,
+    );
     opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     opts.remote_name = Some("origin".to_owned());
     opts.index_pack_threads = index_threads.or(Some(1));

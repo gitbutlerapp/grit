@@ -63,7 +63,7 @@ write_snapshot() {
 	ensure_cargo_public_api
 	cd "${REPO}"
 	# Document the supported embedder surface only (`http-ureq` optional). Internal
-	# bench helpers (`unstable-bench-helpers`) stay out of the committed snapshot.
+	# `test-support` hooks stay out of the committed snapshot (default features only).
 	cargo "+${PUBLIC_API_TOOLCHAIN}" public-api -p grit-lib --features http-ureq --simplified >"${dest}"
 }
 
@@ -122,7 +122,7 @@ check-test-items)
 	# without --document-hidden-items. Drop it so check-test-items rebuilds correctly.
 	rm -f "${REPO}/target/doc/grit_lib.json"
 	if python3 "${REPO}/scripts/public_api.py" check-test-items; then
-		echo "public-api test-item allowlist matches."
+		echo "public-api test-item ratchet passed (zero offenders)."
 	else
 		exit 1
 	fi

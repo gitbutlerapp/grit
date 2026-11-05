@@ -428,23 +428,6 @@ impl FetchOptions {
         self
     }
 
-    /// Spool the received pack without index-pack (transport tests and diagnostics).
-    #[doc(hidden)]
-    #[must_use]
-    pub fn pack_spool_only(mut self, enabled: bool) -> Self {
-        self.pack_spool_only = enabled;
-        self
-    }
-
-    /// Promisor on-demand object fetch by oid (see [`crate::promisor_fetch`]).
-    #[doc(hidden)]
-    #[must_use]
-    pub fn promisor_object_wants(mut self, wants: Vec<ObjectId>) -> Self {
-        self.object_wants = wants;
-        self.promisor_object_fetch = true;
-        self
-    }
-
     /// Whether this fetch carries any shallow/deepen request (an explicit
     /// `fetch_depth`/`deepen-since`/`deepen-not`). Note this does NOT cover the
     /// "already shallow, fetching more of the same boundary" case — that is

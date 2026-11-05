@@ -10,6 +10,7 @@ use grit_lib::porcelain::stage_tracked::{
 };
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::knobs::stage_options_staging_thresholds;
 use std::fs;
 
 use support::git;
@@ -34,12 +35,14 @@ fn small_bulk_thresholds() -> IndexStagingThresholds {
 }
 
 fn stage_opts_with_small_bulk() -> StageOptions {
-    StageOptions {
-        mode: StageMode::All,
-        executable_hint: Default::default(),
-        staging_thresholds: Some(small_bulk_thresholds()),
-        ..StageOptions::default()
-    }
+    stage_options_staging_thresholds(
+        StageOptions {
+            mode: StageMode::All,
+            executable_hint: Default::default(),
+            ..StageOptions::default()
+        },
+        small_bulk_thresholds(),
+    )
 }
 
 #[test]

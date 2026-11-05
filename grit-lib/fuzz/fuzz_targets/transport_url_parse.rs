@@ -3,5 +3,5 @@
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    grit_lib::fuzz::transport_url_parse(data);
+    grit_lib::test_support::fuzz::transport_url_parse(data);
 });

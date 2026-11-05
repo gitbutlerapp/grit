@@ -4,7 +4,7 @@ Grit compares library micro-benchmarks (Criterion) and command-level scenarios (
 
 ## `make bench-lib`
 
-Runs every Criterion bench under `grit-lib/benches/` (including `unstable-bench-helpers` where required), then writes a JSON summary:
+Runs every Criterion bench under `grit-lib/benches/` (with the `test-support` feature where a bench needs fixtures or hooks), then writes a JSON summary:
 
 | Output | Description |
 | --- | --- |

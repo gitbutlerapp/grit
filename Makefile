@@ -127,7 +127,7 @@ docs-check: site/node_modules
 	$(CARGO) doc -p grit-lib --no-deps
 	cd site && GRIT_SITE_STRICT=1 npm run check && npm test && npm run typecheck && GRIT_SITE_STRICT=1 npm run build
 
-LLVM_COV_FEATURES ?= http-ureq,unstable-bench-helpers,full-tests,test-support
+LLVM_COV_FEATURES ?= http-ureq,full-tests,test-support
 
 coverage:
 	@mkdir -p target/llvm-cov target/doc

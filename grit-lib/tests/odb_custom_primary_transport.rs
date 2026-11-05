@@ -543,14 +543,16 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
     fs::write(dir.path().join("sub/deep.txt"), "deeper\n").expect("write");
     stage(
         &repo,
-        &StageOptions {
-            mode: StageMode::Update,
-            staging_thresholds: Some(IndexStagingThresholds {
+        &grit_lib::test_support::knobs::stage_options_staging_thresholds(
+            StageOptions {
+                mode: StageMode::Update,
+                ..StageOptions::default()
+            },
+            IndexStagingThresholds {
                 large_index_restage: 0,
                 parallel_tracked_restage: 0,
-            }),
-            ..StageOptions::default()
-        },
+            },
+        ),
         &mut NullProgress,
         &NeverCancel,
     )

@@ -57,7 +57,7 @@ mod plan;
 mod rebase;
 mod rebase_session;
 
-#[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
+#[cfg(any(test, feature = "test-support"))]
 pub use rebase::patch_id_inject;
 mod reword;
 mod split;

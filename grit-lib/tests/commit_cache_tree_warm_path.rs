@@ -92,7 +92,7 @@ fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
     req.committer = Some(sig);
     req.allow_empty = allow_empty;
     req.assume_worktree_synced = true;
-    req.skip_pre_commit_tree_match(true)
+    grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match(req, true)
 }
 
 #[test]

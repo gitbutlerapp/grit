@@ -1603,7 +1603,7 @@ pub(crate) fn open_fetch_target(local_git_dir: &Path, opts: &FetchOptions) -> Re
 ///
 /// Received packs are ingested into `local`'s primary backend, including a custom
 /// [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store. Set
-/// [`FetchOptions::pack_spool_only`](crate::transfer::FetchOptions::pack_spool_only) to keep the
+/// test_support fetch pack-spool-only knob (test-support feature) to keep the
 /// negotiated pack on disk and ingest it with [`crate::index_pack::ingest_received_pack_path`]
 /// or [`crate::unpack_objects::ingest_pack_into`].
 pub fn fetch_remote_into(

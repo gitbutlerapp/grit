@@ -376,7 +376,7 @@ fn stage_with_hint(
         dry_run,
         intent_to_add,
         force_ignored,
-        ..StageOptions::default()
+        skip_pathspec_ignore_check: false,
     };
     stage_paths(repo, &opts, progress, cancel).map_err(map_add_error)
 }

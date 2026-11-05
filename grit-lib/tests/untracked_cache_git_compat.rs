@@ -290,7 +290,7 @@ fn grit_auto_untr_shell_accepted_by_git_status_without_warning() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
     let mut req = grit_test_support::commit_request("fill", "Test <t@example.com> 1 +0000");
-    req = req.skip_pre_commit_tree_match(true);
+    req = grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match(req, true);
     create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
 
     let index_bytes = fs::read(root.join(".git/index")).expect("read index");

@@ -1,8 +1,8 @@
-//! Ratchet: public API paths must not look like test/bench/fixture hooks unless allowlisted.
+//! Ratchet: public API paths must not look like test/bench/fixture hooks.
 
 use std::collections::BTreeSet;
+
 const SNAPSHOT: &str = include_str!("../public-api.txt");
-const ALLOWLIST: &str = include_str!("../public-api-test-items.allow");
 const HIDDEN_OFFENDERS: &str = include_str!("../public-api-test-items.hidden-offenders");
 
 const FORBIDDEN: &[&str] = &[
@@ -115,25 +115,12 @@ fn all_offenders(snapshot_offenders: &BTreeSet<String>) -> BTreeSet<String> {
 fn public_api_test_items_ratchet() {
     let snapshot_offenders = offending_paths_from_snapshot(SNAPSHOT);
     let offenders = all_offenders(&snapshot_offenders);
-    let allow = parse_path_lines(ALLOWLIST);
 
-    let missing: Vec<_> = offenders.difference(&allow).collect();
     assert!(
-        missing.is_empty(),
-        "public API test-like paths missing from public-api-test-items.allow (remove hooks or \
-         shrink the allowlist):\n{}",
-        missing
-            .iter()
-            .map(|p| format!("  {p}"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    );
-
-    let stale: Vec<_> = allow.difference(&offenders).collect();
-    assert!(
-        stale.is_empty(),
-        "stale allowlist entries (hook removed from the API listing; drop the allowlist line):\n{}",
-        stale
+        offenders.is_empty(),
+        "public API must not expose test/bench/fixture hooks (move to test_support or rename); \
+         offenders:\n{}",
+        offenders
             .iter()
             .map(|p| format!("  {p}"))
             .collect::<Vec<_>>()
@@ -187,19 +174,4 @@ fn snapshot_line_parser_smoke() {
         "grit_lib::objects::bench_fixture::daily_special::DailySpecialShape::expected_ref_count"
     );
     assert!(path_violates(&path));
-}
-
-#[test]
-fn allowlist_file_sorted() {
-    let lines: Vec<_> = ALLOWLIST
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .collect();
-    let mut sorted = lines.clone();
-    sorted.sort();
-    assert_eq!(
-        lines, sorted,
-        "public-api-test-items.allow must stay sorted"
-    );
 }

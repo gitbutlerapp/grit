@@ -425,7 +425,10 @@ fn object_want_fetch_sends_no_reply() {
     assert!(!has_object(client.path(), &server.big));
 
     let (mut conn, sent) = InProcessConn::connect(&server.git_dir);
-    let mut opts = FetchOptions::new().promisor_object_wants(vec![server.big]);
+    let mut opts = grit_lib::test_support::knobs::fetch_options_promisor_object_wants(
+        FetchOptions::new(),
+        vec![server.big],
+    );
     opts.remote_name = Some("origin".to_owned());
     opts.filter = Some(ObjectFilterSpec::BlobNone);
     let outcome = fetch_remote(

@@ -268,7 +268,7 @@
 - Coverage of these modules is ≥85%.
 - Overall grit-lib line coverage is ≥80% and gated in CI so it can't drop.
 
-**Status (factory step 1130 / follow-up #1355, branch `factory/coverage-80-gate-9f8d`):** `grit-lib/coverage-floors.toml` locks **`[total] minimum = 80.0`**, **`[aggregate.history] minimum = 85.0`**, and history-area group floors **≥85%**. Latest `make coverage` (llvm-cov features `http-ureq,unstable-bench-helpers`, accounting fix for uninstrumented module shims) measures **79.2%** total (**134 687** / **28 077** missed) and **84.9%** history (**26 562** / **4 021** missed); remaining gaps are **`group:revwalk`** (**78.9%**) and roughly **1.1k** additional covered lines for the total floor. Makefile comma-separated features, submodule gitdir sweep fix, expanded revwalk/diff/blame sweeps, and `scripts/tests/test_coverage.py` gate checks are integrated; the coverage job stays red until revwalk and total cross the committed bars.
+**Status (factory step 1130 / follow-up #1355, branch `factory/coverage-80-gate-9f8d`):** `grit-lib/coverage-floors.toml` locks **`[total] minimum = 80.0`**, **`[aggregate.history] minimum = 85.0`**, and history-area group floors **≥85%**. Latest `make coverage` (llvm-cov features `http-ureq,full-tests,test-support`, accounting fix for uninstrumented module shims) measures **79.2%** total (**134 687** / **28 077** missed) and **84.9%** history (**26 562** / **4 021** missed); remaining gaps are **`group:revwalk`** (**78.9%**) and roughly **1.1k** additional covered lines for the total floor. Makefile comma-separated features, submodule gitdir sweep fix, expanded revwalk/diff/blame sweeps, and `scripts/tests/test_coverage.py` gate checks are integrated; the coverage job stays red until revwalk and total cross the committed bars.
 
 **Refs-config coverage (factory step 660, canonical stack `7ba03a1`):** `make coverage` on the integrated 651–659 stack ratchets floors in `grit-lib/coverage-floors.toml`. Latest measured groups: attributes **86.3%**, reflog **86.3%**, ignore **88.3%**, config **86.0%**, refs **85.1%**, **refs-config aggregate 85.9%** (MIDX/core/ODB gates green after nested `odb/` path tracking). Floors for **config**, **refs**, and **refs-config** aggregate are locked at **≥85%** on branch `cursor/coverage-floors-660-91e0`.
 
@@ -290,6 +290,8 @@
 - The public API diff is reviewed in CI.
 - Every public function has at least one test.
 - The docs site library guide is complete.
+
+**Status (factory #6908, branch `factory/fuzz-ratchet-close-6908`):** Fuzz entry points live under **`test_support::fuzz`**; **`unstable-bench-helpers`** and **`public-api-test-items.allow`** are removed. The test-hook ratchet requires **zero** offenders in **`public-api.txt`** and in the **`--document-hidden-items`** rustdoc listing; remaining test knobs use **`test_support::knobs`** or **`pub(crate)`** fields. Grit no longer reads **`GIT_TEST_*`** into **`Environment`**.
 
 ## 18. grit-cli output contract: --json and --markdown
 *Workstream: CLI*

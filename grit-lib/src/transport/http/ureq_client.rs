@@ -328,8 +328,8 @@ impl UreqHttpClient {
         }
     }
 
-    /// Seed cached basic auth for a URL origin (integration tests only).
-    #[doc(hidden)]
+    /// Seed cached basic auth for a URL origin (integration tests only; `test-support` feature).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn seed_cached_basic_auth(&self, url: &str, username: &str, password: &str) {
         use base64::Engine as _;
         let encoded =

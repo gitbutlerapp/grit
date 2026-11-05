@@ -10,7 +10,7 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
-grit-lib = { path = ".." }
+grit-lib = { path = "..", features = ["test-support"] }
 libfuzzer-sys = "0.4"
 
 [[bin]]

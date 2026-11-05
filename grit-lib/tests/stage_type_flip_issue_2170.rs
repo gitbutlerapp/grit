@@ -12,6 +12,7 @@ use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
 use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
+use grit_lib::test_support::knobs::stage_options_staging_thresholds;
 use grit_test_support::git;
 
 fn init_repo(root: &Path) {
@@ -34,10 +35,13 @@ fn open_repo(root: &Path) -> Repository {
 }
 
 fn stage_all(root: &Path, thresholds: Option<IndexStagingThresholds>) -> StageOutcome {
-    let opts = StageOptions {
+    let base = StageOptions {
         mode: StageMode::All,
-        staging_thresholds: thresholds,
         ..StageOptions::default()
+    };
+    let opts = match thresholds {
+        Some(t) => stage_options_staging_thresholds(base, t),
+        None => base,
     };
     stage(&open_repo(root), &opts, &mut NullProgress, &NeverCancel).expect("stage")
 }

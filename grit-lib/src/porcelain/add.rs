@@ -80,7 +80,7 @@ pub struct StageOptions {
     pub mode: StageMode,
     /// Force executable or non-executable mode for explicitly listed regular files (see [`StageExecutableHint`]).
     pub executable_hint: StageExecutableHint,
-    /// Override bulk/parallel staging thresholds (integration tests only).
+    /// Override bulk/parallel staging thresholds (integration tests only; use test_support knobs with the test-support feature).
     #[doc(hidden)]
     pub staging_thresholds: Option<IndexStagingThresholds>,
     /// When true, hash worktree blobs without writing loose objects (commit `--dry-run`); also
@@ -90,7 +90,7 @@ pub struct StageOptions {
     pub intent_to_add: bool,
     /// Stage explicitly named ignored paths instead of returning [`Error::PathspecIgnored`].
     pub force_ignored: bool,
-    /// Skip [`Error::PathspecIgnored`] validation (caller already checked ignore rules).
+    /// Skip [`Error::PathspecIgnored`] validation (integration tests only; use test_support knobs with the test-support feature).
     #[doc(hidden)]
     pub skip_pathspec_ignore_check: bool,
 }

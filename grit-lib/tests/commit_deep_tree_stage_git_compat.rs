@@ -407,7 +407,7 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
     req.committer = Some(sig);
     req.allow_empty = true;
     req.assume_worktree_synced = true;
-    req = req.skip_pre_commit_tree_match(true);
+    req = grit_lib::test_support::knobs::commit_skip_pre_commit_tree_match(req, true);
 
     let _probe = reset_worktree_metadata_probe(root);
     commit_worktree(&repo, &req, &mut NullProgress, &NeverCancel).expect("allow-empty commit");

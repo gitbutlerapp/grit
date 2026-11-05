@@ -284,13 +284,6 @@ impl CommitRequest {
             ..Self::default()
         }
     }
-
-    /// Skip the pre-commit index↔parent tree match (integration tests and scoped commits).
-    #[doc(hidden)]
-    pub fn skip_pre_commit_tree_match(mut self, skip: bool) -> Self {
-        self.skip_pre_commit_tree_match = skip;
-        self
-    }
 }
 
 /// One path-level change that would be recorded in a commit.

@@ -99,7 +99,6 @@ fn config_set_pack_and_log_helpers() {
     let file = ConfigFile::parse(Path::new("cfg"), text, ConfigScope::Local).expect("parse");
     let mut set = ConfigSet::new();
     set.merge(&file);
-    let env = Environment::empty();
     assert!(!set.pack_write_reverse_index_default());
     assert!(!set.pack_read_reverse_index_default());
     assert_eq!(set.pack_index_threads(), Some(4));

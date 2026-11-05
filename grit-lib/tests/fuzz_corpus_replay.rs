@@ -43,23 +43,23 @@ macro_rules! replay_targets {
 #[test]
 fn index_parse_rejects_twenty_zero_byte_file_without_panic() {
     let zeros = [0u8; 20];
-    grit_lib::fuzz::index_parse(&zeros);
+    grit_lib::test_support::fuzz::index_parse(&zeros);
     assert!(Index::parse(&zeros).is_err());
 }
 
 replay_targets! {
-    tree_parse => grit_lib::fuzz::tree_parse,
-    tree_lookup_scan => grit_lib::fuzz::tree_lookup_scan,
-    commit_parse => grit_lib::fuzz::commit_parse,
-    tag_parse => grit_lib::fuzz::tag_parse,
-    index_parse => grit_lib::fuzz::index_parse,
-    pkt_line_read => grit_lib::fuzz::pkt_line_read,
-    protocol_v2_response => grit_lib::fuzz::protocol_v2_response,
-    config_parse => grit_lib::fuzz::config_parse,
-    refspec_parse => grit_lib::fuzz::refspec_parse,
-    ref_name_check => grit_lib::fuzz::ref_name_check,
-    transport_url_parse => grit_lib::fuzz::transport_url_parse,
-    git_date_parse => grit_lib::fuzz::git_date_parse,
-    pack_idx_parse => grit_lib::fuzz::pack_idx_parse,
-    packed_refs_parse => grit_lib::fuzz::packed_refs_parse,
+    tree_parse => grit_lib::test_support::fuzz::tree_parse,
+    tree_lookup_scan => grit_lib::test_support::fuzz::tree_lookup_scan,
+    commit_parse => grit_lib::test_support::fuzz::commit_parse,
+    tag_parse => grit_lib::test_support::fuzz::tag_parse,
+    index_parse => grit_lib::test_support::fuzz::index_parse,
+    pkt_line_read => grit_lib::test_support::fuzz::pkt_line_read,
+    protocol_v2_response => grit_lib::test_support::fuzz::protocol_v2_response,
+    config_parse => grit_lib::test_support::fuzz::config_parse,
+    refspec_parse => grit_lib::test_support::fuzz::refspec_parse,
+    ref_name_check => grit_lib::test_support::fuzz::ref_name_check,
+    transport_url_parse => grit_lib::test_support::fuzz::transport_url_parse,
+    git_date_parse => grit_lib::test_support::fuzz::git_date_parse,
+    pack_idx_parse => grit_lib::test_support::fuzz::pack_idx_parse,
+    packed_refs_parse => grit_lib::test_support::fuzz::packed_refs_parse,
 }

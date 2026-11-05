@@ -1,9 +1,9 @@
-//! Hidden entry points shared by `cargo fuzz` targets and [`fuzz_corpus_replay`](../../tests/fuzz_corpus_replay.rs).
+//! Fuzz entry points shared by `cargo fuzz` targets and [`fuzz_corpus_replay`](../../tests/fuzz_corpus_replay.rs).
 //!
 //! Each function must not panic on arbitrary input; callers treat errors as expected.
 //!
-//! ```rust
-//! grit_lib::fuzz::tree_parse(b"");
+//! ```rust,ignore
+//! grit_lib::test_support::fuzz::tree_parse(b"");
 //! ```
 
 use std::io::Cursor;

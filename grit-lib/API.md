@@ -209,7 +209,7 @@ cargo semver-checks check-release -p grit-lib \
 ```
 
 - **Baseline:** the latest `v*` tag reachable from `HEAD` (override with `SEMVER_BASELINE=…`).
-- **Surface:** same optional features as the public API snapshot (`http-ureq` only; no `unstable-bench-helpers`).
+- **Surface:** same optional features as the public API snapshot (`http-ureq` only; no `test-support`).
 - **Toolchain:** the workspace pin in [`rust-toolchain.toml`](../rust-toolchain.toml) (currently **1.99.0**). `cargo-semver-checks` builds baseline rustdoc in `target/semver-checks/`; that is separate from normal `cargo build` output.
 - **Local run:** `make semver-check` (installs the pinned `cargo-semver-checks` on first use; OpenSSL development headers are required on Linux, same as `cargo-public-api`).
 - **CI:** the **semver-check** job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) uses `fetch-depth: 0` so tags exist. Until **0.6.0** the job sets `continue-on-error: true` and appends the report to the GitHub Actions step summary — expect failures while **0.5.x** still carries breaking API edits.

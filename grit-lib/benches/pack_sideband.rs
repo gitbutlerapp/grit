@@ -6,7 +6,7 @@ use std::hint::black_box;
 use std::io::Cursor;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use grit_lib::{read_sideband_pack_to, PackReceiveTarget};
+use grit_lib::objects::pack_receive::{read_sideband_pack_to, PackReceiveTarget};
 
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::NoProgress;

@@ -43,6 +43,7 @@ Examples:
 | `reflog` | `grit_lib::refs::reflog` |
 | `serve` | `grit_lib::remote::serve` |
 | `transfer` | `grit_lib::remote::transfer` |
+| `test_support::fixtures` (bench repos; enable `test-support`, outside semver) | *(not in default rustdoc)* |
 | `object_inspect` | `grit_lib::revwalk::object_inspect` |
 | `quote_path` | `grit_lib::porcelain::quote_path` |
 | `pack_reuse` | `grit_lib::objects::pack` |
