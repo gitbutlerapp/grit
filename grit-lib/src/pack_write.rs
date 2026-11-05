@@ -12,10 +12,7 @@
 //! ```
 
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-
-use flate2::read::ZlibDecoder;
 
 use crate::error::{Error, Result};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
@@ -23,6 +20,7 @@ use crate::pack::{
     clear_pack_cache, hash_object_bytes, parse_ofs_delta_base, parse_pack_object_header,
     skip_one_pack_object, PackedType,
 };
+use crate::zlib_inflate::ZlibInflateScratch;
 
 /// One `(object id, pack offset)` entry used when writing a v2 index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,17 +82,15 @@ pub fn enumerate_whole_pack_entries(
     let (body_end, count) = validated_pack_body(pack, hash_algo)?;
     let mut pos = 12usize;
     let mut out = Vec::with_capacity(count);
+    let mut scratch = ZlibInflateScratch::default();
     while pos < body_end {
         let offset =
             u64::try_from(pos).map_err(|_| Error::CorruptObject("pack offset overflow".into()))?;
         let (packed_type, size) = parse_pack_object_header(pack, &mut pos)?;
         match packed_type {
             PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
-                let mut dec = ZlibDecoder::new(&pack[pos..]);
-                let mut data = Vec::with_capacity(size as usize);
-                dec.read_to_end(&mut data)
-                    .map_err(|e| Error::Zlib(e.to_string()))?;
-                pos += dec.total_in() as usize;
+                let mut data = Vec::new();
+                scratch.decompress_fixed_into(pack, &mut pos, size, &mut data)?;
                 let kind = packed_type_to_kind(packed_type)?;
                 let oid_bytes = hash_object_bytes(kind, &data, hash_bytes)?;
                 let oid = ObjectId::from_bytes(&oid_bytes)?;
@@ -224,35 +220,24 @@ pub fn whole_pack_uncompressed_size(pack: &[u8], hash_algo: HashAlgo) -> Result<
     let mut pos = 12usize;
     let mut total = 0u64;
     let mut seen = 0usize;
+    let mut scratch = ZlibInflateScratch::default();
     while pos < body_end {
         let (packed_type, size) = parse_pack_object_header(pack, &mut pos)?;
         match packed_type {
             PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
                 total = total.saturating_add(size);
-                let mut dec = ZlibDecoder::new(&pack[pos..]);
-                let mut tmp = Vec::with_capacity(size as usize);
-                dec.read_to_end(&mut tmp)
-                    .map_err(|e| Error::Zlib(e.to_string()))?;
-                pos += dec.total_in() as usize;
+                scratch.skip_zlib_stream(pack, &mut pos, size)?;
                 seen += 1;
             }
             PackedType::RefDelta => {
                 pos += hash_bytes;
-                let mut dec = ZlibDecoder::new(&pack[pos..]);
-                let mut tmp = Vec::with_capacity(size as usize);
-                dec.read_to_end(&mut tmp)
-                    .map_err(|e| Error::Zlib(e.to_string()))?;
-                pos += dec.total_in() as usize;
+                scratch.skip_zlib_stream(pack, &mut pos, size)?;
                 seen += 1;
             }
             PackedType::OfsDelta => {
                 let obj_start = pos;
                 let _base = parse_ofs_delta_base(pack, &mut pos, obj_start as u64)?;
-                let mut dec = ZlibDecoder::new(&pack[pos..]);
-                let mut tmp = Vec::with_capacity(size as usize);
-                dec.read_to_end(&mut tmp)
-                    .map_err(|e| Error::Zlib(e.to_string()))?;
-                pos += dec.total_in() as usize;
+                scratch.skip_zlib_stream(pack, &mut pos, size)?;
                 seen += 1;
             }
         }

@@ -69,6 +69,21 @@ fn declared_loose_object_len(out: &[u8]) -> Option<usize> {
 /// ends, so growth never runs more than [`MAX_HEADER_SIZE_RESERVE`] or the bytes already
 /// produced ahead of real output. Before the header is known the first step is a guess from
 /// the compressed bytes at hand.
+/// Bytes to append when inflating a fixed-size pack zlib stream into a buffer at `len`.
+///
+/// Honest objects at or below [`MAX_HEADER_SIZE_RESERVE`] get one up-front reservation; larger
+/// declared sizes grow geometrically toward the declared size without allocating it upfront.
+fn pack_fixed_output_growth(len: usize, expected: usize) -> usize {
+    if expected <= MAX_HEADER_SIZE_RESERVE {
+        return expected.saturating_sub(len);
+    }
+    if len == 0 {
+        return MAX_HEADER_SIZE_RESERVE;
+    }
+    let target = expected.min(len.saturating_mul(2).max(MAX_HEADER_SIZE_RESERVE));
+    target.saturating_sub(len)
+}
+
 fn loose_output_growth(len: usize, declared: Option<usize>, filled: usize) -> usize {
     match declared {
         Some(total) if total > len => {
@@ -327,13 +342,8 @@ impl ZlibInflateScratch {
         pos: &mut usize,
         expected_size: u64,
     ) -> Result<Vec<u8>> {
-        let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
-        })?;
-        let input = &bytes[*pos..];
-        let mut out = vec![0u8; expected];
-        let consumed = self.decompress_into(input, &mut out, true)?;
-        *pos += consumed;
+        let mut out = Vec::new();
+        self.decompress_fixed_into(bytes, pos, expected_size, &mut out)?;
         Ok(out)
     }
 
@@ -604,10 +614,68 @@ impl ZlibInflateScratch {
             Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
         })?;
         out.clear();
-        out.resize(expected, 0);
-        let consumed = self.decompress_into(&bytes[*pos..], out, true)?;
-        *pos += consumed;
-        Ok(())
+        if expected <= MAX_HEADER_SIZE_RESERVE {
+            out.resize(expected, 0);
+            let consumed = self.decompress_into(&bytes[*pos..], out, true)?;
+            *pos += consumed;
+            return Ok(());
+        }
+        self.reset();
+        let input = &bytes[*pos..];
+        let mut in_off = 0usize;
+        let mut out_pos = 0usize;
+        loop {
+            if out_pos == out.len() {
+                let step = pack_fixed_output_growth(out_pos, expected);
+                if step == 0 {
+                    return Err(Error::CorruptObject(format!(
+                        "pack object size mismatch: expected {expected}, got {out_pos}"
+                    )));
+                }
+                out.reserve_exact(step);
+                out.resize(out_pos + step, 0);
+            }
+            let flush = if in_off >= input.len() {
+                FlushDecompress::Finish
+            } else {
+                FlushDecompress::None
+            };
+            let room = out.len() - out_pos;
+            let before_in = self.dec.total_in();
+            let before_out = self.dec.total_out();
+            let status = self
+                .dec
+                .decompress(&input[in_off..], &mut out[out_pos..out_pos + room], flush)
+                .map_err(|e| Error::Zlib(e.to_string()))?;
+            let consumed = (self.dec.total_in() - before_in) as usize;
+            let produced = (self.dec.total_out() - before_out) as usize;
+            in_off += consumed;
+            out_pos += produced;
+            match status {
+                Status::StreamEnd => {
+                    out.truncate(out_pos);
+                    if out_pos != expected {
+                        return Err(Error::CorruptObject(format!(
+                            "pack object size mismatch: expected {expected}, got {out_pos}"
+                        )));
+                    }
+                    *pos += in_off;
+                    return Ok(());
+                }
+                Status::Ok | Status::BufError => {
+                    if in_off >= input.len() && flush == FlushDecompress::Finish {
+                        out.truncate(out_pos);
+                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                    }
+                    if consumed == 0 && produced == 0 {
+                        out.truncate(out_pos);
+                        return Err(Error::CorruptObject(
+                            "zlib stream stalled before declared object size".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     /// Inflate the zlib stream at the start of `input`, which holds `expected_size` bytes,
@@ -1331,6 +1399,46 @@ mod tests {
             .inflate_loose_file(&mut file.reopen().expect("reopen"), &mut out)
             .expect("inflate");
         assert_eq!(out, plain);
+    }
+
+    #[test]
+    fn decompress_fixed_into_rejects_lying_huge_declared_size() {
+        let plain = b"small payload";
+        let compressed = deflate(plain);
+        let mut scratch = ZlibInflateScratch::default();
+        let mut out = Vec::new();
+        let err = scratch
+            .decompress_fixed_into(&compressed, &mut 0, 549_755_813_887, &mut out)
+            .unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+        assert!(out.capacity() <= MAX_HEADER_SIZE_RESERVE);
+    }
+
+    #[test]
+    fn decompress_fixed_rejects_lying_huge_declared_size() {
+        let plain = b"small payload";
+        let compressed = deflate(plain);
+        let mut scratch = ZlibInflateScratch::default();
+        let err = scratch
+            .decompress_fixed(&compressed, &mut 0, 549_755_813_887)
+            .unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+    }
+
+    #[test]
+    fn pack_fixed_output_growth_caps_initial_reserve() {
+        assert_eq!(
+            pack_fixed_output_growth(0, MAX_HEADER_SIZE_RESERVE),
+            MAX_HEADER_SIZE_RESERVE
+        );
+        assert_eq!(
+            pack_fixed_output_growth(0, MAX_HEADER_SIZE_RESERVE + 1),
+            MAX_HEADER_SIZE_RESERVE
+        );
+        assert_eq!(
+            pack_fixed_output_growth(MAX_HEADER_SIZE_RESERVE, usize::MAX),
+            MAX_HEADER_SIZE_RESERVE
+        );
     }
 
     #[test]

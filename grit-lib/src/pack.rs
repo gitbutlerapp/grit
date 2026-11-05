@@ -6115,6 +6115,49 @@ pub(crate) fn packed_full_object_range(
     Ok(None)
 }
 
+/// Decode the variable-length size field starting at the first byte of a pack object header.
+pub(crate) fn decode_pack_object_size_varint_from_first(
+    first: u8,
+    mut next: impl FnMut() -> Result<u8>,
+) -> Result<u64> {
+    let mut size = (first & 0x0f) as u64;
+    let mut shift = 4u32;
+    let mut c = first;
+    while (c & 0x80) != 0 {
+        if shift >= 64 {
+            return Err(Error::CorruptObject(
+                "pack object size varint overflow".to_owned(),
+            ));
+        }
+        c = next()?;
+        let digit = (c & 0x7f) as u64;
+        size = size
+            .checked_add(
+                digit
+                    .checked_shl(shift)
+                    .ok_or_else(|| Error::CorruptObject("pack object size overflow".to_owned()))?,
+            )
+            .ok_or_else(|| Error::CorruptObject("pack object size overflow".to_owned()))?;
+        shift += 7;
+    }
+    Ok(size)
+}
+
+/// Decode the variable-length size field that follows the first byte of a pack object header.
+pub(crate) fn decode_pack_object_size_varint(
+    first: u8,
+    bytes: &[u8],
+    pos: &mut usize,
+) -> Result<u64> {
+    decode_pack_object_size_varint_from_first(first, || {
+        let b = *bytes.get(*pos).ok_or_else(|| {
+            Error::CorruptObject("unexpected end of variable size header".to_owned())
+        })?;
+        *pos += 1;
+        Ok(b)
+    })
+}
+
 pub(crate) fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
     let first = *bytes.get(*pos).ok_or_else(|| {
         Error::CorruptObject("unexpected end of pack header while decoding object".to_owned())
@@ -6122,17 +6165,7 @@ pub(crate) fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<
     *pos += 1;
 
     let type_code = (first >> 4) & 0x7;
-    let mut size = (first & 0x0f) as u64;
-    let mut shift = 4u32;
-    let mut c = first;
-    while (c & 0x80) != 0 {
-        c = *bytes.get(*pos).ok_or_else(|| {
-            Error::CorruptObject("unexpected end of variable size header".to_owned())
-        })?;
-        *pos += 1;
-        size |= ((c & 0x7f) as u64) << shift;
-        shift += 7;
-    }
+    let size = decode_pack_object_size_varint(first, bytes, pos)?;
 
     let packed_type = match type_code {
         1 => PackedType::Commit,
@@ -6587,6 +6620,124 @@ mod tests {
         let mut pos = 0usize;
         let err = skip_one_pack_object(&bytes, &mut pos, 0, 20).unwrap_err();
         assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn parse_pack_object_header_rejects_all_ff_size_continuation() {
+        let header = [
+            0x80 | (3 << 4) | 0x0f,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+            0xff,
+        ];
+        let mut pos = 0usize;
+        let err = parse_pack_object_header(&header, &mut pos).unwrap_err();
+        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+    }
+
+    #[test]
+    fn lying_huge_pack_blob_read_returns_corrupt_packed_object() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        if !git_try(dir, &["init", "-q"]) {
+            return;
+        }
+        std::fs::write(dir.join("f"), b"hello\n").expect("write");
+        git(dir, &["add", "f"]);
+        git(
+            dir,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-qm",
+                "one",
+            ],
+        );
+        let oid_hex = Command::new("git")
+            .current_dir(dir)
+            .args(["rev-parse", "HEAD:f"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-parse")
+            .stdout;
+        let oid =
+            ObjectId::from_hex(std::str::from_utf8(&oid_hex).unwrap().trim()).expect("parse oid");
+        let objects = dir.join(".git/objects");
+        let pack_dir = objects.join("pack");
+        std::fs::create_dir_all(&pack_dir).expect("pack dir");
+        let pack_stem = pack_dir.join("pack");
+        let mut child = Command::new("git")
+            .current_dir(dir)
+            .args(["pack-objects", "-q"])
+            .arg(&pack_stem)
+            .stdin(std::process::Stdio::piped())
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .spawn()
+            .expect("pack-objects spawn");
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(format!("{oid}\n").as_bytes())
+            .expect("write oid");
+        assert!(
+            child.wait().expect("pack-objects wait").success(),
+            "pack-objects failed"
+        );
+        let loose = objects.join(format!("{}/{}", &oid.to_hex()[..2], &oid.to_hex()[2..]));
+        let _ = std::fs::remove_file(loose);
+        let pack_path = std::fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "pack"))
+            .expect("pack file");
+        let idx_path = pack_path.with_extension("idx");
+        let mut pack = std::fs::read(&pack_path).expect("read pack");
+        assert_eq!(pack[12] & 0x80, 0, "expected single-byte size header");
+        let tail = pack[13..].to_vec();
+        pack.truncate(12);
+        pack.extend_from_slice(&[0x80 | (3 << 4) | 0x0f, 0xff, 0xff, 0xff, 0xff, 0x7f]);
+        pack.extend_from_slice(&tail);
+        let pack_body_end = pack.len() - 20;
+        let pack_hash = HashAlgo::Sha1.checksum_digest(&pack[..pack_body_end]);
+        let pack_trailer = pack_hash.as_slice().to_vec();
+        pack[pack_body_end..].copy_from_slice(&pack_trailer);
+        let mut idx = std::fs::read(&idx_path).expect("read idx");
+        let idx_len = idx.len();
+        let crc_off = 8 + 1024 + 20;
+        let crc = crc32fast::hash(&pack[12..pack_body_end]);
+        idx[crc_off..crc_off + 4].copy_from_slice(&crc.to_be_bytes());
+        idx[idx_len - 40..idx_len - 20].copy_from_slice(&pack_trailer);
+        let idx_hash = HashAlgo::Sha1.checksum_digest(&idx[..idx_len - 20]);
+        let idx_trailer = idx_hash.as_slice().to_vec();
+        idx[idx_len - 20..].copy_from_slice(&idx_trailer);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [&pack_path, &idx_path] {
+                std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
+                    .expect("chmod pack/index");
+            }
+        }
+        std::fs::write(&pack_path, &pack).expect("write pack");
+        std::fs::write(&idx_path, &idx).expect("write idx");
+        clear_pack_cache();
+        let odb = Odb::new(&objects);
+        let err = odb.read(&oid).expect_err("lying header must not abort");
+        assert!(matches!(err, Error::CorruptPackedObject { .. }), "{err:?}");
     }
 
     fn install_synthetic_pack(
