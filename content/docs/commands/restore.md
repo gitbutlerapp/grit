@@ -13,7 +13,7 @@ grit restore [--staged] [--worktree] [--hunks <id,...>] [--lines <path:start-end
 
 ## Description
 
-Discards local changes for tracked paths you name. By default, `grit restore` resets the **working tree** to match the **index** (the same idea as unstaging worktree edits while keeping the index as-is).
+Discards local changes for tracked paths you name. Pathnames in human and `--markdown` output use the same quoting rules as [`grit status`](../status/) (see **Description** there). By default, `grit restore` resets the **working tree** to match the **index** (the same idea as unstaging worktree edits while keeping the index as-is).
 
 - `--staged` resets the **index** from `HEAD` (or from `--source` when you pass it). On an unborn branch, staged paths are removed from the index.
 - `--worktree` resets the **working tree**. When you omit both flags, only the worktree is restored.

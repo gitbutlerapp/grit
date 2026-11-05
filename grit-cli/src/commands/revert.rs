@@ -10,10 +10,12 @@ use crate::operation_output::{
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::revision_errors::map_commit_spec_error;
+use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::{short_hex, ObjectId};
+use grit_lib::operation::Conflict;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, continue_replay_sequence, predict_replay_sequence, skip_replay_step,
@@ -100,6 +102,8 @@ pub struct RevertOutcome {
     /// Rerere replay or record events when `rerere.enabled` is active.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rerere: Vec<crate::operation_output::RerereEventJson>,
+    #[serde(skip)]
+    pub(crate) conflict_sources: Option<Vec<Conflict>>,
 }
 
 impl RevertOutcome {
@@ -118,6 +122,7 @@ impl RevertOutcome {
             dry_run: None,
             check: false,
             rerere: Vec::new(),
+            conflict_sources: None,
         }
     }
 
@@ -156,11 +161,16 @@ impl HumanRender for RevertOutcome {
                 outln!(w, "Revert aborted.");
             }
             RevertResult::Conflicts => {
-                if let Some(details) = &self.conflicts {
+                if let Some(details) = &self.conflict_sources {
+                    let path_opts = path_display_for_discovered_repo();
                     if self.check {
-                        crate::operation_output::render_revert_check_conflicts_human(details, w)?;
+                        crate::operation_output::render_revert_check_conflicts_human(
+                            details,
+                            path_opts.as_ref(),
+                            w,
+                        )?;
                     } else {
-                        render_conflicts_human(details, w)?;
+                        render_conflicts_human(details, None, path_opts.as_ref(), w)?;
                         crate::operation_output::render_rerere_human(&self.rerere);
                         render_revert_conflict_footer_human();
                     }
@@ -313,6 +323,7 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> RevertOutcome {
         } => RevertOutcome {
             source: Some(commit.to_hex()),
             conflicts: Some(OperationConflictBlock::for_revert(&conflicts).conflicts),
+            conflict_sources: Some(conflicts),
             ..RevertOutcome::new(RevertResult::Conflicts)
         },
         SequencePrediction::Empty { commit, .. } => RevertOutcome {
@@ -357,6 +368,7 @@ fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
             RevertOutcome {
                 commits: created_so_far.iter().map(RevertCommitEntry::from).collect(),
                 conflicts: Some(block.conflicts),
+                conflict_sources: Some(conflicts),
                 rerere: crate::operation_output::rerere_events_json(&rerere),
                 next_steps: Some(block.next_steps),
                 alternatives: block.alternatives,

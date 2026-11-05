@@ -15,7 +15,7 @@ grit clean [--dry-run] [--ignored | --only-ignored] [-e <pattern>] [--files-only
 
 ## Description
 
-Removes untracked files (and untracked directories) from the working tree. Tracked files and nested Git repositories (directories that contain their own `.git`) are never removed.
+Removes untracked files (and untracked directories) from the working tree. Pathnames in human and `--markdown` output use the same quoting rules as [`grit status`](../status/) (see **Description** there). Tracked files and nested Git repositories (directories that contain their own `.git`) are never removed.
 
 Without `-f` / `--force`, `grit clean` is a **dry run**: it prints what would be removed and leaves the work tree unchanged. This differs from Git’s `clean.requireForce` error on purpose — previewing is the default so you can see the impact before deleting anything. `--dry-run` is accepted explicitly (and conflicts with `-f`).
 

@@ -18,7 +18,7 @@ grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-X ours|theirs] [--co
 
 ## Description
 
-Brings the commits from `<rev>` into the current branch:
+Brings the commits from `<rev>` into the current branch. Pathnames in human, stderr conflict lines, and `--markdown` output use the same quoting rules as [`grit status`](../status/) (see **Description** there).
 
 - If the current branch already has everything, nothing changes.
 - If the current branch has no commits of its own since they diverged, it's moved forward to `<rev>` (a fast-forward). No new commit is made.

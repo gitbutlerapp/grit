@@ -1,21 +1,45 @@
 //! Warnings when nested repositories are recorded as gitlinks.
 
+use crate::markdown::format_inline_code;
 use crate::output::OutputMode;
+use crate::ui::{path_display_for_discovered_repo, PathDisplayOptions};
+
+fn format_path_for_display(path: &str, path_opts: Option<&PathDisplayOptions>) -> String {
+    let discovered = path_display_for_discovered_repo();
+    let opts = path_opts.or(discovered.as_ref());
+    opts.map(|o| o.format_path_for_human(path))
+        .unwrap_or_else(|| path.to_owned())
+}
 
 /// Print warnings for paths newly staged as gitlinks (human and markdown modes).
-pub fn emit_embedded_gitlink_warnings(mode: OutputMode, paths: &[String], dry_run: bool) {
+pub fn emit_embedded_gitlink_warnings(
+    mode: OutputMode,
+    paths: &[String],
+    dry_run: bool,
+    path_opts: Option<&PathDisplayOptions>,
+) {
     if paths.is_empty() {
         return;
     }
     let records = if dry_run { "would record" } else { "records" };
     for path in paths {
-        let hint = format!("Remove `{path}/.git` and stage again to vendor the files inside.");
-        let body = format!(
-            "`{path}` is a nested repository; grit {records} it as a gitlink. Clones get an empty directory, not its files. {hint}"
-        );
+        let shown = format_path_for_display(path, path_opts);
+        let hint_shown = format_path_for_display(path, path_opts);
         match mode {
-            OutputMode::Human => eprintln!("warning: {body}"),
-            OutputMode::Markdown => eprintln!("> **Warning:** {body}"),
+            OutputMode::Human => {
+                let hint =
+                    format!("Remove {hint_shown}/.git and stage again to vendor the files inside.");
+                eprintln!(
+                    "warning: {shown} is a nested repository; grit {records} it as a gitlink. Clones get an empty directory, not its files. {hint}"
+                );
+            }
+            OutputMode::Markdown => {
+                let path_code = format_inline_code(&shown);
+                let hint_code = format_inline_code(&format!("{hint_shown}/.git"));
+                eprintln!(
+                    "> **Warning:** {path_code} is a nested repository; grit {records} it as a gitlink. Clones get an empty directory, not its files. Remove {hint_code} and stage again to vendor the files inside."
+                );
+            }
             OutputMode::Json => {}
         }
     }

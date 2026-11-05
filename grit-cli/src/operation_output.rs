@@ -1,6 +1,8 @@
 //! Shared JSON, human, and markdown fragments for paused operations (merge, pick, revert).
 
+use crate::markdown::format_inline_code;
 use crate::output::outln;
+use crate::ui::PathDisplayOptions;
 use anyhow::Result;
 use grit_lib::operation::{Conflict, ConflictKind, RenamedPaths};
 use grit_lib::state::{operation_alternatives, operation_next_steps, InProgressOperation};
@@ -85,11 +87,19 @@ impl OperationConflictBlock {
     }
 }
 
-/// Map a library [`Conflict`] to CLI JSON, optionally with merge-style summaries.
-#[must_use]
-pub fn conflict_json(conflict: &Conflict, merge_label: Option<&str>) -> ConflictJson {
+fn format_path_for_display(path_opts: Option<&PathDisplayOptions>, path: &str) -> String {
+    path_opts
+        .map(|opts| opts.format_path_for_human(path))
+        .unwrap_or_else(|| path.to_owned())
+}
+
+fn conflict_summary(
+    conflict: &Conflict,
+    merge_label: Option<&str>,
+    format_path: &dyn Fn(&str) -> String,
+) -> Option<String> {
     let path = &conflict.path;
-    let summary = match &conflict.kind {
+    match &conflict.kind {
         ConflictKind::RenameRename(renamed) => {
             let RenamedPaths {
                 base_path,
@@ -100,46 +110,67 @@ pub fn conflict_json(conflict: &Conflict, merge_label: Option<&str>) -> Conflict
                 || "on the incoming side".to_owned(),
                 |label| format!("in {label}"),
             );
-            // One summary per conflict: the two new names are listed as plain paths.
             (path == base_path).then(|| {
                 format!(
-                    "{base_path} renamed to {ours_path} on the current branch and to {theirs_path} {incoming}; both names are in the work tree"
+                    "{} renamed to {} on the current branch and to {} {incoming}; both names are in the work tree",
+                    format_path(base_path),
+                    format_path(ours_path),
+                    format_path(theirs_path),
                 )
             })
         }
         ConflictKind::DirectoryRenameMoved(moved) => Some(format!(
-            "{original} was added to a directory the other side renamed, so it now sits at {path}; stage it there or move it back",
-            original = moved.original_path
+            "{} was added to a directory the other side renamed, so it now sits at {}; stage it there or move it back",
+            format_path(&moved.original_path),
+            format_path(path),
         )),
         ConflictKind::DirectoryRenameSplit => Some(format!(
-            "{path}/ was split across several directories with no clear destination; files added to it stay in {path}/"
+            "{}/ was split across several directories with no clear destination; files added to it stay in {}/",
+            format_path(path),
+            format_path(path),
         )),
         ConflictKind::DirectoryRenameBlocked(blocked) => {
-            let sources = blocked.sources.join(", ");
+            let sources = blocked
+                .sources
+                .iter()
+                .map(|p| format_path(p))
+                .collect::<Vec<_>>()
+                .join(", ");
             Some(if blocked.existing {
                 format!(
-                    "{sources} would follow a directory rename to {path}, but that path is taken; left where it was added"
+                    "{sources} would follow a directory rename to {}, but that path is taken; left where it was added",
+                    format_path(path),
                 )
             } else {
                 format!(
-                    "{sources} would all follow directory renames to {path}; each was left where it was added"
+                    "{sources} would all follow directory renames to {}; each was left where it was added",
+                    format_path(path),
                 )
             })
         }
         ConflictKind::DeletedByUs => merge_label.map(|label| {
             format!(
-                "{path} deleted on the current branch and modified in {label}; {label}'s version is in the work tree"
+                "{} deleted on the current branch and modified in {label}; {label}'s version is in the work tree",
+                format_path(path),
             )
         }),
         ConflictKind::DeletedByThem => merge_label.map(|label| {
             format!(
-                "{path} modified on the current branch and deleted in {label}; the current branch's version is in the work tree"
+                "{} modified on the current branch and deleted in {label}; the current branch's version is in the work tree",
+                format_path(path),
             )
         }),
         _ => None,
-    };
+    }
+}
+
+/// Map a library [`Conflict`] to CLI JSON, optionally with merge-style summaries.
+#[must_use]
+pub fn conflict_json(conflict: &Conflict, merge_label: Option<&str>) -> ConflictJson {
+    let format_raw = |p: &str| p.to_owned();
+    let summary = conflict_summary(conflict, merge_label, &format_raw);
     ConflictJson {
-        path: path.clone(),
+        path: conflict.path.clone(),
         kind: conflict.kind.as_str().to_owned(),
         summary,
     }
@@ -151,26 +182,62 @@ pub fn conflict_paths(conflicts: Vec<Conflict>) -> Vec<String> {
     conflicts.into_iter().map(|c| c.path).collect()
 }
 
+/// One human `CONFLICT (kind): …` line with paths safe for terminal display.
+#[must_use]
+pub fn format_conflict_human_line(
+    conflict: &Conflict,
+    merge_label: Option<&str>,
+    path_opts: Option<&PathDisplayOptions>,
+) -> String {
+    let format_path = |p: &str| format_path_for_display(path_opts, p);
+    let kind = conflict.kind.as_str();
+    if let Some(summary) = conflict_summary(conflict, merge_label, &format_path) {
+        format!("CONFLICT ({kind}): {summary}")
+    } else {
+        format!("CONFLICT ({kind}): {}", format_path(&conflict.path))
+    }
+}
+
+fn eprint_conflict_line(
+    conflict: &Conflict,
+    merge_label: Option<&str>,
+    path_opts: Option<&PathDisplayOptions>,
+) {
+    eprintln!(
+        "{}",
+        format_conflict_human_line(conflict, merge_label, path_opts)
+    );
+}
+
 /// Human stderr lines for conflict summaries (merge-style).
-pub fn render_conflicts_human(conflicts: &[ConflictJson], w: &mut dyn Write) -> Result<()> {
-    for item in conflicts {
-        if let Some(summary) = &item.summary {
-            eprintln!("CONFLICT ({kind}): {summary}", kind = item.kind);
-        } else {
-            eprintln!("CONFLICT ({kind}): {}", item.path, kind = item.kind);
-        }
+pub fn render_conflicts_human(
+    conflicts: &[Conflict],
+    merge_label: Option<&str>,
+    path_opts: Option<&PathDisplayOptions>,
+    w: &mut dyn Write,
+) -> Result<()> {
+    for conflict in conflicts {
+        eprint_conflict_line(conflict, merge_label, path_opts);
     }
     let _ = w;
     Ok(())
 }
 
 /// Markdown bullet list for conflicts.
-pub fn render_conflicts_markdown(conflicts: &[ConflictJson], w: &mut dyn Write) -> Result<()> {
-    for item in conflicts {
-        if let Some(summary) = &item.summary {
-            outln!(w, "- **{}** — {summary}", item.kind);
+pub fn render_conflicts_markdown(
+    conflicts: &[Conflict],
+    merge_label: Option<&str>,
+    path_opts: Option<&PathDisplayOptions>,
+    w: &mut dyn Write,
+) -> Result<()> {
+    let format_path = |p: &str| format_path_for_display(path_opts, p);
+    for conflict in conflicts {
+        let kind = conflict.kind.as_str();
+        if let Some(summary) = conflict_summary(conflict, merge_label, &format_path) {
+            outln!(w, "- **{}** — {summary}", kind);
         } else {
-            outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
+            let shown = format_inline_code(&format_path(&conflict.path));
+            outln!(w, "- **{}** — {shown}", kind);
         }
     }
     Ok(())
@@ -215,12 +282,17 @@ pub fn render_merge_conflict_footer_human() {
 /// Human output for `grit merge --check` when the merge would conflict.
 pub fn render_merge_check_conflicts_human(
     branch: &str,
-    conflicts: &[ConflictJson],
+    conflicts: &[Conflict],
+    path_opts: Option<&PathDisplayOptions>,
     w: &mut dyn Write,
 ) -> Result<()> {
     outln!(w, "Would conflict merging {branch}");
-    for item in conflicts {
-        outln!(w, "  {}", item.path);
+    for conflict in conflicts {
+        outln!(
+            w,
+            "  {}",
+            format_path_for_display(path_opts, &conflict.path)
+        );
     }
     Ok(())
 }
@@ -228,12 +300,14 @@ pub fn render_merge_check_conflicts_human(
 /// Markdown output for `grit merge --check` when the merge would conflict.
 pub fn render_merge_check_conflicts_markdown(
     branch: &str,
-    conflicts: &[ConflictJson],
+    conflicts: &[Conflict],
+    path_opts: Option<&PathDisplayOptions>,
     w: &mut dyn Write,
 ) -> Result<()> {
     outln!(w, "- Would conflict merging **`{branch}`**");
-    for item in conflicts {
-        outln!(w, "  - `{path}`", path = item.path);
+    for conflict in conflicts {
+        let shown = format_inline_code(&format_path_for_display(path_opts, &conflict.path));
+        outln!(w, "  - {shown}");
     }
     Ok(())
 }
@@ -247,24 +321,34 @@ pub fn render_revert_conflict_footer_human() {
 
 /// Human output for `grit pick --check` when the pick would conflict.
 pub fn render_pick_check_conflicts_human(
-    conflicts: &[ConflictJson],
+    conflicts: &[Conflict],
+    path_opts: Option<&PathDisplayOptions>,
     w: &mut dyn Write,
 ) -> Result<()> {
     outln!(w, "Would conflict during pick");
-    for item in conflicts {
-        outln!(w, "  {}", item.path);
+    for conflict in conflicts {
+        outln!(
+            w,
+            "  {}",
+            format_path_for_display(path_opts, &conflict.path)
+        );
     }
     Ok(())
 }
 
 /// Human output for `grit revert --check` when the revert would conflict.
 pub fn render_revert_check_conflicts_human(
-    conflicts: &[ConflictJson],
+    conflicts: &[Conflict],
+    path_opts: Option<&PathDisplayOptions>,
     w: &mut dyn Write,
 ) -> Result<()> {
     outln!(w, "Would conflict during revert");
-    for item in conflicts {
-        outln!(w, "  {}", item.path);
+    for conflict in conflicts {
+        outln!(
+            w,
+            "  {}",
+            format_path_for_display(path_opts, &conflict.path)
+        );
     }
     Ok(())
 }
