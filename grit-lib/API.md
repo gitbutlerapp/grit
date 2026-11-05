@@ -66,13 +66,13 @@ Use this checklist before merging a new or widened public API:
 
 ## Audit
 
-Snapshot date: **2026-11-05**, from committed [`public-api.txt`](public-api.txt) (**33 307** lines; `wc -l` on the file). Top-level modules match:
+Snapshot date: **2026-11-05**, from committed [`public-api.txt`](public-api.txt) (**33 317** lines; `wc -l` on the file). Top-level modules match:
 
 ```bash
 grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/public-api.txt
 ```
 
-**External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **432** repo-first and **157** `_with_` function names; the baseline still records **33 295** `public_api_lines` until the ratchet step lands, while the committed snapshot file is **33 307** lines today.
+**External users** counts are the number of files under each consumer tree that reference `grit_lib::<module>` (or `grit_lib::<module>::`), counted with `rg -l`. **Ratchet** columns use approximate per-module counts from `public-api.txt`: free functions whose first parameter is `&Repository` / `Repository`, and public functions whose name contains `_with_`. Workspace totals from [`api-ratchet.toml`](api-ratchet.toml) (rustdoc JSON via `make api-ratchet-check`) are **432** repo-first and **157** `_with_` function names; the baseline still records **33 295** `public_api_lines` until the ratchet step lands, while the committed snapshot file is **33 317** lines today.
 
 ### Regenerating counts
 
@@ -127,16 +127,16 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `blame` | 337 | 25 (cli 1, utils 2, tests 22) | 5 / 1 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Blame options and results belong on the diff/rev domain; shrink nested helpers in the sweep. |
 | `bundle` | 342 | 15 (cli 1, utils 1, examples 1, http 3, tests 9) | 11 / 9 | keep | Visibility sweep: objects, maintenance, bundle | Bundle read/write and remote bundle transport are a supported domain. |
 | `change_id` | 135 | 19 (cli 9, tests 10) | 2 / 0 | keep | — | Change-id header generation is a first-class cross-cutting feature. |
-| `command_runner` | 492 | 29 (cli 7, examples 2, tests 20) | 10 / 1 | keep | — | Injectable subprocess/hook runner boundary for CLI and tests. |
+| `command_runner` | 497 | 29 (cli 7, examples 2, tests 20) | 10 / 1 | keep | — | Injectable subprocess/hook runner boundary for CLI and tests. |
 | `commit` | 282 | 19 (cli 4, examples 1, tests 14) | 0 / 1 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Commit encoding, signing, and trailer parsing for porcelain and hooks. |
-| `config` | 1204 | 687 (cli 42, utils 6, examples 48, protocol 6, http 2, ts 1, tests 582) | 4 / 11 | keep | One path for pathspec and ident | Config cascade is central; nested `ident_*` and date helpers consolidate under `config()` / `ident`. |
+| `config` | 1204 | 688 (cli 42, utils 6, examples 48, protocol 6, http 2, ts 1, tests 583) | 4 / 11 | keep | One path for pathspec and ident | Config cascade is central; nested `ident_*` and date helpers consolidate under `config()` / `ident`. |
 | `diagnostics` | 132 | 16 (cli 1, examples 1, tests 14) | 0 / 0 | keep | — | Structured diagnostics sink wired from `Repository::diagnostics`. |
-| `diff` | 2378 | 180 (cli 26, utils 3, examples 7, tests 144) | 20 / 25 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Tree/content diff, merge, rerere, and patch-id helpers. |
+| `diff` | 2378 | 181 (cli 26, utils 3, examples 7, tests 145) | 20 / 25 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Tree/content diff, merge, rerere, and patch-id helpers. |
 | `divergence` | 208 | 2 (cli 1, tests 1) | 4 / 0 | keep | — | Ahead/behind and divergence summaries for `grit shortlog` / `grit ahead`. |
 | `error` | 1173 | 369 (cli 36, utils 2, examples 44, protocol 1, http 2, ts 2, tests 282) | 0 / 0 | keep | Typed, per-area errors | Legacy umbrella `Error` shrinks as areas expose dedicated enums. |
 | `fsmonitor` | 58 | 0 | 0 / 0 | merge into `worktree::fsmonitor` | One path for everything else the ratchet flags | Duplicate of the worktree fsmonitor submodule; root crate has zero external imports. |
-| `gitbutler` | 63 | 4 (cli 3, tests 1) | 1 / 0 | keep | — | GitButler workspace integration markers and helpers. |
-| `ident` | 227 | 51 (cli 6, examples 6, http 1, ts 1, tests 37) | 0 / 0 | keep | One path for pathspec and ident | Canonical root `ident` per `canonical-modules.toml`; config ident shims merge here. |
+| `gitbutler` | 62 | 4 (cli 3, tests 1) | 1 / 0 | keep | — | GitButler workspace integration markers and helpers. |
+| `ident` | 227 | 52 (cli 6, examples 6, http 1, ts 1, tests 38) | 0 / 0 | keep | One path for pathspec and ident | Canonical root `ident` per `canonical-modules.toml`; config ident shims merge here. |
 | `index` | 653 | 122 (cli 6, utils 1, examples 8, tests 107) | 3 / 11 | keep | Visibility sweep: refs, config, worktree, index and small root modules | Index file, sparse checkout, split index, and untracked cache. |
 | `line_range` | 45 | 1 (tests 1) | 0 / 0 | keep | — | Shared line-range parsing for blame and diff hunks. |
 | `list_limit` | 23 | 3 (cli 3) | 0 / 0 | keep | — | Shared `-n` limit parsing for list commands and library callers. |
@@ -144,28 +144,28 @@ Decisions are **keep**, **merge into …** (executed in a later roadmap step), o
 | `maintenance` | 1112 | 46 (cli 3, utils 2, examples 1, http 1, tests 39) | 20 / 3 | keep | Visibility sweep: objects, maintenance, bundle | Gc, repack, fsck, commit-graph, and MIDX maintenance. |
 | `notes` | 136 | 14 (cli 1, utils 1, examples 1, tests 11) | 7 / 0 | keep | — | Git notes read/write on `Repository::notes`. |
 | `object_inspect` | 114 | 12 (cli 7, tests 5) | 1 / 0 | merge into `revwalk::object_inspect` | One path for everything else the ratchet flags | Root re-export duplicates revwalk object display/resolve helpers. |
-| `objects` | 4224 | 656 (cli 58, utils 9, examples 41, protocol 4, http 6, ts 3, tests 535) | 14 / 23 | keep | Pluggable object store on Repository | ODB, packs, MIDX, promisor, and hashing; primary object domain. |
+| `objects` | 4224 | 657 (cli 58, utils 9, examples 41, protocol 4, http 6, ts 3, tests 536) | 14 / 23 | keep | Pluggable object store on Repository | ODB, packs, MIDX, promisor, and hashing; primary object domain. |
 | `operation` | 210 | 21 (cli 7, tests 14) | 0 / 0 | keep | — | In-progress merge/rebase/cherry-pick operation state. |
 | `pack_reuse` | 33 | 0 | 1 / 0 | merge into `objects::pack_reuse` | One path for everything else the ratchet flags | Flat root alias; canonical path is under `objects`. |
 | `pack_write` | 39 | 0 | 0 / 0 | merge into `objects::pack_write` | One path for everything else the ratchet flags | Flat root alias; canonical path is under `objects`. |
 | `parallel` | 129 | 36 (cli 2, ts 1, tests 33) | 0 / 0 | keep | — | Thread policy and parallel helpers used across hot paths. |
 | `path_validate` | 142 | 5 (tests 5) | 0 / 0 | keep | — | Path component validation shared by index, worktree, and fsck. |
 | `pathspec` | 239 | 0 | 1 / 6 | keep | One path for pathspec and ident | Canonical root pathspec matcher; overlaps with `worktree::pathspec` and porcelain helpers. |
-| `porcelain` | 3142 | 325 (cli 38, utils 3, examples 7, http 1, ts 1, tests 275) | 117 / 17 | keep | Collapse function variant families | High-level command orchestration; many `Repository`-first free functions move onto handles. |
-| `prelude` | 1309 | 5 (cli 1, utils 1, tests 3) | 0 / 0 | keep | — | Curated import surface for embedders. |
-| `progress` | 291 | 375 (cli 29, examples 6, protocol 1, http 1, tests 338) | 0 / 7 | keep | One way to do each thing | Single progress/cancel traits; duplicate sinks merge here. |
+| `porcelain` | 3142 | 326 (cli 38, utils 3, examples 7, http 1, ts 1, tests 276) | 117 / 17 | keep | Collapse function variant families | High-level command orchestration; many `Repository`-first free functions move onto handles. |
+| `prelude` | 1314 | 5 (cli 1, utils 1, tests 3) | 0 / 0 | keep | — | Curated import surface for embedders. |
+| `progress` | 291 | 376 (cli 29, examples 6, protocol 1, http 1, tests 339) | 0 / 7 | keep | One way to do each thing | Single progress/cancel traits; duplicate sinks merge here. |
 | `quote_path` | 5 | 3 (cli 1, tests 2) | 0 / 1 | merge into `porcelain::quote_path` | One path for everything else the ratchet flags | Root re-export only; CLI uses porcelain path. |
 | `refs` | 2265 | 303 (cli 16, utils 8, examples 18, protocol 3, http 2, ts 1, tests 255) | 35 / 13 | keep | Visibility sweep: refs, config, worktree, index and small root modules | Ref backends, reflog, refspec, reftable, and validation. |
-| `remote` | 5392 | 213 (cli 25, utils 3, examples 7, protocol 7, http 9, tests 162) | 48 / 19 | keep | Visibility sweep: remote | Fetch/push, transport, credentials, and protocol v2. |
-| `repo` | 250 | 736 (cli 56, utils 7, examples 51, protocol 3, http 4, tests 615) | 2 / 4 | keep | Collapse function variant families | `Repository` entry point; pathspec/patch-id/display helpers belong on handles. |
+| `remote` | 5392 | 214 (cli 25, utils 3, examples 7, protocol 7, http 9, tests 163) | 48 / 19 | keep | Visibility sweep: remote | Fetch/push, transport, credentials, and protocol v2. |
+| `repo` | 250 | 737 (cli 56, utils 7, examples 51, protocol 3, http 4, tests 616) | 2 / 4 | keep | Collapse function variant families | `Repository` entry point; pathspec/patch-id/display helpers belong on handles. |
 | `repo_handles` | 774 | 31 (cli 7, examples 3, tests 21) | 0 / 5 | keep | One way to do each thing | Bundled domain handles; naming aligns with `objects`/`references` in a later pass. |
-| `revwalk` | 3181 | 179 (cli 25, utils 2, examples 14, tests 138) | 134 / 12 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Rev-parse, rev-list, merge-base, history edits, and object inspect. |
+| `revwalk` | 3181 | 180 (cli 25, utils 2, examples 14, tests 139) | 134 / 12 | keep | Visibility sweep: revwalk, diff, porcelain, commit, blame, apply | Rev-parse, rev-list, merge-base, history edits, and object inspect. |
 | `stash` | 231 | 20 (cli 1, tests 19) | 3 / 0 | keep | — | Stash stack types and operations on `Repository::stash`. |
-| `state` | 196 | 66 (cli 18, utils 1, examples 6, http 1, tests 40) | 5 / 0 | keep | — | Repository metadata state (MERGE_HEAD, CHERRY_PICK_HEAD, etc.). |
+| `state` | 196 | 67 (cli 18, utils 1, examples 6, http 1, tests 41) | 5 / 0 | keep | — | Repository metadata state (MERGE_HEAD, CHERRY_PICK_HEAD, etc.). |
 | `tree_sha256` | 275 | 11 (cli 1, utils 1, examples 2, tests 7) | 2 / 0 | keep | — | Tree SHA-256 verification helpers for fsck and display. |
-| `worktree` | 1363 | 69 (cli 9, utils 1, examples 1, tests 58) | 27 / 14 | keep | Visibility sweep: refs, config, worktree, index and small root modules | Worktrees, ignore, attributes, and canonical `worktree::pathspec`. |
+| `worktree` | 1364 | 69 (cli 9, utils 1, examples 1, tests 58) | 27 / 14 | keep | Visibility sweep: refs, config, worktree, index and small root modules | Worktrees, ignore, attributes, and canonical `worktree::pathspec`. |
 | `HookName` (re-export) | 10 | 2 (tests 2) | 0 / 0 | merge into `command_runner::hooks` | Remove root-level leftover re-exports | Hooks enum belongs in command_runner; crate root re-export is legacy. |
-| `PostOperationHooks` (re-export) | 3 | 58 (cli 4, examples 1, tests 53) | 0 / 0 | merge into `command_runner::hooks` | Remove root-level leftover re-exports | Same as `HookName`. |
+| `PostOperationHooks` (re-export) | 3 | 59 (cli 4, examples 1, tests 54) | 0 / 0 | merge into `command_runner::hooks` | Remove root-level leftover re-exports | Same as `HookName`. |
 | `RefStorageFormat` (re-export) | 3 | 71 (examples 7, tests 64) | 0 / 0 | merge into `refs::ref_storage` | Remove root-level leftover re-exports | Duplicate of `refs::ref_storage::RefStorageFormat` at crate root. |
 | `OidAbbrevBatch` (re-export) | 15 | 2 (cli 1, tests 1) | 0 / 0 | merge into `objects` (abbrev batch) | Remove root-level leftover re-exports | Object-id abbreviation helper should live under objects/revwalk, not crate root. |
 | `PARALLEL_STAT_MIN_ENTRIES` | 1 | 8 (tests 8) | 0 / 0 | make private | Test-only items out of the public API | Parallel stat tuning constant for worktree scan; not embedder API. |
