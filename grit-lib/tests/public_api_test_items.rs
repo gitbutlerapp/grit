@@ -148,13 +148,8 @@ fn word_splitter_unit_cases() {
     assert!(!path_violates("grit_lib::objects::CompositeStore"));
     assert!(!path_violates("grit_lib::refs::ReflogRewriteStale"));
 
-<<<<<<< New base: Refresh public-api snapshot after read_loose_object_info re-export.
     assert!(path_violates(&format!("grit_lib::{}ench_fixture", "b")));
-||||||| Common ancestor
-    assert!(path_violates("grit_lib::bench_fixture"));
-=======
     assert!(path_violates("grit_lib::objects::bench_fixture"));
->>>>>>> Current commit: Visibility sweep: revwalk, diff, porcelain, commit, blame, apply
     assert!(!path_violates(
         "grit_lib::remote::HttpClientFactory::create_for_preflight"
     ));

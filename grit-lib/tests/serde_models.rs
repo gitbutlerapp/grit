@@ -35,12 +35,6 @@ fn result_models_implement_serialize() {
     assert_serialize::<grit_lib::diff::DiffEntry>();
     assert_serialize::<grit_lib::porcelain::tag::TagSummary>();
     assert_serialize::<grit_lib::porcelain::tag::TagList>();
-<<<<<<< New base: Refresh public-api snapshot after read_loose_object_info re-export.
-    assert_serialize::<grit_lib::revwalk::DescribedCommit>();
-||||||| Common ancestor
-    assert_serialize::<grit_lib::revwalk::describe::DescribedCommit>();
-=======
->>>>>>> Current commit: Visibility sweep: revwalk, diff, porcelain, commit, blame, apply
     assert_serialize::<grit_lib::blame::BlameResult>();
     assert_serialize::<grit_lib::blame::BlameHunk>();
     assert_serialize::<grit_lib::blame::BlameCommitInfo>();
