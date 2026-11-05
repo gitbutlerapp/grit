@@ -47,6 +47,7 @@ fn finish_push_outcome(
     opts: &PushOptions,
     results: Vec<PushRefResult>,
     remote_messages: Vec<String>,
+    sent: crate::transfer::TransferStats,
 ) -> Result<PushOutcome> {
     if !opts.dry_run {
         if let Some(remote) = opts.tracking_remote.as_deref() {
@@ -56,6 +57,7 @@ fn finish_push_outcome(
     Ok(PushOutcome {
         results,
         remote_messages,
+        sent,
     })
 }
 
@@ -283,9 +285,17 @@ pub(crate) fn push_remote_with(
             if !opts.dry_run {
                 crate::transport::send_client_flush(conn)?;
             }
-            return finish_push_outcome(local, opts, results, Vec::new());
+            return finish_push_outcome(
+                local,
+                opts,
+                results,
+                Vec::new(),
+                crate::transfer::TransferStats::default(),
+            );
         }
     };
+
+    let mut sent = crate::transfer::TransferStats::default();
 
     // 4. Write the ref-update commands (first carries the cap list after a NUL),
     //    then the pack — but only when there are objects to send. A deletion-only
@@ -333,7 +343,7 @@ pub(crate) fn push_remote_with(
                 let mut haves: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
                 haves.extend_from_slice(&adv.advertised_haves);
                 match session.write_bundle(local.odb(), &haves, &tips, threshold, |w| {
-                    pack.write_to(local, w, &stop).map(drop)
+                    pack.write_to(local, w, &stop, None).map(drop)
                 })? {
                     crate::push_bundle::Spooled::Bundle => true,
                     crate::push_bundle::Spooled::Small(small) => {
@@ -361,7 +371,7 @@ pub(crate) fn push_remote_with(
             apply_report_status(&report, &mut plan.decisions);
             let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
             sideband.finish_pending();
-            return finish_push_outcome(local, opts, results, sideband.remote_messages);
+            return finish_push_outcome(local, opts, results, sideband.remote_messages, sent);
         }
     }
 
@@ -384,17 +394,44 @@ pub(crate) fn push_remote_with(
         // The pack streams straight into the connection; a push of a whole
         // repository never holds the packfile in memory.
         let mut out = std::io::BufWriter::with_capacity(PACK_SEND_BUFFER, conn.writer());
-        let sent = match spooled_pack.take() {
-            Some(spooled) => spooled.copy_to(&mut out)?,
-            None => pack.write_to(local, &mut out, &stop)?.pack_bytes,
+        let stats = match spooled_pack.take() {
+            Some(spooled) => {
+                let mut metered = crate::progress::ProgressWrite::new(
+                    &mut out,
+                    &mut sideband as &mut dyn crate::progress::ProgressSink,
+                );
+                let bytes = spooled.copy_to(&mut metered)?;
+                metered.finish();
+                PackStats {
+                    pack_bytes: bytes,
+                    ..PackStats::default()
+                }
+            }
+            None => {
+                let stats = pack.write_to(local, &mut out, &stop, Some(&mut sideband))?;
+                if stats.pack_bytes > 0 {
+                    use crate::progress::{ProgressPhase, ProgressSink as _, ProgressUnit};
+                    sideband.start_with_unit(
+                        ProgressPhase::SendingObjects,
+                        ProgressUnit::Bytes,
+                        Some(stats.pack_bytes),
+                    );
+                    sideband.set(stats.pack_bytes);
+                    sideband.finish();
+                }
+                stats
+            }
         };
         out.flush()?;
         drop(out);
         conn.writer().flush()?;
+        sent.objects = stats.object_count as u64;
+        sent.bytes = stats.pack_bytes;
         net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
-            "push_remote: sent pack ({sent} bytes)"
+            "push_remote: sent pack ({bytes} bytes)",
+            bytes = sent.bytes
         );
     } else {
         net_trace!(
@@ -441,7 +478,7 @@ pub(crate) fn push_remote_with(
         "push_remote: done — {} result(s)",
         results.len()
     );
-    finish_push_outcome(local, opts, results, remote_messages)
+    finish_push_outcome(local, opts, results, remote_messages, sent)
 }
 
 /// Push refs to a remote over smart HTTP (`git-receive-pack`), returning a
@@ -771,11 +808,14 @@ impl PushPack {
     }
 
     /// Stream the pack to `w`, stopping with [`Error::Cancelled`] once `stop` fires.
+    ///
+    /// Reports pack-build phases to `progress` when provided.
     fn write_to(
         &self,
         local: &Repository,
         w: &mut dyn Write,
         stop: &crate::progress::CancelSignal<'_>,
+        progress: Option<&mut dyn crate::progress::ProgressSink>,
     ) -> Result<PackStats> {
         crate::pack_objects::write_pack_for_push_with_cancel(
             local.odb(),
@@ -786,6 +826,7 @@ impl PushPack {
             &self.opts,
             w,
             stop,
+            progress,
         )
     }
 }
@@ -1453,7 +1494,12 @@ mod tests {
         PushPack::for_plan(plan, repo, adv)?
             .map(|pack| {
                 let mut bytes = Vec::new();
-                pack.write_to(repo, &mut bytes, &crate::progress::CancelSignal::never())?;
+                pack.write_to(
+                    repo,
+                    &mut bytes,
+                    &crate::progress::CancelSignal::never(),
+                    None,
+                )?;
                 Ok(bytes)
             })
             .transpose()

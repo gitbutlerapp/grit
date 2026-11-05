@@ -81,6 +81,7 @@ impl Stage {
     fn of(phase: ProgressPhase) -> Option<Self> {
         match phase {
             ProgressPhase::ReceivingObjects
+            | ProgressPhase::SendingObjects
             | ProgressPhase::EnumeratingObjects
             | ProgressPhase::CopyingObjects => Some(Self::Transfer),
             ProgressPhase::IndexingObjects => Some(Self::Indexing),

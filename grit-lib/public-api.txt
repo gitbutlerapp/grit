@@ -19088,6 +19088,7 @@ pub grit_lib::progress::ProgressPhase::EnumeratingObjects
 pub grit_lib::progress::ProgressPhase::IndexingObjects
 pub grit_lib::progress::ProgressPhase::ReceivingObjects
 pub grit_lib::progress::ProgressPhase::ResolvingDeltas
+pub grit_lib::progress::ProgressPhase::SendingObjects
 pub grit_lib::progress::ProgressPhase::StagingFiles
 pub grit_lib::progress::ProgressPhase::TransferringBundle
 impl grit_lib::progress::ProgressPhase
@@ -26119,6 +26120,7 @@ impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::PushO
 pub struct grit_lib::remote::transfer::PushOutcome
 pub grit_lib::remote::transfer::PushOutcome::remote_messages: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::transfer::PushOutcome::results: alloc::vec::Vec<grit_lib::remote::push_report::PushRefResult>
+pub grit_lib::remote::transfer::PushOutcome::sent: grit_lib::remote::transfer::TransferStats
 impl grit_lib::remote::transfer::PushOutcome
 pub fn grit_lib::remote::transfer::PushOutcome::has_rejections(&self) -> bool
 pub fn grit_lib::remote::transfer::PushOutcome::has_updates(&self) -> bool

@@ -983,6 +983,7 @@ mod tests {
                 objects: 1_234,
                 bytes: 2 * 1024 * 1024,
                 object_types,
+                transfer_sent: false,
             },
             no_checkout_reason: None,
             branches_with_commits: None,
