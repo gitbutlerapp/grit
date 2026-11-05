@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-thread_local! {
+thread_local! { // hygiene: test-support diff blob-read counter (thread-local)
     static BLOB_READ_COUNTER: RefCell<Option<Arc<AtomicUsize>>> = const { RefCell::new(None) };
 }
 

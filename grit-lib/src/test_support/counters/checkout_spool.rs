@@ -3,9 +3,9 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-static CHECKOUT_SPOOL_PROBE: AtomicUsize = AtomicUsize::new(0);
-static CHECKOUT_SPOOL_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0);
-static CHECKOUT_SPOOL_PROBE_SERIAL: Mutex<bool> = Mutex::new(false);
+static CHECKOUT_SPOOL_PROBE: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support checkout spool probe counters
+static CHECKOUT_SPOOL_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support checkout spool probe counters
+static CHECKOUT_SPOOL_PROBE_SERIAL: Mutex<bool> = Mutex::new(false); // hygiene: test-support checkout spool probe counters
 
 /// Keeps checkout spool probing armed for one test; disarms on drop.
 /// Guard that arms checkout spool-delete counting for one test.

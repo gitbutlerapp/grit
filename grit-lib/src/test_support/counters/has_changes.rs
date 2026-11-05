@@ -2,8 +2,8 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-static WORKTREE_HAS_CHANGES_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0);
-static HAS_CHANGES_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static WORKTREE_HAS_CHANGES_ENTRIES_SCANNED: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support has_changes probe counters
+static HAS_CHANGES_CALL_COUNT: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support has_changes probe counters
 
 /// Entries scanned in the last worktree `has_changes` walk (since last reset).
 pub fn worktree_has_changes_entries_scanned() -> usize {

@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
-static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
-static WORKTREE_READ_DIR_PROBE: AtomicUsize = AtomicUsize::new(0);
-static WORKTREE_PATH_RESOLVE_PROBE: AtomicUsize = AtomicUsize::new(0);
-static WORKTREE_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0);
-static WORKTREE_PROBE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None);
-static WORKTREE_PROBE_SERIAL: Mutex<()> = Mutex::new(());
+static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support worktree probe counters
+static WORKTREE_READ_DIR_PROBE: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support worktree probe counters
+static WORKTREE_PATH_RESOLVE_PROBE: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support worktree probe counters
+static WORKTREE_PROBE_ACTIVE: AtomicUsize = AtomicUsize::new(0); // hygiene: test-support worktree probe counters
+static WORKTREE_PROBE_ROOT: Mutex<Option<PathBuf>> = Mutex::new(None); // hygiene: test-support worktree probe counters
+static WORKTREE_PROBE_SERIAL: Mutex<()> = Mutex::new(()); // hygiene: test-support worktree probe counters
 
 /// Serializes probing tests; each owns the counters while its scope is alive.
 /// Guard that scopes worktree syscall probes to one test and repository root.
