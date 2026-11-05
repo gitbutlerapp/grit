@@ -164,6 +164,7 @@ pub fn try_effective_client_protocol_version_from_config(config: &ConfigSet) -> 
 /// Version `0` means no header (classic v0 advertisement); `1` and `2` send
 /// `version=1` / `version=2` respectively.
 #[must_use]
+#[cfg_attr(not(any(test, feature = "http-ureq")), allow(dead_code))]
 pub(crate) fn client_git_protocol_header_value(version: u8) -> Option<String> {
     match version {
         0 => None,
@@ -177,6 +178,7 @@ pub(crate) fn client_git_protocol_header_value(version: u8) -> Option<String> {
 /// # Errors
 ///
 /// Returns [`Error::Config`] when `protocol.version` is set to an invalid value.
+#[cfg_attr(not(any(test, feature = "http-ureq")), allow(dead_code))]
 pub(crate) fn client_git_protocol_header_from_config(
     config: &ConfigSet,
 ) -> Result<Option<String>, Error> {

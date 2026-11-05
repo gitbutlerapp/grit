@@ -904,6 +904,7 @@ pub(crate) fn smart_info_refs_discovery_url(repo_base: &str) -> String {
 
 /// Strip the `/info/refs` suffix (and query) from a discovery URL, returning the repo base.
 #[must_use]
+#[cfg_attr(not(any(test, feature = "http-ureq")), allow(dead_code))]
 pub(crate) fn repo_base_from_info_refs_url(info_refs_url: &str) -> Option<String> {
     let path = info_refs_url.split('?').next()?;
     let base = path.strip_suffix("/info/refs")?.trim_end_matches('/');
@@ -914,6 +915,7 @@ pub(crate) fn repo_base_from_info_refs_url(info_refs_url: &str) -> Option<String
 /// discovery URL whose path matches the effective repository base (Git's
 /// `credential_from_url` after `update_url_from_redirect`).
 #[must_use]
+#[cfg_attr(not(any(test, feature = "http-ureq")), allow(dead_code))]
 pub(crate) fn effective_info_refs_url_after_redirect(
     requested_info_refs_url: &str,
     final_url: Option<&str>,
@@ -961,6 +963,7 @@ pub(crate) fn rebased_base_from_redirect(
 /// distinct). Non-default ports are always included; default ports for the scheme
 /// are filled in when omitted from the URL.
 #[must_use]
+#[cfg_attr(not(any(test, feature = "http-ureq")), allow(dead_code))]
 pub(crate) fn http_origin_key(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
     let scheme = parsed.scheme().to_ascii_lowercase();
@@ -971,6 +974,7 @@ pub(crate) fn http_origin_key(url: &str) -> Option<String> {
 
 /// Returns whether two URLs share the same HTTP origin (scheme, host, port).
 #[must_use]
+#[cfg_attr(not(any(test, feature = "http-ureq")), allow(dead_code))]
 pub(crate) fn http_origins_match(a: &str, b: &str) -> bool {
     match (http_origin_key(a), http_origin_key(b)) {
         (Some(left), Some(right)) => left == right,

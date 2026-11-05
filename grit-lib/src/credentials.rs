@@ -71,6 +71,7 @@ pub const NON_INTERACTIVE_MESSAGE: &str = "credentials required but unavailable 
 /// The program to pass to [`HelperCredentialProvider::with_askpass`], or
 /// `None` when askpass is not configured.
 #[must_use]
+#[cfg_attr(not(feature = "http-ureq"), allow(dead_code))]
 pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<PathBuf> {
     let program = env
         .var_os("GIT_ASKPASS")
@@ -762,6 +763,7 @@ fn strip_userinfo_from_authority(authority: &str) -> &str {
 }
 
 /// Redact credentials from URL-like `http://` / `https://` substrings in `message`.
+#[cfg_attr(not(feature = "http-ureq"), allow(dead_code))]
 pub(crate) fn redact_embedded_url_credentials(message: &str) -> String {
     let mut out = String::with_capacity(message.len());
     let mut rest = message;
