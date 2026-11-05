@@ -199,6 +199,36 @@ jobs:
       - run: make public-api-check
       - run: make api-ratchet-check
 
+  semver-check:
+    name: semver-check
+    runs-on: ubuntu-latest
+    continue-on-error: true # Make blocking at 0.6.0: delete continue-on-error
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use all CPU cores for Cargo (override .cargo/config.toml jobs = 2)
+        run: echo "CARGO_BUILD_JOBS=$(nproc)" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@1.99.0
+
+      - name: Install cargo-semver-checks (see scripts/semver-check.sh)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+          CARGO_SEMVER_CHECKS_VERSION="$(grep 'CARGO_SEMVER_CHECKS_VERSION=' scripts/semver-check.sh | cut -d'"' -f2)"
+          cargo install cargo-semver-checks --version "${CARGO_SEMVER_CHECKS_VERSION}" --locked
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: semver-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - run: make semver-check
+
   rustdoc:
     name: rustdoc
     runs-on: ubuntu-latest
