@@ -1734,3 +1734,93 @@ fn tree_conflicts_with_result(
     paths.dedup();
     Ok(Err(paths))
 }
+
+/// One commit of a head, by the key it's matched on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Keyed {
+    /// The change id, or `patch:<patch id>` for a commit without one.
+    pub key: String,
+    /// The commit.
+    pub commit: ObjectId,
+    /// Its subject line.
+    pub subject: String,
+}
+
+/// The commits of `head` that `floor` doesn't have, oldest first along
+/// first parents, with the keys they are matched on.
+///
+/// # Errors
+///
+/// When a commit can't be read.
+pub fn keyed_commits(repo: &Repository, head: ObjectId, floor: &[ObjectId]) -> Result<Vec<Keyed>> {
+    Ok(sequence(repo, head, floor)?
+        .into_iter()
+        .map(|v| Keyed {
+            key: v.key,
+            commit: v.oid,
+            subject: v.subject,
+        })
+        .collect())
+}
+
+/// The commits of `theirs` whose change `ours` doesn't have, leaving out
+/// what `floor` (the branch both are merged into) has: what merging `ours`
+/// would leave out.
+///
+/// # Errors
+///
+/// When a commit can't be read.
+pub fn missing_from(
+    repo: &Repository,
+    floor: &[ObjectId],
+    ours: ObjectId,
+    theirs: ObjectId,
+) -> Result<Vec<Keyed>> {
+    if is_ancestor(repo, theirs, ours)? {
+        return Ok(Vec::new());
+    }
+    let have: HashSet<String> = sequence(repo, ours, floor)?
+        .into_iter()
+        .map(|v| v.key)
+        .collect();
+    Ok(keyed_commits(repo, theirs, floor)?
+        .into_iter()
+        .filter(|k| !have.contains(&k.key))
+        .collect())
+}
+
+/// Replay the commits of `head` that `floor` doesn't have onto `onto`,
+/// leaving out those whose key is in `skip`: the new tip (`onto` when
+/// nothing is left), or the paths of the first commit that conflicts.
+///
+/// # Errors
+///
+/// When a commit or tree can't be read or written.
+pub fn replay_onto(
+    repo: &Repository,
+    head: ObjectId,
+    floor: &[ObjectId],
+    onto: ObjectId,
+    skip: &HashSet<String>,
+) -> Result<std::result::Result<ObjectId, Vec<String>>> {
+    let mut tip = onto;
+    for mut version in sequence(repo, head, floor)? {
+        if skip.contains(&version.key) || version.merge {
+            continue;
+        }
+        load_changes(repo, &mut version)?;
+        let step = Step {
+            version,
+            fold: None,
+            message: None,
+            new_change: false,
+            against: None,
+        };
+        match replay(repo, tip, &step)? {
+            Ok(Some(next)) => tip = next,
+            Ok(None) => {}
+            Err(paths) => return Ok(Err(paths)),
+        }
+    }
+    Ok(Ok(tip))
+}

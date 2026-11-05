@@ -790,6 +790,8 @@ pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "share_accept_render",
     "share_resolve_render",
     "share_resolve_applied_render",
+    "share_resolve_integrated_render",
+    "share_resolve_renamed_render",
     "slice_render",
     "sync_render",
     "serve_render",

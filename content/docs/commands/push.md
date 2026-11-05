@@ -227,6 +227,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `origin_added` | string | URL saved as `origin` after an `<owner>/<project>` push from a repository with no remotes (omitted otherwise). |
 | `remote_messages` | array of strings | Hook and diagnostic text from the remote (same lines as `remote: …` on stderr in human mode; omitted when empty). |
 | `shared` | array | For each [shared](../share/) branch pushed: `branch`, `combined` (members whose heads were combined into yours and pushed again), `head` (your head after combining) and `heads`, the other members' heads fetched right after the push, each with `user`, `tip`, `relation` to your branch (`same`, `ahead`, `behind`, `diverged` or `unknown`), and for a head that diverged from yours `divergence`: `scenario` (a stable code such as `amended_both_conflicting`; see [Divergence scenarios](../share/#divergence-scenarios)), `summary`, `needs_decision`, `base`, `changes` (each commit's `change`, `subject`, and what `you` and `them` did to it), `conflicts` and `also`. Omitted when no shared branch was pushed. |
+| `pushed_to_integrated` | array | Branches this push made again after a share of them was integrated, bringing integrated commits: nobody shares them now (see [After integrating](../share/#after-integrating)). Each has `branch`, `scenario` (`pushed_to_integrated`), `summary`, `by`, `at`, `into`, `target_branch`, `pull`, `url`, `integrated` and `new` (how many of its commits were integrated, and how many are new) and `options` (`rebase`, `rename`, `reshare`, each with `id`, `label`, `loses` and `command`). Omitted when empty. |
 
 Example:
 
@@ -275,7 +276,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | `0` | Success ([`success`](../exit-codes/)). |
 | `1` | Command failed, a ref was rejected, or the `pre-push` hook exited non-zero ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
-| `3` | Pushed, but a [shared](../share/) branch's heads diverged in a way someone has to decide about ([`needs_decision`](../exit-codes/)). |
+| `3` | Pushed, but a [shared](../share/) branch's heads diverged in a way someone has to decide about, or the push made a branch again that was shared and integrated (`pushed_to_integrated`) ([`needs_decision`](../exit-codes/)). |
 | `128` | Could not reach or read the remote: missing repository, DNS or connection failure, HTTP error status ([`remote_unreadable`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.

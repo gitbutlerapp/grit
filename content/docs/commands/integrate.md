@@ -8,7 +8,7 @@ order: 9
 ## Synopsis
 
 ```text
-grit integrate <branch>
+grit integrate <branch> [--without <user>...]
 ```
 
 ## Description
@@ -49,11 +49,14 @@ In a clone (not a snapshot checkout) of a project on a grit hosting server such 
 
 The branch you are on stays as it is; once merged, [`grit sync`](../sync/) stops pushing it.
 
+**A [shared](../share/) branch** merges your head of it. Every other member's head has to be in yours first: when one has changes yours doesn't (matched by change id), nothing is merged, and the refusal names each such member and their commits. Take them with [`grit sync`](../sync/) and integrate again, or pass `--without <user>` to merge without them; their changes stay in their copy, as a branch nobody shares. Once merged, the share is over: the branch is deleted from every member's copy (except the heads of members left out), every member is told, and `unshared` lists them. The server remembers what was merged for 14 days, so a later push of the branch's name that brings those commits is reported as `pushed_to_integrated` (see [`grit share`](../share/#after-integrating)).
+
 ## Options
 
 | Option | Description |
 | --- | --- |
 | `<branch>` | The branch to merge into the target. |
+| `--without <user>` | For a shared branch: merge without waiting for this member's changes, which stay in their copy. Repeatable. |
 
 ## Examples
 
@@ -115,6 +118,7 @@ Schema: [v1](/schemas/integrate/v1.json)
 | `pull` | integer or omitted | In a clone: the pull request the merge went through, for a copy of an organization's project. |
 | `url` | string or omitted | In a clone: the pull request's web page. |
 | `local` | object or omitted | In a clone: the target branch here after the merge, as [`grit sync`](../sync/)'s `target` reports it (`name`, `action`, `tip`). |
+| `unshared` | array of strings or omitted | For a [shared](../share/) branch: the other members. Integrating ended the share and deleted the branch from their copies. |
 
 ```json
 {
@@ -207,7 +211,7 @@ A failed refresh:
 | Code | Meaning |
 | --- | --- |
 | `0` | The branch was merged, or the target already had it, and the checkout was refreshed. |
-| `1` | The branch was merged (or the target had it), but the refresh after failed (`refresh_error`) or stopped (`refresh.result` is `rebase_stopped`, `conflicts`, `refused_not_ff` or `autostash_conflict`): the output says so and what to do. Or nothing was merged: the branch conflicts with the target, shares no history with it, is the target, is not a valid branch name, could not be checked in, or does not exist on the server; uncommitted changes in the server's worktree block the merge; in a clone, you aren't a member of the organization, or the branch couldn't be pushed to your space; or this is neither a snapshot checkout nor a clone of a hosted project. |
+| `1` | The branch was merged (or the target had it), but the refresh after failed (`refresh_error`) or stopped (`refresh.result` is `rebase_stopped`, `conflicts`, `refused_not_ff` or `autostash_conflict`): the output says so and what to do. Or nothing was merged: the branch conflicts with the target, shares no history with it, is the target, is not a valid branch name, could not be checked in, or does not exist on the server; uncommitted changes in the server's worktree block the merge; in a clone, you aren't a member of the organization, the branch couldn't be pushed to your space, or it is a shared branch another member's head has changes of that yours lacks (pass `--without <user>` to merge anyway); or this is neither a snapshot checkout nor a clone of a hosted project. |
 
 ## See also
 

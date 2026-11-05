@@ -151,6 +151,12 @@ pub enum ShareRequest {
         /// The shared branch.
         branch: String,
     },
+    /// Share `branch` again, after it was integrated, with everyone who was
+    /// on it then. The caller's head of `branch` is the new share's start.
+    Reshare {
+        /// The branch that was shared.
+        branch: String,
+    },
     /// Revoke the share link `link` (its id) of `branch`.
     RevokeLink {
         /// The shared branch.
@@ -248,9 +254,42 @@ pub struct SharedBranch {
     /// Open share links, for members.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<ShareLinkInfo>,
+    /// How it was integrated, for [`ShareState::Integrated`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrated: Option<ShareIntegration>,
     /// Its web page.
     pub url: String,
 }
+
+/// How a shared branch was integrated. The branch was then deleted from
+/// every member's copy; the share is kept for [`INTEGRATED_KEEP_DAYS`] so a
+/// later push of the same name can be recognised.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareIntegration {
+    /// Who integrated it.
+    pub by: String,
+    /// When, RFC 3339.
+    pub at: String,
+    /// The project it was merged into, `<owner>/<project>`.
+    pub into: String,
+    /// The branch it was merged into.
+    pub target_branch: String,
+    /// The target's tip afterwards (the merge commit, when one was made).
+    pub commit: String,
+    /// The keys of the commits integrated (change ids, or `patch:<id>`;
+    /// see [`crate::divergence`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changes: Vec<String>,
+    /// The pull request it went through, for an organization's project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull: Option<u64>,
+    /// The pull request's page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// How many days an integrated share is remembered, with its head log.
+pub const INTEGRATED_KEEP_DAYS: u32 = 14;
 
 /// A share link just made: the only time its URL is shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

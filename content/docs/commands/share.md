@@ -13,7 +13,7 @@ grit share list [<branch>]
 grit share accept <link>
 grit share remove <branch> [<user>|<email>...]
 grit share leave <branch>
-grit share resolve <branch> [<option>] [--with <user>]
+grit share resolve <branch> [<option> [<name>]] [--with <user>]
 grit share revoke <branch> <link-id>
 ```
 
@@ -29,7 +29,7 @@ The other members' heads are fetched beside yours as `<remote>/shared/<branch>/<
 - **`grit share accept <link>`** accepts a link: you are on the branch, and your copy of the project is made in your space. In a clone of the project it fetches the branch into it; anywhere else it clones your copy into a new directory.
 - **`grit share remove <branch> <user>...`** removes people, and withdraws invitations to the email addresses you name. Only the person who shared the branch (or, for a copy of an organization's project, someone who can integrate into it) can remove people, and nobody can remove the person who shared it. With no users, it ends the share. Nobody loses work: each member's head stays a branch in their own space.
 - **`grit share leave <branch>`** takes you off a branch; your head stays a branch in your space.
-- **`grit share resolve <branch> [<option>]`** puts your head and another member's back together after they diverged (see [Resolving a divergence](#resolving-a-divergence)). Name the member with `--with` when several heads diverged from yours.
+- **`grit share resolve <branch> [<option>]`** puts your head and another member's back together after they diverged (see [Resolving a divergence](#resolving-a-divergence)). Name the member with `--with` when several heads diverged from yours. For a branch pushed again after it was integrated, it takes `rebase`, `rename <name>` or `reshare` (see [After integrating](#after-integrating)).
 - **`grit share revoke <branch> <link-id>`** stops a link from working. Link ids are in `grit share list`.
 
 ### Your copy
@@ -96,6 +96,20 @@ Every divergence report lists its options, the recommended one first, each with 
 `grit share resolve <branch>` with no option applies `combine` when nothing would be lost; otherwise it lists the options and exits with status `3`. With an option, it moves your branch to the result (when the branch is checked out, as `grit reset --keep` does, keeping local changes or refusing) and pushes your head.
 
 **Without asking.** When another member's head and yours can be put together without losing anything (any scenario that doesn't need a decision), `grit sync` and `grit push` do it themselves: they combine the two, move your branch, and push the result, and the other member's next `grit sync` fast-forwards to it. Only when someone has to decide do they stop, report the options, and exit `3`.
+
+### After integrating
+
+[`grit integrate`](../integrate/) on a shared branch merges your head, once every other member's changes are in it (or the members whose aren't are left out with `--without`). Then the share is over: the branch is deleted from every member's copy and the server's `refs/shared/` heads with it, and everyone is told. Your clone keeps its local branch; [`grit sync`](../sync/) leaves it alone once its commits are on the target.
+
+The server remembers the integration for 14 days. When a push or sync makes a branch of that name again and it brings commits that were integrated (by change id), it is pushed as a branch nobody shares, and [`grit push`](../push/) and [`grit sync`](../sync/) report it with scenario `pushed_to_integrated`, how many of its commits were integrated and how many are new, and these options (exit status `3`). Reusing the name for unrelated work gets no report.
+
+| Option | What it does |
+| --- | --- |
+| `rebase` | Replay only the new commits onto the target (`origin/<target>`), leaving out every commit that was integrated, even amended since, and push the branch. |
+| `rename <name>` | Rename the branch here and in your space, deleting the old name there. |
+| `reshare` | Share it again with everyone who was on it. |
+
+Plain git sees the same report as `remote:` lines on the push.
 
 ## Options
 
@@ -225,6 +239,8 @@ Schema: [share.add v1](/schemas/share.add/v1.json) · [share.list v1](/schemas/s
 | `pushed` | boolean | Whether your head was pushed. |
 | `next` | string or omitted | What to run next, for `resolve`, which is done by hand. |
 | `options` | array or omitted | When a decision is needed and none was chosen: each option's `id`, `label`, `loses` and `command`. |
+| `renamed` | string or omitted | For `rename`: the branch's new name, here and in your space. |
+| `shared_with` | array of strings or omitted | For `reshare`: who the branch is shared with again. |
 
 <!-- schema: share.resolve -->
 
@@ -268,7 +284,7 @@ Shared by `alice` from `alice/widget`; state active, base `main`.
 | --- | --- |
 | `0` | Done. |
 | `1` | The server refused (the message says why: not on the branch, only the sharer can remove people, a used-up or expired link), the option chosen conflicts, or the command could not run: not a clone of a hosted project, not signed in. |
-| `3` | `grit share resolve` without an option, for a divergence that needs a decision: the options are listed (`needs_decision`). |
+| `3` | `grit share resolve` without an option, for a divergence that needs a decision, or a branch pushed again after it was integrated: the options are listed (`needs_decision`). |
 | `2` | Invalid arguments, such as `--uses` without `--link`. |
 
 ## See also

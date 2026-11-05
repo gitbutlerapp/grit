@@ -368,6 +368,7 @@ fn integrate_render() {
         pull: None,
         url: None,
         local: None,
+        unshared: Vec::new(),
     };
     snapshot_modes("integrate_render", &outcome);
 }
@@ -403,6 +404,7 @@ fn integrate_elsewhere_render() {
         pull: None,
         url: None,
         local: None,
+        unshared: Vec::new(),
     };
     snapshot_modes("integrate_elsewhere_render", &outcome);
 }
@@ -426,6 +428,7 @@ fn integrate_refresh_failed_render() {
         pull: None,
         url: None,
         local: None,
+        unshared: Vec::new(),
     };
     snapshot_modes("integrate_refresh_failed_render", &outcome);
 }
@@ -505,6 +508,33 @@ fn sample_divergence() -> crate::commands::share::DivergenceJson {
     }
 }
 
+fn sample_integrated() -> crate::commands::share::IntegratedJson {
+    use crate::commands::share::{IntegratedJson, ResolveOptionJson};
+    let opt = |id: &str, label: &str, command: &str| ResolveOptionJson {
+        id: id.to_owned(),
+        label: label.to_owned(),
+        loses: None,
+        command: command.to_owned(),
+    };
+    IntegratedJson {
+        scenario: "pushed_to_integrated".to_owned(),
+        summary: "pairing was shared, and alice integrated it into example.com/widget main; 3 of its commits are there already, 1 is new".to_owned(),
+        by: "alice".to_owned(),
+        at: "2023-11-14T22:13:20Z".to_owned(),
+        into: "example.com/widget".to_owned(),
+        target_branch: "main".to_owned(),
+        pull: Some(31),
+        url: Some("https://grithub.dev/example.com/widget/pulls/31".to_owned()),
+        integrated: 3,
+        new: 1,
+        options: vec![
+            opt("rebase", "rebase onto main: keep only the 1 new commit", "grit share resolve pairing rebase"),
+            opt("rename", "keep it as pairing-2", "grit share resolve pairing rename pairing-2"),
+            opt("reshare", "share it again with bob", "grit share resolve pairing reshare"),
+        ],
+    }
+}
+
 fn sample_options() -> Vec<crate::commands::share::ResolveOptionJson> {
     use crate::commands::share::ResolveOptionJson;
     let opt = |id: &str, label: &str, loses: Option<&str>| ResolveOptionJson {
@@ -554,6 +584,7 @@ fn sync_render() {
         tip: Some(tip.to_owned()),
         message: message.map(str::to_owned),
         shared: Vec::new(),
+        integrated: None,
     };
     let outcome = SyncOutcome {
         space: "alice/widget".to_owned(),
@@ -595,6 +626,15 @@ fn sync_render() {
                     SyncAction::Pulled,
                     "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e",
                     Some("took bob's head, which builds on yours"),
+                )
+            },
+            SyncBranch {
+                integrated: Some(sample_integrated()),
+                ..branch(
+                    "pairing-old",
+                    SyncAction::Pushed,
+                    "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
+                    None,
                 )
             },
         ],
@@ -706,6 +746,8 @@ fn share_render() {
         pushed: false,
         next: None,
         options: sample_options(),
+        renamed: None,
+        shared_with: Vec::new(),
     };
     snapshot_modes("share_resolve_render", &asked);
     let applied = ShareResolveOutcome {
@@ -716,4 +758,28 @@ fn share_render() {
         ..asked
     };
     snapshot_modes("share_resolve_applied_render", &applied);
+    let integrated = sample_integrated();
+    let pushed_again = ShareResolveOutcome {
+        branch: "pairing".to_owned(),
+        with: "alice".to_owned(),
+        scenario: integrated.scenario.clone(),
+        summary: integrated.summary.clone(),
+        option: None,
+        previous: "4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e".to_owned(),
+        head: None,
+        pushed: false,
+        next: None,
+        options: integrated.options,
+        renamed: None,
+        shared_with: Vec::new(),
+    };
+    snapshot_modes("share_resolve_integrated_render", &pushed_again);
+    let renamed = ShareResolveOutcome {
+        option: Some("rename".to_owned()),
+        pushed: true,
+        options: Vec::new(),
+        renamed: Some("pairing-2".to_owned()),
+        ..pushed_again
+    };
+    snapshot_modes("share_resolve_renamed_render", &renamed);
 }

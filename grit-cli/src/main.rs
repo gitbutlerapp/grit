@@ -843,8 +843,12 @@ enum ShareAction {
         /// The shared branch.
         branch: String,
         /// The option to apply, such as `combine` or `keep_both` (default: `combine`,
-        /// when nothing would be lost; otherwise the options are listed).
+        /// when nothing would be lost; otherwise the options are listed). For a
+        /// branch pushed again after it was integrated: `rebase`, `rename` or
+        /// `reshare`.
         option: Option<String>,
+        /// For `rename`: the branch's new name.
+        name: Option<String>,
         /// The member whose head to resolve with (needed when several diverged).
         #[arg(long, value_name = "USER")]
         with: Option<String>,
@@ -951,6 +955,10 @@ enum Command {
         /// The branch to merge.
         #[arg(value_name = "BRANCH")]
         branch: String,
+        /// For a shared branch: integrate without waiting for this member's
+        /// changes, which stay in their copy. Repeatable.
+        #[arg(long, value_name = "USER")]
+        without: Vec<String>,
     },
     /// Push and pull every active branch between this clone and your space on the server (grithub).
     Sync,
@@ -2909,8 +2917,8 @@ fn dispatch(
             emit_success(outcome, opts, ctx)?;
             Ok(status)
         }
-        Command::Integrate { branch } => {
-            let outcome = commands::checkin::integrate(&branch, opts.mode)?;
+        Command::Integrate { branch, without } => {
+            let outcome = commands::checkin::integrate(&branch, &without, opts.mode)?;
             let status = ExitStatus::from_integrate(&outcome);
             emit_success(outcome, opts, ctx)?;
             Ok(status)
@@ -2953,11 +2961,13 @@ fn dispatch(
             ShareAction::Resolve {
                 branch,
                 option,
+                name,
                 with,
             } => {
                 let outcome = commands::share::resolve(
                     &branch,
                     option.as_deref(),
+                    name.as_deref(),
                     with.as_deref(),
                     opts.mode,
                 )?;

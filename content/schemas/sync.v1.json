@@ -137,6 +137,82 @@
         }
       ]
     },
+    "IntegratedJson": {
+      "description": "A branch pushed (or synced) again after its share was integrated, bringing integrated commits: scenario `pushed_to_integrated`. It is a branch nobody shares now.",
+      "properties": {
+        "at": {
+          "description": "When, RFC 3339.",
+          "type": "string"
+        },
+        "by": {
+          "description": "Who integrated it.",
+          "type": "string"
+        },
+        "integrated": {
+          "description": "How many of the branch's commits were integrated already.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "into": {
+          "description": "The project it was merged into, `<owner>/<project>`.",
+          "type": "string"
+        },
+        "new": {
+          "description": "How many are new.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "options": {
+          "description": "The ways forward, recommended first.",
+          "items": {
+            "$ref": "#/definitions/ResolveOptionJson"
+          },
+          "type": "array"
+        },
+        "pull": {
+          "description": "The pull request it went through, for an organization's project.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scenario": {
+          "description": "Always `pushed_to_integrated`.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "What happened, in a sentence.",
+          "type": "string"
+        },
+        "target_branch": {
+          "description": "The branch it was merged into.",
+          "type": "string"
+        },
+        "url": {
+          "description": "The pull request's page.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "by",
+        "integrated",
+        "into",
+        "new",
+        "options",
+        "scenario",
+        "summary",
+        "target_branch"
+      ],
+      "type": "object"
+    },
     "ResolveOptionJson": {
       "description": "One way out of a divergence.",
       "properties": {
@@ -257,6 +333,17 @@
       "properties": {
         "action": {
           "$ref": "#/definitions/SyncAction"
+        },
+        "integrated": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/IntegratedJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For a branch this sync made again after a share of it was integrated (scenario `pushed_to_integrated`): what happened, and the options. Nobody shares it now."
         },
         "message": {
           "description": "Why it was refused, or what to do about a divergence.",
