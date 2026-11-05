@@ -321,7 +321,13 @@ pub struct CommitPlan {
 /// Which paths are included when recording a commit ([`commit_with_scope`]).
 #[derive(Debug, Clone)]
 pub enum CommitScope {
-    /// Stage every worktree change, then commit (default `grit commit` behavior).
+    /// Stage worktree changes, then commit (default `grit commit` behavior).
+    ///
+    /// Stages tracked modifications and deletions plus untracked files, except when
+    /// `status.showUntrackedFiles` is `no` (or a Git boolean false synonym): then only tracked
+    /// paths are staged, matching `git commit -a` and what [`crate::porcelain::status`] shows.
+    /// Explicit path commits ([`CommitScope::Paths`]) and [`crate::porcelain::add::stage`] are
+    /// unchanged.
     AutoStage,
     /// Commit the index as-is (`git commit` without `-a`).
     Staged,

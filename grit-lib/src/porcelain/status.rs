@@ -566,26 +566,34 @@ pub(crate) fn count_unstaged_and_untracked_paths(
         .iter()
         .filter(|e| e.status != DiffStatus::Unmerged)
         .count();
-    let worktree_rules = rules_arc
-        .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
-    let (untracked, _, _) = collect_untracked_and_ignored_inner(
-        repo,
-        index,
-        work_tree,
-        &[],
-        UntrackedScan {
-            ignored_mode: IgnoredMode::No,
-            show_all: false,
-            sort_paths: true,
-            use_untracked_cache: false,
-            cache_miss: UntrackedCacheMissAction::RefreshFull,
-            clean_unit_dirs: None,
-        },
-        &worktree_rules,
-        None,
-    )?;
-    Ok((unstaged_count, untracked.len()))
+    let untracked_count = if matches!(
+        untracked_mode_from_config(repo.config()?.as_ref())?,
+        UntrackedMode::No
+    ) {
+        0
+    } else {
+        let worktree_rules = rules_arc
+            .lock()
+            .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+        let (untracked, _, _) = collect_untracked_and_ignored_inner(
+            repo,
+            index,
+            work_tree,
+            &[],
+            UntrackedScan {
+                ignored_mode: IgnoredMode::No,
+                show_all: false,
+                sort_paths: true,
+                use_untracked_cache: false,
+                cache_miss: UntrackedCacheMissAction::RefreshFull,
+                clean_unit_dirs: None,
+            },
+            &worktree_rules,
+            None,
+        )?;
+        untracked.len()
+    };
+    Ok((unstaged_count, untracked_count))
 }
 
 /// Like [`collect_untracked_and_ignored`], reusing an existing

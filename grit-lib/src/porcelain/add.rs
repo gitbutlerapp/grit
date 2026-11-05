@@ -158,25 +158,47 @@ fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
     }
 }
 
-/// Stage every tracked and untracked change for [`crate::porcelain::commit`].
+/// Stage worktree changes for [`crate::porcelain::commit`] auto-staging.
 ///
 /// Uses the stat-trust tracked scan from `stage_tracked_modifications_in_index_with_rules` instead of
 /// the diff-for-staging pipeline, then stages untracked paths the same way as [`stage`] with
-/// [`StageMode::All`].
+/// [`StageMode::All`], unless `status.showUntrackedFiles` is `no` (or a Git boolean false synonym),
+/// in which case only tracked modifications and deletions are staged — the same set as `git commit -a`
+/// and the set [`crate::porcelain::status`] lists.
 ///
 /// # Errors
 ///
-/// Same as [`stage`].
+/// Same as [`stage`], plus [`crate::error::ConfigError::InvalidUntrackedFilesMode`] when
+/// `status.showUntrackedFiles` is invalid.
 pub fn stage_for_commit(
     repo: &Repository,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<StageOutcome> {
+    let config = repo.config()?;
     let opts = StageOptions {
-        mode: StageMode::All,
+        mode: stage_mode_for_commit(config.as_ref())?,
         ..StageOptions::default()
     };
     stage_with_tracked_scan(repo, &opts, progress, cancel)
+}
+
+/// Staging mode for commit auto-staging from `status.showUntrackedFiles`.
+///
+/// # Errors
+///
+/// Returns [`crate::error::ConfigError::InvalidUntrackedFilesMode`] for invalid config values.
+pub(crate) fn stage_mode_for_commit(
+    config: &crate::config::ConfigSet,
+) -> std::result::Result<StageMode, crate::error::ConfigError> {
+    use crate::porcelain::status::{untracked_mode_from_config, UntrackedMode};
+    Ok(
+        if matches!(untracked_mode_from_config(config)?, UntrackedMode::No) {
+            StageMode::Update
+        } else {
+            StageMode::All
+        },
+    )
 }
 
 /// Like [`stage_for_commit`], but updates a caller-owned index and does not write it to disk.
@@ -191,8 +213,9 @@ pub(crate) fn stage_for_commit_on_index(
     cancel: &dyn Cancel,
     dry_run: bool,
 ) -> Result<StageOutcome> {
+    let config = repo.config()?;
     let opts = StageOptions {
-        mode: StageMode::All,
+        mode: stage_mode_for_commit(config.as_ref())?,
         dry_run,
         ..StageOptions::default()
     };
@@ -2535,6 +2558,56 @@ mod tests {
         assert_eq!(outcome.added.len(), 1);
         let index = repo.load_index().unwrap();
         assert!(index.get(b"new.txt", 0).is_some());
+    }
+
+    #[test]
+    fn stage_for_commit_hides_untracked_when_show_untracked_files_no() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let git = root.join(".git");
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[status]\n\tshowUntrackedFiles = no\n",
+        )
+        .unwrap();
+        let repo =
+            Repository::open(&git, &RepositoryOptions::empty().with_work_tree(root)).unwrap();
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "tracked.txt", b"tracked\n");
+        write_index(&repo, &mut index);
+        fs::write(root.join("tracked.txt"), b"tracked-modified\n").unwrap();
+        fs::write(root.join("secret.env"), b"secret\n").unwrap();
+
+        let outcome =
+            stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).unwrap();
+        assert_eq!(outcome.added.len(), 0);
+        assert_eq!(outcome.modified.len(), 1);
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"secret.env", 0).is_none());
+    }
+
+    #[test]
+    fn stage_for_commit_still_adds_untracked_when_show_untracked_files_all() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let git = root.join(".git");
+        fs::write(
+            git.join("config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n[status]\n\tshowUntrackedFiles = all\n",
+        )
+        .unwrap();
+        let repo =
+            Repository::open(&git, &RepositoryOptions::empty().with_work_tree(root)).unwrap();
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "tracked.txt", b"tracked\n");
+        write_index(&repo, &mut index);
+        fs::write(root.join("new.txt"), b"fresh\n").unwrap();
+
+        let outcome =
+            stage_for_commit(&repo, &mut NullProgress, &crate::progress::NeverCancel).unwrap();
+        assert_eq!(outcome.added.len(), 1);
     }
 
     #[test]
