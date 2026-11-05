@@ -4003,40 +4003,20 @@ mod pack_refs_test_hooks {
     }
 }
 
-/// Test hook: when set to a ref name, the next [`append_reflog`] for that ref fails.
-///
-/// Only active in debug builds; used by regression tests for commit ref/reflog atomicity.
-#[cfg(test)]
-mod reflog_fail_inject {
-    use std::cell::RefCell;
+#[cfg(any(test, feature = "test-support"))]
+#[path = "inject.rs"]
+pub(crate) mod inject;
 
-    // hygiene: test-only reflog failure injection hook
-    thread_local! {
-        pub static INJECT: RefCell<Option<String>> = const { RefCell::new(None) };
-    }
-}
-
-/// Test hook: fail the next reflog append for `refname` (or any ref when `None`).
-#[cfg(test)]
-pub fn set_test_inject_reflog_fail(refname: Option<&str>) {
-    reflog_fail_inject::INJECT.with(|c| {
-        *c.borrow_mut() = refname.map(str::to_owned);
-    });
-}
-
-#[cfg(test)]
 fn test_inject_reflog_fail(refname: &str) -> Result<()> {
-    reflog_fail_inject::INJECT.with(|c| {
-        if c.borrow().as_deref() == Some(refname) {
-            return Err(Error::Io(std::io::Error::other("injected reflog failure")));
-        }
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        inject::reflog_fail(refname)
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let _ = refname;
         Ok(())
-    })
-}
-
-#[cfg(not(test))]
-fn test_inject_reflog_fail(_refname: &str) -> Result<()> {
-    Ok(())
+    }
 }
 
 /// Move a checked-out branch to `new_oid` and append matching branch and `HEAD` reflogs.
@@ -4117,187 +4097,23 @@ fn read_loose_or_packed_oid(git_dir: &Path, refname: &str) -> Result<Option<Obje
     Ok(None)
 }
 
-#[cfg(test)]
-mod test_pause_inject_serial {
-    use std::sync::{Mutex, OnceLock};
-
-    // hygiene: test-only pause injection serialization
-    static SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
-
-    pub fn lock() -> std::sync::MutexGuard<'static, ()> {
-        SERIAL
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-    }
-}
-
-/// Serialize tests that install global ref pause injection hooks (parallel `cargo test` safe).
-#[cfg(test)]
-pub fn test_pause_injection_serial_guard() -> std::sync::MutexGuard<'static, ()> {
-    test_pause_inject_serial::lock()
-}
-
-#[cfg(test)]
-mod branch_ref_pause_inject {
-    use std::sync::{Condvar, Mutex, OnceLock};
-
-    pub struct PauseGate {
-        pub wait: Mutex<bool>,
-        pub cv: Condvar,
-    }
-
-    // hygiene: test-only branch-ref commit pause injection
-    static PAUSE_BEFORE_COMMIT: OnceLock<Mutex<Option<std::sync::Arc<PauseGate>>>> =
-        OnceLock::new();
-
-    pub fn pause_slot() -> &'static Mutex<Option<std::sync::Arc<PauseGate>>> {
-        PAUSE_BEFORE_COMMIT.get_or_init(|| Mutex::new(None))
-    }
-}
-
-/// Synchronization gate used with [`set_test_inject_branch_ref_pause_before_commit`].
-#[cfg(test)]
-pub type BranchRefPauseGate = std::sync::Arc<branch_ref_pause_inject::PauseGate>;
-
-/// Test-only: pause [`update_branch_for_commit`] on the files backend after reflogs, before committing the ref.
-#[cfg(test)]
-pub fn set_test_inject_branch_ref_pause_before_commit(gate: Option<BranchRefPauseGate>) {
-    *branch_ref_pause_inject::pause_slot()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = gate;
-}
-
-#[cfg(test)]
 fn test_branch_ref_pause_before_commit() {
-    let gate = branch_ref_pause_inject::pause_slot()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    if let Some(gate) = gate {
-        let mut wait = gate.wait.lock().unwrap_or_else(|e| e.into_inner());
-        *wait = true;
-        gate.cv.notify_all();
-        while *wait {
-            wait = gate.cv.wait(wait).unwrap_or_else(|e| e.into_inner());
-        }
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        inject::branch_ref_pause_before_commit();
     }
 }
 
-#[cfg(not(test))]
-fn test_branch_ref_pause_before_commit() {}
-
-#[cfg(test)]
-mod ref_store_batch_pause_inject {
-    use std::sync::{Condvar, Mutex, OnceLock};
-
-    pub struct PauseGate {
-        pub wait: Mutex<bool>,
-        pub cv: Condvar,
-    }
-
-    // hygiene: test-only ref-store batch commit pause injection
-    /// Armed pause: ref index, the repository it applies to, and the gate.
-    pub type PauseSlot = Option<(usize, std::path::PathBuf, std::sync::Arc<PauseGate>)>;
-
-    static PAUSE_AFTER_REF_WRITE: OnceLock<Mutex<PauseSlot>> = OnceLock::new();
-
-    pub fn pause_slot() -> &'static Mutex<PauseSlot> {
-        PAUSE_AFTER_REF_WRITE.get_or_init(|| Mutex::new(None))
-    }
-}
-
-/// Synchronization gate used with [`set_test_inject_ref_store_batch_pause_after_apply`].
-#[cfg(test)]
-pub type RefStoreBatchPauseGate = std::sync::Arc<ref_store_batch_pause_inject::PauseGate>;
-
-/// Test-only: build a pause gate for [`set_test_inject_ref_store_batch_pause_after_apply`].
-#[cfg(test)]
-pub fn new_ref_store_batch_pause_gate() -> RefStoreBatchPauseGate {
-    std::sync::Arc::new(ref_store_batch_pause_inject::PauseGate {
-        wait: std::sync::Mutex::new(false),
-        cv: std::sync::Condvar::new(),
-    })
-}
-
-/// Test-only: pause files ref-store batch commit after persisting the ref at `apply_index` (0-based).
-///
-/// Only ref stores for `git_dir` pause, so tests running in parallel against
-/// other repositories are unaffected.
-#[cfg(test)]
-pub fn set_test_inject_ref_store_batch_pause_after_apply(
-    apply_index: usize,
-    git_dir: &Path,
-    gate: Option<RefStoreBatchPauseGate>,
-) {
-    *ref_store_batch_pause_inject::pause_slot()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner()) = gate.map(|g| (apply_index, git_dir.to_path_buf(), g));
-}
-
-#[cfg(test)]
-struct RefStorePauseTestSerial {
-    /// Held while one test owns ref-store batch pause injection.
-    holder: Option<std::thread::ThreadId>,
-}
-
-#[cfg(test)]
-static REF_STORE_PAUSE_TEST_SERIAL: std::sync::Mutex<RefStorePauseTestSerial> =
-    std::sync::Mutex::new(RefStorePauseTestSerial { holder: None });
-
-/// Serialize ref-store batch pause injection tests and clear injection on drop.
-#[cfg(test)]
-pub(crate) struct RefStoreBatchPauseTestScope {
-    _serial: std::sync::MutexGuard<'static, RefStorePauseTestSerial>,
-}
-
-#[cfg(test)]
-pub(crate) fn ref_store_batch_pause_test_scope() -> RefStoreBatchPauseTestScope {
-    let mut serial = REF_STORE_PAUSE_TEST_SERIAL
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    assert!(
-        serial.holder.is_none(),
-        "ref_store_batch_pause_test_scope must not nest"
-    );
-    serial.holder = Some(std::thread::current().id());
-    set_test_inject_ref_store_batch_pause_after_apply(0, Path::new(""), None);
-    RefStoreBatchPauseTestScope { _serial: serial }
-}
-
-#[cfg(test)]
-impl Drop for RefStoreBatchPauseTestScope {
-    fn drop(&mut self) {
-        set_test_inject_ref_store_batch_pause_after_apply(0, Path::new(""), None);
-        self._serial.holder = None;
-    }
-}
-
-#[cfg(test)]
 pub(crate) fn test_ref_store_batch_pause_after_ref_write(idx: usize, git_dir: &Path) {
-    let slot = ref_store_batch_pause_inject::pause_slot()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    if let Some((target, target_dir, gate)) = slot {
-        let same_repo = |a: &Path, b: &Path| {
-            a == b
-                || matches!((a.canonicalize_simplified(), b.canonicalize_simplified()), (Ok(a), Ok(b)) if a == b)
-        };
-        if idx != target || !same_repo(git_dir, &target_dir) {
-            return;
-        }
-        let mut wait = gate.wait.lock().unwrap_or_else(|e| e.into_inner());
-        *wait = true;
-        gate.cv.notify_all();
-        while *wait {
-            wait = gate.cv.wait(wait).unwrap_or_else(|e| e.into_inner());
-        }
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        inject::ref_store_batch_pause_after_ref_write(idx, git_dir);
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        let _ = (idx, git_dir);
     }
 }
-
-#[cfg(not(test))]
-pub(crate) fn test_ref_store_batch_pause_after_ref_write(_idx: usize, _git_dir: &Path) {}
 
 /// Loose branch ref lock held between CAS validation and the ref file commit.
 ///
@@ -5451,7 +5267,6 @@ mod update_branch_for_commit_tests {
     use super::*;
     use crate::reflog::read_reflog;
     use crate::repo::init_repository;
-    use std::sync::{Arc, Condvar, Mutex};
     use std::thread;
     use tempfile::TempDir;
 
@@ -5461,7 +5276,7 @@ mod update_branch_for_commit_tests {
 
     #[test]
     fn update_branch_for_commit_holds_lock_until_ref_commit() {
-        let _pause_serial = super::test_pause_injection_serial_guard();
+        let _pause_serial = super::inject::pause_injection_test_scope();
         let tmp = TempDir::new().unwrap();
         let repo = init_repository(
             tmp.path(),
@@ -5477,11 +5292,8 @@ mod update_branch_for_commit_tests {
         let oid3 = test_commit(&git_dir, "three");
         write_ref(&git_dir, "refs/heads/main", &oid1).unwrap();
 
-        let gate = Arc::new(branch_ref_pause_inject::PauseGate {
-            wait: Mutex::new(false),
-            cv: Condvar::new(),
-        });
-        set_test_inject_branch_ref_pause_before_commit(Some(gate.clone()));
+        let gate = super::inject::branch_ref_pause_gate();
+        super::inject::set_branch_ref_pause_before_commit(Some(gate.clone()));
 
         let git_dir_thread = git_dir.clone();
         let handle = thread::spawn(move || {
@@ -5511,7 +5323,7 @@ mod update_branch_for_commit_tests {
         gate.cv.notify_all();
         drop(wait);
         handle.join().unwrap().unwrap();
-        set_test_inject_branch_ref_pause_before_commit(None);
+        super::inject::set_branch_ref_pause_before_commit(None);
 
         assert_eq!(resolve_ref(&git_dir, "refs/heads/main").unwrap(), oid2);
     }
@@ -5530,7 +5342,7 @@ mod update_branch_for_commit_tests {
         let git_dir = repo.git_dir().to_path_buf();
         let new_oid = sample_oid("3333333333333333333333333333333333333333");
 
-        crate::reftable::set_test_inject_reftable_transaction_fail(true);
+        crate::reftable::inject::set_reftable_transaction_fail(true);
         let err = update_branch_for_commit(
             &git_dir,
             &BranchCommitRefUpdate {
@@ -5542,7 +5354,7 @@ mod update_branch_for_commit_tests {
             },
         )
         .unwrap_err();
-        crate::reftable::set_test_inject_reftable_transaction_fail(false);
+        crate::reftable::inject::set_reftable_transaction_fail(false);
         assert!(!matches!(err, Error::Message(_)));
 
         assert!(resolve_ref(&git_dir, "refs/heads/main").is_err());

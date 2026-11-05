@@ -4611,68 +4611,30 @@ pub mod caches {
     pub use crate::repo_caches::*;
 }
 
-mod index_write_fail_inject {
-    use std::cell::RefCell;
-
-    // hygiene: thread-local index write failure injection for tests
-    thread_local! {
-        pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
-        pub static INJECT_REMAINING: RefCell<Option<usize>> = const { RefCell::new(None) };
-    }
-}
-
-/// Debug-only: fail every [`Repository::write_index`] / index lock path while enabled.
-#[doc(hidden)]
-pub fn set_test_inject_index_write_fail(enabled: bool) {
-    index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
-    if !enabled {
-        index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = None);
-    }
-}
-
-/// Debug-only: fail the next `remaining` index write attempts, then allow writes.
-#[doc(hidden)]
-pub fn set_test_inject_index_write_fail_remaining(remaining: usize) {
-    index_write_fail_inject::INJECT.with(|c| *c.borrow_mut() = true);
-    index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = Some(remaining));
-}
-
-mod rewrite_apply_inject {
-    use std::cell::RefCell;
-
-    // hygiene: thread-local rewrite abort injection for tests
-    thread_local! {
-        pub static ABORT_AFTER_REFS: RefCell<bool> = const { RefCell::new(false) };
-    }
-}
-
-/// Debug-only: stop [`crate::history::apply_rewrite`] after ref updates without rolling back.
-#[doc(hidden)]
-pub fn set_test_inject_rewrite_apply_abort_after_refs(enabled: bool) {
-    rewrite_apply_inject::ABORT_AFTER_REFS.with(|c| *c.borrow_mut() = enabled);
-}
+#[cfg(any(test, feature = "test-support"))]
+#[path = "repo/inject.rs"]
+pub(crate) mod inject;
 
 pub(crate) fn test_inject_rewrite_apply_abort_after_refs() -> bool {
-    rewrite_apply_inject::ABORT_AFTER_REFS.with(|c| *c.borrow())
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        inject::rewrite_apply_abort_after_refs()
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        false
+    }
 }
 
 fn test_inject_index_write_fail() -> Result<()> {
-    index_write_fail_inject::INJECT.with(|enabled| {
-        if !*enabled.borrow() {
-            return Ok(());
-        }
-        index_write_fail_inject::INJECT_REMAINING.with(|remaining| {
-            if let Some(left) = remaining.borrow_mut().as_mut() {
-                if *left == 0 {
-                    return Ok(());
-                }
-                *left -= 1;
-            }
-            Err(Error::Io(std::io::Error::other(
-                "injected index write failure",
-            )))
-        })
-    })
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        inject::index_write_fail()
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
+        Ok(())
+    }
 }
 
 #[path = "repo_location.rs"]

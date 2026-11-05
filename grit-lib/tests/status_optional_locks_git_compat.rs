@@ -264,10 +264,10 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     )
     .expect("plan");
     let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     let _err = apply_rewrite(&grit, &plan, &apply_opts(), &mut NullProgress, &NeverCancel)
         .expect_err("injected abort");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     assert!(rewrite_apply_journal_active(grit.git_dir()));
     assert_ne!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
 

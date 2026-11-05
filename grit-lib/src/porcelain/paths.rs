@@ -2638,7 +2638,8 @@ mod index_lock_transaction_tests {
 
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
-    use crate::repo::{init_repository, set_test_inject_index_write_fail, Repository};
+    use crate::repo::{init_repository, Repository};
+    use crate::test_support::inject::set_test_inject_index_write_fail;
 
     use super::{move_path, remove_paths, RemoveOptions};
 

@@ -34,22 +34,27 @@ use super::types::{
     RewrittenCommit,
 };
 
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-thread_local! { // hygiene: patch-id compute counter for tests and unstable-bench-helpers
-    static PATCH_ID_COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
-}
+#[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
+#[allow(missing_docs)]
+pub mod patch_id_inject {
+    use std::cell::Cell;
 
-/// Returns how many times patch-id computation ran on this thread since the last reset.
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-#[must_use]
-pub fn test_patch_id_compute_call_count() -> usize {
-    PATCH_ID_COMPUTE_CALLS.with(Cell::get)
-}
+    thread_local! {
+        static PATCH_ID_COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
+    }
 
-/// Clears the patch-id computation counter on this thread (tests and benchmarks).
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-pub fn test_reset_patch_id_compute_call_count() {
-    PATCH_ID_COMPUTE_CALLS.with(|c| c.set(0));
+    #[must_use]
+    pub fn patch_id_compute_call_count() -> usize {
+        PATCH_ID_COMPUTE_CALLS.with(Cell::get)
+    }
+
+    pub fn reset_patch_id_compute_call_count() {
+        PATCH_ID_COMPUTE_CALLS.with(|c| c.set(0));
+    }
+
+    pub(crate) fn record_patch_id_compute_call() {
+        PATCH_ID_COMPUTE_CALLS.with(|c| c.set(c.get().saturating_add(1)));
+    }
 }
 
 /// Inputs for [`plan_rebase`], matching `git rebase [--onto <base>] <upstream>` on a single branch tip.
@@ -1231,8 +1236,8 @@ fn compute_patch_id_recorded(
     commit_oid: &ObjectId,
     mode: PatchIdMode,
 ) -> Result<Option<ObjectId>, crate::error::Error> {
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
-    PATCH_ID_COMPUTE_CALLS.with(|c| c.set(c.get().saturating_add(1)));
+    #[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
+    patch_id_inject::record_patch_id_compute_call();
     compute_patch_id(algo, odb, commit_oid, mode)
 }
 
@@ -1401,7 +1406,7 @@ mod tests {
 
     #[test]
     fn patch_id_scan_bounded_on_large_onto_side() {
-        test_reset_patch_id_compute_call_count();
+        patch_id_inject::reset_patch_id_compute_call_count();
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = Repository::init(
             dir.path(),
@@ -1445,7 +1450,7 @@ mod tests {
         };
         reset_commit_parent_lookups();
         let _map = applied_by_patch(&repo, fork, onto, &range).expect("applied");
-        let calls = test_patch_id_compute_call_count();
+        let calls = patch_id_inject::patch_id_compute_call_count();
         assert!(
             calls <= 4,
             "expected patch-id work proportional to fork..onto overlap, got {calls} calls"

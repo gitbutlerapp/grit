@@ -24,6 +24,9 @@ pub mod fixtures;
 pub mod counters;
 
 #[cfg(any(test, feature = "test-support"))]
+pub mod inject;
+
+#[cfg(any(test, feature = "test-support"))]
 pub mod status;
 
 pub mod commit_graph;

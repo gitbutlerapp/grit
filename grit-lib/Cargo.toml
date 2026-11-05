@@ -142,7 +142,7 @@ harness = false
 [[bench]]
 name = "history_plan_rebase"
 harness = false
-required-features = ["unstable-bench-helpers"]
+required-features = ["unstable-bench-helpers", "test-support"]
 
 [[bench]]
 name = "fsck"

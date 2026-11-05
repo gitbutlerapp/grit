@@ -594,13 +594,13 @@ mod update_refs_tests {
     )]
     #[test]
     fn apply_cas_rejects_after_concurrent_packed_delete() {
-        let _pause_serial = refs::test_pause_injection_serial_guard();
+        let _pause_serial = refs::inject::pause_injection_test_scope();
         use std::path::Path;
         use std::process::Command;
         use std::sync::Arc;
         use std::thread;
 
-        let _pause_scope = refs::ref_store_batch_pause_test_scope();
+        let _pause_scope = refs::inject::ref_store_batch_pause_test_scope();
 
         fn git(dir: &Path, args: &[&str]) {
             let out = Command::new("git")
@@ -662,12 +662,8 @@ mod update_refs_tests {
             let _ = std::fs::remove_file(git_dir.join(format!("refs/heads/{name}")));
         }
 
-        let gate = refs::new_ref_store_batch_pause_gate();
-        refs::set_test_inject_ref_store_batch_pause_after_apply(
-            0,
-            &git_dir,
-            Some(Arc::clone(&gate)),
-        );
+        let gate = refs::inject::ref_store_batch_pause_gate();
+        refs::inject::set_ref_store_batch_pause_after_apply(0, &git_dir, Some(Arc::clone(&gate)));
 
         let updates = vec![
             RefTransactionItem {
@@ -718,7 +714,7 @@ mod update_refs_tests {
             c2
         );
 
-        refs::set_test_inject_ref_store_batch_pause_after_apply(0, &git_dir, None);
+        refs::inject::set_ref_store_batch_pause_after_apply(0, &git_dir, None);
     }
 
     #[cfg_attr(
@@ -727,13 +723,13 @@ mod update_refs_tests {
     )]
     #[test]
     fn unconditional_create_rejects_after_concurrent_packed_parent() {
-        let _pause_serial = refs::test_pause_injection_serial_guard();
+        let _pause_serial = refs::inject::pause_injection_test_scope();
         use std::path::Path;
         use std::process::Command;
         use std::sync::Arc;
         use std::thread;
 
-        let _pause_scope = refs::ref_store_batch_pause_test_scope();
+        let _pause_scope = refs::inject::ref_store_batch_pause_test_scope();
 
         fn git(dir: &Path, args: &[&str]) {
             let out = Command::new("git")
@@ -782,12 +778,8 @@ mod update_refs_tests {
         git(&repo, &["commit", "-q", "-m", "c1"]);
         let c1 = rev_parse(&repo, "HEAD");
 
-        let gate = refs::new_ref_store_batch_pause_gate();
-        refs::set_test_inject_ref_store_batch_pause_after_apply(
-            0,
-            &git_dir,
-            Some(Arc::clone(&gate)),
-        );
+        let gate = refs::inject::ref_store_batch_pause_gate();
+        refs::inject::set_ref_store_batch_pause_after_apply(0, &git_dir, Some(Arc::clone(&gate)));
 
         let updates = vec![
             RefTransactionItem {
@@ -835,7 +827,7 @@ mod update_refs_tests {
         assert!(crate::refs::resolve_ref(&git_dir, "refs/heads/conflict").is_ok());
         assert!(crate::refs::resolve_ref(&git_dir, "refs/heads/conflict/child").is_err());
 
-        refs::set_test_inject_ref_store_batch_pause_after_apply(0, &git_dir, None);
+        refs::inject::set_ref_store_batch_pause_after_apply(0, &git_dir, None);
     }
 }
 

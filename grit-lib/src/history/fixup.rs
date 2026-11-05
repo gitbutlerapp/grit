@@ -493,7 +493,8 @@ mod hunk_selection_restore_tests {
     use crate::history::RefScope;
     use crate::objects::ObjectId;
     use crate::porcelain::hunk_select::{unstaged_file_diffs, LineRange};
-    use crate::repo::{init_repository, set_test_inject_index_write_fail_remaining};
+    use crate::repo::init_repository;
+    use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
     use crate::RefStorageFormat;
     use std::process::Command;
 
@@ -623,7 +624,7 @@ mod hunk_selection_restore_tests {
         set_test_inject_index_write_fail_remaining(1);
         let err = restore_after_hunk_fixup_apply(&grit, &snapshot).expect_err("restore fails");
         restore_full_hunk_fixup_snapshot(&grit, &snapshot).expect("rollback snapshot");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
         assert!(matches!(err, HistoryError::WorktreeApply { .. }));
         assert_ne!(
             grit.head_commit().expect("head after"),

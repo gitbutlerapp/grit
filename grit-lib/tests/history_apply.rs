@@ -725,7 +725,7 @@ fn ref_update_lines_round_trip_through_git_update_ref_stdin() {
 
 #[test]
 fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
-    use grit_lib::repo::set_test_inject_index_write_fail_remaining;
+    use grit_lib::test_support::inject::set_test_inject_index_write_fail_remaining;
 
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
@@ -780,7 +780,7 @@ fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected checkout failure");
-    grit_lib::repo::set_test_inject_index_write_fail(false);
+    grit_lib::test_support::inject::set_test_inject_index_write_fail(false);
     assert!(matches!(
         err,
         grit_lib::revwalk::history::HistoryError::WorktreeApply { .. }
@@ -817,7 +817,7 @@ fn interrupted_rewrite_apply_recovers_and_blocks_commit_until_finished() {
     );
     assert_ne!(plan.head.old_tree, plan.head.new_tree);
     let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     let err = apply_rewrite(
         &grit,
         &plan,
@@ -826,7 +826,7 @@ fn interrupted_rewrite_apply_recovers_and_blocks_commit_until_finished() {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort after refs");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     let grit_lib::revwalk::history::HistoryError::WorktreeApply { message } = err else {
         panic!("unexpected apply error");
     };
@@ -909,7 +909,7 @@ fn interrupted_partial_checkout() -> (HistoryRepo, grit_lib::revwalk::history::R
     fs::write(wt.join("scratch.txt"), "scratch\n").expect("untracked file");
 
     let grit = open_grit(wt);
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     apply_rewrite(
         &grit,
         &plan,
@@ -918,7 +918,7 @@ fn interrupted_partial_checkout() -> (HistoryRepo, grit_lib::revwalk::history::R
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort after refs");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     assert!(rewrite_apply_journal_active(grit.git_dir()));
 
     fs::write(wt.join("one.txt"), "one new\n").expect("finished path");
@@ -1133,7 +1133,7 @@ fn interrupted_rewrite_apply_abort_keeps_racily_clean_edit_visible() {
 
     let plan = plan_tip_tree_edits(wt, tip, &[("other.txt", b"other\n")]);
     let grit = open_grit(wt);
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     apply_rewrite(
         &grit,
         &plan,
@@ -1142,7 +1142,7 @@ fn interrupted_rewrite_apply_abort_keeps_racily_clean_edit_visible() {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     fs::write(wt.join("other.txt"), "oth").expect("half-written new file");
 
     assert_eq!(
@@ -1228,7 +1228,7 @@ fn rewrite_apply_journal_stores_from_tree_manifest_for_wide_clean_transition() {
         .collect();
     let plan = plan_tip_tree_edits(wt, tip, &edit_refs);
     let grit = open_grit(wt);
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     apply_rewrite(
         &grit,
         &plan,
@@ -1237,7 +1237,7 @@ fn rewrite_apply_journal_stores_from_tree_manifest_for_wide_clean_transition() {
         &mut grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     let worktree_dir = wt.join(".git/grit/rewrite-apply/worktree");
     let file_count = fs::read_dir(&worktree_dir)
         .expect("journal worktree dir")
@@ -1274,7 +1274,7 @@ fn interrupted_rewrite_apply_abort_restores_empty_tracked_file() {
         b"would-be-new-content\n",
         "change empty in replayed tip",
     );
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     apply_rewrite(
         &grit,
         &plan,
@@ -1283,7 +1283,7 @@ fn interrupted_rewrite_apply_abort_restores_empty_tracked_file() {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     fs::remove_file(wt.join("empty.txt")).expect("simulate partial checkout deleting empty file");
     grit_lib::revwalk::history::abort_interrupted_rewrite_apply(&grit).expect("abort");
     assert!(wt.join("empty.txt").is_file());
@@ -1306,7 +1306,7 @@ fn interrupted_rewrite_apply_abort_restores_newline_filename() {
         b"after\n",
         "change newline-named file in replayed tip",
     );
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     apply_rewrite(
         &grit,
         &plan,
@@ -1315,7 +1315,7 @@ fn interrupted_rewrite_apply_abort_restores_newline_filename() {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     fs::remove_file(wt.join(newline_path)).expect("simulate partial checkout");
     grit_lib::revwalk::history::abort_interrupted_rewrite_apply(&grit).expect("abort");
     assert!(wt.join(newline_path).is_file());

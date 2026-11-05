@@ -56,6 +56,9 @@ mod r#move;
 mod plan;
 mod rebase;
 mod rebase_session;
+
+#[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
+pub use rebase::patch_id_inject;
 mod reword;
 mod split;
 mod squash;
@@ -90,8 +93,6 @@ pub use rebase::{
     rebase_run_request, resolve_rebase_use_fork_point, PreRebase, RebaseCheckPlan,
     RebaseOntoOptions, RebasePlan, RebaseRequest,
 };
-#[cfg(any(test, feature = "unstable-bench-helpers"))]
-pub use rebase::{test_patch_id_compute_call_count, test_reset_patch_id_compute_call_count};
 pub(crate) use rebase_session::persist_rebase_stopped_head_if_missing;
 pub use rebase_session::{
     abort_rebase, continue_rebase, skip_rebase, start_rebase, start_rebase_with_exec, RebaseAbort,

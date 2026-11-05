@@ -3674,15 +3674,9 @@ pub fn verify_ref_transaction_batch_reftable(
     Ok(())
 }
 
-#[cfg(test)]
-mod reftable_tx_fail_inject {
-    use std::cell::RefCell;
-
-    // hygiene: test-only write_transaction failure injection (thread_local)
-    thread_local! {
-        pub static INJECT: RefCell<bool> = const { RefCell::new(false) };
-    }
-}
+#[cfg(any(test, feature = "test-support"))]
+#[path = "reftable/inject.rs"]
+pub(crate) mod inject;
 
 #[cfg(test)]
 mod reftable_write_test_hooks {
@@ -3716,27 +3710,15 @@ mod reftable_write_test_hooks {
     }
 }
 
-/// When enabled (tests only), the next [`ReftableStack::write_transaction`] fails before writing.
-#[cfg(test)]
-pub fn set_test_inject_reftable_transaction_fail(enabled: bool) {
-    reftable_tx_fail_inject::INJECT.with(|c| *c.borrow_mut() = enabled);
-}
-
-#[cfg(test)]
 fn test_inject_reftable_transaction_fail() -> Result<()> {
-    reftable_tx_fail_inject::INJECT.with(|c| {
-        if *c.borrow() {
-            return Err(Error::Io(std::io::Error::other(
-                "injected reftable transaction failure",
-            )));
-        }
+    #[cfg(any(test, feature = "test-support"))]
+    {
+        inject::reftable_transaction_fail()
+    }
+    #[cfg(not(any(test, feature = "test-support")))]
+    {
         Ok(())
-    })
-}
-
-#[cfg(not(test))]
-fn test_inject_reftable_transaction_fail() -> Result<()> {
-    Ok(())
+    }
 }
 
 /// Delete a ref from a reftable repo.
@@ -5072,7 +5054,7 @@ mod tests {
         let before = fs::read_to_string(&tables_list).unwrap_or_default();
 
         let oid = ObjectId::from_bytes(&[0xcd; 20]).unwrap();
-        set_test_inject_reftable_transaction_fail(true);
+        inject::set_reftable_transaction_fail(true);
         let mut stack = ReftableStack::open(&git_dir).unwrap();
         let opts = read_write_options(&git_dir);
         let err = stack.write_transaction(
@@ -5084,7 +5066,7 @@ mod tests {
             }],
             &opts,
         );
-        set_test_inject_reftable_transaction_fail(false);
+        inject::set_reftable_transaction_fail(false);
         assert!(err.is_err());
 
         let after = fs::read_to_string(&tables_list).unwrap_or_default();

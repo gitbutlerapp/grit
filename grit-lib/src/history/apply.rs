@@ -2544,7 +2544,7 @@ mod inject_and_apply_tests {
 
     #[test]
     fn apply_rewrite_injected_checkout_failure_restores_worktree_and_index() {
-        use crate::repo::set_test_inject_index_write_fail_remaining;
+        use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -2651,7 +2651,7 @@ mod inject_and_apply_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
         assert!(matches!(
             err,
             HistoryError::WorktreeApply { .. } | HistoryError::ApplyRollbackIncomplete { .. }
@@ -3115,7 +3115,7 @@ mod inject_and_apply_tests {
 
     #[test]
     fn apply_rewrite_injected_checkout_failure_restores_directory_after_file_transition() {
-        use crate::repo::set_test_inject_index_write_fail_remaining;
+        use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -3231,7 +3231,7 @@ mod inject_and_apply_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
         assert!(matches!(err, HistoryError::WorktreeApply { .. }));
 
         let tree_from_index_path = |path: &std::path::Path| {
@@ -3260,7 +3260,7 @@ mod inject_and_apply_tests {
     #[cfg(unix)]
     #[test]
     fn apply_rewrite_injected_checkout_failure_restores_regular_file_after_symlink_transition() {
-        use crate::repo::set_test_inject_index_write_fail_remaining;
+        use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -3371,7 +3371,7 @@ mod inject_and_apply_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
         assert!(matches!(err, HistoryError::WorktreeApply { .. }));
 
         let file_path = dir.path().join("file.txt");
@@ -3386,7 +3386,7 @@ mod inject_and_apply_tests {
 
     #[test]
     fn apply_rewrite_injected_checkout_failure_restores_regular_file_after_directory_transition() {
-        use crate::repo::set_test_inject_index_write_fail_remaining;
+        use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -3497,7 +3497,7 @@ mod inject_and_apply_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
         assert!(matches!(err, HistoryError::WorktreeApply { .. }));
 
         let tree_from_index_path = |path: &std::path::Path| {
@@ -3608,7 +3608,7 @@ mod inject_and_apply_tests {
     #[test]
     fn apply_rewrite_checkout_failure_preserves_gitlink_worktree() {
         use crate::index::MODE_GITLINK;
-        use crate::repo::set_test_inject_index_write_fail_remaining;
+        use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -3734,7 +3734,7 @@ mod inject_and_apply_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
 
         assert!(
             sub_dir.join("local.txt").is_file(),
@@ -3757,7 +3757,7 @@ mod inject_and_apply_tests {
 
         use std::os::unix::fs::PermissionsExt;
 
-        use crate::repo::set_test_inject_index_write_fail_remaining;
+        use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -3875,7 +3875,7 @@ mod inject_and_apply_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("checkout must fail");
-        crate::repo::set_test_inject_index_write_fail(false);
+        crate::test_support::inject::set_test_inject_index_write_fail(false);
 
         let mode = fs::metadata(&script_path)
             .expect("meta")

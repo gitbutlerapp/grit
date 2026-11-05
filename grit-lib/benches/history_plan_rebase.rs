@@ -14,8 +14,10 @@ use grit_lib::porcelain::index_from_tree::index_from_tree;
 use grit_lib::refs::write_ref;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    plan_rebase, test_patch_id_compute_call_count, test_reset_patch_id_compute_call_count,
-    EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,
+    plan_rebase, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,
+};
+use grit_lib::test_support::inject::{
+    test_patch_id_compute_call_count, test_reset_patch_id_compute_call_count,
 };
 
 use s7::history_commit_count;

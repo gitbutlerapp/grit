@@ -108,7 +108,7 @@ fn interrupted_rewrite_repo() -> (tempfile::TempDir, String) {
     )
     .expect("plan");
     let new_tip = plan.ref_updates[0].new.to_hex();
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
     apply_rewrite(
         &repo,
         &plan,
@@ -122,7 +122,7 @@ fn interrupted_rewrite_repo() -> (tempfile::TempDir, String) {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("injected abort after refs");
-    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     fs::write(wt.join("a.txt"), "new con").expect("half-written checkout");
     (tmp, new_tip)
 }

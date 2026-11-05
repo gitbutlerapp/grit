@@ -2167,8 +2167,10 @@ mod tests {
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
     use crate::reflog::read_reflog;
-    use crate::refs::{resolve_ref, set_test_inject_reflog_fail};
-    use crate::repo::set_test_inject_index_write_fail;
+    use crate::refs::resolve_ref;
+    use crate::test_support::inject::{
+        set_test_inject_index_write_fail, set_test_inject_reflog_fail,
+    };
     use crate::write_tree::{cache_tree_fully_valid, verify_cache_tree};
     use std::fs;
     use std::io::Write;
