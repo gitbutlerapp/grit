@@ -4,7 +4,9 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 
-pub use grit_lib::bench_fixture::synth::{generate_synth_repo, SynthReport, SynthTier, TierSpec};
+pub use grit_lib::test_support::fixtures::synth::{
+    generate_synth_repo, SynthReport, SynthTier, TierSpec,
+};
 
 /// Validate tier **S** output using the system `git` binary (integration tests).
 pub fn verify_tier_s_with_git(repo: &Path, spec: TierSpec) -> Result<()> {

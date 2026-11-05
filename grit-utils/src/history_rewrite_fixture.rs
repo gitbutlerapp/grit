@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::bench_fixture::synth::{
-    generate_synth_repo_with_spec, history_rewrite_bench_spec, SynthReport,
+use grit_lib::test_support::fixtures::synth::{
+    generate_synth_repo_with_spec, history_rewrite_spec, SynthReport,
 };
 
 use crate::bench_env::empty_global_config_path;
@@ -91,7 +91,7 @@ pub fn history_rewrite_work_path() -> PathBuf {
     cache_root().join(WORK_SUFFIX)
 }
 
-fn smoke_spec() -> grit_lib::bench_fixture::synth::TierSpec {
+fn smoke_spec() -> grit_lib::test_support::fixtures::synth::TierSpec {
     let mut spec = SynthTier::S.spec();
     spec.commit_count = 200;
     spec.file_count = 500;
@@ -103,7 +103,7 @@ fn build_source_repo(git: &Path, smoke: bool) -> Result<(PathBuf, SynthReport)> 
     let spec = if smoke {
         smoke_spec()
     } else {
-        history_rewrite_bench_spec()
+        history_rewrite_spec()
     };
     let src = cache_root().join(if smoke {
         "history-rewrite-src-smoke"

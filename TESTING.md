@@ -22,8 +22,8 @@ cargo test -p grit-lib --lib
 cargo test -p grit-lib -p grit-cli
 
 # Whole workspace, fast (what `make test` runs: nextest when installed, then doctests)
-cargo nextest run --workspace && cargo test --workspace --doc
-cargo test --workspace   # without nextest
+cargo nextest run --workspace --features grit-lib/test-support && cargo test --workspace --doc --features grit-lib/test-support
+cargo test --workspace --features grit-lib/test-support   # without nextest
 
 # Everything, including git comparisons and heavy fixtures (`make test-full`, nightly CI)
 make test-full
@@ -252,7 +252,9 @@ Unit tests: `python3 -m unittest scripts/tests/test_api_ratchet.py` (also covere
 
 ### `test-support` and public API test hooks
 
-**`test-support`** is an empty-by-default, **unstable** `grit-lib` feature. It exposes [`grit_lib::test_support`](grit-lib/src/test_support/mod.rs) for workspace tests and internal crates only (via **`grit-test-support`** dev-dependencies). It is **outside semver**: omitted from **`public-api.txt`** and **`make semver-check`**, and may change in any release. Do not enable it from **`grit-cli`**, **`grit-protocol`**, or **`grit-http-server`** `[dependencies]`; **`make gate`** and CI also run **`cargo check -p grit-lib`** and **`cargo check -p grit-cli`** without the feature so the default embedder build stays clean.
+**`test-support`** is an empty-by-default, **unstable** `grit-lib` feature. It exposes [`grit_lib::test_support`](grit-lib/src/test_support/mod.rs) (including [`test_support::fixtures`](grit-lib/src/test_support/fixtures/mod.rs) for synthetic benchmark repos and [`test_support::ewah`](grit-lib/src/test_support/ewah.rs) for EWAH Criterion fixtures) for workspace tests and internal crates only. Enable it from **`grit-test-support`**, **`grit-utils`**, and **`cargo test --workspace`** / **`make gate`** via **`--features grit-lib/test-support`**; do not enable it from **`grit-cli`**, **`grit-protocol`**, or **`grit-http-server`** `[dependencies]`. It is **outside semver**: omitted from **`public-api.txt`** and **`make semver-check`**, and may change in any release. **`make gate`** and CI still run **`cargo check -p grit-lib`** and **`cargo check -p grit-cli`** without the feature so the default embedder build stays clean.
+
+**`unstable-bench-helpers`** is a deprecated alias for **`test-support`** (removed in a later roadmap step); prefer **`test-support`** for new code and for **`make bench-lib`**.
 
 Test hooks belong in three tiers (roadmap API 0.6): **`test_support::fixtures`** for shared repo generators, **`test_support`** helpers for cross-crate wiring, and **`#[doc(hidden)]`** items documented only with **`--document-hidden-items`** (see below). New hooks should land in **`test_support`** when they are not **`#[doc(hidden)]`**.
 

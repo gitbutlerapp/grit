@@ -96,9 +96,6 @@ fn every_public_module_has_rust_doctest_in_module_docs() {
     let missing: Vec<String> = pub_mods_from_lib_rs()
         .into_iter()
         .filter_map(|name| {
-            if name == "ewah_bench_api" {
-                return None;
-            }
             let doc = if name == "prelude" {
                 inline_prelude_doc(&lib_rs)
             } else {

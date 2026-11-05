@@ -57,10 +57,6 @@ pub mod pack {
     pub use crate::pack_reuse_root::*;
 }
 
-pub mod bench_fixture {
-    //! Synthetic repository fixtures for benchmarks and tests.
-    pub use crate::bench_fixture_root::*;
-}
 pub mod pack_reuse {
     //! Verbatim pack reuse for upload-pack.
     pub use crate::pack_reuse_root::*;
@@ -153,11 +149,4 @@ pub mod pack_receive {
 pub mod pack_stream_scan {
     //! Count a pack's objects while its bytes are still arriving.
     pub use crate::pack_stream_scan::*;
-}
-
-#[cfg(feature = "unstable-bench-helpers")]
-#[allow(missing_docs)]
-pub mod ewah_bench {
-    //! Criterion fixtures for EWAH bitmap hot paths (`benches/ewah.rs` only).
-    include!("../ewah_bench_api.rs");
 }

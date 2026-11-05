@@ -227,7 +227,7 @@ impl DetRng {
 
 /// Fixed parameters for history-rewrite grit-bench scenarios (~10k files, 5k commits, 50 branches).
 #[must_use]
-pub fn history_rewrite_bench_spec() -> TierSpec {
+pub fn history_rewrite_spec() -> TierSpec {
     TierSpec {
         tier: SynthTier::M,
         layout: PathLayout::TierDefault,

@@ -5,7 +5,9 @@ use std::process::{Command, Stdio};
 
 use anyhow::{ensure, Context, Result};
 use clap::Parser;
-use grit_lib::bench_fixture::synth::{generate_synth_repo_with_spec, PathLayout, SynthTier};
+use grit_lib::test_support::fixtures::synth::{
+    generate_synth_repo_with_spec, PathLayout, SynthTier,
+};
 use grit_utils::bench_env::apply_isolated_env;
 use grit_utils::daily::runner::{
     run_timed_via_helper, timing_stats_from_samples, BenchArgv, RunLimits, RunPolicy,
@@ -65,7 +67,7 @@ fn main() -> Result<()> {
     ] {
         let cwd = args.fixtures.join(shape);
         if !cwd.join(".git").exists() {
-            let spec = grit_lib::bench_fixture::synth::TierSpec {
+            let spec = grit_lib::test_support::fixtures::synth::TierSpec {
                 file_count: files,
                 commit_count: commits,
                 ref_count: refs,

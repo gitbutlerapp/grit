@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use grit_lib::bench_fixture::synth::SynthTier;
+use grit_lib::test_support::fixtures::synth::SynthTier;
 
 use crate::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
 use crate::conflicts_suite::run_conflicts_suite;

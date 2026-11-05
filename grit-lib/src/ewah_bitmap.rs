@@ -290,7 +290,7 @@ impl<'a> EwahView<'a> {
     }
 
     /// OR logical words into `out`, advancing only through set runs and literal payloads.
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
+    #[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
     pub(crate) fn or_into(&self, out: &mut Bitmap) -> Result<(), EwahError> {
         let word_limit = self.bit_size.div_ceil(BITS_IN_EWORD);
         out.grow_words(word_limit);
@@ -323,7 +323,7 @@ impl<'a> EwahView<'a> {
     }
 
     /// Population count without materializing an uncompressed bitmap.
-    #[cfg(any(test, feature = "unstable-bench-helpers"))]
+    #[cfg(any(test, feature = "test-support", feature = "unstable-bench-helpers"))]
     pub(crate) fn count_ones(&self) -> Result<usize, EwahError> {
         let mut count = 0usize;
         let mut pointer = 0usize;

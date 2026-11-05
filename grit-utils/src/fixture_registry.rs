@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::bench_fixture::daily_special::{generate_daily_special_repo, DailySpecialShape};
-use grit_lib::bench_fixture::synth::{
+use grit_lib::test_support::fixtures::daily_special::{
+    generate_daily_special_repo, DailySpecialShape,
+};
+use grit_lib::test_support::fixtures::synth::{
     generate_synth_repo, generate_synth_repo_with_spec, RepoShape, SynthTier,
 };
 

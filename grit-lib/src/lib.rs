@@ -224,8 +224,6 @@ pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
 pub(crate) mod partial_clone;
 
-#[path = "bench_fixture/mod.rs"]
-mod bench_fixture_root;
 pub(crate) mod bitmap_walk;
 pub(crate) mod fetch;
 pub(crate) mod fetch_head;
@@ -407,7 +405,6 @@ pub mod fuzz;
 pub use ref_storage::RefStorageFormat;
 
 pub use crate::oid_abbrev::OidAbbrevBatch;
-pub use objects::bench_fixture;
 pub use objects::pack_reuse;
 pub use objects::pack_write;
 pub use porcelain::quote_path;

@@ -41,11 +41,12 @@ else
 	echo ""
 	echo "==> api-ratchet skipped (pinned nightly-${PUBLIC_API_NIGHTLY_DATE} not installed)"
 fi
+WORKSPACE_TEST_FEATURES=(--features grit-lib/test-support)
 if cargo nextest --version >/dev/null 2>&1; then
-	run_stage "test" cargo nextest run --workspace
-	run_stage "doctests" cargo test --workspace --doc
+	run_stage "test" cargo nextest run --workspace "${WORKSPACE_TEST_FEATURES[@]}"
+	run_stage "doctests" cargo test --workspace --doc "${WORKSPACE_TEST_FEATURES[@]}"
 else
-	run_stage "test" cargo test --workspace
+	run_stage "test" cargo test --workspace "${WORKSPACE_TEST_FEATURES[@]}"
 fi
 
 echo ""

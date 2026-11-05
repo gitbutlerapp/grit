@@ -36,10 +36,10 @@ full-tests = []
 http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls"]
 # Use the platform TLS stack (Secure Transport on macOS) instead of rustls.
 http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
-# Internal helpers for Criterion benches (EWAH); omitted from the public API snapshot.
-unstable-bench-helpers = []
 # Unstable test hooks for the workspace; outside semver — dev-dependencies and internal crates only.
 test-support = []
+# Internal helpers for Criterion benches (EWAH); alias for `test-support` (removed in a later plan step).
+unstable-bench-helpers = ["test-support"]
 # Forward `trace_span!` to the `tracing` crate (zero cost when disabled).
 tracing = ["dep:tracing"]
 # Derive or implement `serde::Serialize` on result models (`StatusModel`, `DiffEntry`,
@@ -228,7 +228,7 @@ harness = false
 [[bench]]
 name = "ewah"
 harness = false
-required-features = ["unstable-bench-helpers"]
+required-features = ["test-support"]
 
 [[bench]]
 name = "change_id_resolve"
@@ -297,6 +297,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt"] }
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
+required-features = ["test-support"]
 
 [[test]]
 name = "clone_reflog_injected_ref_store"

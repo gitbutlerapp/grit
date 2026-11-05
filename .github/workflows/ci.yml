@@ -423,8 +423,8 @@ jobs:
         # so most never ran) in parallel, each test in its own process
         # (.config/nextest.toml); doctests still need cargo test.
         run: |
-          cargo nextest run --workspace --profile ci
-          cargo test --workspace --doc
+          cargo nextest run --workspace --profile ci --features grit-lib/test-support
+          cargo test --workspace --doc --features grit-lib/test-support
 
   test-full:
     name: test-full

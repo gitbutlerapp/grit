@@ -5,8 +5,8 @@
 updated = "2026-11-05"
 
 [counts]
-public_api_lines = 33295
-pub_fn_with_in_name = 157
+public_api_lines = 33043
+pub_fn_with_in_name = 156
 pub_fn_too_many_arguments_allow = 34
 pub_fn_two_plus_bare_bool = 31
 pub_fn_result_string_err = 14

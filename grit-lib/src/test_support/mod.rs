@@ -8,5 +8,14 @@
 //!
 //! ```rust,ignore
 //! // Available with the `test-support` feature (workspace tests only).
-//! let _ = grit_lib::test_support;
+//! use grit_lib::test_support::fixtures::synth::SynthTier;
+//! let _ = SynthTier::S;
 //! ```
+//!
+//! [`fixtures`] holds deterministic repo generators for `grit-bench` and workspace tests.
+//! [`ewah`] exposes Criterion fixtures for EWAH bitmap benches.
+
+/// Criterion fixtures for EWAH bitmap benches (`benches/ewah.rs`).
+pub mod ewah;
+/// Deterministic synthetic repositories for `grit-bench` and workspace tests.
+pub mod fixtures;

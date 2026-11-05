@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard};
 
-use grit_lib::bench_fixture::daily_special::DailySpecialShape;
+use grit_lib::test_support::fixtures::daily_special::DailySpecialShape;
 use grit_utils::binary::resolve_binary;
 use grit_utils::fixture_registry::{self, FixtureKind, DEFAULT_GIT_GIT_HEAD};
 use tempfile::TempDir;

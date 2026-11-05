@@ -4,12 +4,12 @@ use std::collections::VecDeque;
 
 use grit_lib::diff::tree_oid_of_commit;
 use grit_lib::error::Error;
-use grit_lib::objects::bench_fixture::synth::{generate_synth_repo_with_spec, RepoShape};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{
     parse_tree, parse_tree_with_oid_len, HashAlgo, ObjectId, ObjectKind, TreeEntry, TreeRefIter,
 };
 use grit_lib::repo::Repository;
+use grit_lib::test_support::fixtures::synth::{generate_synth_repo_with_spec, RepoShape};
 use grit_test_support::objects::{git_supports_sha256, HashAlgo as FixtureAlgo, RepoFixture};
 
 fn entries_from_ref_iter(data: &[u8]) -> grit_lib::error::Result<Vec<TreeEntry>> {

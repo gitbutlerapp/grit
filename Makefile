@@ -45,18 +45,21 @@ build:
 debug:
 	$(CARGO) build -p grit-cli
 
+# grit-lib integration tests link `test_support::fixtures`; enable on workspace test runs.
+WORKSPACE_TEST_FEATURES = --features grit-lib/test-support
+
 # nextest runs test binaries in parallel, each test in its own process
 # (.config/nextest.toml); it does not run doctests, so those go through cargo test.
 test:
 	@if $(CARGO) nextest --version >/dev/null 2>&1; then \
-		$(CARGO) nextest run --workspace && $(CARGO) test --workspace --doc; \
+		$(CARGO) nextest run --workspace $(WORKSPACE_TEST_FEATURES) && $(CARGO) test --workspace --doc $(WORKSPACE_TEST_FEATURES); \
 	else \
-		$(CARGO) test --workspace; \
+		$(CARGO) test --workspace $(WORKSPACE_TEST_FEATURES); \
 	fi
 
 # Tests that start the system git (comparisons, fixtures built with git) or build
 # heavy fixtures are compiled only with the full-tests feature of each crate.
-FULL_TESTS = --features grit-lib/full-tests,grit-cli/full-tests,grit-utils/full-tests,grit-examples/full-tests,grit-protocol/full-tests,grit-http-server/full-tests,grit-test-support/full-tests
+FULL_TESTS = --features grit-lib/test-support,grit-lib/full-tests,grit-cli/full-tests,grit-utils/full-tests,grit-examples/full-tests,grit-protocol/full-tests,grit-http-server/full-tests,grit-test-support/full-tests
 
 test-full:
 	$(CARGO) build --release -p grit-cli
@@ -82,7 +85,7 @@ gate:
 bench-lib:
 	@mkdir -p $(BENCH_DIR)
 	$(CARGO) build --release -p grit-utils
-	$(CARGO) bench -p grit-lib --features unstable-bench-helpers
+	$(CARGO) bench -p grit-lib --features test-support
 	./target/release/grit-bench criterion-summary --criterion-dir $(CRITERION_DIR) --format json --output $(BENCH_DIR)/criterion-summary.json
 
 bench-scenarios:
