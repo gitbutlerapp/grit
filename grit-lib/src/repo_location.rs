@@ -133,8 +133,7 @@ fn locate_dot_git_dir(options: &RepositoryOptions) -> Result<Option<Located>> {
         || env.git_work_tree.is_some()
         || env.git_object_directory.is_some()
         || has_ceilings
-        || options.test_assume_different_owner
-        || env.test_assume_different_owner()
+        || !options.uses_default_ownership_check()
     {
         return Ok(None);
     }
@@ -199,7 +198,13 @@ fn accept_dot_git_dir(
         return Ok(None);
     }
 
-    ensure_valid_ownership(env, None, Some(work_tree), &git_dir)?;
+    ensure_valid_ownership(
+        options.ownership_check().as_ref(),
+        env,
+        None,
+        Some(work_tree),
+        &git_dir,
+    )?;
     let location = RepositoryLocation {
         git_dir,
         work_tree: Some(work_tree.to_path_buf()),
@@ -386,11 +391,18 @@ mod tests {
         for vars in [
             vec![("GIT_DIR", git_dir)],
             vec![("GIT_CEILING_DIRECTORIES", ceiling.as_str())],
-            vec![("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")],
         ] {
             let options = options_at(tmp.path(), &vars);
             assert!(locate_dot_git_dir(&options).unwrap().is_none(), "{vars:?}");
         }
+        let foreign = {
+            use crate::ownership_check::ForeignOwnershipCheck;
+            use std::sync::Arc;
+            let mut options = options_at(tmp.path(), &[]);
+            options = options.with_ownership_check(Arc::new(ForeignOwnershipCheck));
+            options
+        };
+        assert!(locate_dot_git_dir(&foreign).unwrap().is_none());
     }
 
     #[test]

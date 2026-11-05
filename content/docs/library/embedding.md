@@ -45,7 +45,7 @@ Empty snapshots need no allocation for the captured map.
 | `diagnostics` | `DiagnosticSink` for warnings and trace events |
 | `network_trace` | When true, emit network trace events via the diagnostics sink |
 | `reference_unix_time` | Wall clock for rev-parse date selectors (`@{yesterday}`, etc.) |
-| Test knobs | `test_assume_different_owner`, … |
+| `ownership_check` | Injectable [`OwnershipCheck`](rustdoc:grit_lib::ownership_check::OwnershipCheck) for `safe.directory` (default [`SystemOwnershipCheck`](rustdoc:grit_lib::ownership_check::SystemOwnershipCheck)) |
 
 Construct options with one of the associated constructors, then chain the builder methods:
 

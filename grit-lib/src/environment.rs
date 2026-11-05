@@ -22,6 +22,7 @@ use crate::config::parse_git_config_maybe_bool;
 use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics};
 use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
 use crate::ident_resolve::IdentityEnv;
+use crate::ownership_check::{default_ownership_check, is_default_ownership_check, OwnershipCheck};
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 ///
@@ -91,8 +92,6 @@ pub struct Environment {
     pub git_exec_path: Option<OsString>,
     /// `$PWD` when set (symlink-preserving absolute path for include matching).
     pub pwd: Option<String>,
-    /// Override for `GIT_TEST_ASSUME_DIFFERENT_OWNER` when set (see Git environment variable of the same name).
-    pub git_test_assume_different_owner: Option<String>,
     /// Original working directory of the `grit` invocation (for messages).
     pub grit_invocation_cwd: Option<String>,
     /// Override for `SUDO_UID` when set (see Git environment variable of the same name).
@@ -169,7 +168,6 @@ impl Environment {
             git_install_root: None,
             git_exec_path: None,
             pwd: None,
-            git_test_assume_different_owner: None,
             grit_invocation_cwd: None,
             sudo_uid: None,
             git_test_utf8_nfd_to_nfc: None,
@@ -226,7 +224,6 @@ impl Environment {
             && self.git_install_root == e.git_install_root
             && self.git_exec_path == e.git_exec_path
             && self.pwd == e.pwd
-            && self.git_test_assume_different_owner == e.git_test_assume_different_owner
             && self.grit_invocation_cwd == e.grit_invocation_cwd
             && self.sudo_uid == e.sudo_uid
             && self.git_test_utf8_nfd_to_nfc == e.git_test_utf8_nfd_to_nfc
@@ -301,7 +298,6 @@ impl Environment {
             git_install_root: get_os("GIT_INSTALL_ROOT"),
             git_exec_path: get_os("GIT_EXEC_PATH"),
             pwd: get("PWD"),
-            git_test_assume_different_owner: get("GIT_TEST_ASSUME_DIFFERENT_OWNER"),
             grit_invocation_cwd: get("GRIT_INVOCATION_CWD"),
             sudo_uid: get("SUDO_UID"),
             git_test_utf8_nfd_to_nfc: get("GIT_TEST_UTF8_NFD_TO_NFC"),
@@ -344,18 +340,6 @@ impl Environment {
             .as_deref()
             .map(|value| value != "false")
             .unwrap_or(true)
-    }
-
-    /// Whether `GIT_TEST_ASSUME_DIFFERENT_OWNER` is enabled.
-    #[must_use]
-    pub fn test_assume_different_owner(&self) -> bool {
-        self.git_test_assume_different_owner
-            .as_deref()
-            .map(|v| {
-                let lower = v.to_ascii_lowercase();
-                v == "1" || lower == "true" || lower == "yes" || lower == "on"
-            })
-            .unwrap_or(false)
     }
 
     /// Use `path` as the repository directory, like setting `GIT_DIR`.
@@ -786,11 +770,6 @@ impl Environment {
         subprocess_push_str(&mut set, "PWD", self.pwd.as_deref());
         subprocess_push_str(
             &mut set,
-            "GIT_TEST_ASSUME_DIFFERENT_OWNER",
-            self.git_test_assume_different_owner.as_deref(),
-        );
-        subprocess_push_str(
-            &mut set,
             "GRIT_INVOCATION_CWD",
             self.grit_invocation_cwd.as_deref(),
         );
@@ -1012,7 +991,6 @@ const TYPED_ENVIRONMENT_VARS: &[&str] = &[
     "GIT_INSTALL_ROOT",
     "GIT_EXEC_PATH",
     "PWD",
-    "GIT_TEST_ASSUME_DIFFERENT_OWNER",
     "GRIT_INVOCATION_CWD",
     "SUDO_UID",
     "GIT_TEST_UTF8_NFD_TO_NFC",
@@ -1070,8 +1048,8 @@ pub struct RepositoryOptions {
     pub diagnostics: DiagnosticsHandle,
     /// When true, network operations may emit [`crate::diagnostics::Trace::Network`] events.
     pub network_trace: bool,
-    /// When true, treat repository ownership as a different user (`safe.directory` tests).
-    pub test_assume_different_owner: bool,
+    /// Injectable ownership checks for discovery (`safe.directory`).
+    pub(crate) ownership_check: Arc<dyn OwnershipCheck>,
     /// Wall-clock reference for rev-parse date selectors; embedders set explicitly.
     pub reference_unix_time: Option<i64>,
     /// Parallel worker overrides (`--threads` in the CLI).
@@ -1106,7 +1084,7 @@ impl Default for RepositoryOptions {
             change_id_generator: Arc::new(OsChangeIdGenerator),
             diagnostics: Arc::new(NullDiagnostics),
             network_trace: false,
-            test_assume_different_owner: false,
+            ownership_check: default_ownership_check(),
             reference_unix_time: None,
             thread_policy: crate::parallel::ThreadPolicy::default(),
             work_tree: None,
@@ -1195,6 +1173,30 @@ impl RepositoryOptions {
     pub fn with_diagnostics(mut self, diagnostics: DiagnosticsHandle) -> Self {
         self.diagnostics = diagnostics;
         self
+    }
+
+    /// Replace the ownership check used during discovery and clone safety checks.
+    ///
+    /// The default [`crate::ownership_check::SystemOwnershipCheck`] compares the effective Unix
+    /// uid against repository paths. [`crate::ownership_check::ForeignOwnershipCheck`] treats
+    /// every repository as foreign so `safe.directory` always applies (useful in sandboxes and
+    /// tests).
+    #[must_use]
+    pub fn with_ownership_check(mut self, check: Arc<dyn OwnershipCheck>) -> Self {
+        self.ownership_check = check;
+        self
+    }
+
+    /// Ownership check installed on these options.
+    #[must_use]
+    pub fn ownership_check(&self) -> Arc<dyn OwnershipCheck> {
+        Arc::clone(&self.ownership_check)
+    }
+
+    /// Whether these options still use the shared default [`SystemOwnershipCheck`](crate::ownership_check::SystemOwnershipCheck).
+    #[must_use]
+    pub fn uses_default_ownership_check(&self) -> bool {
+        is_default_ownership_check(&self.ownership_check)
     }
 
     /// Choose whether hooks run by repositories opened with these options have their output

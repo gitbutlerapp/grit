@@ -165,6 +165,10 @@ pub mod prelude {
     pub use crate::index::Index;
     pub use crate::objects::odb::Odb;
     pub use crate::objects::{Object, ObjectId, ObjectInfo, ObjectKind};
+    pub use crate::ownership_check::{
+        ForeignOwnershipCheck, OwnershipCheck, OwnershipContext, OwnershipError, OwnershipStatus,
+        SystemOwnershipCheck,
+    };
     pub use crate::repo::{
         resolve_initial_branch, DiscoveryInfo, InitOptions, InitOutcome, Repository,
         RepositoryBuilder,
@@ -285,6 +289,7 @@ pub mod objects;
 pub(crate) mod odb;
 pub(crate) mod offload;
 pub mod operation;
+pub mod ownership_check;
 pub(crate) mod pack;
 pub(crate) mod pack_bitmap;
 mod pack_delta;

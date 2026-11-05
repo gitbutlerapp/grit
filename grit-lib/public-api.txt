@@ -1875,7 +1875,6 @@ pub grit_lib::config::environment::Environment::git_object_directory: core::opti
 pub grit_lib::config::environment::Environment::git_optional_locks: bool
 pub grit_lib::config::environment::Environment::git_prefix: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_replace_ref_base: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::git_test_assume_different_owner: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_test_no_write_rev_index: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_test_reftable_autocompaction: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_test_utf8_nfd_to_nfc: core::option::Option<alloc::string::String>
@@ -1906,7 +1905,6 @@ pub fn grit_lib::config::environment::Environment::is_fetch_options_default(&sel
 pub fn grit_lib::config::environment::Environment::push_config_override(&mut self, &grit_lib::config::environment::ConfigOverride)
 pub fn grit_lib::config::environment::Environment::reftable_autocompaction_enabled(&self) -> bool
 pub fn grit_lib::config::environment::Environment::subprocess_environment(&self) -> alloc::vec::Vec<(std::ffi::os_str::OsString, std::ffi::os_str::OsString)>
-pub fn grit_lib::config::environment::Environment::test_assume_different_owner(&self) -> bool
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
 pub fn grit_lib::config::environment::Environment::with_git_dir(self, impl core::convert::AsRef<std::path::Path>) -> Self
@@ -1936,7 +1934,6 @@ pub grit_lib::config::environment::RepositoryOptions::network_trace: bool
 pub grit_lib::config::environment::RepositoryOptions::open_for_serving: bool
 pub grit_lib::config::environment::RepositoryOptions::promisor_fetcher: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>
 pub grit_lib::config::environment::RepositoryOptions::reference_unix_time: core::option::Option<i64>
-pub grit_lib::config::environment::RepositoryOptions::test_assume_different_owner: bool
 pub grit_lib::config::environment::RepositoryOptions::thread_policy: grit_lib::parallel::ThreadPolicy
 pub grit_lib::config::environment::RepositoryOptions::validate_repository_format: bool
 pub grit_lib::config::environment::RepositoryOptions::work_tree: core::option::Option<std::path::PathBuf>
@@ -1944,12 +1941,15 @@ impl grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::ownership_check(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>
+pub fn grit_lib::config::environment::RepositoryOptions::uses_default_ownership_check(&self) -> bool
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_environment(grit_lib::config::environment::Environment) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_hook_stdio(self, grit_lib::command_runner::hooks::HookStdio) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_network_trace(self, bool) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_ownership_check(self, alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_promisor_fetcher(self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_work_tree(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::without_format_validation(self) -> Self
@@ -13574,6 +13574,108 @@ pub fn grit_lib::operation::operation_next_steps(grit_lib::state::InProgressOper
 pub fn grit_lib::operation::operation_next_steps_empty(grit_lib::state::InProgressOperation) -> alloc::vec::Vec<grit_lib::state::NextStep>
 pub fn grit_lib::operation::status_operation(&grit_lib::state::WtStatusState, bool) -> core::option::Option<grit_lib::state::Operation>
 pub fn grit_lib::operation::tree_merge_has_conflicts(&grit_lib::diff::merge_trees::TreeMergeOutput) -> bool
+pub mod grit_lib::ownership_check
+#[non_exhaustive] pub enum grit_lib::ownership_check::OwnershipError
+pub grit_lib::ownership_check::OwnershipError::Io
+pub grit_lib::ownership_check::OwnershipError::Io::path: std::path::PathBuf
+pub grit_lib::ownership_check::OwnershipError::Io::source: core::io::error::Error
+impl core::error::Error for grit_lib::ownership_check::OwnershipError
+pub fn grit_lib::ownership_check::OwnershipError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::ownership_check::OwnershipError
+pub fn grit_lib::ownership_check::OwnershipError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::ownership_check::OwnershipError
+pub fn grit_lib::ownership_check::OwnershipError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::ownership_check::OwnershipError
+impl core::marker::Send for grit_lib::ownership_check::OwnershipError
+impl core::marker::Sync for grit_lib::ownership_check::OwnershipError
+impl core::marker::Unpin for grit_lib::ownership_check::OwnershipError
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipError
+pub enum grit_lib::ownership_check::OwnershipStatus
+pub grit_lib::ownership_check::OwnershipStatus::NotOwned
+pub grit_lib::ownership_check::OwnershipStatus::Owned
+impl core::clone::Clone for grit_lib::ownership_check::OwnershipStatus
+pub fn grit_lib::ownership_check::OwnershipStatus::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::ownership_check::OwnershipStatus
+impl core::cmp::PartialEq for grit_lib::ownership_check::OwnershipStatus
+pub fn grit_lib::ownership_check::OwnershipStatus::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::ownership_check::OwnershipStatus
+pub fn grit_lib::ownership_check::OwnershipStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::StructuralPartialEq for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Freeze for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Send for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Sync for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Unpin for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipStatus
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipStatus
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipStatus
+pub struct grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::clone::Clone for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::clone(&self) -> Self
+impl core::default::Default for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::default() -> Self
+impl core::fmt::Debug for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::ForeignOwnershipCheck
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl core::marker::Freeze for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::Send for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::Sync for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::Unpin for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::ForeignOwnershipCheck
+pub struct grit_lib::ownership_check::OwnershipContext
+pub grit_lib::ownership_check::OwnershipContext::sudo_uid: core::option::Option<u32>
+impl grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::from_environment(&grit_lib::config::environment::Environment) -> Self
+impl core::clone::Clone for grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::clone(&self) -> Self
+impl core::default::Default for grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::default() -> Self
+impl core::fmt::Debug for grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Freeze for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Send for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Sync for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Unpin for grit_lib::ownership_check::OwnershipContext
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipContext
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipContext
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipContext
+pub struct grit_lib::ownership_check::SystemOwnershipCheck
+impl core::clone::Clone for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::clone(&self) -> Self
+impl core::default::Default for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::default() -> Self
+impl core::fmt::Debug for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::SystemOwnershipCheck
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl core::marker::Freeze for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::Send for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::Sync for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::Unpin for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::SystemOwnershipCheck
+pub trait grit_lib::ownership_check::OwnershipCheck: core::marker::Send + core::marker::Sync
+pub fn grit_lib::ownership_check::OwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::OwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+pub fn grit_lib::ownership_check::default_ownership_check() -> alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>
+pub fn grit_lib::ownership_check::is_default_ownership_check(&alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>) -> bool
 pub mod grit_lib::pack_reuse
 pub struct grit_lib::pack_reuse::ReuseWriteStats
 pub grit_lib::pack_reuse::ReuseWriteStats::pack_ofs_fixup_objects: u32
@@ -17587,6 +17689,42 @@ impl core::marker::Unpin for grit_lib::objects::ObjectKind
 impl core::marker::UnsafeUnpin for grit_lib::objects::ObjectKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::ObjectKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectKind
+#[non_exhaustive] pub enum grit_lib::prelude::OwnershipError
+pub grit_lib::prelude::OwnershipError::Io
+pub grit_lib::prelude::OwnershipError::Io::path: std::path::PathBuf
+pub grit_lib::prelude::OwnershipError::Io::source: core::io::error::Error
+impl core::error::Error for grit_lib::ownership_check::OwnershipError
+pub fn grit_lib::ownership_check::OwnershipError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::ownership_check::OwnershipError
+pub fn grit_lib::ownership_check::OwnershipError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::ownership_check::OwnershipError
+pub fn grit_lib::ownership_check::OwnershipError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::ownership_check::OwnershipError
+impl core::marker::Send for grit_lib::ownership_check::OwnershipError
+impl core::marker::Sync for grit_lib::ownership_check::OwnershipError
+impl core::marker::Unpin for grit_lib::ownership_check::OwnershipError
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipError
+pub enum grit_lib::prelude::OwnershipStatus
+pub grit_lib::prelude::OwnershipStatus::NotOwned
+pub grit_lib::prelude::OwnershipStatus::Owned
+impl core::clone::Clone for grit_lib::ownership_check::OwnershipStatus
+pub fn grit_lib::ownership_check::OwnershipStatus::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::ownership_check::OwnershipStatus
+impl core::cmp::PartialEq for grit_lib::ownership_check::OwnershipStatus
+pub fn grit_lib::ownership_check::OwnershipStatus::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::ownership_check::OwnershipStatus
+pub fn grit_lib::ownership_check::OwnershipStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::StructuralPartialEq for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Freeze for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Send for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Sync for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::Unpin for grit_lib::ownership_check::OwnershipStatus
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipStatus
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipStatus
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipStatus
 #[non_exhaustive] pub enum grit_lib::prelude::Trace
 pub grit_lib::prelude::Trace::Network
 pub grit_lib::prelude::Trace::Network::message: alloc::string::String
@@ -17801,7 +17939,6 @@ pub grit_lib::prelude::Environment::git_object_directory: core::option::Option<a
 pub grit_lib::prelude::Environment::git_optional_locks: bool
 pub grit_lib::prelude::Environment::git_prefix: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_replace_ref_base: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::git_test_assume_different_owner: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_test_no_write_rev_index: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_test_reftable_autocompaction: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc: core::option::Option<alloc::string::String>
@@ -17832,7 +17969,6 @@ pub fn grit_lib::config::environment::Environment::is_fetch_options_default(&sel
 pub fn grit_lib::config::environment::Environment::push_config_override(&mut self, &grit_lib::config::environment::ConfigOverride)
 pub fn grit_lib::config::environment::Environment::reftable_autocompaction_enabled(&self) -> bool
 pub fn grit_lib::config::environment::Environment::subprocess_environment(&self) -> alloc::vec::Vec<(std::ffi::os_str::OsString, std::ffi::os_str::OsString)>
-pub fn grit_lib::config::environment::Environment::test_assume_different_owner(&self) -> bool
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
 pub fn grit_lib::config::environment::Environment::with_git_dir(self, impl core::convert::AsRef<std::path::Path>) -> Self
@@ -17852,6 +17988,24 @@ impl core::marker::Unpin for grit_lib::config::environment::Environment
 impl core::marker::UnsafeUnpin for grit_lib::config::environment::Environment
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::environment::Environment
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::environment::Environment
+pub struct grit_lib::prelude::ForeignOwnershipCheck
+impl core::clone::Clone for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::clone(&self) -> Self
+impl core::default::Default for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::default() -> Self
+impl core::fmt::Debug for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::ForeignOwnershipCheck
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl core::marker::Freeze for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::Send for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::Sync for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::Unpin for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::ForeignOwnershipCheck
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::ForeignOwnershipCheck
 pub struct grit_lib::prelude::Index
 pub grit_lib::prelude::Index::cache_tree: core::option::Option<grit_lib::index::CacheTreeNode>
 pub grit_lib::prelude::Index::cache_tree_root: core::option::Option<grit_lib::objects::ObjectId>
@@ -18167,6 +18321,24 @@ impl core::marker::Unpin for grit_lib::objects::odb::Odb
 impl core::marker::UnsafeUnpin for grit_lib::objects::odb::Odb
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::odb::Odb
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::Odb
+pub struct grit_lib::prelude::OwnershipContext
+pub grit_lib::prelude::OwnershipContext::sudo_uid: core::option::Option<u32>
+impl grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::from_environment(&grit_lib::config::environment::Environment) -> Self
+impl core::clone::Clone for grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::clone(&self) -> Self
+impl core::default::Default for grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::default() -> Self
+impl core::fmt::Debug for grit_lib::ownership_check::OwnershipContext
+pub fn grit_lib::ownership_check::OwnershipContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Freeze for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Send for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Sync for grit_lib::ownership_check::OwnershipContext
+impl core::marker::Unpin for grit_lib::ownership_check::OwnershipContext
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipContext
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipContext
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipContext
 pub struct grit_lib::prelude::RecordingRunner
 pub grit_lib::prelude::RecordingRunner::recorded: std::sync::poison::mutex::Mutex<alloc::vec::Vec<grit_lib::command_runner::CommandSpec>>
 impl grit_lib::command_runner::RecordingRunner
@@ -18306,7 +18478,6 @@ pub grit_lib::prelude::RepositoryOptions::network_trace: bool
 pub grit_lib::prelude::RepositoryOptions::open_for_serving: bool
 pub grit_lib::prelude::RepositoryOptions::promisor_fetcher: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>
 pub grit_lib::prelude::RepositoryOptions::reference_unix_time: core::option::Option<i64>
-pub grit_lib::prelude::RepositoryOptions::test_assume_different_owner: bool
 pub grit_lib::prelude::RepositoryOptions::thread_policy: grit_lib::parallel::ThreadPolicy
 pub grit_lib::prelude::RepositoryOptions::validate_repository_format: bool
 pub grit_lib::prelude::RepositoryOptions::work_tree: core::option::Option<std::path::PathBuf>
@@ -18314,12 +18485,15 @@ impl grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::ownership_check(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>
+pub fn grit_lib::config::environment::RepositoryOptions::uses_default_ownership_check(&self) -> bool
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_diagnostics(self, grit_lib::diagnostics::DiagnosticsHandle) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_environment(grit_lib::config::environment::Environment) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_hook_stdio(self, grit_lib::command_runner::hooks::HookStdio) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_network_trace(self, bool) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_ownership_check(self, alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_promisor_fetcher(self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_work_tree(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::without_format_validation(self) -> Self
@@ -18353,6 +18527,24 @@ impl core::marker::Unpin for grit_lib::command_runner::SystemCommandRunner
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::SystemCommandRunner
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::SystemCommandRunner
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::SystemCommandRunner
+pub struct grit_lib::prelude::SystemOwnershipCheck
+impl core::clone::Clone for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::clone(&self) -> Self
+impl core::default::Default for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::default() -> Self
+impl core::fmt::Debug for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::ownership_check::SystemOwnershipCheck
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl core::marker::Freeze for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::Send for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::Sync for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::Unpin for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::marker::UnsafeUnpin for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::SystemOwnershipCheck
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::SystemOwnershipCheck
 pub trait grit_lib::prelude::CommandRunner: core::marker::Send + core::marker::Sync
 pub fn grit_lib::prelude::CommandRunner::spawn(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
 pub fn grit_lib::prelude::CommandRunner::spawn_server_receive_hook(&self, &grit_lib::command_runner::CommandSpec) -> core::io::error::Result<grit_lib::command_runner::RunningCommand>
@@ -18371,6 +18563,15 @@ pub fn grit_lib::diagnostics::CollectingDiagnostics::warn(&self, grit_lib::diagn
 impl grit_lib::diagnostics::DiagnosticSink for grit_lib::diagnostics::NullDiagnostics
 pub fn grit_lib::diagnostics::NullDiagnostics::trace(&self, grit_lib::diagnostics::Trace)
 pub fn grit_lib::diagnostics::NullDiagnostics::warn(&self, grit_lib::diagnostics::Warning)
+pub trait grit_lib::prelude::OwnershipCheck: core::marker::Send + core::marker::Sync
+pub fn grit_lib::prelude::OwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::prelude::OwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::ForeignOwnershipCheck
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::ForeignOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
+impl grit_lib::ownership_check::OwnershipCheck for grit_lib::ownership_check::SystemOwnershipCheck
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::always_apply_safe_directory(&self) -> bool
+pub fn grit_lib::ownership_check::SystemOwnershipCheck::status(&self, &std::path::Path, &grit_lib::ownership_check::OwnershipContext) -> core::result::Result<grit_lib::ownership_check::OwnershipStatus, grit_lib::ownership_check::OwnershipError>
 pub fn grit_lib::prelude::resolve_initial_branch(&grit_lib::config::environment::Environment, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
 pub type grit_lib::prelude::Result<T> = core::result::Result<T, grit_lib::error::Error>
 pub mod grit_lib::progress

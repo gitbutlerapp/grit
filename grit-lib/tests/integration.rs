@@ -1239,6 +1239,8 @@ mod oid_hashtable_api;
 #[cfg(feature = "full-tests")]
 #[path = "orig_head_git_compat.rs"]
 mod orig_head_git_compat;
+#[path = "ownership_check_discover.rs"]
+mod ownership_check_discover;
 #[cfg(feature = "full-tests")]
 #[path = "pack_bitmap_read_git_compat.rs"]
 mod pack_bitmap_read_git_compat;

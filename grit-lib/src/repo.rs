@@ -447,7 +447,7 @@ pub struct Repository {
     network_trace: bool,
     /// Embedder override for rev-parse relative dates (`@{yesterday}`, etc.).
     reference_unix_time: Option<i64>,
-    test_assume_different_owner: bool,
+    ownership_check: Arc<dyn crate::ownership_check::OwnershipCheck>,
     thread_policy: crate::parallel::ThreadPolicy,
     hook_stdio: crate::hooks::HookStdio,
 }
@@ -669,7 +669,7 @@ impl Repository {
             diagnostics: Arc::clone(&options.diagnostics),
             network_trace: options.network_trace,
             reference_unix_time: options.reference_unix_time,
-            test_assume_different_owner: options.test_assume_different_owner,
+            ownership_check: options.ownership_check(),
             thread_policy: options.thread_policy,
             hook_stdio: options.hook_stdio,
         })
@@ -820,7 +820,7 @@ impl Repository {
             change_id_generator: Arc::clone(&self.change_id_generator),
             diagnostics: Arc::clone(&self.diagnostics),
             network_trace: self.network_trace,
-            test_assume_different_owner: self.test_assume_different_owner,
+            ownership_check: Arc::clone(&self.ownership_check),
             reference_unix_time: self.reference_unix_time,
             thread_policy: self.thread_policy,
             work_tree: None,
@@ -925,7 +925,7 @@ impl Repository {
             diagnostics: Arc::clone(&self.diagnostics),
             network_trace: self.network_trace,
             reference_unix_time: self.reference_unix_time,
-            test_assume_different_owner: self.test_assume_different_owner,
+            ownership_check: Arc::clone(&self.ownership_check),
             thread_policy: self.thread_policy,
             hook_stdio: self.hook_stdio,
         };
@@ -1931,7 +1931,7 @@ impl Repository {
             diagnostics: Arc::clone(&options.diagnostics),
             network_trace: options.network_trace,
             reference_unix_time: options.reference_unix_time,
-            test_assume_different_owner: options.test_assume_different_owner,
+            ownership_check: options.ownership_check(),
             thread_policy: options.thread_policy,
             hook_stdio: options.hook_stdio,
         };
@@ -2127,12 +2127,12 @@ impl Repository {
                         }
                     }
                 }
-                let assume_different =
-                    options.test_assume_different_owner || env.test_assume_different_owner();
-                if assume_different {
+                let ownership_check = options.ownership_check();
+                if ownership_check.always_apply_safe_directory() {
                     repo.enforce_safe_directory()?;
                 } else {
                     ensure_valid_ownership(
+                        ownership_check.as_ref(),
                         env,
                         gitfile.as_deref(),
                         repo.work_tree.as_deref(),
@@ -3635,59 +3635,42 @@ fn ensure_safe_directory_allows(
     Err(Error::DubiousOwnership(path_for_error_message(checked)))
 }
 
-#[cfg(unix)]
-fn path_lstat_uid(path: &Path) -> std::io::Result<u32> {
-    use std::os::unix::fs::MetadataExt;
-    let meta = fs::symlink_metadata(path)?;
-    Ok(meta.uid())
+fn path_owned(
+    ownership_check: &dyn crate::ownership_check::OwnershipCheck,
+    context: &crate::ownership_check::OwnershipContext,
+    path: &Path,
+) -> Result<bool> {
+    use crate::ownership_check::{OwnershipError, OwnershipStatus};
+    match ownership_check.status(path, context) {
+        Ok(OwnershipStatus::Owned) => Ok(true),
+        Ok(OwnershipStatus::NotOwned) => Ok(false),
+        Err(OwnershipError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+            Ok(true)
+        }
+        Err(OwnershipError::Io { source, .. }) => Err(Error::Io(source)),
+    }
 }
 
 /// Match Git's `ensure_valid_ownership`: check gitfile, worktree, and gitdir ownership,
 /// then `safe.directory` when any path is not owned by the effective user.
-#[cfg(unix)]
 fn ensure_valid_ownership(
+    ownership_check: &dyn crate::ownership_check::OwnershipCheck,
     environment: &Environment,
     gitfile: Option<&Path>,
     worktree: Option<&Path>,
     gitdir: &Path,
 ) -> Result<()> {
-    const ROOT_UID: u32 = 0;
-    let sudo_euid = environment
-        .sudo_uid
-        .as_deref()
-        .and_then(|s| s.parse::<u32>().ok());
-
-    fn owned_by_effective_user(path: &Path, sudo_euid: Option<u32>) -> std::io::Result<bool> {
-        let st_uid = path_lstat_uid(path)?;
-        let mut euid = nix::unistd::geteuid().as_raw();
-        if euid == ROOT_UID {
-            if st_uid == ROOT_UID {
-                return Ok(true);
-            }
-            if let Some(sudo_uid) = sudo_euid {
-                euid = sudo_uid;
-            }
-        }
-        Ok(st_uid == euid)
-    }
-
-    let assume_different = environment.test_assume_different_owner();
-    if !assume_different {
+    let context = crate::ownership_check::OwnershipContext::from_environment(environment);
+    if !ownership_check.always_apply_safe_directory() {
         let gitfile_ok = gitfile
-            .map(|p| owned_by_effective_user(p, sudo_euid))
+            .map(|p| path_owned(ownership_check, &context, p))
             .transpose()?
             .unwrap_or(true);
-        // Git may use a `GIT_WORK_TREE` that does not exist yet (t1510); skip ownership when
-        // the path is absent instead of failing discovery with ENOENT.
         let wt_ok = match worktree {
             None => true,
-            Some(wt) => match owned_by_effective_user(wt, sudo_euid) {
-                Ok(ok) => ok,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-                Err(e) => return Err(Error::Io(e)),
-            },
+            Some(wt) => path_owned(ownership_check, &context, wt)?,
         };
-        let gd_ok = owned_by_effective_user(gitdir, sudo_euid)?;
+        let gd_ok = path_owned(ownership_check, &context, gitdir)?;
         if gitfile_ok && wt_ok && gd_ok {
             return Ok(());
         }
@@ -3704,26 +3687,15 @@ fn ensure_valid_ownership(
     ensure_safe_directory_allows(gitdir, &data_path, environment)
 }
 
-#[cfg(not(unix))]
-fn ensure_valid_ownership(
-    _environment: &Environment,
-    _gitfile: Option<&Path>,
-    _worktree: Option<&Path>,
-    _gitdir: &Path,
-) -> Result<()> {
-    Ok(())
-}
-
 impl Repository {
     /// Enforce `safe.directory` ownership checks, matching upstream behavior.
     ///
-    /// When `GIT_TEST_ASSUME_DIFFERENT_OWNER=1`, ownership is considered unsafe
+    /// When the installed [`crate::ownership_check::OwnershipCheck`] sets
+    /// [`crate::ownership_check::OwnershipCheck::always_apply_safe_directory`], ownership is considered unsafe
     /// unless a matching `safe.directory` value is configured in system/global/
     /// command scopes (repository-local config is ignored).
     pub fn enforce_safe_directory(&self) -> Result<()> {
-        let assume_different =
-            self.test_assume_different_owner || self.environment.test_assume_different_owner();
-        if !assume_different {
+        if !self.ownership_check.always_apply_safe_directory() {
             return Ok(());
         }
 
@@ -3765,9 +3737,7 @@ impl Repository {
     /// Used by operations that explicitly open another repository by path
     /// (e.g. local clone source).
     pub(crate) fn enforce_safe_directory_git_dir(&self) -> Result<()> {
-        let assume_different =
-            self.test_assume_different_owner || self.environment.test_assume_different_owner();
-        if !assume_different {
+        if !self.ownership_check.always_apply_safe_directory() {
             return Ok(());
         }
         let checked = self
@@ -3783,23 +3753,22 @@ impl Repository {
 
     /// Verify the repository is safe to use as a `git clone` source (local clone).
     ///
-    /// When `GIT_TEST_ASSUME_DIFFERENT_OWNER` is set, applies the same `safe.directory`
-    /// rules as discovery. Otherwise checks filesystem ownership of the git directory
-    /// only (matching Git's `die_upon_dubious_ownership` for clone).
+    /// When the ownership check sets
+    /// [`crate::ownership_check::OwnershipCheck::always_apply_safe_directory`],
+    /// applies the same `safe.directory` rules as discovery. Otherwise checks filesystem
+    /// ownership of the git directory only (matching Git's `die_upon_dubious_ownership`
+    /// for clone).
     pub fn verify_safe_for_clone_source(&self) -> Result<()> {
-        let assume_different =
-            self.test_assume_different_owner || self.environment.test_assume_different_owner();
-        if assume_different {
+        if self.ownership_check.always_apply_safe_directory() {
             self.enforce_safe_directory_git_dir()
         } else {
-            #[cfg(unix)]
-            {
-                ensure_valid_ownership(self.environment.as_ref(), None, None, &self.git_dir)
-            }
-            #[cfg(not(unix))]
-            {
-                Ok(())
-            }
+            ensure_valid_ownership(
+                self.ownership_check.as_ref(),
+                self.environment.as_ref(),
+                None,
+                None,
+                &self.git_dir,
+            )
         }
     }
 }
