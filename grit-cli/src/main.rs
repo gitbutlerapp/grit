@@ -2842,11 +2842,12 @@ fn emit_success_quiet<T: output::HumanRender + output::MarkdownRender + serde::S
     Ok(ExitStatus::Success)
 }
 
-fn finish_hunk_error(err: &anyhow::Error, opts: &OutputOptions, code: i32) -> ExitStatus {
+fn finish_hunk_error(err: anyhow::Error, opts: &OutputOptions, code: i32) -> ExitStatus {
+    let err = json_error::ensure_structured(err);
     if opts.mode == OutputMode::Human {
         eprintln!("error: {err:#}");
     } else {
-        output::emit_error(err, opts);
+        output::emit_error(&err, opts);
     }
     ExitStatus::from_i32(code)
 }
@@ -3416,6 +3417,7 @@ fn dispatch(
                     Ok(status)
                 }
                 Err(err) => {
+                    let err = json_error::ensure_structured(err);
                     output::emit_error(&err, opts);
                     Ok(ExitStatus::diff_command_error(no_index || wants_exit_code))
                 }
@@ -3504,11 +3506,10 @@ fn dispatch(
                 match commands::add::run_hunks(&pathspecs, &hunks, &lines, unified_context, dry_run)
                 {
                     Ok(outcome) => emit_success(outcome, opts, ctx),
-                    Err(err) => Ok(finish_hunk_error(
-                        &err,
-                        opts,
-                        commands::add::hunks_exit_code(&err),
-                    )),
+                    Err(err) => {
+                        let code = commands::add::hunks_exit_code(&err);
+                        Ok(finish_hunk_error(err, opts, code))
+                    }
                 }
             } else {
                 emit_success(
@@ -3786,11 +3787,10 @@ fn dispatch(
                     &lines,
                 ) {
                     Ok(outcome) => emit_success_quiet(outcome, &quiet, opts, ctx),
-                    Err(err) => Ok(finish_hunk_error(
-                        &err,
-                        opts,
-                        commands::commit::hunks_exit_code(&err),
-                    )),
+                    Err(err) => {
+                        let code = commands::commit::hunks_exit_code(&err);
+                        Ok(finish_hunk_error(err, opts, code))
+                    }
                 }
             } else {
                 emit_success_quiet(
@@ -4216,11 +4216,10 @@ fn dispatch(
                 );
                 match outcome {
                     Ok(out) => emit_success(out, opts, ctx),
-                    Err(err) => Ok(finish_hunk_error(
-                        &err,
-                        opts,
-                        commands::add::hunks_exit_code(&err),
-                    )),
+                    Err(err) => {
+                        let code = commands::add::hunks_exit_code(&err);
+                        Ok(finish_hunk_error(err, opts, code))
+                    }
                 }
             }
             HistoryAction::Rebase {
@@ -4301,11 +4300,10 @@ fn dispatch(
                 });
                 match outcome {
                     Ok(o) => emit_success(o, opts, ctx),
-                    Err(err) => Ok(finish_hunk_error(
-                        &err,
-                        opts,
-                        commands::stash::hunks_exit_code(&err),
-                    )),
+                    Err(err) => {
+                        let code = commands::stash::hunks_exit_code(&err);
+                        Ok(finish_hunk_error(err, opts, code))
+                    }
                 }
             }
             Some(StashAction::Push {
@@ -4349,11 +4347,10 @@ fn dispatch(
                 });
                 match outcome {
                     Ok(o) => emit_success(o, opts, ctx),
-                    Err(err) => Ok(finish_hunk_error(
-                        &err,
-                        opts,
-                        commands::stash::hunks_exit_code(&err),
-                    )),
+                    Err(err) => {
+                        let code = commands::stash::hunks_exit_code(&err);
+                        Ok(finish_hunk_error(err, opts, code))
+                    }
                 }
             }
             Some(StashAction::List) => emit_success(commands::stash::run_list()?, opts, ctx),
@@ -4441,11 +4438,10 @@ fn dispatch(
                     &pathspecs, &hunks, &lines, staged, worktree, dry_run,
                 ) {
                     Ok(outcome) => emit_success(outcome, opts, ctx),
-                    Err(err) => Ok(finish_hunk_error(
-                        &err,
-                        opts,
-                        commands::restore::hunks_exit_code(&err),
-                    )),
+                    Err(err) => {
+                        let code = commands::restore::hunks_exit_code(&err);
+                        Ok(finish_hunk_error(err, opts, code))
+                    }
                 }
             } else {
                 if dry_run {

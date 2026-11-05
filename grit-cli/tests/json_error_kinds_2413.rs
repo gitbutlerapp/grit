@@ -24,6 +24,23 @@ fn json_error_kinds_for_ci_failures() {
         .unwrap_or("")
         .contains("not a git repository"));
 
+    for args in [
+        &["--json", "diff"][..],
+        &["--json", "diff", "--staged"][..],
+        &["--json", "diff", "--stat"][..],
+        &["--json", "stash"][..],
+    ] {
+        let err = json_err(&no_repo, args);
+        assert_eq!(err["kind"], "not_a_repository", "args={args:?}");
+        assert!(
+            err["error"]
+                .as_str()
+                .unwrap_or("")
+                .contains("not a git repository"),
+            "args={args:?}"
+        );
+    }
+
     let fixture = CliFixture::empty();
     std::fs::write(fixture.path().join("a"), "a\n").unwrap();
     fixture.run_ok(&["commit", "-m", "one"]);
