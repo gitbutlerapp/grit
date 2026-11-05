@@ -1930,11 +1930,31 @@ mod tests {
         let mut wire = b"003dERR access denied or repository not exported: /srv/x.git\n".to_vec();
         wire.extend_from_slice(b"0000");
         let err = read_advertisement(&mut std::io::Cursor::new(wire)).expect_err("ERR");
-        assert!(matches!(err, Error::RemoteFatal { .. }));
+        assert_eq!(err.kind_name(), "remote_fatal");
         assert_eq!(
             err.to_string(),
             "remote error: access denied or repository not exported: /srv/x.git"
         );
+        assert!(matches!(err, Error::RemoteFatal { .. }));
+        assert_eq!(
+            match err {
+                Error::RemoteFatal { message } => message,
+                other => panic!("expected RemoteFatal, got {other:?}"),
+            },
+            "access denied or repository not exported: /srv/x.git"
+        );
+    }
+
+    #[test]
+    fn read_advertisement_v2_capability_block_err_is_remote_fatal() {
+        use crate::error::Error;
+        let mut wire = Vec::new();
+        pkt_line::write_line_to_vec(&mut wire, "version 2").unwrap();
+        pkt_line::write_line_to_vec(&mut wire, "agent=git/2.99").unwrap();
+        pkt_line::write_line_to_vec(&mut wire, "ERR service not enabled").unwrap();
+        wire.extend_from_slice(b"0000");
+        let err = read_advertisement(&mut std::io::Cursor::new(wire)).expect_err("v2 ERR");
+        assert!(matches!(err, Error::RemoteFatal { message } if message == "service not enabled"));
     }
 
     #[test]

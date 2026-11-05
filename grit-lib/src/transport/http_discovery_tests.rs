@@ -1,4 +1,6 @@
 //! Unit tests for smart-HTTP discovery helpers (included from [`super::http`]).
+#![cfg(test)]
+
 use super::*;
 use crate::error::{Error, RemoteUnreadableReason};
 
@@ -168,4 +170,199 @@ fn url_helpers() {
         format!("http://h/r.git/{UPLOAD_PACK}"),
         "http://h/r.git/git-upload-pack"
     );
+}
+
+struct MockHttp {
+    body: Vec<u8>,
+}
+
+impl HttpClient for MockHttp {
+    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
+        Ok(self.body.clone())
+    }
+
+    fn post(
+        &self,
+        _url: &str,
+        _content_type: &str,
+        _accept: &str,
+        _body: &[u8],
+        _git_protocol: Option<&str>,
+    ) -> crate::error::Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+
+    fn get_with_final_url_exact(
+        &self,
+        _url: &str,
+        _git_protocol: Option<&str>,
+    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
+        Ok((self.body.clone(), None))
+    }
+}
+
+fn sample_smart_advertisement() -> Vec<u8> {
+    let oid = "0000000000000000000000000000000000000000";
+    let mut body = String::new();
+    body.push_str("001e# service=git-upload-pack\n");
+    body.push_str("0000");
+    body.push_str(&format!("0032{oid} capabilities^{}\n", "multi_ack"));
+    body.push_str("0000");
+    body.into_bytes()
+}
+
+fn remote_fatal_message(err: crate::error::Error) -> String {
+    match err {
+        crate::error::Error::RemoteFatal { message } => message,
+        other => panic!("expected Error::RemoteFatal, got {other:?}"),
+    }
+}
+
+fn pkt_line(text: &str) -> Vec<u8> {
+    let mut buf = Vec::new();
+    pkt_line::write_line_to_vec(&mut buf, text).expect("pkt-line");
+    buf
+}
+
+fn http_info_refs(preamble: bool, lines: &[&str]) -> Vec<u8> {
+    let mut body = Vec::new();
+    if preamble {
+        body.extend(pkt_line("# service=git-upload-pack"));
+        body.extend_from_slice(b"0000");
+    }
+    for text in lines {
+        body.extend(pkt_line(text));
+    }
+    body.extend_from_slice(b"0000");
+    body
+}
+
+fn assert_http_discovery_fatal(body: &[u8], expected: &str) {
+    for (entry, result) in [
+        ("discover", discover_upload_pack_from_body(body).map(|_| ())),
+        (
+            "list_refs",
+            discover_upload_pack_for_list_refs_from_body(body).map(|_| ()),
+        ),
+    ] {
+        let err = result.expect_err("an ERR info/refs body must fail");
+        assert_eq!(remote_fatal_message(err), expected, "{entry}");
+    }
+}
+
+#[test]
+fn discover_upload_pack_client_helpers_and_git_advertisement() {
+    let body = sample_smart_advertisement();
+    let _ = discover_upload_pack_from_body(&body);
+    let _ = discover_upload_pack_for_list_refs_from_body(&body);
+    let client = MockHttp { body: body.clone() };
+    let _ = discover_upload_pack(&client, "https://example.com/r.git", None);
+    let _ = discover_upload_pack_exact(&client, "https://example.com/r.git", Some("version=2"));
+    let _ = discover_upload_pack_for_list_refs(&client, "https://example.com/r.git", None);
+
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("SKIP: no system git for live advertisement round trip");
+        return;
+    }
+
+    use crate::repo::{InitOptions, Repository};
+    use std::process::Command;
+
+    fn hermetic_git(cmd: &mut Command) {
+        cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(crate::RefStorageFormat::Files),
+    )
+    .expect("init");
+    std::fs::write(dir.path().join("f.txt"), b"x\n").expect("write");
+    {
+        let mut add = Command::new("git");
+        add.current_dir(dir.path()).args(["add", "f.txt"]);
+        hermetic_git(&mut add);
+        let out = add.output().expect("git add");
+        assert!(
+            out.status.success(),
+            "git add: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    {
+        let mut commit = Command::new("git");
+        commit.current_dir(dir.path()).args(["commit", "-qm", "c"]);
+        commit
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@e.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@e.com");
+        hermetic_git(&mut commit);
+        let out = commit.output().expect("git commit");
+        assert!(
+            out.status.success(),
+            "git commit: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let git_advert = {
+        let mut cmd = Command::new("git");
+        cmd.current_dir(dir.path())
+            .args(["upload-pack", "--advertise-refs", "."]);
+        hermetic_git(&mut cmd);
+        cmd.output().expect("git upload-pack")
+    };
+    assert!(
+        git_advert.status.success(),
+        "git upload-pack: {}",
+        String::from_utf8_lossy(&git_advert.stderr)
+    );
+    let (_version, refs, _caps, _agent) =
+        discover_upload_pack_from_body(&git_advert.stdout).expect("parse git advertisement");
+    assert!(
+        refs.iter().any(|(name, _)| name == "refs/heads/main"),
+        "parsed advertisement must list main: {refs:?}"
+    );
+    let (_version2, list_refs, _caps2, _agent2) =
+        discover_upload_pack_for_list_refs_from_body(&git_advert.stdout)
+            .expect("list refs from git");
+    assert!(
+        list_refs.iter().any(|(name, _)| name == "refs/heads/main"),
+        "list-refs parse must include main: {list_refs:?}"
+    );
+}
+
+#[test]
+fn smart_http_v0_err_is_remote_fatal() {
+    for preamble in [true, false] {
+        let body = http_info_refs(preamble, &["ERR access denied"]);
+        assert_http_discovery_fatal(&body, "access denied");
+    }
+}
+
+#[test]
+fn smart_http_v0_err_after_first_ref_is_remote_fatal() {
+    let oid = "a".repeat(40);
+    let first = format!("{oid} refs/heads/main\0multi_ack side-band-64k");
+    let body = http_info_refs(true, &[&first, "ERR repository is being moved"]);
+    assert_http_discovery_fatal(&body, "repository is being moved");
+}
+
+#[test]
+fn smart_http_v2_err_is_remote_fatal() {
+    for preamble in [true, false] {
+        let body = http_info_refs(
+            preamble,
+            &["version 2", "agent=git/2.99", "ERR access denied"],
+        );
+        assert_http_discovery_fatal(&body, "access denied");
+    }
 }

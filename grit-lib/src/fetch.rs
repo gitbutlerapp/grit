@@ -3893,3 +3893,118 @@ mod v2_negotiation_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod remote_fatal_fetch_tests {
+    use super::*;
+    use crate::objects::ObjectId;
+    use crate::progress::NeverCancel;
+    use crate::refs::resolve_ref;
+    use crate::repo::{InitOptions, Repository};
+    use crate::transfer::{FetchOptions, TagMode};
+    use crate::transport::Connection;
+    use std::io::{Cursor, Read, Write};
+    use std::path::{Path, PathBuf};
+
+    struct ScriptedConn {
+        reader: Cursor<Vec<u8>>,
+        sink: Vec<u8>,
+        refs: Vec<(String, ObjectId)>,
+        caps: Vec<String>,
+    }
+
+    impl ScriptedConn {
+        fn new(server_script: Vec<u8>, tip: ObjectId) -> Self {
+            Self {
+                reader: Cursor::new(server_script),
+                sink: Vec::new(),
+                refs: vec![("refs/heads/main".to_owned(), tip)],
+                caps: ["side-band-64k", "multi_ack_detailed", "ofs-delta"]
+                    .map(str::to_owned)
+                    .to_vec(),
+            }
+        }
+    }
+
+    impl Connection for ScriptedConn {
+        fn reader(&mut self) -> &mut dyn Read {
+            &mut self.reader
+        }
+        fn writer(&mut self) -> &mut dyn Write {
+            &mut self.sink
+        }
+        fn advertised_refs(&self) -> &[(String, ObjectId)] {
+            &self.refs
+        }
+        fn capabilities(&self) -> &[String] {
+            &self.caps
+        }
+        fn head_symref(&self) -> Option<&str> {
+            None
+        }
+        fn protocol_version(&self) -> u8 {
+            0
+        }
+    }
+
+    fn empty_local(root: &Path) -> PathBuf {
+        let repo =
+            Repository::init(root, &InitOptions::new().with_initial_branch("main")).expect("init");
+        repo.git_dir().to_path_buf()
+    }
+
+    fn absent_oid() -> ObjectId {
+        ObjectId::from_hex(&"b".repeat(40)).expect("oid")
+    }
+
+    fn line(text: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        pkt_line::write_line_to_vec(&mut buf, text).expect("pkt-line");
+        buf
+    }
+
+    fn remote_fatal_message(err: crate::error::Error) -> String {
+        match err {
+            crate::error::Error::RemoteFatal { message } => message,
+            other => panic!("expected Error::RemoteFatal, got {other:?}"),
+        }
+    }
+
+    fn fetch_err(server_script: Vec<u8>) -> (crate::error::Error, PathBuf, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let local_git = empty_local(&tmp.path().join("local"));
+        let mut conn = ScriptedConn::new(server_script, absent_oid());
+        let mut opts = FetchOptions::new();
+        opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
+        opts.tags = TagMode::None;
+        let err = fetch_remote(
+            &local_git,
+            &mut conn,
+            &mut opts,
+            &mut NoProgress,
+            &NeverCancel,
+        )
+        .expect_err("the server aborted the fetch");
+        (err, local_git, tmp)
+    }
+
+    #[test]
+    fn fetch_err_after_done_is_remote_fatal() {
+        let (err, local_git, _tmp) = fetch_err(line("ERR upload-pack: not our ref bbbb"));
+        assert_eq!(remote_fatal_message(err), "upload-pack: not our ref bbbb");
+        assert!(resolve_ref(&local_git, "refs/remotes/origin/main").is_err());
+    }
+
+    #[test]
+    fn fetch_sideband_channel3_is_remote_fatal() {
+        let mut script = line("NAK");
+        pkt_line::write_packet_raw(&mut script, b"\x03fatal: the requested object is corrupt\n")
+            .expect("band 3");
+        let (err, local_git, _tmp) = fetch_err(script);
+        assert_eq!(
+            remote_fatal_message(err),
+            "fatal: the requested object is corrupt"
+        );
+        assert!(resolve_ref(&local_git, "refs/remotes/origin/main").is_err());
+    }
+}

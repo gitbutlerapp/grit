@@ -265,10 +265,13 @@ mod tests {
     fn try_protocol_version_from_config_value_accepts_v2_and_rejects_unknown() {
         use crate::error::{ConfigError, Error};
         let err = try_protocol_version_from_config_value("3").expect_err("v3");
-        assert!(matches!(
-            err,
-            Error::Config(ConfigError::UnknownValue { .. })
-        ));
+        match err {
+            Error::Config(ConfigError::UnknownValue { key, value }) => {
+                assert_eq!(key, "protocol.version");
+                assert_eq!(value, "3");
+            }
+            other => panic!("expected UnknownValue for protocol.version, got {other:?}"),
+        }
         assert_eq!(try_protocol_version_from_config_value("2").expect("v2"), 2);
     }
 }

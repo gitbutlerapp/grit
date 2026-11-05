@@ -304,4 +304,167 @@ mod tests {
         assert_eq!(lines2, vec!["ok".to_owned()]);
         assert!(term2.is_some());
     }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "uses system git; run with --features full-tests"
+    )]
+    #[test]
+    fn system_git_upload_pack_accepts_grit_written_pkt_lines() {
+        use crate::objects::promisor_remote::parse_advertisement;
+        use crate::objects::ObjectId;
+        use crate::refs::store::paths::{logs_refs_dir_path, logs_refs_subdir_path};
+        use crate::refs::{ref_update_flags, verify_branch_commit_cas};
+        use crate::repo::{InitOptions, Repository};
+        use std::io::{Cursor, Write};
+        use std::path::Path;
+        use std::process::{Command, Stdio};
+
+        if Command::new("git").arg("--version").output().is_err() {
+            eprintln!("SKIP: no system git");
+            return;
+        }
+
+        fn hermetic_git(cmd: &mut Command) {
+            cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null");
+        }
+
+        fn git_head_hex(dir: &Path) -> String {
+            let mut cmd = Command::new("git");
+            cmd.current_dir(dir).args(["rev-parse", "HEAD"]);
+            hermetic_git(&mut cmd);
+            let out = cmd.output().expect("git rev-parse");
+            assert!(
+                out.status.success(),
+                "git rev-parse: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        std::fs::write(dir.path().join("pkt.txt"), b"peer\n").expect("write");
+        {
+            let mut add = Command::new("git");
+            add.current_dir(dir.path()).args(["add", "pkt.txt"]);
+            hermetic_git(&mut add);
+            let out = add.output().expect("git add");
+            assert!(
+                out.status.success(),
+                "git add: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        {
+            let mut commit = Command::new("git");
+            commit
+                .current_dir(dir.path())
+                .args(["commit", "-qm", "pkt-line peer"]);
+            commit
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@e.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@e.com");
+            hermetic_git(&mut commit);
+            let out = commit.output().expect("git commit");
+            assert!(
+                out.status.success(),
+                "git commit: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        let head_hex = git_head_hex(dir.path());
+
+        let git_advert = {
+            let mut cmd = Command::new("git");
+            cmd.current_dir(dir.path())
+                .args(["upload-pack", "--advertise-refs", "."]);
+            hermetic_git(&mut cmd);
+            cmd.output().expect("git upload-pack --advertise-refs")
+        };
+        assert!(
+            git_advert.status.success(),
+            "git upload-pack --advertise-refs: {}",
+            String::from_utf8_lossy(&git_advert.stderr)
+        );
+        assert!(
+            !git_advert.stdout.is_empty(),
+            "git must emit pkt-line ref advertisement"
+        );
+
+        let mut advert = Cursor::new(git_advert.stdout.as_slice());
+        let (git_ref_lines, git_term) =
+            read_until_flush_or_delim(&mut advert).expect("read git ref pkt-lines");
+        assert_eq!(git_term, Some(Packet::Flush));
+        assert!(
+            git_ref_lines
+                .iter()
+                .any(|line| line.contains(&head_hex) && line.contains("HEAD")),
+            "git ref pkt-lines must advertise HEAD at {head_hex}: {git_ref_lines:?}"
+        );
+
+        let mut fetch_request = Vec::new();
+        write_line_to_vec(
+            &mut fetch_request,
+            &format!("want {head_hex} multi_ack side-band-64k"),
+        )
+        .expect("want line");
+        write_flush(&mut fetch_request).expect("request flush");
+        write_line_to_vec(&mut fetch_request, "done").expect("done");
+        write_flush(&mut fetch_request).expect("done flush");
+
+        let mut upload = Command::new("git");
+        upload
+            .current_dir(dir.path())
+            .args(["upload-pack", "--stateless-rpc", "."])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        hermetic_git(&mut upload);
+        let mut child = upload.spawn().expect("spawn git upload-pack");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(&fetch_request)
+            .expect("write fetch pkt-lines");
+        let pack_response = child.wait_with_output().expect("wait upload-pack");
+        assert!(
+            pack_response.status.success(),
+            "git upload-pack must accept grit-written pkt-lines: {}",
+            String::from_utf8_lossy(&pack_response.stderr)
+        );
+        assert!(
+            pack_response.stdout.len() > 20,
+            "git must respond with a non-trivial pack pkt-line stream"
+        );
+        let mut pack_reader = Cursor::new(pack_response.stdout.as_slice());
+        let (_pack_lines, pack_term) =
+            read_until_flush_or_delim(&mut pack_reader).expect("read git pack section");
+        assert!(
+            pack_term.is_some(),
+            "git pack response must terminate a pkt-line section"
+        );
+
+        assert!(
+            parse_advertisement("version https://git-scm.com/docs/pack-protocol/2\n").is_empty()
+        );
+
+        let _ = ref_update_flags("refs/heads/main");
+        let oid = ObjectId::from_bytes(&[1u8; 20]).expect("oid");
+        verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("cas");
+
+        let git_dir = tempfile::tempdir().expect("t").path().join(".git");
+        std::fs::create_dir_all(&git_dir).expect("mkdir");
+        let _ = logs_refs_dir_path(&git_dir);
+        let _ = logs_refs_subdir_path(&git_dir, "heads");
+    }
 }
