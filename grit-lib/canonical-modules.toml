@@ -27,7 +27,6 @@ credentials = "remote::credentials"
 crlf = "worktree::crlf"
 delta_encode = "objects::delta_encode"
 diagnostics = "diagnostics"
-divergence = "divergence"
 diff = "diff"
 divergence = "divergence"
 environment = "config::environment"
@@ -153,6 +152,7 @@ modules = [
   "config",
   "diagnostics",
   "diff",
+  "divergence",
   "error",
   "history",
   "index",

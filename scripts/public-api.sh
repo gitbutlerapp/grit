@@ -118,6 +118,9 @@ check)
 	;;
 check-test-items)
 	ensure_toolchain
+	# `check` runs cargo-public-api first, which writes target/doc/grit_lib.json
+	# without --document-hidden-items. Drop it so check-test-items rebuilds correctly.
+	rm -f "${REPO}/target/doc/grit_lib.json"
 	if python3 "${REPO}/scripts/public_api.py" check-test-items; then
 		echo "public-api test-item allowlist matches."
 	else
