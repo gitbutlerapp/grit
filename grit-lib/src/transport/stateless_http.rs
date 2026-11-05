@@ -210,6 +210,7 @@ pub struct StatelessHttpConnection<C: HttpClient> {
     head_symref: Option<String>,
     protocol_version: u8,
     object_format: String,
+    saw_ref_advertisement_flush: bool,
     pending: Vec<u8>,
     response: Option<Box<dyn Read + Send>>,
     fail_read: Option<ErrRead>,
@@ -237,6 +238,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         caps: Vec<String>,
         head_symref: Option<String>,
         object_format: String,
+        saw_ref_advertisement_flush: bool,
         git_protocol: Option<String>,
         cancel: Option<Arc<dyn Cancel + Send + Sync>>,
         stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -259,6 +261,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
             head_symref,
             protocol_version,
             object_format,
+            saw_ref_advertisement_flush,
             pending: Vec::new(),
             response: None,
             fail_read: None,
@@ -551,6 +554,10 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
         self.protocol_version
     }
 
+    fn saw_ref_advertisement_flush(&self) -> bool {
+        self.saw_ref_advertisement_flush
+    }
+
     fn stateless_rpc(&self) -> bool {
         true
     }
@@ -684,6 +691,7 @@ mod tests {
             Vec::new(),
             None,
             "sha1".to_owned(),
+            false,
             None,
             None,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -712,6 +720,7 @@ mod tests {
             Vec::new(),
             None,
             "sha1".to_owned(),
+            false,
             None,
             None,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

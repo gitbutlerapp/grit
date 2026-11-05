@@ -26410,6 +26410,7 @@ pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::writer(&mut self) -> &mut dyn core::io::write::Write
@@ -26509,6 +26510,7 @@ pub fn grit_lib::remote::transport::GitDaemonConnection::http_stack_watch(&self)
 pub fn grit_lib::remote::transport::GitDaemonConnection::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::GitDaemonConnection::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::GitDaemonConnection::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::GitDaemonConnection::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::GitDaemonConnection::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::GitDaemonConnection::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::GitDaemonConnection::writer(&mut self) -> &mut dyn core::io::write::Write
@@ -26569,6 +26571,7 @@ pub fn grit_lib::remote::transport::SshConnection::http_stack_watch(&self) -> co
 pub fn grit_lib::remote::transport::SshConnection::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::SshConnection::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::SshConnection::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::SshConnection::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::SshConnection::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::SshConnection::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::SshConnection::writer(&mut self) -> &mut dyn core::io::write::Write
@@ -26635,6 +26638,7 @@ pub fn grit_lib::remote::transport::Connection::http_stack_watch(&self) -> core:
 pub fn grit_lib::remote::transport::Connection::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::Connection::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::Connection::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::Connection::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::Connection::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::Connection::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::Connection::writer(&mut self) -> &mut dyn core::io::write::Write
@@ -26650,6 +26654,7 @@ pub fn grit_lib::remote::transport::GitDaemonConnection::http_stack_watch(&self)
 pub fn grit_lib::remote::transport::GitDaemonConnection::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::GitDaemonConnection::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::GitDaemonConnection::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::GitDaemonConnection::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::GitDaemonConnection::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::GitDaemonConnection::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::GitDaemonConnection::writer(&mut self) -> &mut dyn core::io::write::Write
@@ -26665,6 +26670,7 @@ pub fn grit_lib::remote::transport::SshConnection::http_stack_watch(&self) -> co
 pub fn grit_lib::remote::transport::SshConnection::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::SshConnection::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::SshConnection::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::SshConnection::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::SshConnection::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::SshConnection::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::SshConnection::writer(&mut self) -> &mut dyn core::io::write::Write
@@ -26680,6 +26686,7 @@ pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::reader(&mut self) -> &mut dyn alloc::io::read::Read
+pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::stateless_rpc(&self) -> bool
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::stateless_http::StatelessHttpConnection<C>::writer(&mut self) -> &mut dyn core::io::write::Write

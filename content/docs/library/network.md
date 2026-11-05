@@ -64,7 +64,7 @@ When the remote cannot be talked to at all, every operation (`list_refs`, `fetch
 | `Transport { detail }` | DNS, refused or reset connection, TLS, or timeout (HTTP and `git://`). Usually worth a retry. |
 | `HttpStatus { status }` | A smart-HTTP error status such as 403, 404 or 5xx. A `401` challenge stays [`Error::Auth`](rustdoc:grit_lib::error::Error::Auth). |
 | `NotGitServer { status, content_type }` | HTTP succeeded but the body was not a Git advertisement (for example `200 text/html` from a mistyped or parked host). |
-| `NoHandshake` | The transport ran but never spoke Git, for example `ssh` failed to connect or a `git://` peer hung up without a ref advertisement. |
+| `NoHandshake` | The transport ran but never spoke Git, for example `ssh` failed to connect, a `git://` peer hung up before any pkt-line, or the ref advertisement ended at EOF without a flush. An empty remote that sends only a flush pkt-line (`0000`) is a completed handshake with no refs. |
 
 Wrapper errors answer the same question without unwrapping: [`Error::is_remote_unreadable`](rustdoc:grit_lib::error::Error::is_remote_unreadable), [`RemoteError::is_remote_unreadable`](rustdoc:grit_lib::remote::RemoteError::is_remote_unreadable), [`CloneError::is_remote_unreadable`](rustdoc:grit_lib::remote::clone::CloneError::is_remote_unreadable) and [`PullError::is_remote_unreadable`](rustdoc:grit_lib::porcelain::pull::PullError::is_remote_unreadable). The `grit` CLI maps all of them to exit code 128 and `kind: remote_unreadable` ([Exit codes](../exit-codes.md)).
 
