@@ -8,7 +8,7 @@ use std::error::Error as StdError;
 
 use anyhow::Error;
 use grit_lib::error::{AuthFailure, Error as LibError, OverwriteReason, RemoteUnreadableReason};
-use grit_lib::porcelain::branch_error::BranchError;
+use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::remote::clone::CloneError;
@@ -322,7 +322,7 @@ fn clone_checkout_failed(err: &CloneError) -> Error {
     else {
         return guided(ErrorKind::CloneCheckoutFailed, err.to_string(), None, None);
     };
-    let dir = grit_lib::config::git_path::user_display_path(path);
+    let dir = path.display();
     let human = format!("the clone into '{dir}' succeeded, but its checkout failed: {source}");
     let hint = format!(
         "the repository was kept; run `grit reset --hard` in '{dir}' to finish the checkout{}",
@@ -336,7 +336,7 @@ fn clone_checkout_failed(err: &CloneError) -> Error {
         payload: StructuredJsonError {
             hint: Some(hint),
             clone_checkout: Some(crate::json_error::CloneCheckoutJson {
-                path: grit_lib::config::git_path::user_display_path(path),
+                path: path.display().to_string(),
                 commit: commit.to_hex(),
                 missing_object: err.missing_promised_object().map(|oid| oid.to_hex()),
                 failed_remotes: err

@@ -4,9 +4,9 @@ use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::error::Error;
 use grit_lib::porcelain::branch::{
     create_branch, delete_branch, preview_unset_upstream, rename_branch, set_upstream,
-    unset_upstream, validate_set_upstream, CreateBranchOptions, RenameBranchOptions,
+    unset_upstream, validate_set_upstream, CreateBranchOptions, DeleteMode, RenameBranchOptions,
+    StartPoint, TrackMode,
 };
-use grit_lib::porcelain::branch_error::{DeleteMode, StartPoint, TrackMode};
 use grit_lib::refs::branch_tracking::{
     list_branches, BranchDetail, BranchListQuery, BranchScope, BranchSummary,
 };
@@ -659,10 +659,7 @@ fn summary_to_entry(row: BranchSummary, full_detail: bool) -> BranchEntry {
         entry.remote = remote;
         entry.subject = row.subject;
         entry.date = row.committer_time.and_then(|t| t.format(&Rfc3339).ok());
-        entry.worktree = row
-            .worktree
-            .as_ref()
-            .map(|p| grit_lib::config::git_path::user_display_path(p));
+        entry.worktree = row.worktree.map(|p| p.display().to_string());
     }
     entry
 }
@@ -710,7 +707,7 @@ fn track_mode(opts: &BranchRunOptions) -> TrackMode {
 }
 
 fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
-    use grit_lib::porcelain::branch_error::BranchError;
+    use grit_lib::porcelain::branch::BranchError;
     match err {
         Error::RevParse(
             RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
@@ -834,8 +831,8 @@ fn unset(repo: &Repository, branch: &str, dry_run: bool) -> Result<BranchOutcome
     })
 }
 
-fn branch_error_message(err: &grit_lib::porcelain::branch_error::BranchError) -> String {
-    use grit_lib::porcelain::branch_error::BranchError;
+fn branch_error_message(err: &grit_lib::porcelain::branch::BranchError) -> String {
+    use grit_lib::porcelain::branch::BranchError;
     match err {
         BranchError::NotFullyMerged { name, .. } => format!(
             "{err}\nIf you are sure you want to delete it, run 'grit branch --force-delete {name}'"

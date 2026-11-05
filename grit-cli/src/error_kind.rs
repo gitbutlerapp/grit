@@ -1,6 +1,6 @@
 //! Stable machine-readable categories for structured `--json` errors.
 
-use grit_lib::porcelain::branch_error::BranchError;
+use grit_lib::porcelain::branch::BranchError;
 use schemars::JsonSchema;
 use serde::Serialize;
 

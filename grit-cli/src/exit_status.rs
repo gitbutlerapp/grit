@@ -356,7 +356,7 @@ mod tests {
     use grit_lib::command_runner::hooks::{HookError, HookOutput};
     use grit_lib::error::OverwriteReason;
     use grit_lib::objects::ObjectId;
-    use grit_lib::porcelain::branch_error::BranchError;
+    use grit_lib::porcelain::branch::BranchError;
 
     #[test]
     fn exit_status_for_every_error_kind() {
@@ -407,7 +407,7 @@ mod tests {
             assert_eq!(ExitStatus::for_error(&err), *expected);
         }
 
-        let filter_err = grit_lib::revwalk::CommitFilterError::InvalidPattern {
+        let filter_err = grit_lib::revwalk::filter::CommitFilterError::InvalidPattern {
             pattern: "[".into(),
             detail: "unclosed".into(),
         };

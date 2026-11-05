@@ -13,7 +13,6 @@ use crate::error::{Error, Result};
 use crate::git_path::path_for_error_message;
 use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
-use crate::porcelain::branch_error::{BranchError, DeleteMode, StartPoint, TrackMode};
 use crate::porcelain::checkout_reflog::{
     branch_create_reflog_source_label, checkout_reflog_identity, create_branch_ref_with_reflog,
     reset_branch_ref_with_reflog,
@@ -30,6 +29,8 @@ use crate::worktree::{
     admin_dirs_match, ensure_branch_not_checked_out_in_any_worktree, list_worktrees,
     worktree_admin_dir,
 };
+
+pub use crate::porcelain::branch_error::{BranchError, DeleteMode, StartPoint, TrackMode};
 
 const HEADS_PREFIX: &str = "refs/heads/";
 

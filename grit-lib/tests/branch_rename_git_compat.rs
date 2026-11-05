@@ -8,8 +8,7 @@ use std::sync::Arc;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::branch::{list_branches, rename_branch, RenameBranchOptions};
-use grit_lib::porcelain::branch_error::BranchError;
+use grit_lib::porcelain::branch::{list_branches, rename_branch, BranchError, RenameBranchOptions};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
     ReflogUpdate,

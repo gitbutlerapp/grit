@@ -3,7 +3,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::porcelain::branch_error::BranchError;
+use grit_lib::porcelain::branch::BranchError;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::worktree::{

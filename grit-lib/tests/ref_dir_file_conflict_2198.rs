@@ -93,7 +93,7 @@ fn switch_create_over_a_ref_directory_names_the_ref() {
             &repo,
             "rel",
             None,
-            grit_lib::porcelain::branch_error::TrackMode::Auto,
+            grit_lib::porcelain::branch::TrackMode::Auto,
         )
         .expect("resolve");
         let err = switch_repository(
