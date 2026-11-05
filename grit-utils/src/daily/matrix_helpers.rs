@@ -1165,16 +1165,8 @@ pub fn verify_log_json_filter(ctx: &DailyHeadlineContext) -> Result<()> {
         .filter(|l| !l.is_empty())
         .map(str::to_string)
         .collect();
-    let mut grit_oids: Vec<String> = if grit_out.trim_start().starts_with('[') {
-        serde_json::from_str(grit_out.trim()).context("parse grit log filter json array")?
-    } else {
-        grit_out
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .map(|l| l.trim_matches('"').to_string())
-            .collect()
-    };
+    let mut grit_oids: Vec<String> =
+        serde_json::from_str(grit_out.trim()).context("parse grit log filter json array")?;
     git_oids.sort();
     grit_oids.sort();
     if git_oids != grit_oids {

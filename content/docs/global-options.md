@@ -9,7 +9,7 @@ These options work on any command (and on `grit` itself when you pass no subcomm
 | --- | --- |
 | `--json` | Print one JSON object instead of human-readable text. Errors become `{"error": "..."}`. |
 | `--markdown` | Print agent-friendly Markdown instead of human-readable text. Most commands render structured headings, lists, and tables (or fenced diffs) rather than dumping JSON. Mutually exclusive with `--json`. |
-| `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. |
+| `--filter <EXPR>` | Apply a jq expression to the JSON output. Requires `--json`. Iterator-style filters always emit a JSON array; singular filters emit one value (`null` when absent). |
 | `--threads <N>` | Worker threads for parallel library work inside this process. `0` selects all logical CPUs (Git-style auto); `1` forces serial paths. Does not change human, `--json`, or `--markdown` output shape. |
 | `--no-optional-locks` | Skip opportunistic index updates that take optional locks (same as `GIT_OPTIONAL_LOCKS=0`). Stat refresh still runs in memory; `.git/index` is left untouched. |
 | `-h`, `--help` | Print help for `grit` or for a command. |

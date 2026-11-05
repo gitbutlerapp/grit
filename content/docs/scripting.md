@@ -3,7 +3,7 @@ title: Scripting with grit
 summary: Use --json and --filter to build scripts on top of grit.
 ---
 
-With `--json`, a command prints exactly one JSON value on stdout, so you can pipe it straight into other tools. The shape of each command's outcome is documented on its command page and in the committed v1 JSON Schemas under [`/schemas/`](../schemas/). Shared flag rules (`-n` as limit, long-only `--dry-run` on mutations, message and pathspec groups) are documented in [CLI conventions](../cli-conventions/). `--filter` runs a [jq](https://jqlang.org) expression over that value without needing `jq` installed. When a filter produces several values, they come back as one JSON array:
+With `--json`, a command prints exactly one JSON value on stdout, so you can pipe it straight into other tools. The shape of each command's outcome is documented on its command page and in the committed v1 JSON Schemas under [`/schemas/`](../schemas/). Shared flag rules (`-n` as limit, long-only `--dry-run` on mutations, message and pathspec groups) are documented in [CLI conventions](../cli-conventions/). `--filter` runs a [jq](https://jqlang.org) expression over that value without needing `jq` installed. Iterator-style filters — path `[]`, comma, `select`, and similar — always come back as a JSON array (`[]`, one element, or many). Singular filters such as `.branch` or `{branch, clean}` still emit one value; a missing field is `null`:
 
 ```console
 $ grit status --json --filter '{branch, clean}'
@@ -26,7 +26,7 @@ $ grit log --json --filter '.commits[].subject'
 | **Success stdout** | Exactly one JSON value: the command outcome object. |
 | **Failure stdout** | One object `{"error": "…"}` (see [error schema](/schemas/error/v1.json)). Some failures add structured fields such as `kind`; parsers should accept unknown keys. |
 | **stderr** | Progress, auth hints, and human `error:` lines. Scripts should parse **stdout only** for the outcome when `--json` is set. |
-| **`--filter`** | Requires `--json`. Runs jq-like logic on the outcome; multiple results become one JSON array. |
+| **`--filter`** | Requires `--json`. Runs jq-like logic on the outcome. Iterator filters always emit a JSON array; singular filters emit one value (`null` if absent). |
 | **Exit codes** | See [Exit codes](../exit-codes/). `0` success, `1` command failure, `2` usage (including bad `--hunks` ids and `diff --exit-code` errors), `128`/`129` for cases in the table. With `--json`, usage and most failures still print `{"error":"…"}` on stdout. |
 
 Pass `--json` on every command you script. Plumbing commands ([`grit manager`](../manager/), [`grit upload-pack`](../upload-pack/), [`grit receive-pack`](../receive-pack/)) speak wire protocols instead of JSON.

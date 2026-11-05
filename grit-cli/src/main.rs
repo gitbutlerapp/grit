@@ -96,7 +96,9 @@ pub(crate) struct Cli {
     markdown: bool,
     /// jq-like expression applied to JSON output (requires `--json`).
     ///
-    /// Examples: `.branch`, `.commits[].oid`, `{branch, clean}`.
+    /// Iterator-style filters (for example `.commits[].oid`) always emit a JSON
+    /// array; singular filters (for example `.branch`) emit one value, including
+    /// `null` when a field is missing.
     #[arg(long, global = true, value_name = "EXPR")]
     filter: Option<String>,
     /// Worker threads for parallel library work (`0` = auto, `1` = serial).
