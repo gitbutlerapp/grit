@@ -88,8 +88,8 @@ pub mod grit_server_share {
     pub use crate::grit_server_share::{
         accept, share, share_link, LinkOptions, LinkUses, NewShareLink, ShareAcceptReply,
         ShareAcceptRequest, ShareAcceptStatus, ShareIntegration, ShareLinkInfo, ShareMember,
-        ShareMode, ShareReply, ShareRequest, ShareState, SharedBranch, DEFAULT_LINK_DAYS,
-        MAX_LINK_DAYS, SHARED_REFS,
+        ShareMode, ShareReply, ShareRequest, ShareState, ShareView, SharedBranch,
+        DEFAULT_LINK_DAYS, MAX_LINK_DAYS, SHARED_REFS,
     };
 }
 
