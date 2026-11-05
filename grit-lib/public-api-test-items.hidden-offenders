@@ -9,6 +9,3 @@ grit_lib::pack_store::test_hooks
 grit_lib::pack_store::test_hooks::implicit_stores_created
 grit_lib::pack_store::test_hooks::legacy_stores_created
 grit_lib::pack_store::test_hooks::reset
-grit_lib::repo::set_test_inject_index_write_fail
-grit_lib::repo::set_test_inject_index_write_fail_remaining
-grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs

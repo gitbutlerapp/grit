@@ -34,6 +34,3 @@ grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc
 grit_lib::prelude::RepositoryOptions::test_assume_different_owner
 grit_lib::remote::DefaultHttpClientFactory::create_for_probe
 grit_lib::remote::HttpClientFactory::create_for_probe
-grit_lib::repo::set_test_inject_index_write_fail
-grit_lib::repo::set_test_inject_index_write_fail_remaining
-grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs
