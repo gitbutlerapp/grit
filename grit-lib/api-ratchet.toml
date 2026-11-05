@@ -5,12 +5,12 @@
 updated = "2026-11-05"
 
 [counts]
-public_api_lines = 33219
+public_api_lines = 33295
 pub_fn_with_in_name = 157
 pub_fn_too_many_arguments_allow = 34
 pub_fn_two_plus_bare_bool = 31
 pub_fn_result_string_err = 14
-pub_free_fn_repository_first = 431
+pub_free_fn_repository_first = 432
 pub_free_fn_git_dir_path_first = 142
 pub_items_multiple_paths = 183
 pub_libc_types = 2
