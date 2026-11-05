@@ -4499,6 +4499,41 @@ pub(crate) fn read_packed_commit_header_block_into(
     Ok(false)
 }
 
+/// Inflate commit `oid`, stored whole in a local pack, through its first non-blank message
+/// line into `out`.
+///
+/// Same positioned-read strategy as [`read_packed_commit_header_block_into`], but inflation
+/// stops at the subject line rather than at the blank line that ends the headers.
+///
+/// Returns `false`, leaving `out` unspecified, when no local pack index lists `oid`, the entry
+/// is not a whole commit, the positioned read or inflate fails, or the subject prefix is not
+/// found within the compressed bytes fetched. Callers then read the whole object.
+///
+/// # Errors
+///
+/// Propagates pack directory listing and pack index lookup errors.
+pub(crate) fn read_packed_commit_through_subject_into(
+    objects_dir: &Path,
+    oid: &ObjectId,
+    out: &mut Vec<u8>,
+) -> Result<bool> {
+    pack_cache::sync_thread_local_for_objects_dir(objects_dir);
+    if let Some(idx) = pack_cache::hinted_pack_index(objects_dir) {
+        if let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
+        {
+            return Ok(read_commit_through_subject_at(&idx, offset, out));
+        }
+    }
+    for idx in pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)? {
+        if let Some(offset) = pack_cache::find_offset_in_pack_read_context(objects_dir, &idx, oid)?
+        {
+            pack_cache::remember_pack_hit(objects_dir, &idx);
+            return Ok(read_commit_through_subject_at(&idx, offset, out));
+        }
+    }
+    Ok(false)
+}
+
 /// [`read_packed_commit_header_block_into`] for many commits at once.
 ///
 /// Calls `found(i, header)` for every `oids[i]` the shortcut applies to, with the bytes
@@ -4585,6 +4620,22 @@ fn read_commit_header_block_at(idx: &PackIndex, offset: u64, out: &mut Vec<u8>) 
     })
 }
 
+fn read_commit_through_subject_at(idx: &PackIndex, offset: u64, out: &mut Vec<u8>) -> bool {
+    let Some(pack_bytes) = validated_pack_bytes(idx) else {
+        return false;
+    };
+    let mut window = [0u8; COMMIT_HEADER_BLOCK_WINDOW];
+    WHOLE_OBJECT_ZLIB.with(|slot| {
+        read_commit_through_subject_from(
+            &pack_bytes,
+            offset,
+            &mut window,
+            &mut slot.borrow_mut(),
+            out,
+        )
+    })
+}
+
 /// Read the commit entry at `offset` with a positioned read into `window` and inflate its
 /// header block into `out` (see [`read_packed_commit_header_block_into`]).
 ///
@@ -4621,6 +4672,39 @@ fn read_commit_header_block_from(
     inflate_commit_header_block(&window[pos..len], size, want, zlib, out)
 }
 
+/// Read the commit entry at `offset` with a positioned read into `window` and inflate through
+/// its subject line into `out` (see [`read_packed_commit_through_subject_into`]).
+fn read_commit_through_subject_from(
+    pack_bytes: &PackData,
+    offset: u64,
+    window: &mut [u8],
+    zlib: &mut ZlibInflateScratch,
+    out: &mut Vec<u8>,
+) -> bool {
+    let first_read = COMMIT_HEADER_BLOCK_FIRST_READ.min(window.len());
+    let Some(len) = pack_bytes.read_sparse(offset, &mut window[..first_read]) else {
+        return false;
+    };
+    let mut pos = 0usize;
+    let Ok((PackedType::Commit, size)) = parse_pack_object_header(&window[..len], &mut pos) else {
+        return false;
+    };
+    if inflate_commit_through_subject(&window[pos..len], size, zlib, out) {
+        return true;
+    }
+    if len < first_read || first_read == window.len() {
+        return false;
+    }
+    let Some(len) = pack_bytes.read_sparse(offset, window) else {
+        return false;
+    };
+    pos = 0;
+    let Ok((PackedType::Commit, size)) = parse_pack_object_header(&window[..len], &mut pos) else {
+        return false;
+    };
+    inflate_commit_through_subject(&window[pos..len], size, zlib, out)
+}
+
 /// Inflate the zlib stream of a `size`-byte commit from `compressed` into `out` and keep its
 /// headers through the blank line that ends them, which must lie within its first `want` bytes.
 ///
@@ -4651,6 +4735,24 @@ fn inflate_commit_header_block(
         }
         _ => false,
     }
+}
+
+/// Inflate the zlib stream of a `size`-byte commit from `compressed` into `out` and keep every
+/// header and the message through its first non-blank line.
+fn inflate_commit_through_subject(
+    compressed: &[u8],
+    size: u64,
+    zlib: &mut ZlibInflateScratch,
+    out: &mut Vec<u8>,
+) -> bool {
+    zlib.decompress_prefix_until(
+        compressed,
+        size,
+        COMMIT_SUBJECT_READ_STEP,
+        out,
+        crate::objects::commit_through_subject_len,
+    )
+    .is_ok()
 }
 
 fn read_object_info_from_pack_at_offset_with_bytes(

@@ -143,11 +143,11 @@ impl Odb {
             {
                 return Ok(Some(through_subject(data)));
             }
-            let mut header = Vec::new();
-            if crate::pack::read_packed_commit_header_block_into(objects_dir, oid, &mut header)?
-                && !header.is_empty()
+            let mut prefix = Vec::new();
+            if crate::pack::read_packed_commit_through_subject_into(objects_dir, oid, &mut prefix)?
+                && !prefix.is_empty()
             {
-                return Ok(Some(through_subject(header)));
+                return Ok(Some(through_subject(prefix)));
             }
             Ok(None)
         };
@@ -385,6 +385,37 @@ mod tests {
             }
         }
         assert!(cut_short > 0, "no commit was read only through its subject");
+    }
+
+    #[test]
+    fn read_commit_through_subject_packed_without_pack_read_context() {
+        use crate::objects::read_commit_subject_line;
+
+        let dir = TempDir::new().unwrap();
+        let cases = git_commits_with_prefixes(dir.path());
+        git(dir.path(), &["repack", "-a", "-d", "-q"], None);
+        let objects = dir.path().join("objects");
+        let odb = Odb::new(&objects);
+        for (oid, expected) in &cases {
+            let prefix = odb.read_commit_through_subject(oid).unwrap();
+            assert_eq!(prefix, *expected, "{oid}");
+            assert_eq!(
+                read_commit_subject_line(&prefix).unwrap(),
+                read_commit_subject_line(&git(
+                    dir.path(),
+                    &["cat-file", "commit", &oid.to_hex()],
+                    None
+                ))
+                .unwrap(),
+                "{oid}"
+            );
+        }
+
+        git(dir.path(), &["commit-graph", "write", "--reachable"], None);
+        for (oid, expected) in &cases {
+            let prefix = odb.read_commit_through_subject(oid).unwrap();
+            assert_eq!(prefix, *expected, "{oid} with commit-graph");
+        }
     }
 
     #[test]
