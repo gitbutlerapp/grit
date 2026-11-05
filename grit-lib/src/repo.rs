@@ -136,6 +136,8 @@ pub struct InitOptions {
     /// related cascade). When `None`, init uses [`Environment::empty`] and the handle stays
     /// hermetic like [`RepositoryOptions::empty`].
     pub environment: Option<Environment>,
+    /// Init-time filesystem probes ([`InitFilesystemConfigOptions`]).
+    pub init_filesystem: InitFilesystemConfigOptions,
 }
 
 impl Default for InitOptions {
@@ -149,6 +151,7 @@ impl Default for InitOptions {
             bare_with_worktree_at_path: false,
             object_format: None,
             environment: None,
+            init_filesystem: InitFilesystemConfigOptions::default(),
         }
     }
 }
@@ -185,6 +188,13 @@ impl InitOptions {
     #[must_use]
     pub fn with_environment(mut self, environment: Environment) -> Self {
         self.environment = Some(environment);
+        self
+    }
+
+    /// Set [`Self::init_filesystem`] (for example [`PrecomposeDetection::Always`](crate::init_filesystem::PrecomposeDetection::Always) on Linux CI).
+    #[must_use]
+    pub fn with_init_filesystem(mut self, init_filesystem: InitFilesystemConfigOptions) -> Self {
+        self.init_filesystem = init_filesystem;
         self
     }
 
@@ -622,6 +632,7 @@ impl Repository {
         let caches = RepoCaches::with_diagnostics(
             Arc::clone(&command_runner),
             Arc::clone(&options.diagnostics),
+            options.reftable_write,
         );
         caches.set_promisor_fetcher(options.promisor_fetcher.clone());
         let odb = if let Some(ref wt) = work_tree {
@@ -828,6 +839,7 @@ impl Repository {
             open_for_serving: false,
             promisor_fetcher: self.caches().promisor_fetcher(),
             hook_stdio: self.hook_stdio,
+            reftable_write: self.caches.reftable_write(),
         }
     }
 
@@ -884,6 +896,7 @@ impl Repository {
         let caches = RepoCaches::with_diagnostics(
             Arc::clone(&self.command_runner),
             Arc::clone(&self.diagnostics),
+            self.caches.reftable_write(),
         );
         let ref_store = if self.refs_on_disk() {
             caches.open_ref_store(&git_dir, &environment)?
@@ -1724,6 +1737,7 @@ impl Repository {
                 options.template_dir.as_deref(),
                 options.ref_storage,
                 object_format,
+                options.init_filesystem,
                 &env,
             )?
         } else if separate_layout {
@@ -1734,6 +1748,7 @@ impl Repository {
                 options.template_dir.as_deref(),
                 options.ref_storage,
                 object_format,
+                options.init_filesystem,
                 &env,
             )?
         } else {
@@ -1744,6 +1759,7 @@ impl Repository {
                 options.template_dir.as_deref(),
                 options.ref_storage,
                 object_format,
+                options.init_filesystem,
                 &env,
             )?
         };
@@ -1889,6 +1905,7 @@ impl Repository {
         let caches = RepoCaches::with_diagnostics(
             Arc::clone(&command_runner),
             Arc::clone(&options.diagnostics),
+            options.reftable_write,
         );
         let odb = builder
             .build()
@@ -4218,6 +4235,7 @@ fn write_fresh_git_directory(
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
     skip_hooks_and_info: bool,
+    init_filesystem: InitFilesystemConfigOptions,
     environment: &Environment,
 ) -> Result<()> {
     ensure_git_directory_layout(git_dir, bare, ref_storage, skip_hooks_and_info)?;
@@ -4283,7 +4301,7 @@ fn write_fresh_git_directory(
         crate::refs::store::RawRef::Symbolic(format!("refs/heads/{initial_branch}")),
     )?;
 
-    apply_init_filesystem_config(git_dir, InitFilesystemConfigOptions::default(), environment)?;
+    apply_init_filesystem_config(git_dir, init_filesystem, environment)?;
 
     fs::write(
         git_dir.join("description"),
@@ -4300,6 +4318,7 @@ fn write_fresh_git_directory(
 /// # Errors
 ///
 /// Returns [`Error::WorktreePathIo`] or [`Error::GitDirPathIo`] on filesystem failures.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn init_repository_separate_git_dir(
     work_tree: &Path,
     git_dir: &Path,
@@ -4307,6 +4326,7 @@ pub(crate) fn init_repository_separate_git_dir(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
+    init_filesystem: InitFilesystemConfigOptions,
     environment: &Environment,
 ) -> Result<Repository> {
     let skip_hooks_info = template_dir.is_some_and(|p| p.as_os_str().is_empty());
@@ -4332,6 +4352,7 @@ pub(crate) fn init_repository_separate_git_dir(
             ref_storage,
             object_format,
             skip_hooks_info,
+            init_filesystem,
             environment,
         )?;
     }
@@ -4399,10 +4420,12 @@ pub(crate) fn init_repository(
         template_dir,
         ref_storage,
         HashAlgo::Sha1,
+        InitFilesystemConfigOptions::default(),
         &Environment::empty(),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn init_repository_with_object_format(
     path: &Path,
     bare: bool,
@@ -4410,6 +4433,7 @@ pub(crate) fn init_repository_with_object_format(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
+    init_filesystem: InitFilesystemConfigOptions,
     environment: &Environment,
 ) -> Result<Repository> {
     let skip_hooks_info = !bare && template_dir.is_some_and(|p| p.as_os_str().is_empty());
@@ -4451,6 +4475,7 @@ pub(crate) fn init_repository_with_object_format(
             ref_storage,
             object_format,
             skip_hooks_info,
+            init_filesystem,
             environment,
         )?;
     }
@@ -4477,6 +4502,7 @@ pub(crate) fn init_repository_with_object_format(
 /// # Errors
 ///
 /// Returns [`Error::WorktreePathIo`] or [`Error::GitDirPathIo`] on filesystem failures.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn init_bare_with_env_worktree(
     git_dir: &Path,
     work_tree: &Path,
@@ -4484,6 +4510,7 @@ pub(crate) fn init_bare_with_env_worktree(
     template_dir: Option<&Path>,
     ref_storage: crate::ref_storage::RefStorageFormat,
     object_format: HashAlgo,
+    init_filesystem: InitFilesystemConfigOptions,
     environment: &Environment,
 ) -> Result<Repository> {
     fs::create_dir_all(git_dir)?;
@@ -4500,6 +4527,7 @@ pub(crate) fn init_bare_with_env_worktree(
             ref_storage,
             object_format,
             false,
+            init_filesystem,
             environment,
         )?;
     }

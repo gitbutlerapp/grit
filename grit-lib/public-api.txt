@@ -1875,9 +1875,6 @@ pub grit_lib::config::environment::Environment::git_object_directory: core::opti
 pub grit_lib::config::environment::Environment::git_optional_locks: bool
 pub grit_lib::config::environment::Environment::git_prefix: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_replace_ref_base: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::git_test_no_write_rev_index: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::git_test_reftable_autocompaction: core::option::Option<alloc::string::String>
-pub grit_lib::config::environment::Environment::git_test_utf8_nfd_to_nfc: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::git_work_tree: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::grit_invocation_cwd: core::option::Option<alloc::string::String>
 pub grit_lib::config::environment::Environment::home: core::option::Option<std::ffi::os_str::OsString>
@@ -1903,7 +1900,6 @@ pub fn grit_lib::config::environment::Environment::git_now_date_override(&self) 
 pub fn grit_lib::config::environment::Environment::home_dir(&self) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::environment::Environment::is_fetch_options_default(&self) -> bool
 pub fn grit_lib::config::environment::Environment::push_config_override(&mut self, &grit_lib::config::environment::ConfigOverride)
-pub fn grit_lib::config::environment::Environment::reftable_autocompaction_enabled(&self) -> bool
 pub fn grit_lib::config::environment::Environment::subprocess_environment(&self) -> alloc::vec::Vec<(std::ffi::os_str::OsString, std::ffi::os_str::OsString)>
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
@@ -1934,6 +1930,7 @@ pub grit_lib::config::environment::RepositoryOptions::network_trace: bool
 pub grit_lib::config::environment::RepositoryOptions::open_for_serving: bool
 pub grit_lib::config::environment::RepositoryOptions::promisor_fetcher: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>
 pub grit_lib::config::environment::RepositoryOptions::reference_unix_time: core::option::Option<i64>
+pub grit_lib::config::environment::RepositoryOptions::reftable_write: grit_lib::refs::reftable::ReftableWriteOptions
 pub grit_lib::config::environment::RepositoryOptions::thread_policy: grit_lib::parallel::ThreadPolicy
 pub grit_lib::config::environment::RepositoryOptions::validate_repository_format: bool
 pub grit_lib::config::environment::RepositoryOptions::work_tree: core::option::Option<std::path::PathBuf>
@@ -1942,6 +1939,7 @@ pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::ownership_check(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>
+pub fn grit_lib::config::environment::RepositoryOptions::reftable_write(&self) -> grit_lib::refs::reftable::ReftableWriteOptions
 pub fn grit_lib::config::environment::RepositoryOptions::uses_default_ownership_check(&self) -> bool
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
@@ -1951,6 +1949,7 @@ pub fn grit_lib::config::environment::RepositoryOptions::with_hook_stdio(self, g
 pub fn grit_lib::config::environment::RepositoryOptions::with_network_trace(self, bool) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_ownership_check(self, alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_promisor_fetcher(self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_reftable_write(self, grit_lib::refs::reftable::ReftableWriteOptions) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_work_tree(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::without_format_validation(self) -> Self
 impl core::clone::Clone for grit_lib::config::environment::RepositoryOptions
@@ -2701,7 +2700,7 @@ pub fn grit_lib::config::ConfigSet::pack_read_reverse_index_default(&self) -> bo
 pub fn grit_lib::config::ConfigSet::pack_window_memory_bytes(&self) -> u64
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_hash_cache(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_lookup_table(&self) -> bool
-pub fn grit_lib::config::ConfigSet::pack_write_reverse_index_default(&self, &grit_lib::config::environment::Environment) -> bool
+pub fn grit_lib::config::ConfigSet::pack_write_reverse_index_default(&self) -> bool
 pub fn grit_lib::config::ConfigSet::precompose_unicode(&self) -> bool
 pub fn grit_lib::config::ConfigSet::preload_index(&self) -> bool
 pub fn grit_lib::config::ConfigSet::quote_path_fully(&self) -> bool
@@ -17639,7 +17638,7 @@ pub fn grit_lib::config::ConfigSet::pack_read_reverse_index_default(&self) -> bo
 pub fn grit_lib::config::ConfigSet::pack_window_memory_bytes(&self) -> u64
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_hash_cache(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_lookup_table(&self) -> bool
-pub fn grit_lib::config::ConfigSet::pack_write_reverse_index_default(&self, &grit_lib::config::environment::Environment) -> bool
+pub fn grit_lib::config::ConfigSet::pack_write_reverse_index_default(&self) -> bool
 pub fn grit_lib::config::ConfigSet::precompose_unicode(&self) -> bool
 pub fn grit_lib::config::ConfigSet::preload_index(&self) -> bool
 pub fn grit_lib::config::ConfigSet::quote_path_fully(&self) -> bool
@@ -17708,9 +17707,6 @@ pub grit_lib::prelude::Environment::git_object_directory: core::option::Option<a
 pub grit_lib::prelude::Environment::git_optional_locks: bool
 pub grit_lib::prelude::Environment::git_prefix: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_replace_ref_base: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::git_test_no_write_rev_index: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::git_test_reftable_autocompaction: core::option::Option<alloc::string::String>
-pub grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::git_work_tree: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::grit_invocation_cwd: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Environment::home: core::option::Option<std::ffi::os_str::OsString>
@@ -17736,7 +17732,6 @@ pub fn grit_lib::config::environment::Environment::git_now_date_override(&self) 
 pub fn grit_lib::config::environment::Environment::home_dir(&self) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::environment::Environment::is_fetch_options_default(&self) -> bool
 pub fn grit_lib::config::environment::Environment::push_config_override(&mut self, &grit_lib::config::environment::ConfigOverride)
-pub fn grit_lib::config::environment::Environment::reftable_autocompaction_enabled(&self) -> bool
 pub fn grit_lib::config::environment::Environment::subprocess_environment(&self) -> alloc::vec::Vec<(std::ffi::os_str::OsString, std::ffi::os_str::OsString)>
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
@@ -17839,6 +17834,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::Index
 pub grit_lib::prelude::InitOptions::bare: bool
 pub grit_lib::prelude::InitOptions::bare_with_worktree_at_path: bool
 pub grit_lib::prelude::InitOptions::environment: core::option::Option<grit_lib::config::environment::Environment>
+pub grit_lib::prelude::InitOptions::init_filesystem: grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 pub grit_lib::prelude::InitOptions::initial_branch: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::InitOptions::object_format: core::option::Option<grit_lib::objects::HashAlgo>
 pub grit_lib::prelude::InitOptions::ref_storage: grit_lib::refs::ref_storage::RefStorageFormat
@@ -17849,6 +17845,7 @@ pub fn grit_lib::repo::InitOptions::new() -> Self
 pub fn grit_lib::repo::InitOptions::with_bare(self, bool) -> Self
 pub fn grit_lib::repo::InitOptions::with_bare_with_worktree_at_path(self, bool) -> Self
 pub fn grit_lib::repo::InitOptions::with_environment(self, grit_lib::config::environment::Environment) -> Self
+pub fn grit_lib::repo::InitOptions::with_init_filesystem(self, grit_lib::config::init_filesystem::InitFilesystemConfigOptions) -> Self
 pub fn grit_lib::repo::InitOptions::with_initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::repo::InitOptions::with_object_format(self, grit_lib::objects::HashAlgo) -> Self
 pub fn grit_lib::repo::InitOptions::with_ref_storage(self, grit_lib::refs::ref_storage::RefStorageFormat) -> Self
@@ -18229,6 +18226,7 @@ pub grit_lib::prelude::RepositoryOptions::network_trace: bool
 pub grit_lib::prelude::RepositoryOptions::open_for_serving: bool
 pub grit_lib::prelude::RepositoryOptions::promisor_fetcher: core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>
 pub grit_lib::prelude::RepositoryOptions::reference_unix_time: core::option::Option<i64>
+pub grit_lib::prelude::RepositoryOptions::reftable_write: grit_lib::refs::reftable::ReftableWriteOptions
 pub grit_lib::prelude::RepositoryOptions::thread_policy: grit_lib::parallel::ThreadPolicy
 pub grit_lib::prelude::RepositoryOptions::validate_repository_format: bool
 pub grit_lib::prelude::RepositoryOptions::work_tree: core::option::Option<std::path::PathBuf>
@@ -18237,6 +18235,7 @@ pub fn grit_lib::config::environment::RepositoryOptions::empty() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::for_serving(self) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::from_process() -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::ownership_check(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>
+pub fn grit_lib::config::environment::RepositoryOptions::reftable_write(&self) -> grit_lib::refs::reftable::ReftableWriteOptions
 pub fn grit_lib::config::environment::RepositoryOptions::uses_default_ownership_check(&self) -> bool
 pub fn grit_lib::config::environment::RepositoryOptions::with_change_id_generator(self, alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
@@ -18246,6 +18245,7 @@ pub fn grit_lib::config::environment::RepositoryOptions::with_hook_stdio(self, g
 pub fn grit_lib::config::environment::RepositoryOptions::with_network_trace(self, bool) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_ownership_check(self, alloc::rcs::arc::Arc<dyn grit_lib::ownership_check::OwnershipCheck>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_promisor_fetcher(self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> Self
+pub fn grit_lib::config::environment::RepositoryOptions::with_reftable_write(self, grit_lib::refs::reftable::ReftableWriteOptions) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::with_work_tree(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 pub fn grit_lib::config::environment::RepositoryOptions::without_format_validation(self) -> Self
 impl core::clone::Clone for grit_lib::config::environment::RepositoryOptions
@@ -19920,6 +19920,28 @@ impl core::marker::Unpin for grit_lib::refs::reftable::ReftableTransactionUpdate
 impl core::marker::UnsafeUnpin for grit_lib::refs::reftable::ReftableTransactionUpdate
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reftable::ReftableTransactionUpdate
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reftable::ReftableTransactionUpdate
+#[non_exhaustive] pub struct grit_lib::refs::reftable::ReftableWriteOptions
+pub grit_lib::refs::reftable::ReftableWriteOptions::autocompaction_enabled: bool
+impl grit_lib::refs::reftable::ReftableWriteOptions
+pub fn grit_lib::refs::reftable::ReftableWriteOptions::with_autocompaction_enabled(self, bool) -> Self
+impl core::clone::Clone for grit_lib::refs::reftable::ReftableWriteOptions
+pub fn grit_lib::refs::reftable::ReftableWriteOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::cmp::PartialEq for grit_lib::refs::reftable::ReftableWriteOptions
+pub fn grit_lib::refs::reftable::ReftableWriteOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::refs::reftable::ReftableWriteOptions
+pub fn grit_lib::refs::reftable::ReftableWriteOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::reftable::ReftableWriteOptions
+pub fn grit_lib::refs::reftable::ReftableWriteOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::marker::StructuralPartialEq for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::marker::Freeze for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::marker::Send for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::marker::Sync for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::marker::Unpin for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::marker::UnsafeUnpin for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reftable::ReftableWriteOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reftable::ReftableWriteOptions
 pub struct grit_lib::refs::reftable::ReftableWriter
 impl grit_lib::refs::reftable::ReftableWriter
 pub fn grit_lib::refs::reftable::ReftableWriter::add_log(&mut self, grit_lib::refs::reftable::LogRecord) -> grit_lib::error::Result<()>
@@ -19957,7 +19979,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reftable::Write
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reftable::WriteOptions
 pub fn grit_lib::refs::reftable::dump_reftable_blocks(&std::path::Path) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::refs::reftable::read_write_options(&std::path::Path) -> grit_lib::refs::reftable::WriteOptions
-pub fn grit_lib::refs::reftable::read_write_options_with_environment(&std::path::Path, &grit_lib::config::environment::Environment) -> grit_lib::refs::reftable::WriteOptions
+pub fn grit_lib::refs::reftable::read_write_options_with_environment(&std::path::Path, &grit_lib::config::environment::Environment, &grit_lib::refs::reftable::ReftableWriteOptions) -> grit_lib::refs::reftable::WriteOptions
 pub fn grit_lib::refs::reftable::reftable_append_reflog(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_delete_ref(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reftable::reftable_delete_ref_with_write_options(&std::path::Path, &str, &grit_lib::refs::reftable::WriteOptions) -> grit_lib::error::Result<()>
@@ -26376,7 +26398,7 @@ pub fn grit_lib::repo::caches::RepoCaches::ref_storage_format_from_local_config(
 pub fn grit_lib::repo::caches::RepoCaches::set_promisor_fetcher(&self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>)
 pub fn grit_lib::repo::caches::RepoCaches::set_promisor_hydrate_hook(&self, core::option::Option<grit_lib::blame::PromisorHydrateHook>)
 pub fn grit_lib::repo::caches::RepoCaches::should_warn_commit_graph_once(&self, &str) -> bool
-pub fn grit_lib::repo::caches::RepoCaches::with_diagnostics(alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>, grit_lib::diagnostics::DiagnosticsHandle) -> alloc::rcs::arc::Arc<Self>
+pub fn grit_lib::repo::caches::RepoCaches::with_diagnostics(alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>, grit_lib::diagnostics::DiagnosticsHandle, grit_lib::refs::reftable::ReftableWriteOptions) -> alloc::rcs::arc::Arc<Self>
 impl core::fmt::Debug for grit_lib::repo::caches::RepoCaches
 pub fn grit_lib::repo::caches::RepoCaches::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::ops::drop::Drop for grit_lib::repo::caches::RepoCaches
@@ -26412,6 +26434,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::DiscoveryInfo
 pub grit_lib::repo::InitOptions::bare: bool
 pub grit_lib::repo::InitOptions::bare_with_worktree_at_path: bool
 pub grit_lib::repo::InitOptions::environment: core::option::Option<grit_lib::config::environment::Environment>
+pub grit_lib::repo::InitOptions::init_filesystem: grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 pub grit_lib::repo::InitOptions::initial_branch: core::option::Option<alloc::string::String>
 pub grit_lib::repo::InitOptions::object_format: core::option::Option<grit_lib::objects::HashAlgo>
 pub grit_lib::repo::InitOptions::ref_storage: grit_lib::refs::ref_storage::RefStorageFormat
@@ -26422,6 +26445,7 @@ pub fn grit_lib::repo::InitOptions::new() -> Self
 pub fn grit_lib::repo::InitOptions::with_bare(self, bool) -> Self
 pub fn grit_lib::repo::InitOptions::with_bare_with_worktree_at_path(self, bool) -> Self
 pub fn grit_lib::repo::InitOptions::with_environment(self, grit_lib::config::environment::Environment) -> Self
+pub fn grit_lib::repo::InitOptions::with_init_filesystem(self, grit_lib::config::init_filesystem::InitFilesystemConfigOptions) -> Self
 pub fn grit_lib::repo::InitOptions::with_initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::repo::InitOptions::with_object_format(self, grit_lib::objects::HashAlgo) -> Self
 pub fn grit_lib::repo::InitOptions::with_ref_storage(self, grit_lib::refs::ref_storage::RefStorageFormat) -> Self

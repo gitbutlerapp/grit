@@ -408,9 +408,38 @@ pub struct WriteOptions {
     /// Geometric factor for stack auto-compaction (`reftable.geometricFactor`).
     /// Defaults to 2 when unset.
     pub auto_compaction_factor: u8,
-    /// Whether to run automatic stack compaction after writes (Git test knob via
-    /// [`Environment::reftable_autocompaction_enabled`](crate::environment::Environment::reftable_autocompaction_enabled)).
+    /// Whether to run automatic stack compaction after writes (see
+    /// [`ReftableWriteOptions::autocompaction_enabled`] on [`RepositoryOptions`](crate::environment::RepositoryOptions)).
     pub autocompaction_enabled: bool,
+}
+
+/// Repository-level overrides for reftable stack writes.
+///
+/// Pass through [`RepositoryOptions::with_reftable_write`](crate::environment::RepositoryOptions::with_reftable_write)
+/// when opening a [`crate::repo::Repository`], or set fields on [`WriteOptions`] for direct
+/// [`ReftableWriter`] use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReftableWriteOptions {
+    /// When false, skip automatic stack compaction after writes (default: `true`).
+    pub autocompaction_enabled: bool,
+}
+
+impl Default for ReftableWriteOptions {
+    fn default() -> Self {
+        Self {
+            autocompaction_enabled: true,
+        }
+    }
+}
+
+impl ReftableWriteOptions {
+    /// Override [`Self::autocompaction_enabled`].
+    #[must_use]
+    pub fn with_autocompaction_enabled(mut self, enabled: bool) -> Self {
+        self.autocompaction_enabled = enabled;
+        self
+    }
 }
 
 impl Default for WriteOptions {
@@ -3850,17 +3879,22 @@ fn apply_geometric_factor_from_config(opts: &mut WriteOptions, raw: &str) {
 
 /// Read reftable write options from the repository config (auto-compaction enabled).
 pub fn read_write_options(git_dir: &Path) -> WriteOptions {
-    read_write_options_with_environment(git_dir, &crate::environment::Environment::empty())
+    read_write_options_with_environment(
+        git_dir,
+        &crate::environment::Environment::empty(),
+        &ReftableWriteOptions::default(),
+    )
 }
 
 /// Read reftable write options from config and an explicit discovery environment.
 pub fn read_write_options_with_environment(
     git_dir: &Path,
     env: &crate::environment::Environment,
+    reftable_write: &ReftableWriteOptions,
 ) -> WriteOptions {
     let mut opts = WriteOptions {
         hash_size: reftable_hash_size_for_git_dir(git_dir),
-        autocompaction_enabled: env.reftable_autocompaction_enabled(),
+        autocompaction_enabled: reftable_write.autocompaction_enabled,
         ..Default::default()
     };
 

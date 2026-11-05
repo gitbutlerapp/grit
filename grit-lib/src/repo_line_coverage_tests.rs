@@ -101,6 +101,7 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
         None,
         RefStorageFormat::Files,
         crate::objects::HashAlgo::Sha1,
+        crate::init_filesystem::InitFilesystemConfigOptions::default(),
         &crate::environment::Environment::empty(),
     )?;
     let repo =
@@ -120,6 +121,7 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
         None,
         RefStorageFormat::Files,
         crate::objects::HashAlgo::Sha1,
+        crate::init_filesystem::InitFilesystemConfigOptions::default(),
         &crate::environment::Environment::empty(),
     )?;
 

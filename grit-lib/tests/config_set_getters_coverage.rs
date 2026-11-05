@@ -44,7 +44,7 @@ fn typed_getters_and_merge_set() {
     assert!(set2.has_key("branch.main.remote"));
     assert_eq!(set2.get_bool("core.bare"), Some(Ok(false)));
     let env = Environment::empty();
-    assert!(set2.pack_write_reverse_index_default(&env));
+    assert!(set2.pack_write_reverse_index_default());
     assert!(set2.pack_read_reverse_index_default());
     assert_eq!(set2.pack_index_threads(), Some(2));
     assert_eq!(set2.loose_objects_zlib_level().unwrap(), 1);

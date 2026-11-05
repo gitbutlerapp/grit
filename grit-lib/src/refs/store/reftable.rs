@@ -14,8 +14,8 @@ use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::reftable::{
     read_write_options, read_write_options_with_environment, reftable_storage_location, LogRecord,
-    RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate, TablesListLock,
-    WriteOptions,
+    RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate, ReftableWriteOptions,
+    TablesListLock, WriteOptions,
 };
 use crate::repo::init_repository;
 
@@ -55,6 +55,7 @@ type StoreResult<T> = std::result::Result<T, RefStoreError>;
 pub struct ReftableRefStore {
     git_dir: PathBuf,
     environment: Environment,
+    reftable_write: ReftableWriteOptions,
     _keepalive: Option<tempfile::TempDir>,
     prepared: Mutex<Option<PreparedReftableBatch>>,
 }
@@ -87,25 +88,31 @@ impl ReftableRefStore {
     ///
     /// Returns [`Error::Io`] when the reftable stack cannot be read.
     pub fn open(git_dir: PathBuf) -> Result<Self> {
-        Self::open_with_environment(git_dir, Environment::empty())
+        Self::open_with_environment(
+            git_dir,
+            Environment::empty(),
+            ReftableWriteOptions::default(),
+        )
     }
 
     pub(crate) fn open_with_environment(
         git_dir: PathBuf,
         environment: Environment,
+        reftable_write: ReftableWriteOptions,
     ) -> Result<Self> {
         let store_git_dir = stack_root(&git_dir);
         let _ = ReftableStack::open(&store_git_dir)?;
         Ok(Self {
             git_dir,
             environment,
+            reftable_write,
             _keepalive: None,
             prepared: Mutex::new(None),
         })
     }
 
     fn write_options_for(&self, store_git_dir: &Path) -> WriteOptions {
-        read_write_options_with_environment(store_git_dir, &self.environment)
+        read_write_options_with_environment(store_git_dir, &self.environment, &self.reftable_write)
     }
 
     /// Create a new ephemeral reftable repository (tests).
@@ -126,6 +133,7 @@ impl ReftableRefStore {
         let store = Self {
             git_dir: git_dir.clone(),
             environment: Environment::empty(),
+            reftable_write: ReftableWriteOptions::default(),
             _keepalive: Some(root),
             prepared: Mutex::new(None),
         };

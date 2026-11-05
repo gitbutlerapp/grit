@@ -23,6 +23,7 @@ use crate::diagnostics::{DiagnosticsHandle, NullDiagnostics};
 use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
 use crate::ident_resolve::IdentityEnv;
 use crate::ownership_check::{default_ownership_check, is_default_ownership_check, OwnershipCheck};
+use crate::reftable::ReftableWriteOptions;
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 ///
@@ -96,12 +97,6 @@ pub struct Environment {
     pub grit_invocation_cwd: Option<String>,
     /// Override for `SUDO_UID` when set (see Git environment variable of the same name).
     pub sudo_uid: Option<String>,
-    /// Override for `GIT_TEST_UTF8_NFD_TO_NFC` when set (see Git environment variable of the same name).
-    pub git_test_utf8_nfd_to_nfc: Option<String>,
-    /// Override for `GIT_TEST_NO_WRITE_REV_INDEX` when set (see Git environment variable of the same name).
-    pub git_test_no_write_rev_index: Option<String>,
-    /// Test knob: when `"false"`, reftable auto-compaction is disabled (CLI captures at open).
-    pub git_test_reftable_autocompaction: Option<String>,
     /// Override for `GIT_AUTHOR_NAME` when set (see Git environment variable of the same name).
     pub git_author_name: Option<String>,
     /// Override for `GIT_AUTHOR_EMAIL` when set (see Git environment variable of the same name).
@@ -170,9 +165,6 @@ impl Environment {
             pwd: None,
             grit_invocation_cwd: None,
             sudo_uid: None,
-            git_test_utf8_nfd_to_nfc: None,
-            git_test_no_write_rev_index: None,
-            git_test_reftable_autocompaction: None,
             git_author_name: None,
             git_author_email: None,
             git_author_date: None,
@@ -226,9 +218,6 @@ impl Environment {
             && self.pwd == e.pwd
             && self.grit_invocation_cwd == e.grit_invocation_cwd
             && self.sudo_uid == e.sudo_uid
-            && self.git_test_utf8_nfd_to_nfc == e.git_test_utf8_nfd_to_nfc
-            && self.git_test_no_write_rev_index == e.git_test_no_write_rev_index
-            && self.git_test_reftable_autocompaction == e.git_test_reftable_autocompaction
             && self.git_author_name == e.git_author_name
             && self.git_author_email == e.git_author_email
             && self.git_author_date == e.git_author_date
@@ -300,9 +289,6 @@ impl Environment {
             pwd: get("PWD"),
             grit_invocation_cwd: get("GRIT_INVOCATION_CWD"),
             sudo_uid: get("SUDO_UID"),
-            git_test_utf8_nfd_to_nfc: get("GIT_TEST_UTF8_NFD_TO_NFC"),
-            git_test_no_write_rev_index: get("GIT_TEST_NO_WRITE_REV_INDEX"),
-            git_test_reftable_autocompaction: get("GIT_TEST_REFTABLE_AUTOCOMPACTION"),
             git_author_name: get("GIT_AUTHOR_NAME"),
             git_author_email: get("GIT_AUTHOR_EMAIL"),
             git_author_date: get("GIT_AUTHOR_DATE"),
@@ -328,18 +314,6 @@ impl Environment {
         raw.split_whitespace()
             .next()
             .and_then(|p| p.parse::<i64>().ok())
-    }
-
-    /// Whether reftable auto-compaction is enabled for this process snapshot.
-    ///
-    /// Defaults to `true`. Set `GIT_TEST_REFTABLE_AUTOCOMPACTION=false` at the CLI
-    /// boundary to disable (see site global-options docs).
-    #[must_use]
-    pub fn reftable_autocompaction_enabled(&self) -> bool {
-        self.git_test_reftable_autocompaction
-            .as_deref()
-            .map(|value| value != "false")
-            .unwrap_or(true)
     }
 
     /// Use `path` as the repository directory, like setting `GIT_DIR`.
@@ -540,8 +514,6 @@ impl Environment {
             "GIT_CONFIG_PARAMETERS" => self.git_config_parameters.clone(),
             "GIT_CONFIG_COUNT" => self.git_config_count.clone(),
             "GIT_PREFIX" => self.git_prefix.clone(),
-            "GIT_TEST_UTF8_NFD_TO_NFC" => self.git_test_utf8_nfd_to_nfc.clone(),
-            "GIT_TEST_REFTABLE_AUTOCOMPACTION" => self.git_test_reftable_autocompaction.clone(),
             "GIT_AUTHOR_NAME" => self.git_author_name.clone(),
             "GIT_AUTHOR_EMAIL" => self.git_author_email.clone(),
             "GIT_AUTHOR_DATE" => self.git_author_date.clone(),
@@ -774,21 +746,6 @@ impl Environment {
             self.grit_invocation_cwd.as_deref(),
         );
         subprocess_push_str(&mut set, "SUDO_UID", self.sudo_uid.as_deref());
-        subprocess_push_str(
-            &mut set,
-            "GIT_TEST_UTF8_NFD_TO_NFC",
-            self.git_test_utf8_nfd_to_nfc.as_deref(),
-        );
-        subprocess_push_str(
-            &mut set,
-            "GIT_TEST_NO_WRITE_REV_INDEX",
-            self.git_test_no_write_rev_index.as_deref(),
-        );
-        subprocess_push_str(
-            &mut set,
-            "GIT_TEST_REFTABLE_AUTOCOMPACTION",
-            self.git_test_reftable_autocompaction.as_deref(),
-        );
         subprocess_push_str(&mut set, "GIT_AUTHOR_NAME", self.git_author_name.as_deref());
         subprocess_push_str(
             &mut set,
@@ -993,9 +950,6 @@ const TYPED_ENVIRONMENT_VARS: &[&str] = &[
     "PWD",
     "GRIT_INVOCATION_CWD",
     "SUDO_UID",
-    "GIT_TEST_UTF8_NFD_TO_NFC",
-    "GIT_TEST_NO_WRITE_REV_INDEX",
-    "GIT_TEST_REFTABLE_AUTOCOMPACTION",
     "GIT_AUTHOR_NAME",
     "GIT_AUTHOR_EMAIL",
     "GIT_AUTHOR_DATE",
@@ -1064,6 +1018,8 @@ pub struct RepositoryOptions {
     pub promisor_fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
     /// Where hook subprocesses write their output (captured by default).
     pub hook_stdio: crate::hooks::HookStdio,
+    /// Overrides for reftable stack writes on repositories opened with these options.
+    pub reftable_write: ReftableWriteOptions,
 }
 
 impl std::fmt::Debug for RepositoryOptions {
@@ -1092,6 +1048,7 @@ impl Default for RepositoryOptions {
             open_for_serving: false,
             promisor_fetcher: None,
             hook_stdio: crate::hooks::HookStdio::default(),
+            reftable_write: ReftableWriteOptions::default(),
         }
     }
 }
@@ -1173,6 +1130,19 @@ impl RepositoryOptions {
     pub fn with_diagnostics(mut self, diagnostics: DiagnosticsHandle) -> Self {
         self.diagnostics = diagnostics;
         self
+    }
+
+    /// Override reftable write behavior (for example disable auto-compaction in tests).
+    #[must_use]
+    pub fn with_reftable_write(mut self, reftable_write: ReftableWriteOptions) -> Self {
+        self.reftable_write = reftable_write;
+        self
+    }
+
+    /// Reftable write overrides installed on these options.
+    #[must_use]
+    pub fn reftable_write(&self) -> ReftableWriteOptions {
+        self.reftable_write
     }
 
     /// Replace the ownership check used during discovery and clone safety checks.

@@ -211,7 +211,7 @@ fn resolve_ingest_pack_publish_policy(
             .map_err(|msg| Error::Io(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)))?;
     let write_rev = cfg
         .as_ref()
-        .is_none_or(|c| c.pack_write_reverse_index_default(&opts.environment));
+        .is_none_or(|c| c.pack_write_reverse_index_default());
     Ok(IngestPackPublishPolicy {
         shared_repo,
         write_rev,

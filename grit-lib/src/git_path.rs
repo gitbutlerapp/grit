@@ -1149,6 +1149,7 @@ mod git_path_component_tests {
             None,
             RefStorageFormat::Files,
             HashAlgo::Sha1,
+            crate::init_filesystem::InitFilesystemConfigOptions::default(),
             &crate::environment::Environment::empty(),
         )
         .expect("init separate git dir");

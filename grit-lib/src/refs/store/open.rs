@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::environment::Environment;
 use crate::error::Result;
 use crate::ref_storage::RefStorageFormat as OnDiskFormat;
+use crate::reftable::ReftableWriteOptions;
 
 use super::routing::resolve_common_dir;
 use super::{FilesRefStore, FilesRefStoreConfig, RefStore, ReftableRefStore};
@@ -20,7 +21,12 @@ use super::{FilesRefStore, FilesRefStoreConfig, RefStore, ReftableRefStore};
 ///
 /// Propagates format detection and backend open failures.
 pub fn open_ref_store(git_dir: &Path) -> Result<Arc<dyn RefStore>> {
-    open_ref_store_uncached(git_dir, &Environment::empty(), None)
+    open_ref_store_uncached(
+        git_dir,
+        &Environment::empty(),
+        &ReftableWriteOptions::default(),
+        None,
+    )
 }
 
 /// Initialize a fresh repository or linked worktree HEAD using its configured backend.
@@ -63,6 +69,7 @@ pub(crate) fn initialize_head(git_dir: &Path, head: super::RawRef) -> Result<()>
 pub(crate) fn open_ref_store_uncached(
     git_dir: &Path,
     env: &Environment,
+    reftable_write: &ReftableWriteOptions,
     caches: Option<&crate::repo_caches::RepoCaches>,
 ) -> Result<Arc<dyn RefStore>> {
     let format = if let Some(c) = caches {
@@ -75,6 +82,7 @@ pub(crate) fn open_ref_store_uncached(
         OnDiskFormat::Reftable => Arc::new(ReftableRefStore::open_with_environment(
             git_dir.to_path_buf(),
             env.clone(),
+            *reftable_write,
         )?),
     };
     Ok(store)

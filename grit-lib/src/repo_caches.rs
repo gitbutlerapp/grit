@@ -41,6 +41,7 @@ use crate::precompose_config::{
 };
 use crate::promisor_fetch::PromisorFetcher;
 use crate::ref_storage::RefStorageFormat;
+use crate::reftable::ReftableWriteOptions;
 use crate::repo::Repository;
 
 /// Parents and committer timestamps reused across rev-parse and revwalk on one handle.
@@ -80,6 +81,7 @@ pub struct RepoCaches {
     diagnostics: Mutex<DiagnosticsHandle>,
     /// Cached change-id header probe `(odb fingerprint, result)` for this handle.
     stored_change_id_header_likely: Mutex<Option<(u64, bool)>>,
+    reftable_write: ReftableWriteOptions,
 }
 
 impl std::fmt::Debug for RepoCaches {
@@ -92,7 +94,11 @@ impl RepoCaches {
     /// Create an empty cache arena for one repository handle.
     #[must_use]
     pub fn new(command_runner: Arc<dyn crate::command_runner::CommandRunner>) -> Arc<Self> {
-        Self::with_diagnostics(command_runner, Arc::new(NullDiagnostics))
+        Self::with_diagnostics(
+            command_runner,
+            Arc::new(NullDiagnostics),
+            ReftableWriteOptions::default(),
+        )
     }
 
     /// Create a cache arena wired to the given diagnostic sink.
@@ -100,6 +106,7 @@ impl RepoCaches {
     pub fn with_diagnostics(
         command_runner: Arc<dyn crate::command_runner::CommandRunner>,
         diagnostics: DiagnosticsHandle,
+        reftable_write: ReftableWriteOptions,
     ) -> Arc<Self> {
         Arc::new(Self {
             config_cache: Mutex::new(HashMap::new()),
@@ -123,6 +130,7 @@ impl RepoCaches {
             bitmap_index: BitmapIndexCache::default(),
             diagnostics: Mutex::new(diagnostics),
             stored_change_id_header_likely: Mutex::new(None),
+            reftable_write,
         })
     }
 
@@ -584,6 +592,12 @@ impl RepoCaches {
         v
     }
 
+    /// Reftable write overrides for this handle.
+    #[must_use]
+    pub(crate) fn reftable_write(&self) -> ReftableWriteOptions {
+        self.reftable_write
+    }
+
     /// Open (or reuse) the [`crate::refs::store::RefStore`] for `git_dir`.
     ///
     /// # Errors
@@ -602,7 +616,12 @@ impl RepoCaches {
                 return Ok(Arc::clone(store));
             }
         }
-        let store = crate::refs::store::open_ref_store_uncached(git_dir, env, Some(self))?;
+        let store = crate::refs::store::open_ref_store_uncached(
+            git_dir,
+            env,
+            &self.reftable_write,
+            Some(self),
+        )?;
         if let Ok(mut guard) = self.ref_stores.lock() {
             guard.insert(key, Arc::clone(&store));
         }

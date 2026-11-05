@@ -776,6 +776,7 @@ pub fn clone(
         None,
         RefStorageFormat::Files,
         object_format,
+        crate::init_filesystem::InitFilesystemConfigOptions::default(),
         &Environment::empty(),
     )
     .map_err(|e| {

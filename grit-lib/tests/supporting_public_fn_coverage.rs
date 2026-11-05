@@ -149,7 +149,7 @@ fn diagnostics_dotfile_environment() {
     let env = Environment::empty();
     assert!(env.var("NO_SUCH_VAR").is_none());
     assert!(env.var_os("NO_SUCH_VAR").is_none());
-    let _ = env.reftable_autocompaction_enabled();
+    let _ = grit_lib::refs::reftable::ReftableWriteOptions::default().autocompaction_enabled;
 }
 
 #[test]

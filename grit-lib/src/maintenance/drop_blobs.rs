@@ -1324,7 +1324,7 @@ fn rewrite_packs(
         if let Ok(lines) = std::fs::read(old.with_extension("promisor")) {
             std::fs::write(new_pack.with_extension("promisor"), lines)?;
         }
-        if config.pack_write_reverse_index_default(&env) {
+        if config.pack_write_reverse_index_default() {
             crate::pack_rev::write_pack_rev_sidecar_for_index_path(
                 &new_pack.with_extension("idx"),
             )?;

@@ -1,6 +1,0 @@
-grit_lib::config::environment::Environment::git_test_no_write_rev_index
-grit_lib::config::environment::Environment::git_test_reftable_autocompaction
-grit_lib::config::environment::Environment::git_test_utf8_nfd_to_nfc
-grit_lib::prelude::Environment::git_test_no_write_rev_index
-grit_lib::prelude::Environment::git_test_reftable_autocompaction
-grit_lib::prelude::Environment::git_test_utf8_nfd_to_nfc

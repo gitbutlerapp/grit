@@ -58,7 +58,7 @@ fn compression_and_pack_accessor_matrix() {
         let _ = set.loose_objects_zlib_level();
         let _ = set.pack_objects_zlib_level();
         let _ = set.pack_index_threads();
-        let _ = set.pack_write_reverse_index_default(&Environment::empty());
+        let _ = set.pack_write_reverse_index_default();
         let _ = set.pack_read_reverse_index_default();
         let _ = set.get_regexp("core");
     }

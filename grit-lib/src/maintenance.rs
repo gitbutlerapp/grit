@@ -1096,7 +1096,7 @@ fn repack_detail(
         let idx_path = pack_path.with_extension("idx");
         if cfg
             .as_ref()
-            .is_none_or(|c| c.pack_write_reverse_index_default(&opts.environment))
+            .is_none_or(|c| c.pack_write_reverse_index_default())
         {
             write_pack_rev_sidecar_for_index_path(&idx_path)?;
         }
@@ -2603,7 +2603,7 @@ pub(crate) fn rewrite_local_objects_without(
         if let Some(pack_path) = &ingested.pack_path {
             if cfg
                 .as_ref()
-                .is_none_or(|c| c.pack_write_reverse_index_default(&opts.environment))
+                .is_none_or(|c| c.pack_write_reverse_index_default())
             {
                 write_pack_rev_sidecar_for_index_path(&pack_path.with_extension("idx"))?;
             }

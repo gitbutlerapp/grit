@@ -2104,16 +2104,8 @@ impl ConfigSet {
     }
 
     /// Default for `pack.writeReverseIndex` / `pack.writereverseindex` (Git default: true).
-    ///
-    /// Tests set `GIT_TEST_NO_WRITE_REV_INDEX` to force no `.rev` output.
     #[must_use]
-    pub fn pack_write_reverse_index_default(&self, env: &Environment) -> bool {
-        if env.git_test_no_write_rev_index.as_deref().is_some_and(|v| {
-            let s = v.trim().to_ascii_lowercase();
-            matches!(s.as_str(), "1" | "true" | "yes" | "on")
-        }) {
-            return false;
-        }
+    pub fn pack_write_reverse_index_default(&self) -> bool {
         if self
             .get("pack.writeReverseIndex")
             .is_some_and(|v| v.trim().is_empty())
