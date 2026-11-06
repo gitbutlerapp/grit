@@ -125,7 +125,7 @@ fn rm_leaves_worktree_when_index_lock_held() {
     )
     .expect_err("rm with index.lock");
     assert!(
-        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        matches!(&err, grit_lib::error::Error::LockHeld(lock) if lock.path.ends_with(".git/index.lock")),
         "expected index lock failure, got {err:?}"
     );
 
@@ -149,7 +149,7 @@ fn mv_leaves_worktree_when_index_lock_held() {
     let err = move_path(&repo, "a", "b", false, &grit_lib::progress::NeverCancel)
         .expect_err("mv with index.lock");
     assert!(
-        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        matches!(&err, grit_lib::error::Error::LockHeld(lock) if lock.path.ends_with(".git/index.lock")),
         "expected index lock failure, got {err:?}"
     );
 
@@ -638,7 +638,7 @@ fn mv_refused_when_index_lock_held_externally() {
     )
     .expect_err("mv with held lock");
     assert!(
-        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        matches!(&err, grit_lib::error::Error::LockHeld(lock) if lock.path.ends_with(".git/index.lock")),
         "expected index lock failure, got {err:?}"
     );
     assert!(repo_dir.join("tracked").is_file());
@@ -705,7 +705,7 @@ fn mv_force_refused_when_index_lock_held_externally() {
     )
     .expect_err("force mv with lock");
     assert!(
-        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        matches!(&err, grit_lib::error::Error::LockHeld(lock) if lock.path.ends_with(".git/index.lock")),
         "expected index lock failure, got {err:?}"
     );
     assert!(repo_dir.join("source").is_file());

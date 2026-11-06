@@ -668,6 +668,8 @@ mod environment_discover;
 #[cfg(feature = "full-tests")]
 #[path = "error_cancelled.rs"]
 mod error_cancelled;
+#[path = "error_contract.rs"]
+mod error_contract;
 #[cfg(feature = "full-tests")]
 #[path = "fetch_all_cancel.rs"]
 mod fetch_all_cancel;

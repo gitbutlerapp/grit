@@ -5411,9 +5411,7 @@ pub grit_lib::error::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::error::Error::Io(core::io::error::Error)
 pub grit_lib::error::Error::LocalUploadPack(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
 pub grit_lib::error::Error::LocalUploadPackPanicked
-pub grit_lib::error::Error::LockHeld
-pub grit_lib::error::Error::LockHeld::holder: core::option::Option<grit_lib::lockfile::LockHolder>
-pub grit_lib::error::Error::LockHeld::path: std::path::PathBuf
+pub grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError)
 pub grit_lib::error::Error::LooseHashMismatch
 pub grit_lib::error::Error::LooseHashMismatch::path: alloc::string::String
 pub grit_lib::error::Error::LooseHashMismatch::real_oid: alloc::string::String
@@ -5627,6 +5625,8 @@ pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
+pub fn grit_lib::error::Error::lock_held(&self) -> core::option::Option<&grit_lib::error::LockHeldError>
+pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::error::PathIoError>
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -5642,6 +5642,8 @@ impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
 impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ApplyError) -> Self
+impl core::convert::From<grit_lib::error::Cancelled> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::Cancelled) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
@@ -5678,6 +5680,10 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history:
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::FilterError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::FilterError) -> Self
+impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::LockHeldError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::error::PathOutsideRepoError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::PathOutsideRepoError) -> Self
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error
@@ -5949,6 +5955,27 @@ impl core::marker::Unpin for grit_lib::error::OverwriteReason
 impl core::marker::UnsafeUnpin for grit_lib::error::OverwriteReason
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::OverwriteReason
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::OverwriteReason
+#[non_exhaustive] pub enum grit_lib::error::PathIoOperation
+pub grit_lib::error::PathIoOperation::GitDir(grit_lib::error::GitDirPathOperation)
+pub grit_lib::error::PathIoOperation::Worktree(grit_lib::error::WorktreePathOperation)
+impl core::clone::Clone for grit_lib::error::PathIoOperation
+pub fn grit_lib::error::PathIoOperation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::PathIoOperation
+impl core::cmp::PartialEq for grit_lib::error::PathIoOperation
+pub fn grit_lib::error::PathIoOperation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::error::PathIoOperation
+pub fn grit_lib::error::PathIoOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::error::PathIoOperation
+pub fn grit_lib::error::PathIoOperation::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::error::PathIoOperation
+impl core::marker::StructuralPartialEq for grit_lib::error::PathIoOperation
+impl core::marker::Freeze for grit_lib::error::PathIoOperation
+impl core::marker::Send for grit_lib::error::PathIoOperation
+impl core::marker::Sync for grit_lib::error::PathIoOperation
+impl core::marker::Unpin for grit_lib::error::PathIoOperation
+impl core::marker::UnsafeUnpin for grit_lib::error::PathIoOperation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathIoOperation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathIoOperation
 #[non_exhaustive] pub enum grit_lib::error::PathOutsideRepoError
 pub grit_lib::error::PathOutsideRepoError::OutsideRepository
 pub grit_lib::error::PathOutsideRepoError::OutsideRepository::path: alloc::string::String
@@ -6220,6 +6247,69 @@ impl core::marker::Unpin for grit_lib::error::WorktreePathOperation
 impl core::marker::UnsafeUnpin for grit_lib::error::WorktreePathOperation
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::WorktreePathOperation
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::WorktreePathOperation
+pub struct grit_lib::error::Cancelled
+impl core::clone::Clone for grit_lib::error::Cancelled
+pub fn grit_lib::error::Cancelled::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::Cancelled
+impl core::cmp::PartialEq for grit_lib::error::Cancelled
+pub fn grit_lib::error::Cancelled::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::Cancelled> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::Cancelled) -> Self
+impl core::fmt::Debug for grit_lib::error::Cancelled
+pub fn grit_lib::error::Cancelled::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::Cancelled
+pub fn grit_lib::error::Cancelled::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::error::Cancelled
+impl core::marker::StructuralPartialEq for grit_lib::error::Cancelled
+impl core::marker::Freeze for grit_lib::error::Cancelled
+impl core::marker::Send for grit_lib::error::Cancelled
+impl core::marker::Sync for grit_lib::error::Cancelled
+impl core::marker::Unpin for grit_lib::error::Cancelled
+impl core::marker::UnsafeUnpin for grit_lib::error::Cancelled
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::Cancelled
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::Cancelled
+pub struct grit_lib::error::LockHeldError
+pub grit_lib::error::LockHeldError::holder: core::option::Option<grit_lib::lockfile::LockHolder>
+pub grit_lib::error::LockHeldError::path: std::path::PathBuf
+impl core::clone::Clone for grit_lib::error::LockHeldError
+pub fn grit_lib::error::LockHeldError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::LockHeldError
+impl core::cmp::PartialEq for grit_lib::error::LockHeldError
+pub fn grit_lib::error::LockHeldError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::LockHeldError) -> Self
+impl core::error::Error for grit_lib::error::LockHeldError
+impl core::fmt::Debug for grit_lib::error::LockHeldError
+pub fn grit_lib::error::LockHeldError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::LockHeldError
+pub fn grit_lib::error::LockHeldError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::LockHeldError
+impl core::marker::Freeze for grit_lib::error::LockHeldError
+impl core::marker::Send for grit_lib::error::LockHeldError
+impl core::marker::Sync for grit_lib::error::LockHeldError
+impl core::marker::Unpin for grit_lib::error::LockHeldError
+impl core::marker::UnsafeUnpin for grit_lib::error::LockHeldError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::LockHeldError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::LockHeldError
+pub struct grit_lib::error::PathIoError
+pub grit_lib::error::PathIoError::operation: grit_lib::error::PathIoOperation
+pub grit_lib::error::PathIoError::path: core::option::Option<std::path::PathBuf>
+pub grit_lib::error::PathIoError::source: core::io::error::Error
+impl grit_lib::error::PathIoError
+pub fn grit_lib::error::PathIoError::git_dir(impl core::convert::Into<alloc::string::String>, grit_lib::error::GitDirPathOperation, core::io::error::Error) -> Self
+pub fn grit_lib::error::PathIoError::message(&self) -> alloc::string::String
+pub fn grit_lib::error::PathIoError::worktree(impl core::convert::Into<alloc::string::String>, grit_lib::error::WorktreePathOperation, core::io::error::Error) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathIoError) -> Self
+impl core::fmt::Debug for grit_lib::error::PathIoError
+pub fn grit_lib::error::PathIoError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::error::PathIoError
+impl core::marker::Send for grit_lib::error::PathIoError
+impl core::marker::Sync for grit_lib::error::PathIoError
+impl core::marker::Unpin for grit_lib::error::PathIoError
+impl core::marker::UnsafeUnpin for grit_lib::error::PathIoError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::PathIoError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::error::PathIoError
 pub type grit_lib::error::Result<T> = core::result::Result<T, grit_lib::error::Error>
 pub mod grit_lib::gitbutler
 pub struct grit_lib::gitbutler::GitButlerWorkspace
@@ -14289,9 +14379,7 @@ pub grit_lib::prelude::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError
 pub grit_lib::prelude::Error::Io(core::io::error::Error)
 pub grit_lib::prelude::Error::LocalUploadPack(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
 pub grit_lib::prelude::Error::LocalUploadPackPanicked
-pub grit_lib::prelude::Error::LockHeld
-pub grit_lib::prelude::Error::LockHeld::holder: core::option::Option<grit_lib::lockfile::LockHolder>
-pub grit_lib::prelude::Error::LockHeld::path: std::path::PathBuf
+pub grit_lib::prelude::Error::LockHeld(grit_lib::error::LockHeldError)
 pub grit_lib::prelude::Error::LooseHashMismatch
 pub grit_lib::prelude::Error::LooseHashMismatch::path: alloc::string::String
 pub grit_lib::prelude::Error::LooseHashMismatch::real_oid: alloc::string::String
@@ -14505,6 +14593,8 @@ pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
+pub fn grit_lib::error::Error::lock_held(&self) -> core::option::Option<&grit_lib::error::LockHeldError>
+pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::error::PathIoError>
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -14520,6 +14610,8 @@ impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
 impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ApplyError) -> Self
+impl core::convert::From<grit_lib::error::Cancelled> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::Cancelled) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
@@ -14556,6 +14648,10 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history:
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::FilterError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::FilterError) -> Self
+impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::LockHeldError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::error::PathOutsideRepoError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::PathOutsideRepoError) -> Self
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::Error

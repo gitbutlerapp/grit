@@ -2,6 +2,7 @@
 //!
 //! Source for the library guide "Conflicts during replay" page.
 
+use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
@@ -23,7 +24,7 @@ fn replay_identity() -> grit_lib::ident::Signature {
         .unwrap_or_else(|| panic!("guide IDENT must parse as a signature: {IDENT}"))
 }
 
-fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+fn open_repo(root: &Path) -> Result<Repository> {
     let git_dir = if root.join(".git").is_dir() {
         root.join(".git")
     } else {
@@ -38,22 +39,21 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     if let Some(wt) = work_tree {
         opts = opts.with_work_tree(wt);
     }
-    Repository::open(&git_dir, &opts)
+    Ok(Repository::open(&git_dir, &opts)?)
 }
 
-fn git(root: &Path, args: &[&str]) -> Result<(), grit_lib::error::Error> {
+fn git(root: &Path, args: &[&str]) -> Result<()> {
     let home = root.join(".git-home");
-    fs::create_dir_all(&home).map_err(grit_lib::error::Error::Io)?;
+    fs::create_dir_all(&home)?;
     let out = Command::new("git")
         .current_dir(root)
         .args(args)
         .env("HOME", &home)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .map_err(grit_lib::error::Error::Io)?;
+        .output()?;
     if !out.status.success() {
-        return Err(grit_lib::error::Error::Message(format!(
+        return Err(anyhow::anyhow!(format!(
             "git {:?}: {}",
             args,
             String::from_utf8_lossy(&out.stderr)
@@ -62,7 +62,7 @@ fn git(root: &Path, args: &[&str]) -> Result<(), grit_lib::error::Error> {
     Ok(())
 }
 
-fn oid_from_rev(root: &Path, rev: &str) -> Result<ObjectId, grit_lib::error::Error> {
+fn oid_from_rev(root: &Path, rev: &str) -> Result<ObjectId, anyhow::Error> {
     let home = root.join(".git-home");
     let out = Command::new("git")
         .current_dir(root)
@@ -70,31 +70,30 @@ fn oid_from_rev(root: &Path, rev: &str) -> Result<ObjectId, grit_lib::error::Err
         .env("HOME", &home)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .map_err(grit_lib::error::Error::Io)?;
+        .output()?;
     if !out.status.success() {
-        return Err(grit_lib::error::Error::Message("rev-parse failed".into()));
+        return Err(anyhow::anyhow!("rev-parse failed"));
     }
     let hex = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-    ObjectId::from_hex(&hex).map_err(|_| grit_lib::error::Error::Message("bad oid".into()))
+    ObjectId::from_hex(&hex).map_err(|_| anyhow::anyhow!("bad oid"))
 }
 
 /// Build a tiny repo with one conflicting pick, run start → resolve → continue.
-fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
+fn demo_conflict_sequence(root: &Path) -> Result<()> {
     git(root, &["init", "-q", "-b", "main", "."])?;
     git(root, &["config", "user.email", "guide@grit-scm.com"])?;
     git(root, &["config", "user.name", "Library Guide"])?;
-    fs::write(root.join("f"), "base\n").map_err(grit_lib::error::Error::Io)?;
+    fs::write(root.join("f"), "base\n")?;
     git(root, &["add", "f"])?;
     git(root, &["commit", "-qm", "base"])?;
 
     git(root, &["switch", "-c", "topic"])?;
-    fs::write(root.join("f"), "topic\n").map_err(grit_lib::error::Error::Io)?;
+    fs::write(root.join("f"), "topic\n")?;
     git(root, &["commit", "-qam", "topic"])?;
     let pick = oid_from_rev(root, "HEAD")?;
 
     git(root, &["switch", "main"])?;
-    fs::write(root.join("f"), "main\n").map_err(grit_lib::error::Error::Io)?;
+    fs::write(root.join("f"), "main\n")?;
     git(root, &["commit", "-qam", "main"])?;
 
     let repo = open_repo(root)?;
@@ -123,13 +122,13 @@ fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
             println!("created_so_far={}", created_so_far.len());
         }
         other => {
-            return Err(grit_lib::error::Error::Message(format!(
+            return Err(anyhow::anyhow!(format!(
                 "expected conflicts, got {other:?}"
             )));
         }
     }
 
-    fs::write(root.join("f"), "merged\n").map_err(grit_lib::error::Error::Io)?;
+    fs::write(root.join("f"), "merged\n")?;
     stage(
         &repo,
         &StageOptions::default(),
@@ -159,7 +158,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
             }
         }
         other => {
-            return Err(grit_lib::error::Error::Message(format!(
+            return Err(anyhow::anyhow!(format!(
                 "expected completed after continue, got {other:?}"
             )));
         }
@@ -168,9 +167,9 @@ fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
     Ok(())
 }
 
-fn main() -> Result<(), grit_lib::error::Error> {
+fn main() -> Result<()> {
     if std::env::args().nth(1).is_none() {
-        let temp = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;
+        let temp = tempfile::tempdir()?;
         demo_conflict_sequence(temp.path())?;
         return Ok(());
     }
@@ -178,7 +177,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let root = std::env::args()
         .nth(1)
         .map(PathBuf::from)
-        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
     if repo.git_dir().join("CHERRY_PICK_HEAD").exists()

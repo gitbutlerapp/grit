@@ -40,7 +40,7 @@ fn hold_lock(lock_path: &Path, pid: Option<u64>) {
 
 fn expect_lock_held(err: Error) -> (std::path::PathBuf, Option<LockHolder>) {
     match err {
-        Error::LockHeld { path, holder } => (path, holder),
+        Error::LockHeld(grit_lib::error::LockHeldError { path, holder }) => (path, holder),
         other => panic!("expected Error::LockHeld, got {other:?}"),
     }
 }

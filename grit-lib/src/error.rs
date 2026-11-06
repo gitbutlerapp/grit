@@ -4,7 +4,7 @@
 //! specific failure modes. The binary wraps these with `anyhow` for human-
 //! readable top-level reporting.
 //!
-//! Library guide: [errors](https://grit-scm.com/docs/library/embedding)
+//! Library guide: [typed errors](https://grit-scm.com/docs/library/errors) and [embedding](https://grit-scm.com/docs/library/embedding)
 //!
 //! ```rust
 //! use grit_lib::error::Error;
@@ -13,11 +13,105 @@
 //! # }
 //! ```
 
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 pub use crate::git_dir::GitDirPathOperation;
 pub use crate::midx_error::MidxError;
 pub use crate::worktree::io_error::WorktreePathOperation;
+
+/// Lock file could not be created because another process holds it (or left a stale lock).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error(
+    "lock file {} already exists",
+    crate::git_path::user_display_path(.path.as_path())
+)]
+pub struct LockHeldError {
+    /// Lock file that could not be created.
+    pub path: PathBuf,
+    /// Owner recorded in the lock's pid sidecar (`core.lockfilePid`), when one was written.
+    pub holder: Option<crate::lockfile::LockHolder>,
+}
+
+/// Operation stopped because [`Cancel`](crate::progress::Cancel) fired before completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("operation cancelled")
+    }
+}
+
+/// Which filesystem area a [`PathIoError`] refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum PathIoOperation {
+    /// Path under the git directory (objects, refs, index, …).
+    GitDir(GitDirPathOperation),
+    /// Repository-relative worktree path.
+    Worktree(WorktreePathOperation),
+}
+
+/// Structured path I/O failure shared by worktree and git-directory operations.
+#[derive(Debug)]
+pub struct PathIoError {
+    /// What the operation was doing when I/O failed.
+    pub operation: PathIoOperation,
+    /// Path that failed, when known.
+    pub path: Option<PathBuf>,
+    /// Underlying OS error.
+    pub source: std::io::Error,
+}
+
+impl PathIoError {
+    /// Build a worktree-path failure (path is the index- or worktree-relative display path).
+    #[must_use]
+    pub fn worktree(
+        path: impl Into<String>,
+        operation: WorktreePathOperation,
+        source: std::io::Error,
+    ) -> Self {
+        Self {
+            operation: PathIoOperation::Worktree(operation),
+            path: Some(PathBuf::from(path.into())),
+            source,
+        }
+    }
+
+    /// Build a git-directory path failure (`path` is already a display path such as `.git/objects`).
+    #[must_use]
+    pub fn git_dir(
+        path: impl Into<String>,
+        operation: GitDirPathOperation,
+        source: std::io::Error,
+    ) -> Self {
+        Self {
+            operation: PathIoOperation::GitDir(operation),
+            path: Some(PathBuf::from(path.into())),
+            source,
+        }
+    }
+
+    /// Human-readable summary (same text as [`Error::WorktreePathIo`] / [`Error::GitDirPathIo`]).
+    #[must_use]
+    pub fn message(&self) -> String {
+        let path = self
+            .path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        match self.operation {
+            PathIoOperation::Worktree(op) => {
+                crate::worktree::io_error::format_worktree_path_io_message(&path, op, &self.source)
+            }
+            PathIoOperation::GitDir(op) => {
+                crate::git_dir::io_error::format_git_dir_io_message(&path, op, &self.source)
+            }
+        }
+    }
+}
 
 /// Why a Git config numeric value was rejected (`git config int` strict parsing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1296,15 +1390,10 @@ pub enum Error {
     ///
     /// Operations that return this before changing anything leave the repository untouched.
     /// The lock file belongs to whoever created it and is never removed. Retry once the other
-    /// process finishes, or delete `path` when no process owns it (a `holder` with
+    /// process finishes, or delete the lock path when no process owns it (a `holder` with
     /// `running: false` means the lock is stale).
-    #[error("lock file {} already exists", crate::git_path::user_display_path(.path))]
-    LockHeld {
-        /// The lock file that could not be created.
-        path: std::path::PathBuf,
-        /// Owner recorded in the lock's pid sidecar (`core.lockfilePid`), when one was written.
-        holder: Option<crate::lockfile::LockHolder>,
-    },
+    #[error(transparent)]
+    LockHeld(#[from] LockHeldError),
 
     /// A zlib compression or decompression failure.
     #[error("zlib error: {0}")]
@@ -2365,7 +2454,7 @@ impl Error {
             Self::UnknownObjectType(..) => "unknown_object_type",
             Self::ObjectHeaderTooLong { .. } => "object_header_too_long",
             Self::Io(..) => "io",
-            Self::LockHeld { .. } => "lock_held",
+            Self::LockHeld(..) => "lock_held",
             Self::Zlib(..) => "zlib",
             Self::CorruptLooseObject { .. } => "corrupt_loose_object",
             Self::CorruptPackedObject { .. } => "corrupt_packed_object",
@@ -2568,6 +2657,41 @@ impl Error {
         matches!(self, Self::RemoteUnreadable { .. })
     }
 
+    /// When this is [`Error::LockHeld`], returns the structured lock failure.
+    #[must_use]
+    pub fn lock_held(&self) -> Option<&LockHeldError> {
+        match self {
+            Self::LockHeld(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// When this is a worktree or git-dir path I/O failure, returns the shared leaf shape.
+    #[must_use]
+    pub fn path_io(&self) -> Option<PathIoError> {
+        match self {
+            Self::WorktreePathIo {
+                path,
+                operation,
+                source,
+            } => Some(PathIoError::worktree(
+                path.clone(),
+                *operation,
+                std::io::Error::new(source.kind(), source.to_string()),
+            )),
+            Self::GitDirPathIo {
+                path,
+                operation,
+                source,
+            } => Some(PathIoError::git_dir(
+                path.clone(),
+                *operation,
+                std::io::Error::new(source.kind(), source.to_string()),
+            )),
+            _ => None,
+        }
+    }
+
     /// Whether this is [`Error::WorktreePathIo`] caused by another process holding the file
     /// open (a Windows sharing or lock violation, `EBUSY`, or would-block), so retrying after
     /// closing that program can succeed.
@@ -2737,6 +2861,34 @@ impl From<crate::refs::store::RefStoreError> for Error {
     }
 }
 
+impl From<Cancelled> for Error {
+    fn from(_: Cancelled) -> Self {
+        Self::Cancelled
+    }
+}
+
+impl From<PathIoError> for Error {
+    fn from(value: PathIoError) -> Self {
+        let path = value
+            .path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        match value.operation {
+            PathIoOperation::Worktree(operation) => Self::WorktreePathIo {
+                path,
+                operation,
+                source: value.source,
+            },
+            PathIoOperation::GitDir(operation) => Self::GitDirPathIo {
+                path,
+                operation,
+                source: value.source,
+            },
+        }
+    }
+}
+
 impl From<crate::lockfile::LockError> for Error {
     /// [`LockError::Held`](crate::lockfile::LockError::Held) becomes [`Error::LockHeld`] with the
     /// recorded [`LockHolder`](crate::lockfile::LockHolder), and I/O failures become [`Error::Io`].
@@ -2744,10 +2896,10 @@ impl From<crate::lockfile::LockError> for Error {
     fn from(err: crate::lockfile::LockError) -> Self {
         use crate::lockfile::{LockError, LockHolder};
         match err {
-            LockError::Held { path } => Self::LockHeld {
+            LockError::Held { path } => Self::LockHeld(LockHeldError {
                 holder: LockHolder::read(&path),
                 path,
-            },
+            }),
             LockError::Io { source, .. } => Self::Io(source),
         }
     }
@@ -2778,12 +2930,15 @@ impl serde::Serialize for Error {
         use serde::ser::SerializeStruct;
 
         match self {
-            Self::LockHeld { path, holder } => {
+            Self::LockHeld(lock) => {
                 let mut out = serializer.serialize_struct("Error", 3)?;
                 out.serialize_field("kind", self.kind_name())?;
                 out.serialize_field("message", &self.to_string())?;
-                out.serialize_field("path", &crate::git_path::user_display_path(path.as_path()))?;
-                if let Some(holder) = holder {
+                out.serialize_field(
+                    "path",
+                    &crate::git_path::user_display_path(lock.path.as_path()),
+                )?;
+                if let Some(holder) = lock.holder {
                     out.serialize_field(
                         "holder",
                         &LockHolderSerde {

@@ -43,6 +43,24 @@ def _minimal_rustdoc(*extra_index: dict) -> dict:
     return {"index": index, "paths": paths}
 
 
+class ErrorRatchetMetricTests(unittest.TestCase):
+    def test_error_message_construction_sites(self) -> None:
+        count = ar.count_error_message_construction_sites()
+        self.assertGreaterEqual(count, 300)
+
+    def test_collect_error_ratchet_keys(self) -> None:
+        snap = ar.compute_metrics(public_api_text="", payload={"index": {}, "paths": {}})
+        for key in (
+            "umbrella_error_variants",
+            "pub_error_catch_all_variants",
+            "pub_error_string_tuple_variants",
+            "pub_error_enum_not_non_exhaustive",
+            "pub_area_error_wraps_umbrella",
+            "error_message_construction_sites",
+        ):
+            self.assertIn(key, snap.metrics)
+
+
 class ApiRatchetMetricTests(unittest.TestCase):
     def test_public_api_lines(self) -> None:
         snap = ar.compute_metrics(

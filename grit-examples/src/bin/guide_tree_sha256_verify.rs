@@ -2,18 +2,18 @@
 //!
 //! Source for the library guide "Tree SHA-256" verification section.
 
+use anyhow::{Context, Result};
 use grit_lib::commit::signing::GpgConfig;
-use grit_lib::error::Error;
 use grit_lib::tree_sha256::TagVerifyOptions;
 
-fn main() -> Result<(), Error> {
-    let cwd = std::env::current_dir().map_err(Error::Io)?;
+fn main() -> Result<()> {
+    let cwd = std::env::current_dir()?;
     let env = grit_lib::config::environment::Environment::from_vars(std::env::vars_os(), cwd);
     let options = grit_lib::config::environment::RepositoryOptions::with_environment(env);
     let repo = grit_lib::repo::Repository::discover(None, &options)?;
     let tag = std::env::args()
         .nth(1)
-        .ok_or_else(|| Error::Message("usage: guide_tree_sha256_verify <tag>".to_owned()))?;
+        .context("usage: guide_tree_sha256_verify <tag>")?;
     let oid = grit_lib::revwalk::rev_parse::resolve_revision(&repo, &tag)?;
     let gpg =
         GpgConfig::from_config(repo.config()?.as_ref())?.with_command_runner(repo.command_runner());

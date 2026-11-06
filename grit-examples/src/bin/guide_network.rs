@@ -2,6 +2,7 @@
 //!
 //! Source for the library guide "Network" page (included in the docs site).
 
+use anyhow::Result;
 use grit_examples::remote;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
@@ -14,10 +15,10 @@ use grit_lib::remote::{list_refs_from_git_dir, ListRefsOptions};
 use grit_lib::repo::Repository;
 use std::path::Path;
 
-fn main() -> Result<(), grit_lib::error::Error> {
-    let consumer = std::env::args().nth(1).ok_or_else(|| {
-        grit_lib::error::Error::Message("usage: guide_network <consumer-repo>".to_owned())
-    })?;
+fn main() -> Result<()> {
+    let consumer = std::env::args()
+        .nth(1)
+        .ok_or_else(|| anyhow::anyhow!("usage: guide_network <consumer-repo>"))?;
     let consumer = Path::new(&consumer);
     let repo = Repository::discover(Some(consumer), &RepositoryOptions::from_process())?;
     let git_dir = repo.git_dir().to_path_buf();
@@ -28,8 +29,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         true,
     )?;
 
-    let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+    let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)?;
 
     let remote_git_dir =
         resolve_local_remote_git_dir(&remote_info.url, &git_dir, work_tree.as_deref());
@@ -38,8 +38,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         &remote_git_dir,
         Some(remote_repo.odb()),
         &ListRefsOptions::default(),
-    )
-    .map_err(grit_lib::error::Error::from)?;
+    )?;
     eprintln!(
         "ls-remote: {} ref(s) on {}",
         refs_on_remote.len(),
@@ -49,16 +48,14 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = remote_info.fetch_refspecs.clone();
     fetch_opts.tags = TagMode::Following;
-    remote::fetch(&repo, &remote_info, &fetch_opts)
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+    remote::fetch(&repo, &remote_info, &fetch_opts)?;
 
     let tracking = refs::resolve_ref(&git_dir, "refs/remotes/origin/main")?;
     refs::write_ref(&git_dir, "refs/heads/main", &tracking)?;
 
     let parent = repo.objects().read_commit(&tracking)?;
-    let committer = parse_signature(&parent.committer).ok_or_else(|| {
-        grit_lib::error::Error::Message("parent committer is not a valid identity".to_owned())
-    })?;
+    let committer = parse_signature(&parent.committer)
+        .ok_or_else(|| anyhow::anyhow!("parent committer is not a valid identity"))?;
     let new_oid = repo.objects().write_commit(
         &NewCommit::new(
             parent.tree,
@@ -80,8 +77,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         expect_absent: false,
         hook_src_ref: None,
     };
-    remote::push(&repo, &remote_info, &[spec], &PushOptions::default())
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+    remote::push(&repo, &remote_info, &[spec], &PushOptions::default())?;
 
     println!("{new_oid}");
     Ok(())

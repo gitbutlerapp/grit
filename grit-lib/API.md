@@ -28,6 +28,38 @@ Use one cancellation type, one progress sink, [`RefName`](https://docs.rs/grit-l
 
 Each functional area exposes its own `#[non_exhaustive]` `thiserror` enum with structured fields. The public API must not use a catch-all `Message(String)` variant or `Result<_, String>` as the primary error shape.
 
+**Target area map** (one enum per row; fold one-off variants into the neighbour — see [library/errors guide](https://grit-scm.com/docs/library/errors)):
+
+| Area | Enum (target) | Module home |
+| --- | --- | --- |
+| Repository | `RepositoryError` | `repo` |
+| Config | `ConfigError` | `config` |
+| Hook | `HookError` | `command_runner` / hooks |
+| Object | `ObjectError` | `objects`, maintenance, fsck |
+| Ref | `RefError` | `refs`, reflog, reftable |
+| Branch / Tag / Notes | `BranchError`, `TagError`, `NotesError` | porcelain + `refs` |
+| Index | `IndexError` | `index` |
+| Worktree | `WorktreeError` | `worktree`, pathspec, filters |
+| Diff | `DiffError` | `diff`, blame, apply, rerere |
+| Revision | `RevisionError` | `revwalk`, merge-base |
+| Commit | `CommitError` | `commit`, signing |
+| Merge | `MergeError` | merge, pick, revert, `operation` |
+| History | `HistoryError` | `revwalk::history` |
+| Stash | `StashError` | `stash` |
+| Remote | `RemoteError` | `remote`, serve |
+| Bundle | `BundleError` | `bundle` |
+
+**Contract rules**
+
+- `#[non_exhaustive]` `thiserror` on every public `*Error` enum; structured named fields (`PathBuf`, ids, ref names, reason enums); `#[source]` for causes.
+- No tuple variant whose only payload is `String`; no area-level catch-alls. `String` fields only for external text (for example remote stderr), always named.
+- Public APIs return `Result<T, AreaError>` (no `type FooResult = Result<…>` aliases in the public API).
+- Cross-area: wrap the inner area enum. Temporary `Nested(Box<crate::error::Error>)` on the umbrella is allowed until the collapse step; ratchet `pub_area_error_wraps_umbrella` must reach zero before that step merges.
+- Path I/O: [`PathIoError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.PathIoError.html) everywhere a path is involved — not bare `#[from] io::Error` on area enums.
+- Shared leaves: [`LockHeldError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.LockHeldError.html), [`PathIoError`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.PathIoError.html), [`Cancelled`](https://docs.rs/grit-lib/latest/grit_lib/error/struct.Cancelled.html).
+- CLI-only clashes do not belong in the library.
+- Tests assert on **variants**, not message strings. Pin `kind_name` slugs in `grit-lib/tests/error_contract.rs`.
+
 ### 5. Typed outcomes
 
 Operations return structured results (counts, classifications, names, conflict state) so callers and the CLI do not re-derive the same facts from logs or side effects.

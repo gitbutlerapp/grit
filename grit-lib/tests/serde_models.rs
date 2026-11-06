@@ -217,13 +217,13 @@ fn errors_serialize_with_kind_and_message() {
     let err = grit_lib::error::Error::Cancelled;
     assert_eq!(err.kind_name(), "cancelled");
 
-    let err = grit_lib::error::Error::LockHeld {
+    let err = grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError {
         path: std::path::PathBuf::from(".git/index.lock"),
         holder: Some(grit_lib::lockfile::LockHolder {
             pid: 42,
             running: true,
         }),
-    };
+    });
     let json = serde_json::to_value(&err).expect("LockHeld");
     assert_eq!(json["kind"], "lock_held");
     assert_eq!(json["path"], ".git/index.lock");

@@ -3650,10 +3650,10 @@ mod tests {
         )
         .unwrap_err();
         match &err {
-            Error::LockHeld {
+            Error::LockHeld(crate::error::LockHeldError {
                 path: reported,
                 holder,
-            } => {
+            }) => {
                 assert_eq!(reported, &lock_path);
                 assert_eq!(*holder, None);
             }
@@ -3741,7 +3741,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(&err, Error::LockHeld { path, .. } if *path == repo.git_dir().join("index.lock")),
+            matches!(&err, Error::LockHeld(lock) if lock.path == repo.git_dir().join("index.lock")),
             "{err:?}"
         );
         assert_eq!(

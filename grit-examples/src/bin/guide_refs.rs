@@ -2,6 +2,7 @@
 //!
 //! Source for the library guide "Refs" page (included in the docs site).
 
+use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::list_branches;
@@ -16,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 const DEMO_BRANCH: &str = "refs/heads/library-guide-demo";
 
-fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+fn open_repo(root: &Path) -> Result<Repository> {
     let git_dir = if root.join(".git").is_dir() {
         root.join(".git")
     } else {
@@ -31,15 +32,15 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     if let Some(wt) = work_tree {
         opts = opts.with_work_tree(wt);
     }
-    Repository::open(&git_dir, &opts)
+    Ok(Repository::open(&git_dir, &opts)?)
 }
 
-fn main() -> Result<(), grit_lib::error::Error> {
+fn main() -> Result<()> {
     let root = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
     let git_dir = repo.git_dir();
 
@@ -83,10 +84,10 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let target = head
         .oid()
         .cloned()
-        .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("HEAD has no commit"))?;
 
     let demo = RefName::try_from(DEMO_BRANCH)
-        .map_err(|e| grit_lib::error::Error::Message(format!("invalid demo ref name: {e}")))?;
+        .map_err(|err| anyhow::anyhow!("invalid demo ref name: {err}"))?;
     let old = repo.references().resolve(&demo).ok();
     repo.references().update(&demo, &target)?;
 

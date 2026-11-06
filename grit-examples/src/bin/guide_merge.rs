@@ -2,6 +2,7 @@
 //!
 //! Source for the library guide "Merge" page (included in the docs site).
 
+use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId};
@@ -10,7 +11,7 @@ use grit_lib::repo::Repository;
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 
-fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+fn open_repo(root: &Path) -> Result<Repository> {
     let git_dir = if root.join(".git").is_dir() {
         root.join(".git")
     } else {
@@ -25,15 +26,15 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     if let Some(wt) = work_tree {
         opts = opts.with_work_tree(wt);
     }
-    Repository::open(&git_dir, &opts)
+    Ok(Repository::open(&git_dir, &opts)?)
 }
 
-fn main() -> Result<(), grit_lib::error::Error> {
+fn main() -> Result<()> {
     let root = std::env::args()
         .nth(1)
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
     let ours: ObjectId = repo.rev_walk().resolve("ours")?;
@@ -48,8 +49,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         let committer = Signature::new(
             "Guide",
             "guide@example.com",
-            OffsetDateTime::from_unix_timestamp(1_700_000_000)
-                .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?,
+            OffsetDateTime::from_unix_timestamp(1_700_000_000)?,
         )?;
         let commit = repo.objects().write_commit(
             &NewCommit::new(

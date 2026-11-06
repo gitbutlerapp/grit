@@ -17,6 +17,7 @@ mod tests {
     use crate::error_kind::ErrorKind;
     use crate::json_error::StructuredCliError;
     use crate::json_error::{ensure_structured, structured_json_payload};
+    use grit_lib::error::LockHeldError;
 
     /// Library error carried as the `source()` of another error type, so `anyhow` downcasts
     /// cannot see it and only a chain walk finds it.
@@ -37,10 +38,10 @@ mod tests {
 
     fn wrapped_lock_held(holder: Option<LockHolder>) -> (Error, PathBuf) {
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(Wrapper(LibError::LockHeld {
+        let err = Error::new(Wrapper(LibError::LockHeld(LockHeldError {
             path: path.clone(),
             holder,
-        }))
+        })))
         .context("staging files");
         (err, path)
     }

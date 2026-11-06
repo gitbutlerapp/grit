@@ -1032,7 +1032,7 @@ fn interrupted_rewrite_apply_with_lockfile_pid_disabled_leaves_foreign_lock() {
     let grit_lib::revwalk::history::HistoryError::Library(inner) = &err else {
         panic!("unexpected error {err:?}");
     };
-    assert!(matches!(&**inner, grit_lib::error::Error::LockHeld { .. }));
+    assert!(matches!(&**inner, grit_lib::error::Error::LockHeld(..)));
     assert_eq!(
         git_rev_parse(wt, "refs/heads/main"),
         Some(plan.ref_updates[0].new)
@@ -1073,7 +1073,7 @@ fn interrupted_rewrite_apply_waits_for_index_lock_holder() {
         panic!("unexpected error {err:?}");
     };
     assert!(
-        matches!(&**inner, grit_lib::error::Error::LockHeld { path, holder: Some(h) } if *path == lock && h.running),
+        matches!(&**inner, grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError { path, holder: Some(h) }) if *path == lock && h.running),
         "{inner:?}"
     );
     assert_eq!(

@@ -40,7 +40,7 @@ fn stage_paths(paths: &[&str]) -> StageOptions {
 }
 
 fn is_lock_contention(err: &Error) -> bool {
-    matches!(err, Error::LockHeld { .. })
+    matches!(err, Error::LockHeld(..))
 }
 
 /// Stage `path` into the on-disk index from outside grit's staging entry points, while the

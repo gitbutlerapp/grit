@@ -2,6 +2,7 @@
 //!
 //! Source for the library guide "History rewrite" page.
 
+use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -11,23 +12,26 @@ use grit_lib::revwalk::history::{
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use std::path::{Path, PathBuf};
 
-fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
-    Repository::discover(Some(root), &RepositoryOptions::from_process())
+fn open_repo(root: &Path) -> Result<Repository> {
+    Ok(Repository::discover(
+        Some(root),
+        &RepositoryOptions::from_process(),
+    )?)
 }
 
-fn main() -> Result<(), grit_lib::error::Error> {
+fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let root: PathBuf = args
         .next()
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
-        .ok_or_else(|| grit_lib::error::Error::Message("missing repository path".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let spec = args
         .next()
-        .ok_or_else(|| grit_lib::error::Error::Message("missing commit spec".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("missing commit spec"))?;
     let message = args
         .next()
-        .ok_or_else(|| grit_lib::error::Error::Message("missing new message".into()))?;
+        .ok_or_else(|| anyhow::anyhow!("missing new message"))?;
 
     let repo = open_repo(&root)?;
     let commit: ObjectId = resolve_revision_as_commit(&repo, &spec)?;
@@ -43,8 +47,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
             preserve_committer: false,
             sign: true,
         },
-    )
-    .map_err(grit_lib::error::Error::History)?;
+    )?;
 
     for update in &plan.ref_updates {
         println!(
@@ -67,8 +70,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         },
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
-    )
-    .map_err(grit_lib::error::Error::History)?;
+    )?;
 
     println!("head={}", applied.head.to_hex());
     Ok(())

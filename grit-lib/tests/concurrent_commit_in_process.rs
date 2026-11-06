@@ -81,7 +81,7 @@ fn concurrent_allow_empty_commits_avoid_permission_errors() {
                     "unexpected ref store error: {store:?}"
                 );
             }
-            Error::LockHeld { .. } => {}
+            Error::LockHeld(..) => {}
             other => panic!("unexpected concurrent commit error: {other:?}"),
         }
     }
@@ -163,8 +163,7 @@ fn concurrent_commit_while_index_and_ref_handles_open() {
                 ),
                 "unexpected ref store error: {store:?}"
             ),
-            Error::LockHeld { .. } | Error::GitDirPathIo { .. } if err.is_git_dir_file_in_use() => {
-            }
+            Error::LockHeld(..) | Error::GitDirPathIo { .. } if err.is_git_dir_file_in_use() => {}
             Error::GitDirPathIo { .. } => {
                 panic!("unexpected git-dir I/O (not in-use): {err:?}")
             }

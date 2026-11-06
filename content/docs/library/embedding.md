@@ -88,6 +88,10 @@ grit-lib = { version = "0.5", features = ["hot-text-layout"] }
 
 A short operation then faults in a few contiguous code pages instead of windows scattered over the whole binary. `grit status` on 10,000 files drops from 14.2 to 11.5 MB of peak RSS with it, and nothing changes at run time. The feature acts only on `x86_64-unknown-linux-gnu`, where rustc links with LLD; elsewhere it does nothing. Set `GRIT_HOT_TEXT_LAYOUT=0` at build time if you link with another linker. See [Hot text layout](../benchmarking.md#hot-text-layout).
 
+## Typed errors
+
+Area enums, shared leaf types, JSON `kind` slugs, and migration rules are documented in [Typed errors](/docs/library/errors). The umbrella [`Error`](rustdoc:grit_lib::error::Error) remains during the migration; prefer matching on typed area errors as they appear.
+
 ## Serializable results
 
 Enable the `serde-models` feature to get `serde::Serialize` on the results a front end renders, so you don't write your own JSON types for them:

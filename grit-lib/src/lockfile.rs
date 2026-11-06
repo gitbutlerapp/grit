@@ -800,7 +800,7 @@ mod tests {
             .err()
             .expect("held");
         match crate::error::Error::from(err) {
-            crate::error::Error::LockHeld { path, holder } => {
+            crate::error::Error::LockHeld(crate::error::LockHeldError { path, holder }) => {
                 assert_eq!(path, lock_path);
                 assert_eq!(
                     holder,

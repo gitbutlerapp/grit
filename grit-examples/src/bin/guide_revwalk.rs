@@ -2,6 +2,7 @@
 //!
 //! Source for the library guide "Revwalk" page (included in the docs site).
 
+use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
@@ -9,11 +10,12 @@ use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::{resolve_revision, split_double_dot_range};
 use std::path::Path;
 
-fn main() -> Result<(), grit_lib::error::Error> {
+fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
-    let repo_root = args.next().map(std::path::PathBuf::from).ok_or_else(|| {
-        grit_lib::error::Error::Message("usage: guide_revwalk <repo> [main..feature]".to_owned())
-    })?;
+    let repo_root = args
+        .next()
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("usage: guide_revwalk <repo> [main..feature]"))?;
     let range = args.next().unwrap_or_else(|| "main..feature".to_owned());
 
     let repo = open_repo(&repo_root)?;
@@ -41,16 +43,14 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let right = resolve_revision(&repo, right_name)?;
     let bases = merge_bases_first_vs_rest(&repo, left, &[right])?;
     let Some(base) = bases.first() else {
-        return Err(grit_lib::error::Error::Message(
-            "no merge base for range tips".to_owned(),
-        ));
+        return Err(anyhow::anyhow!("no merge base for range tips".to_owned(),));
     };
     println!("merge_base={base}");
 
     Ok(())
 }
 
-fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
+fn open_repo(root: &Path) -> Result<Repository> {
     let git_dir = if root.join(".git").is_dir() {
         root.join(".git")
     } else {
@@ -65,11 +65,10 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     if let Some(wt) = work_tree {
         opts = opts.with_work_tree(wt);
     }
-    Repository::open(&git_dir, &opts)
+    Ok(Repository::open(&git_dir, &opts)?)
 }
 
-fn range_names(range: &str) -> Result<(&str, &str), grit_lib::error::Error> {
-    split_double_dot_range(range).ok_or_else(|| {
-        grit_lib::error::Error::Message(format!("expected a double-dot range, got {range:?}"))
-    })
+fn range_names(range: &str) -> Result<(&str, &str), anyhow::Error> {
+    split_double_dot_range(range)
+        .ok_or_else(|| anyhow::anyhow!("expected a double-dot range, got {range:?}"))
 }

@@ -6464,7 +6464,7 @@ mod tests {
         let lock = IndexLock::acquire(&path, None).unwrap();
         assert!(matches!(
             IndexLock::acquire(&path, None),
-            Err(Error::LockHeld { .. })
+            Err(Error::LockHeld(..))
         ));
         drop(lock);
         idx.write(&path).unwrap(); // idx is mut in each test scope
@@ -6489,7 +6489,7 @@ mod tests {
         let write_err = Index::new().write(&path).unwrap_err();
         for err in [acquire_err, write_err] {
             match &err {
-                Error::LockHeld { path: p, holder } => {
+                Error::LockHeld(crate::error::LockHeldError { path: p, holder }) => {
                     assert_eq!(p, &lock_path);
                     assert_eq!(
                         *holder,

@@ -2316,7 +2316,7 @@ pub fn status(
         match crate::history::recover_interrupted_rewrite_apply(repo) {
             Ok(recovery) => recovery.map(InterruptedRewrite::from),
             Err(crate::history::HistoryError::Library(err))
-                if matches!(*err, crate::error::Error::LockHeld { .. }) =>
+                if matches!(*err, crate::error::Error::LockHeld(..)) =>
             {
                 Some(InterruptedRewrite::Pending)
             }
