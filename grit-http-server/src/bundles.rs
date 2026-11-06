@@ -423,7 +423,7 @@ mod tests {
         let init = grit_lib::repo::InitOptions::new()
             .with_bare(true)
             .with_initial_branch("main");
-        let repo = match Repository::init(dir.path(), &init) {
+        let (repo, _) = match Repository::init(dir.path(), &init) {
             Ok(r) => r,
             Err(e) => panic!("init: {e}"),
         };

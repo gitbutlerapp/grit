@@ -26,7 +26,7 @@ fn stateless_v0_done_emits_bare_ack_before_sideband_pack() {
     let dir =
         std::env::temp_dir().join(format!("grit-v0-multi-ack-detailed-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    Repository::init(
+    let (_, _) = Repository::init(
         &dir,
         &InitOptions::new()
             .with_bare(true)

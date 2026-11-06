@@ -8,7 +8,7 @@ use grit_protocol::upload_pack::stateless_rpc;
 use std::process::Command;
 
 fn init_linear_bare(dir: &std::path::Path, commits: usize) -> ObjectId {
-    Repository::init(
+    let (_, _) = Repository::init(
         dir,
         &InitOptions::new()
             .with_bare(true)
