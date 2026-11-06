@@ -6,8 +6,9 @@ updated = "2026-11-06"
 semver_baseline = "3c0c2e28bef3fec8d2d3599681b0799624aefab5"
 
 [counts]
-pub_repo_constructors = 4
-public_api_lines = 28950
+pub_repo_constructors = 3
+pub_repo_constructor_offenders = 4
+public_api_lines = 28959
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 115
 pub_fn_too_many_arguments_allow = 22

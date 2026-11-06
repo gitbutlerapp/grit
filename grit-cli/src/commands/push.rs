@@ -783,7 +783,6 @@ fn push_once(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use grit_lib::progress::CancelToken;
 
     #[test]
     fn push_status_serializes_snake_case() {

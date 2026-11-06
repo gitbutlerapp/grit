@@ -222,7 +222,7 @@ mod tests {
     fn first_signal_cancels_a_duplicate_is_absorbed_and_drop_restores(signal: libc::c_int) {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let before = current_handler(signal);
-        let _cancel = InterruptCancel::install();
+        let cancel = InterruptCancel::install();
         let token = process_cancel_token();
         assert!(!token.is_cancelled());
         // SAFETY: the installed handler only sets atomic flags for these signals.

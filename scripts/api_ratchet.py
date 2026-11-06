@@ -29,6 +29,7 @@ DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
 
 METRIC_KEYS = (
     "pub_repo_constructors",
+    "pub_repo_constructor_offenders",
     "public_api_lines",
     "pub_fn_impl_suffix",
     "pub_fn_with_in_name",
@@ -46,7 +47,6 @@ METRIC_KEYS = (
     "pub_fn_refname_str",
     "pub_fn_pathspec_strings",
     "pub_fn_configset_with_repo",
-    "pub_repo_constructors",
     "umbrella_error_variants",
     "pub_error_catch_all_variants",
     "pub_error_string_tuple_variants",
@@ -1406,7 +1406,7 @@ def compute_metrics(
             len(sorted(set(configset_repo_offenders))),
             sorted(set(configset_repo_offenders)),
         ),
-        "pub_repo_constructors": MetricResult(
+        "pub_repo_constructor_offenders": MetricResult(
             len(sorted(set(repo_constructor_offenders))),
             sorted(set(repo_constructor_offenders)),
         ),

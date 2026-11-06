@@ -1,8 +1,9 @@
 //! Repository-scoped configuration reads and local writes via [`Config`].
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::config::ConfigSet;
+use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Result;
 use crate::repo::Repository;
 
@@ -86,5 +87,39 @@ impl<'repo> Config<'repo> {
     /// Entries whose canonical key starts with `prefix`.
     pub fn entries_with_prefix(&self, prefix: &str) -> Result<Vec<crate::config::ConfigEntry>> {
         self.snapshot()?.entries_with_prefix(prefix)
+    }
+
+    /// Set a key in the repository-local config file and reload the in-memory snapshot.
+    #[deprecated(note = "use ConfigEditor and explicit reload where needed")]
+    #[inline]
+    pub fn set_local(&self, key: &str, value: &str) -> Result<()> {
+        let path = crate::repo::local_config_write_path(self.repo.git_dir());
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let mut file = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+        file.set(key, value)?;
+        file.write()?;
+        self.repo.reload_config()
+    }
+
+    /// Remove `key` from the repository-local config file and reload the snapshot.
+    #[deprecated(note = "use ConfigEditor and explicit reload where needed")]
+    pub fn unset_local(&self, key: &str) -> Result<()> {
+        let path = crate::repo::local_config_write_path(self.repo.git_dir());
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let mut file = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+        file.unset(key)?;
+        file.write()?;
+        self.repo.reload_config()
+    }
+
+    /// Remove an entire section from the repository-local config file.
+    #[deprecated(note = "use ConfigEditor and explicit reload where needed")]
+    pub fn remove_local_section(&self, section: &str) -> Result<()> {
+        let path = crate::repo::local_config_write_path(self.repo.git_dir());
+        let content = fs::read_to_string(&path).unwrap_or_default();
+        let mut file = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+        file.remove_section(section)?;
+        file.write()?;
+        self.repo.reload_config()
     }
 }

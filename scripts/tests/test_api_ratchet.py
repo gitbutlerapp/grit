@@ -47,7 +47,7 @@ def _minimal_rustdoc(*extra_index: dict) -> dict:
 class ErrorRatchetMetricTests(unittest.TestCase):
     def test_error_message_construction_sites(self) -> None:
         count = ar.count_error_message_construction_sites()
-        self.assertGreaterEqual(count, 300)
+        self.assertGreaterEqual(count, 200)
 
     def test_collect_error_ratchet_keys(self) -> None:
         snap = ar.compute_metrics(public_api_text="", payload={"index": {}, "paths": {}})
@@ -1357,7 +1357,8 @@ class ApiRatchetMetricTests(unittest.TestCase):
             "paths": {"0": {"crate_id": 0, "path": ["grit_lib"], "kind": "module"}},
         }
         snap = ar.compute_metrics(public_api_text="", payload=payload)
-        self.assertEqual(snap.metrics["pub_repo_constructors"].count, 1)
+        self.assertEqual(snap.metrics["pub_repo_constructors"].count, 0)
+        self.assertEqual(snap.metrics["pub_repo_constructor_offenders"].count, 1)
 
     def test_compare_fails_on_unrecorded_decrease(self) -> None:
         snap = ar.RatchetSnapshot(

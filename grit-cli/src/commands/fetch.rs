@@ -737,7 +737,6 @@ mod map_remote_error_tests {
     #[test]
     fn fetch_update_status_serializes_snake_case() {
         use super::{FetchUpdate, FetchUpdateStatus};
-        use grit_lib::progress::CancelToken;
         for (status, expected) in [
             (FetchUpdateStatus::New, "new"),
             (FetchUpdateStatus::FastForward, "fast_forward"),
