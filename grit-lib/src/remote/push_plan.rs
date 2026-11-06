@@ -2067,10 +2067,10 @@ mod tests {
             Err(PushPlanError::NoRemote)
         ));
         assert_eq!(PushPlanError::NoRemote.to_string(), "no remote to push to");
-        assert_eq!(
+        assert!(matches!(
             load_push_plan_context(&repo, None, None).map(|_| ()),
             Err(PushPlanError::NoRemote)
-        );
+        ));
         let named = configured_remote_for_push(&repo, &ConfigSet::new(), Some("upstream"));
         assert_eq!(named.as_deref().unwrap(), "upstream");
         let url_less_origin = config_from("[remote \"origin\"]\n\tpushurl = /tmp/o.git\n");
@@ -2330,7 +2330,7 @@ mod tests {
         let (_tmp, repo) = init_repo();
         let err = resolve_push(&repo, &delete_request(&[]), &PushPlanContext::default())
             .expect_err("empty delete");
-        assert_eq!(err, PushPlanError::DeleteWithoutRefs);
+        assert!(matches!(err, PushPlanError::DeleteWithoutRefs));
     }
 
     #[test]

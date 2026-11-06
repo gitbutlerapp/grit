@@ -215,7 +215,7 @@ mod tests {
         let expected = ConfigSet::load(
             &options.environment,
             Some(location.git_dir()),
-            &LoadConfigOptions::default(),
+            &LoadConfigOptions::standard(&options.environment, Some(location.git_dir())),
         )
         .unwrap();
         let keyed = |set: &ConfigSet| -> Vec<(String, Option<String>)> {

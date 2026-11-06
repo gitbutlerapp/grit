@@ -1131,6 +1131,18 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         file: "src/cli_messages.rs",
         line_contains: "LibError::Config(ConfigError::BadConfigLineInFile",
     },
+    ControlFlowAllowance {
+        file: "src/commands/fetch.rs",
+        line_contains: "LibError::ObjectNotFound(",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/fetch.rs",
+        line_contains: "LibError::HashCollision",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/auth.rs",
+        line_contains: "RemoteError::Auth { .. }",
+    },
 ];
 
 const LIB_ERROR_MATCH_PREFIXES: &[&str] = &["LibError::", "grit_lib::error::Error::"];

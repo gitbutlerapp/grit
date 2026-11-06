@@ -14,7 +14,9 @@ use grit_lib::remote::{ListRefsOptions, Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository};
 
 fn init_repo(dir: &std::path::Path) -> Repository {
-    Repository::init(dir, &InitOptions::default()).expect("init")
+    Repository::init(dir, &InitOptions::default())
+        .expect("init")
+        .0
 }
 
 fn system_git_available() -> bool {
