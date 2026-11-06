@@ -15,8 +15,8 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{NeverCancel, NullProgress};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
@@ -392,7 +392,7 @@ fn fetch_into_quarantine(root: &Path, url: &str) {
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     repo.remotes()
-        .fetch(&remote, fetch_opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, fetch_opts, &mut NullProgress, &NeverCancel, None)
         .expect("grit fetch");
 }
 
@@ -541,7 +541,7 @@ fn commit_and_push_from_quarantine(root: &Path, url: &str) -> ObjectId {
                 ..Default::default()
             }],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )

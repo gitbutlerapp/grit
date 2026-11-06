@@ -7,8 +7,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -96,7 +96,7 @@ fn clone_empty_bare_trunk_over_git_daemon_v2() {
     let grit_dest = tmp.path().join("grit-clone");
     let outcome = clone(
         CloneOptions::new(url.clone(), grit_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

@@ -5,9 +5,9 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 
 fn git_in(dir: &Path, args: &[&str]) -> bool {
     Command::new("git")
@@ -122,7 +122,7 @@ fn clone_fetches_tags_on_unreachable_commits() {
                 grit_dest.path().to_path_buf(),
             )
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -152,7 +152,7 @@ fn clone_file_url_fetches_unreachable_tags() {
         CloneOptions {
             ..CloneOptions::new(url, grit_dest.path().to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

@@ -110,12 +110,6 @@ pub enum ServeError {
     PackInterrupted(Box<ServeError>),
 }
 
-impl From<crate::revision_error::RevisionError> for ServeError {
-    fn from(err: crate::revision_error::RevisionError) -> Self {
-        Self::from(crate::error::Error::from(err))
-    }
-}
-
 /// A fetch request body grew past the transport's decoded-size limit.
 ///
 /// Smart HTTP wraps upload-pack input with a byte cap. The wrapper surfaces this

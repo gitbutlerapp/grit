@@ -12,8 +12,7 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::pack_objects::{
-    build_pack_with_shallow_and_filter, write_upload_pack_stream, PackBuildOptions, PackProgress,
-    PackStats,
+    build_pack_with_shallow_and_filter, write_upload_pack_stream, PackBuildOptions, PackStats,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -197,7 +196,7 @@ fn grit_filtered_pack(
     opts.use_bitmaps = use_bitmaps;
     let empty = std::collections::HashSet::new();
     let mut pack = Vec::new();
-    let mut progress = |_: PackProgress| {};
+    let mut progress = |_ev| {};
     let stats = write_upload_pack_stream(
         repo,
         wants,
@@ -206,7 +205,7 @@ fn grit_filtered_pack(
         &empty,
         Some(filter),
         &opts,
-        &mut progress,
+        &mut grit_lib::progress::NullProgress,
         &mut pack,
     )
     .expect("filtered upload-pack stream");

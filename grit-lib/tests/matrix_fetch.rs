@@ -54,8 +54,9 @@ use std::time::{Duration, Instant};
 use grit_lib::error::Result as GritResult;
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, FetchOutcome, TagMode, UpdateMode};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
@@ -307,7 +308,7 @@ fn daemon_driver(protocol: u8) -> Driver {
             let transport = GitDaemonTransport::new();
             let copts = ConnectOptions::with_protocol_version(protocol);
             let mut conn = transport.connect(url, Service::UploadPack, &copts)?;
-            fetch_remote(local_git, &mut *conn, opts, &mut NoProgress, &NeverCancel)
+            fetch_remote(local_git, &mut *conn, opts, &mut NullProgress, &NeverCancel)
         }),
     }
 }
@@ -340,7 +341,7 @@ fn ssh_driver(protocol: u8, scratch: PathBuf) -> Option<Driver> {
             let transport = SshTransport::with_program(fake_ssh.as_os_str());
             let copts = ConnectOptions::with_protocol_version(protocol);
             let mut conn = transport.connect(url, Service::UploadPack, &copts)?;
-            fetch_remote(local_git, &mut *conn, opts, &mut NoProgress, &NeverCancel)
+            fetch_remote(local_git, &mut *conn, opts, &mut NullProgress, &NeverCancel)
         }),
     })
 }
@@ -407,7 +408,7 @@ fn http_driver(protocol: u8) -> Option<Driver> {
             } else {
                 UreqHttpClient::new()
             });
-            http_fetch(client, local_git, url, opts, &mut NoProgress)
+            http_fetch(client, local_git, url, opts, &mut NullProgress)
         }),
     })
 }

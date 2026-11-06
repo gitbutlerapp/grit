@@ -8,7 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_plan::{
     load_push_plan_context, open_push_destination, resolve_push, resolve_push_invocation,
     PushPlanContext, PushPlanError, PushRequest,
@@ -276,7 +276,7 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
                 remote_ref_tips: ctx.remote_tips.clone(),
                 ..Default::default()
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -685,7 +685,7 @@ fn push_from_positionals_is_readable_by_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -730,7 +730,7 @@ fn push_to_literal_path_remote_is_readable_by_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -777,7 +777,7 @@ fn push_to_relative_path_remote_is_readable_by_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )

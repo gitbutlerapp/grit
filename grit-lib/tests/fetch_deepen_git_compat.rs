@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::progress::NullProgress;
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{fetch_local, FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -287,7 +288,7 @@ fn grit_fetch_daemon_refspec(
         &git_dir,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("fetch_remote")
@@ -560,7 +561,7 @@ mod http {
             &grit_client.join(".git"),
             &url,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
         )
         .expect("http deepen");
         assert_twin_matches(&git_client, &grit_client);
@@ -635,7 +636,7 @@ mod http {
                 &grit_client.join(".git"),
                 &url,
                 &mut opts,
-                &mut NoProgress,
+                &mut NullProgress,
             )
             .expect("http absolute depth fetch");
             assert_twin_matches(&git_client, &grit_client);

@@ -31,7 +31,6 @@ use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefStore, RefStoreError,
     RefTransaction, RefUpdate, RefUpdateFlags,
 };
-use grit_lib::refs::RefError;
 use grit_lib::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store, prepare_with_lock_wait,
 };
@@ -65,7 +64,7 @@ fn txn(name: &str, value: ObjectId) -> RefTransaction {
 }
 
 fn is_lock_held(err: &Error, ref_name: &str) -> bool {
-    matches!(err, Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) if name == ref_name)
+    matches!(err, Error::RefStore(RefStoreError::LockHeld { name }) if name == ref_name)
 }
 
 #[test]
@@ -622,9 +621,7 @@ fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
         .filter(|r| {
             matches!(
                 r,
-                Err(Error::Ref(RefError::Store(
-                    RefStoreError::NameUnavailable { .. }
-                )))
+                Err(Error::RefStore(RefStoreError::NameUnavailable { .. }))
             )
         })
         .count();
@@ -633,10 +630,7 @@ fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
     for outcome in &outcomes {
         if let Err(err) = outcome {
             assert!(
-                matches!(
-                    err,
-                    Error::Ref(RefError::Store(RefStoreError::NameUnavailable { .. }))
-                ),
+                matches!(err, Error::RefStore(RefStoreError::NameUnavailable { .. })),
                 "commit-time D/F races must return NameUnavailable, not {err:?}"
             );
         }

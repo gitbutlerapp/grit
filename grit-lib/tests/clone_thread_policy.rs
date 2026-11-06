@@ -10,8 +10,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::Environment;
 use grit_lib::parallel::ThreadPolicy;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::test_support::index_pack::{
     last_resolved_ingest_threads, set_ingest_thread_recording,
@@ -139,7 +139,7 @@ fn http_clone_honors_thread_policy_over_pack_config_for_ingest() {
             thread_policy: policy,
             ..CloneOptions::new(url, dest)
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
         Some(&DefaultHttpClientFactory::new()),
     )

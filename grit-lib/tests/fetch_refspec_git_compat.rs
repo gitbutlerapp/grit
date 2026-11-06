@@ -7,8 +7,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
 use grit_lib::remote::Remote;
 use grit_lib::repo::Repository;
@@ -229,7 +229,7 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
     fetch_opts.refspecs = vec!["main".into()];
     fetch_opts.tags = TagMode::None;
     origin
-        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
         .expect("Remote::fetch explicit main");
 
     let fetch_head = read_fetch_head(&git_dir);
@@ -586,7 +586,7 @@ fn force_update_non_fast_forward_file() {
 #[cfg(unix)]
 mod http {
     use super::*;
-    use grit_lib::remote::fetch::NoProgress;
+    use grit_lib::progress::NullProgress;
     use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
     use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
     use std::net::{TcpListener, TcpStream};
@@ -719,7 +719,7 @@ mod http {
             &local.join(".git"),
             url,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
         )
         .expect("http fetch");
     }
@@ -835,7 +835,7 @@ mod http {
             &grit_c.join(".git"),
             &server.url,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
         )
         .unwrap_err();
         assert!(

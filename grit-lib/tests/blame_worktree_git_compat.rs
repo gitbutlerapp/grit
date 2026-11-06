@@ -320,10 +320,7 @@ fn untracked_file_is_not_in_head() {
     let repo = open_repo(root);
     let err = blame_file(&repo, "untracked.txt", &worktree_options()).unwrap_err();
     assert!(
-        matches!(
-            &err,
-            Error::Revision(grit_lib::revision_error::RevisionError::RevParse(_))
-        ),
+        matches!(&err, Error::RevParse(_)),
         "unexpected error: {err:?}"
     );
     assert!(err.to_string().contains("untracked.txt"), "{err}");
@@ -700,10 +697,7 @@ fn bare_repository_rejects_worktree_but_accepts_contents() {
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open bare");
     let err = blame_file(&repo, "f.txt", &worktree_options()).unwrap_err();
     assert!(
-        matches!(
-            err,
-            Error::Diff(grit_lib::diff::error::DiffError::BlameWorktreeBareRepository)
-        ),
+        matches!(err, Error::BlameWorktreeBareRepository),
         "unexpected error: {err:?}"
     );
     let result = blame(

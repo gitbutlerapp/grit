@@ -263,12 +263,6 @@ pub enum PullError {
     Repository(#[from] Error),
 }
 
-impl From<crate::revision_error::RevisionError> for PullError {
-    fn from(err: crate::revision_error::RevisionError) -> Self {
-        Self::Repository(err.into())
-    }
-}
-
 impl PullError {
     /// Whether the remote could not be read at all ([`Error::RemoteUnreadable`]).
     #[must_use]
@@ -707,7 +701,8 @@ fn pull_check_outcome(
     let (ahead, behind, would, fast_forward_possible) = match head_oid {
         None => (0, 0, PullResult::SetUpstream, true),
         Some(head_oid) => {
-            let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)?;
+            let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)
+                .map_err(PullError::Repository)?;
             let would = if landed == Some(head_oid) && diverged(repo, head_oid, upstream_oid)? {
                 PullResult::Landed
             } else {
@@ -721,7 +716,8 @@ fn pull_check_outcome(
                 )?
             };
             let up_to_date = head_oid == upstream_oid || is_ancestor(repo, upstream_oid, head_oid)?;
-            let fast_forward = !up_to_date && is_ancestor(repo, head_oid, upstream_oid)?;
+            let fast_forward = !up_to_date
+                && is_ancestor(repo, head_oid, upstream_oid).map_err(PullError::Repository)?;
             (ahead, behind, would, up_to_date || fast_forward)
         }
     };
@@ -833,8 +829,8 @@ fn diverged(
     upstream_oid: ObjectId,
 ) -> std::result::Result<bool, PullError> {
     Ok(head_oid != upstream_oid
-        && !is_ancestor(repo, upstream_oid, head_oid)?
-        && !is_ancestor(repo, head_oid, upstream_oid)?)
+        && !is_ancestor(repo, upstream_oid, head_oid).map_err(PullError::Repository)?
+        && !is_ancestor(repo, head_oid, upstream_oid).map_err(PullError::Repository)?)
 }
 
 /// The upstream a pull integrates.
@@ -884,7 +880,8 @@ fn integrate_fetched_upstream(
     if diverged {
         match integration.mode {
             PullMode::FfOnly => {
-                let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)?;
+                let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)
+                    .map_err(PullError::Repository)?;
                 return Ok(PullOutcome {
                     ahead: Some(ahead),
                     behind: Some(behind),

@@ -13,7 +13,6 @@ use grit_lib::error::Error;
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::switch::{resolve_create_branch, switch_repository, SwitchOptions};
 use grit_lib::refs::store::RefStoreError;
-use grit_lib::refs::RefError;
 use grit_lib::refs::{resolve_ref, RefnameUnavailable};
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
 use grit_lib::repo::Repository;
@@ -49,9 +48,9 @@ fn assert_names_blocking_ref(err: &Error, blocking_ref: &str, new: &str) {
     assert!(
         matches!(
             err,
-            Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
+            Error::RefStore(RefStoreError::NameUnavailable {
                 reason: RefnameUnavailable::DescendantExists { blocking, new_ref }
-            })) if blocking == blocking_ref && new_ref == new
+            }) if blocking == blocking_ref && new_ref == new
         ),
         "expected '{blocking_ref}' to block '{new}': {err:?}"
     );

@@ -9,9 +9,7 @@ use grit_lib::refs::branch_tracking::{
     compare_with_target, compare_with_target_optional, BaseSource, TargetComparisonOptions,
     TargetSpec,
 };
-use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
-use grit_lib::revision_error::RevisionError;
 use grit_test_support::{git, unique_tmp, write_file};
 
 fn open(dir: &Path) -> Repository {
@@ -138,8 +136,8 @@ fn compare_with_target_unknown_errors() {
     let err = compare_with_target(&repo, &opts).unwrap_err();
     assert!(
         matches!(err, Error::ObjectNotFound(_))
-            || matches!(err, Error::Ref(RefError::InvalidName { .. }))
-            || matches!(err, Error::Revision(RevisionError::RevParse(_)))
+            || matches!(err, Error::InvalidRef(_))
+            || matches!(err, Error::RevParse(_))
     );
 }
 

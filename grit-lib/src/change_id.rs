@@ -35,7 +35,6 @@ use crate::objects::{
 };
 use crate::pack::SingleLocalPackReader;
 use crate::parallel::{try_par_map_with_local, ParallelOp};
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::repo_caches::RepoCaches;
 use crate::rev_list::{all_ref_commit_tips_for_walk, walk_closure_ordered, CommitGraph};
@@ -374,9 +373,9 @@ pub fn find_commits_by_change_id_prefix(
     prefix: &str,
 ) -> Result<Vec<ChangeIdMatch>> {
     if !is_change_id_spec_token(prefix) {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
+        return Err(Error::InvalidRef(format!(
             "invalid change id revision token '{prefix}'"
-        ))));
+        )));
     }
     let tips = all_ref_commit_tips_for_walk(repo)?;
     let mut graph = CommitGraph::with_commit_graph(repo, false, true);
@@ -817,7 +816,7 @@ fn change_id_from_commit_object_header(data: &[u8]) -> Option<ChangeId> {
 /// # Errors
 ///
 /// Returns [`Error::ObjectNotFound`] when nothing matches,
-/// [`RevParseError::AmbiguousChangeId`] when several commits match (wrapped in [`Error::Revision`]).
+/// [`Error::RevParse`] with [`RevParseError::AmbiguousChangeId`] when several commits match.
 pub fn resolve_commit_by_change_id_prefix(repo: &Repository, prefix: &str) -> Result<ObjectId> {
     let matches = find_commits_by_change_id_prefix(repo, prefix)?;
     match matches.len() {

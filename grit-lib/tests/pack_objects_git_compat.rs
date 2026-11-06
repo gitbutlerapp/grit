@@ -534,7 +534,7 @@ fn pack_objects_thin_pack_fixes_with_git_index_pack() {
         )
         .wants(&[tip])
         .haves(&[have])
-        .write_to(&mut buf)
+        .write_to(&mut buf, &mut grit_lib::progress::NullProgress)
         .expect("thin");
         buf
     };
@@ -556,7 +556,7 @@ fn pack_objects_write_to_matches_build_pack_bytes() {
     PackObjects::new(&odb, PackObjectsOptions::from(opts))
         .wants(&[tip])
         .haves(&[have])
-        .write_to(&mut via_api)
+        .write_to(&mut via_api, &mut grit_lib::progress::NullProgress)
         .expect("write_to");
     assert_eq!(
         via_build, via_api,
@@ -576,7 +576,7 @@ fn reuse_only_write_to_streams_same_bytes_as_build_pack() {
     let mut streamed = Vec::new();
     let stats = PackObjects::new(&odb, PackObjectsOptions::from(opts))
         .wants(&[tip])
-        .write_to(&mut streamed)
+        .write_to(&mut streamed, &mut grit_lib::progress::NullProgress)
         .expect("write_to");
     assert_eq!(
         streamed, via_build,
@@ -624,7 +624,7 @@ fn reuse_only_thin_pack_keeps_deltas_against_have_bases() {
     let stats = PackObjects::new(&odb, PackObjectsOptions::from(opts))
         .wants(&[tip])
         .haves(&[have])
-        .write_to(&mut thin)
+        .write_to(&mut thin, &mut grit_lib::progress::NullProgress)
         .expect("thin reuse-only pack");
     assert!(stats.delta_count > 0, "thin pack should reuse deltas");
     let appended = git_index_pack_stdin_fix_thin(dir.path(), have, &thin);

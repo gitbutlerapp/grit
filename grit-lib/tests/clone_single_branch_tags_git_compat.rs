@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{
     clone as clone_repo, clone_effective_single_branch, CloneError, CloneOptions, CloneTags,
 };
-use grit_lib::remote::fetch::NoProgress;
 use grit_test_support::git;
 
 fn git_config_fetch_all(work_tree: &Path) -> Vec<String> {
@@ -217,7 +217,7 @@ fn grit_clone_with(case: CloneCase, url: String, dest: PathBuf) {
         single_branch: case.single_branch,
         ..CloneOptions::new(url, dest)
     };
-    clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("grit clone");
+    clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("grit clone");
 }
 
 #[test]
@@ -301,7 +301,7 @@ fn clone_no_tags_sets_tagopt_and_fetches_no_tags() {
             tags: Some(CloneTags::None),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -342,7 +342,7 @@ fn clone_origin_name_used_for_tracking_refs() {
             remote_name: "upstream".to_owned(),
             ..CloneOptions::new(url, dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -385,7 +385,7 @@ fn clone_invalid_remote_on_nonempty_destination_preserves_files() {
             remote_name: "bad name".to_owned(),
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -476,7 +476,7 @@ fn clone_rejects_invalid_remote_name() {
             remote_name: "bad name".to_owned(),
             ..CloneOptions::new(bare.to_string_lossy(), tmp.path().join("dest"))
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -518,7 +518,7 @@ fn assert_single_branch_tag_parity(url: &str, branch: &str, bare: bool) {
             bare,
             ..CloneOptions::new(url.to_owned(), grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -590,7 +590,7 @@ fn clone_depth_no_single_branch_fetches_all_tags() {
             single_branch: Some(false),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

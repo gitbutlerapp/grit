@@ -303,7 +303,7 @@ pub struct MergePredictionOptions {
     pub allow_fast_forward: bool,
     /// When `true`, [`write_merge_tree`] merges commits with no merge base over the empty
     /// tree, like Git's `--allow-unrelated-histories`; when `false` it fails with
-    /// [`crate::revision_error::RevisionError::UnrelatedHistories`]. [`predict_merge`] always reports
+    /// [`Error::UnrelatedHistories`]. [`predict_merge`] always reports
     /// [`MergePrediction::Unrelated`] for such commits.
     pub allow_unrelated_histories: bool,
     /// Merge-favor policy for the simulated three-way merge (ours/theirs/normal).
@@ -461,7 +461,7 @@ impl WrittenMergeTree {
 ///
 /// # Errors
 ///
-/// - [`crate::revision_error::RevisionError::UnrelatedHistories`] when the commits share no merge base and
+/// - [`Error::UnrelatedHistories`] when the commits share no merge base and
 ///   [`MergePredictionOptions::allow_unrelated_histories`] is `false`.
 /// - Object read, merge and object write failures are propagated.
 pub fn write_merge_tree(
@@ -474,12 +474,10 @@ pub fn write_merge_tree(
         Some(base) => base,
         None if options.allow_unrelated_histories => MergeBase::empty(repo)?,
         None => {
-            return Err(Error::Revision(
-                crate::revision_error::RevisionError::UnrelatedHistories {
-                    ours: into_oid,
-                    theirs: other_oid,
-                },
-            ));
+            return Err(Error::UnrelatedHistories {
+                ours: into_oid,
+                theirs: other_oid,
+            })
         }
     };
 
@@ -659,7 +657,7 @@ pub struct MergeSource {
 ///
 /// # Errors
 ///
-/// - [`crate::revision_error::RevisionError::NotFound`] when `spec` names nothing.
+/// - [`Error::RevisionNotFound`] when `spec` names nothing.
 /// - [`Error::UnexpectedObjectKind`] when `spec` names (or a tag peels to) a tree or blob.
 /// - Object database errors (missing or corrupt objects behind a ref) are propagated.
 pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
@@ -676,34 +674,14 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
     });
     // A full-length hex id parses without an object lookup, so a missing object only shows up
     // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
-    let not_found = |err: crate::revision_error::RevisionError| {
-        let missing = match &err {
-            crate::revision_error::RevisionError::NotFound { .. } => true,
-            crate::revision_error::RevisionError::RevParse(
-                RevParseError::InvalidObjectName { .. }
-                | RevParseError::RevisionOutOfRange { .. }
-                | RevParseError::AmbiguousArgument { .. }
-                | RevParseError::NoSuchBranch { .. },
-            ) => true,
-            crate::revision_error::RevisionError::Nested(nested) => {
-                matches!(**nested, Error::ObjectNotFound(_))
-            }
-            _ => false,
-        };
-        Error::Revision(if missing {
-            crate::revision_error::RevisionError::NotFound {
-                spec: spec.to_owned(),
-            }
-        } else {
-            err
-        })
-    };
-    let not_found_io = |err: Error| match err {
-        Error::ObjectNotFound(_) => {
-            Error::Revision(crate::revision_error::RevisionError::NotFound {
-                spec: spec.to_owned(),
-            })
-        }
+    let not_found = |err: Error| match err {
+        Error::ObjectNotFound(_)
+        | Error::RevParse(
+            RevParseError::InvalidObjectName { .. }
+            | RevParseError::RevisionOutOfRange { .. }
+            | RevParseError::AmbiguousArgument { .. }
+            | RevParseError::NoSuchBranch { .. },
+        ) => Error::RevisionNotFound(spec.to_owned()),
         other => other,
     };
     let (peeled, actual, kind) = match named {
@@ -715,15 +693,11 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
             // The revision parser resolves `a...b` to a merge base; a range never names the
             // commit to merge.
             if crate::rev_parse::is_top_level_range(spec) {
-                return Err(Error::Revision(
-                    crate::revision_error::RevisionError::NotFound {
-                        spec: spec.to_owned(),
-                    },
-                ));
+                return Err(Error::RevisionNotFound(spec.to_owned()));
             }
             let oid = crate::rev_parse::resolve_revision_without_index_dwim(repo, spec)
                 .map_err(not_found)?;
-            let (peeled, actual) = repo.odb().peel_tags(oid).map_err(not_found_io)?;
+            let (peeled, actual) = repo.odb().peel_tags(oid).map_err(not_found)?;
             (peeled, actual, MergeSourceKind::Commit)
         }
     };
@@ -1039,11 +1013,9 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
     }
     let canonical = format!("refs/heads/{into_ref}");
     if repo.refs().resolve(&canonical).is_err() {
-        return Err(Error::Branch(
-            crate::porcelain::branch_error::BranchError::NotFound {
-                name: into_ref.to_owned(),
-            },
-        ));
+        return Err(Error::BranchNotFound {
+            branch: into_ref.to_owned(),
+        });
     }
     Ok(canonical)
 }
@@ -2207,7 +2179,6 @@ mod integrate_tests {
     use super::*;
     use crate::environment::RepositoryOptions;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
-    use crate::refs::RefError;
     use std::collections::BTreeMap;
 
     fn index_entry(path: &str, stage: u8) -> IndexEntry {
@@ -2667,11 +2638,7 @@ mod integrate_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("missing branch");
-        assert!(matches!(
-            err,
-            Error::Branch(crate::porcelain::branch_error::BranchError::NotFound { name })
-                if name == "no-such-branch"
-        ));
+        assert!(matches!(err, Error::BranchNotFound { branch } if branch == "no-such-branch"));
         assert!(!tmp_missing.path().join(".git/ORIG_HEAD").exists());
         let tip: ObjectId = grit_test_support::git(tmp_missing.path(), &["rev-parse", "main"])
             .trim()
@@ -2693,7 +2660,7 @@ mod integrate_tests {
         assert!(
             matches!(
                 err,
-                Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { ref name, .. }))
+                Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. })
                     if name == "refs/heads/main"
             ),
             "unexpected {err:?}"

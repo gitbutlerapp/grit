@@ -22,7 +22,6 @@ use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::OidAbbrevBatch;
 
 use super::RevWalk;
-use crate::refs::RefError;
 
 /// Options for [`RevWalk::describe`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -164,7 +163,7 @@ fn build_described(
     let mut abbrev_batch = OidAbbrevBatch::new(abbrev_len);
     let abbrev = abbrev_batch.abbrev_known(repo, commit)?;
     let tag = RefName::try_from(winner.listing.full_name.as_str())
-        .map_err(|e| crate::error::Error::Ref(RefError::invalid_reason(e.to_string())))?;
+        .map_err(|e| crate::error::Error::InvalidRef(e.to_string()))?;
     Ok(DescribedCommit {
         tag,
         tag_oid: winner.listing.oid,
@@ -554,7 +553,7 @@ fn best_match_within(matches: &[ActiveMatch], candidate_count: usize) -> (usize,
 fn map_ref_query(err: RefQueryError) -> crate::error::Error {
     match err {
         RefQueryError::Store(e) => e,
-        other => crate::error::Error::Ref(RefError::invalid_reason(other.to_string())),
+        other => crate::error::Error::InvalidRef(other.to_string()),
     }
 }
 

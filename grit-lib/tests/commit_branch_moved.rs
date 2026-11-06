@@ -11,7 +11,6 @@ use grit_lib::error::Error;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefStoreError;
-use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
 
@@ -85,7 +84,7 @@ fn assert_branch_moved_error(err: &Error) {
     assert!(
         matches!(
             err,
-            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) if name == "refs/heads/main"
+            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) if name == "refs/heads/main"
         ),
         "{err:?}"
     );

@@ -19,7 +19,6 @@ use crate::state::{
 };
 
 pub use crate::porcelain::orphans::{OrphanedCommitSummary, DEFAULT_ORPHAN_LIMIT};
-use crate::refs::RefError;
 
 /// Which parts of the repository [`reset_to_commit`] updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -238,10 +237,7 @@ fn plan_reset(
 ) -> Result<(ObjectId, HeadState, ResetPreview)> {
     opts.identity.validate().map_err(Error::InvalidSignature)?;
     let head = resolve_head_for_repository(repo)?;
-    let previous = head
-        .oid()
-        .copied()
-        .ok_or(Error::Ref(RefError::UnbornHead))?;
+    let previous = head.oid().copied().ok_or(Error::UnbornHead)?;
 
     ensure_reset_worktree_mode(repo, opts.mode)?;
     ensure_keep_index_merged(repo, opts.mode)?;
@@ -392,12 +388,10 @@ fn commit_tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
     let obj = repo.odb().read(commit)?;
     match obj.kind {
         ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
-        ObjectKind::Tree | ObjectKind::Blob => Err(Error::Ref(RefError::invalid_reason(format!(
+        ObjectKind::Tree | ObjectKind::Blob => Err(Error::InvalidRef(format!(
             "object {commit} does not name a commit"
-        )))),
-        ObjectKind::Tag => Err(Error::Ref(RefError::invalid_reason(
-            "unexpected tag after peel",
         ))),
+        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".into())),
     }
 }
 
@@ -418,7 +412,7 @@ fn move_head_tip(
     let (moved, logged): (&str, &[&str]) = match head {
         HeadState::Branch { refname, .. } => (refname, &[refname.as_str(), "HEAD"]),
         HeadState::Detached { .. } => ("HEAD", &["HEAD"]),
-        HeadState::Invalid => return Err(Error::Ref(RefError::InvalidHead)),
+        HeadState::Invalid => return Err(Error::InvalidHead),
     };
     refs::store_write_value_on_store(
         repo.refs(),
@@ -611,11 +605,7 @@ mod tests {
         )
         .expect_err("tree");
         assert!(
-            matches!(
-                &err,
-                Error::Ref(RefError::InvalidName { reason, .. })
-                    if reason.contains("does not name a commit")
-            ),
+            matches!(err, Error::InvalidRef(ref msg) if msg.contains("does not name a commit")),
             "unexpected: {err:?}"
         );
     }

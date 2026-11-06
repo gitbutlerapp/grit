@@ -71,22 +71,6 @@ Bounded default-order filters inflate each visited commit once and reuse those b
 
 [`merge_bases_first_vs_rest`](rustdoc:grit_lib::revwalk::merge_base::merge_bases_first_vs_rest) finds minimal common ancestors between one commit and one or more others — the library equivalent of `git merge-base A B`. For diff-style “pick exactly one base or fail”, see [`merge_base_for_diff_two_commits`](rustdoc:grit_lib::revwalk::merge_base::merge_base_for_diff_two_commits).
 
-## Errors
-
-Revision parsing, listing, merge-base, and object-filter work returns [`RevisionError`](rustdoc:grit_lib::revision_error::RevisionError). On the legacy umbrella, match [`Error::Revision`](rustdoc:grit_lib::error::Error) and use [`RevisionError::kind_name`](rustdoc:grit_lib::revision_error::RevisionError::kind_name) for stable JSON slugs (`revision_not_found`, `rev_parse`, `rev_list`, `unrelated_histories`, `no_merge_base`, `multiple_merge_bases`, `object_filter_parse`, and related values).
-
-| Variant / wrap | When |
-| --- | --- |
-| [`NotFound`](rustdoc:grit_lib::revision_error::RevisionError::NotFound) | A spec does not resolve (`unknown revision '…'`). |
-| [`RevParse`](rustdoc:grit_lib::revision_error::RevisionError::RevParse) | [`RevParseError`](rustdoc:grit_lib::rev_parse_error::RevParseError) from expression parsing. |
-| [`RevList`](rustdoc:grit_lib::revision_error::RevisionError::RevList) | [`RevListError`](rustdoc:grit_lib::rev_list_error::RevListError) (unsupported walk spec, unexpanded `A...B`, sparse filter, `--follow` rules, unexpected object kind, …). |
-| [`UnrelatedHistories`](rustdoc:grit_lib::revision_error::RevisionError::UnrelatedHistories) | Two commits share no merge base where history must be related. |
-| [`NoMergeBase`](rustdoc:grit_lib::revision_error::RevisionError::NoMergeBase) / [`MultipleMergeBases`](rustdoc:grit_lib::revision_error::RevisionError::MultipleMergeBases) | Diff-style merge-base selection (`git diff --merge-base`). |
-| [`ObjectFilterParse`](rustdoc:grit_lib::revision_error::RevisionError::ObjectFilterParse) | Invalid `--filter=` text ([`ObjectFilter::parse`](rustdoc:grit_lib::rev_list::ObjectFilter::parse)). |
-| [`Nested`](rustdoc:grit_lib::revision_error::RevisionError::Nested) | Underlying [`Error`](rustdoc:grit_lib::error::Error) (ODB, I/O, config) during revision work. |
-
-See [Typed errors](errors.md) for cross-area rules and the full area map.
-
 ## Describe (nearest tag)
 
 [`RevWalk::describe`](rustdoc:grit_lib::revwalk::RevWalk::describe) picks the reachable tag with the smallest exact range count from the tag’s peeled commit to the target revision ([`DescribeOptions`](rustdoc:grit_lib::revwalk::DescribeOptions), [`DescribedCommit`](rustdoc:grit_lib::revwalk::DescribedCommit)). The distance matches `grit revs --count tag..rev`, not necessarily Git’s lazy `git describe` depth. When commit-graph generations are available, one backward walk from the target discovers reachable tags (Git’s internal `describe` model): each commit is visited at most once, within flags propagate to parents, and the walk can stop early when the best candidate’s cone covers the queue. Walk depth picks the winner; the library runs one exact `peeled..rev` count for that tag only (not per candidate). Without a commit-graph, the same exact distances come from a single fixpoint pass over the reachable subgraph (within bits from tag peels, then one sweep)—not a separate rev-list count per tag. With `first_parent`, only the first parent is followed in either path.

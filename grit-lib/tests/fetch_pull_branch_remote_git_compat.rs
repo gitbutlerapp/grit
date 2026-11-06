@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::pull::{pull, PullOptions, PullResult};
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
@@ -83,7 +83,7 @@ fn pull_default_options_fast_forward_from_branch_remote_like_git() {
     let options =
         PullOptions::for_working_branch(&repo, Environment::empty(), None).expect("options");
     assert_eq!(options.fetch.remote_name.as_deref(), Some("backup"));
-    let outcome = pull(&repo, &options, &mut NoProgress, &NeverCancel, None).expect("pull");
+    let outcome = pull(&repo, &options, &mut NullProgress, &NeverCancel, None).expect("pull");
     assert_eq!(outcome.result, PullResult::FastForward);
     assert_eq!(outcome.label, "backup/main");
     assert_eq!(rev(&grit_dir, "HEAD"), tip);
@@ -112,7 +112,7 @@ fn fetch_without_remote_updates_branch_remote_tracking_ref_like_git() {
     fetch_opts.refspecs = invocation.user_refspecs;
     fetch_opts.environment = Environment::empty();
     remote
-        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
         .expect("fetch");
     assert_eq!(rev(&grit_dir, "refs/remotes/backup/main"), tip);
     assert_eq!(rev(&grit_dir, "refs/remotes/origin/main"), origin_before);

@@ -111,6 +111,8 @@ impl Progress for NoProgress {}
 
 impl ProgressSink for NoProgress {}
 
+impl Progress for crate::progress::NullProgress {}
+
 // --- Negotiation flush schedule (mirrors fetch-pack.c) --------------------
 
 const INITIAL_FLUSH: usize = 16;

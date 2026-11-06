@@ -29,7 +29,6 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, Ob
 use crate::odb::Odb;
 use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
-use crate::refs::RefError;
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use std::num::NonZeroU32;
 
@@ -2862,7 +2861,7 @@ pub(crate) fn push_local_from(
                     if let Err(err) = outcome.result {
                         apply_ref_store_error_to_push_decision(
                             &mut decisions[idx],
-                            &Error::Ref(RefError::Store(err)),
+                            &Error::RefStore(err),
                             false,
                         );
                     }
@@ -3080,14 +3079,14 @@ fn push_store_ref_update(
 
 fn push_status_for_ref_store_error(err: &Error) -> PushRefStatus {
     match err {
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CreateExists { .. }))
-        | Error::Ref(RefError::Store(crate::refs::store::RefStoreError::ExpectedMismatch {
+        Error::RefStore(crate::refs::store::RefStoreError::CreateExists { .. })
+        | Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch {
             expected: crate::refs::store::Expected::Missing,
             ..
-        })) => PushRefStatus::RejectAlreadyExists,
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::ExpectedMismatch {
-            ..
-        })) => PushRefStatus::RejectStale,
+        }) => PushRefStatus::RejectAlreadyExists,
+        Error::RefStore(crate::refs::store::RefStoreError::ExpectedMismatch { .. }) => {
+            PushRefStatus::RejectStale
+        }
         _ => PushRefStatus::RemoteRejected,
     }
 }
@@ -3101,7 +3100,7 @@ fn push_message_for_ref_store_error(err: &Error) -> String {
 }
 
 fn ref_store_error_refname(err: &Error) -> Option<String> {
-    let Error::Ref(RefError::Store(store_err)) = err else {
+    let Error::RefStore(store_err) = err else {
         return None;
     };
     Some(match store_err {
@@ -4135,15 +4134,10 @@ pub(crate) struct FetchRefRejectHint<'a> {
 fn fetch_ref_store_error_rejectable(err: &Error) -> bool {
     matches!(
         err,
-        Error::Ref(RefError::Store(
-            crate::refs::store::RefStoreError::NameUnavailable { .. }
-        )) | Error::Ref(RefError::Store(
-            crate::refs::store::RefStoreError::LockHeld { .. }
-        )) | Error::Ref(RefError::Store(
-            crate::refs::store::RefStoreError::CreateExists { .. }
-        )) | Error::Ref(RefError::Store(
-            crate::refs::store::RefStoreError::CaseConflict { .. }
-        ))
+        Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { .. })
+            | Error::RefStore(crate::refs::store::RefStoreError::LockHeld { .. })
+            | Error::RefStore(crate::refs::store::RefStoreError::CreateExists { .. })
+            | Error::RefStore(crate::refs::store::RefStoreError::CaseConflict { .. })
     )
 }
 
@@ -4184,33 +4178,26 @@ fn mark_fetch_ref_update_rejected(
     };
     update.mode = UpdateMode::RefLockRejected;
     let mut note = match err {
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::NameUnavailable {
-            reason,
-        })) => {
+        Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { reason }) => {
             let mut text = reason.lock_message_suffix();
             if let Some(blocking) = blocking_ref_from_unavailable(reason) {
                 append_fetch_prune_hint(&mut text, stale_tracking, blocking, hint.remote_name);
             }
             text
         }
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::LockHeld { name })) => {
+        Error::RefStore(crate::refs::store::RefStoreError::LockHeld { name }) => {
             format!("ref '{name}' is locked")
         }
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CaseConflict {
-            name,
-            other,
-        })) => {
+        Error::RefStore(crate::refs::store::RefStoreError::CaseConflict { name, other }) => {
             format!(
                 "cannot store '{name}' and '{other}' as loose refs when core.ignorecase is enabled \
                  — use `grit init --ref-format=reftable` and fetch again to keep both spellings"
             )
         }
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CreateExists { name })) => {
-            format!(
+        Error::RefStore(crate::refs::store::RefStoreError::CreateExists { name }) => format!(
             "reference '{name}' already exists when core.ignorecase treats names as case-insensitive \
              — use `grit init --ref-format=reftable` and fetch again to keep both spellings"
-            )
-        }
+        ),
         _ => err.to_string(),
     };
     if note.is_empty() {

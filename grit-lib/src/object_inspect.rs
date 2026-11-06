@@ -258,16 +258,12 @@ impl Repository {
     pub fn resolve(&self, spec: &str) -> std::result::Result<ResolvedObject, ResolveError> {
         let oid = match resolve_revision(self, spec) {
             Ok(o) => o,
-            Err(crate::revision_error::RevisionError::Nested(ref nested))
-                if matches!(**nested, Error::ObjectNotFound(_)) =>
-            {
+            Err(Error::ObjectNotFound(_)) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 });
             }
-            Err(crate::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousShortObject { spec: prefix },
-            )) => {
+            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
                 let candidates =
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
@@ -275,17 +271,13 @@ impl Repository {
                     candidates,
                 });
             }
-            Err(crate::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousChangeId { prefix, candidates },
-            )) => {
+            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
                 return Err(ResolveError::AmbiguousChangeId {
                     spec: prefix,
                     candidates,
                 });
             }
-            Err(crate::revision_error::RevisionError::RevParse(e)) => {
-                return Err(e.into());
-            }
+            Err(Error::RevParse(e)) => return Err(e.into()),
             Err(_) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
@@ -340,16 +332,12 @@ impl Repository {
 
         let oid = match resolve_revision_for_verify(self, spec) {
             Ok(o) => o,
-            Err(crate::revision_error::RevisionError::Nested(ref nested))
-                if matches!(**nested, Error::ObjectNotFound(_)) =>
-            {
+            Err(Error::ObjectNotFound(_)) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 });
             }
-            Err(crate::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousShortObject { spec: prefix },
-            )) => {
+            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
                 let candidates =
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
@@ -357,17 +345,13 @@ impl Repository {
                     candidates,
                 });
             }
-            Err(crate::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousChangeId { prefix, candidates },
-            )) => {
+            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
                 return Err(ResolveError::AmbiguousChangeId {
                     spec: prefix,
                     candidates,
                 });
             }
-            Err(crate::revision_error::RevisionError::RevParse(e)) => {
-                return Err(e.into());
-            }
+            Err(Error::RevParse(e)) => return Err(e.into()),
             Err(_) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
@@ -414,8 +398,7 @@ impl Repository {
         let strict = warn_ambiguous_refs_from_config(self);
         if upstream_suffix_info(spec).is_some() {
             let full = resolve_upstream_symbolic_name(self, spec).map_err(map_resolve_ref_error)?;
-            let short =
-                shorten_unambiguous(self, &full, strict).map_err(map_repo_error_to_rev_parse)?;
+            let short = shorten_unambiguous(self, &full, strict).map_err(map_resolve_ref_error)?;
             return Ok(Some(ResolvedRefName { full, short }));
         }
         if let Some(branch) =
@@ -425,18 +408,16 @@ impl Repository {
             if self.resolve_ref_oid(&full).is_err() {
                 return Ok(None);
             }
-            let short =
-                shorten_unambiguous(self, &full, strict).map_err(map_repo_error_to_rev_parse)?;
+            let short = shorten_unambiguous(self, &full, strict).map_err(map_resolve_ref_error)?;
             return Ok(Some(ResolvedRefName { full, short }));
         }
-        let (count, full) =
-            expand_ref_dwim_full_name(self, spec).map_err(map_repo_error_to_rev_parse)?;
+        let (count, full) = expand_ref_dwim_full_name(self, spec).map_err(map_resolve_ref_error)?;
         if count == 0 {
             if spec == "HEAD" {
                 match self
                     .refs()
                     .read_raw("HEAD")
-                    .map_err(map_repo_error_to_rev_parse)?
+                    .map_err(map_resolve_ref_error)?
                 {
                     Some(RawRef::Direct(_)) => {
                         return Ok(Some(ResolvedRefName {
@@ -461,8 +442,7 @@ impl Repository {
         let full = full.ok_or_else(|| RevParseError::AmbiguousRefname {
             spec: spec.to_owned(),
         })?;
-        let short =
-            shorten_unambiguous(self, &full, strict).map_err(map_repo_error_to_rev_parse)?;
+        let short = shorten_unambiguous(self, &full, strict).map_err(map_resolve_ref_error)?;
         Ok(Some(ResolvedRefName { full, short }))
     }
 
@@ -647,18 +627,9 @@ mod abbreviate_for_display_tests {
     }
 }
 
-fn map_resolve_ref_error(err: crate::revision_error::RevisionError) -> RevParseError {
+fn map_resolve_ref_error(err: Error) -> RevParseError {
     match err {
-        crate::revision_error::RevisionError::RevParse(e) => e,
-        other => RevParseError::InvalidObjectName {
-            name: other.to_string(),
-        },
-    }
-}
-
-fn map_repo_error_to_rev_parse(err: Error) -> RevParseError {
-    match err {
-        Error::Revision(crate::revision_error::RevisionError::RevParse(e)) => e,
+        Error::RevParse(e) => e,
         other => RevParseError::InvalidObjectName {
             name: other.to_string(),
         },

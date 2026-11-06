@@ -35,8 +35,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
@@ -213,7 +213,7 @@ fn cookie_file_sends_cookie_header_to_server() {
         &fx.local_git,
         &fx.url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("http_fetch with cookie file");
     // The fetch really happened (ref landed) — so the headers we logged are from a
@@ -262,7 +262,7 @@ fn save_cookies_persists_set_cookie_to_file() {
         &fx.local_git,
         &fx.url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("http_fetch with saveCookies");
 
@@ -294,7 +294,7 @@ fn extra_header_reaches_server() {
         &fx.local_git,
         &fx.url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("http_fetch with extraHeader");
 
@@ -403,7 +403,7 @@ fn http_proxy_routes_fetch_through_proxy() {
         &fx.local_git,
         &fx.url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     ) {
         Ok(o) => o,
         Err(e) => {

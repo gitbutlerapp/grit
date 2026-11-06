@@ -78,7 +78,7 @@ fn materialize_binary(
     payload: &BinaryPatchPayload,
 ) -> std::result::Result<Vec<u8>, ApplyError> {
     super::materialize_binary_patch_forward(payload, base).map_err(|e| match e {
-        Error::Diff(crate::diff::error::DiffError::Apply(a)) => a,
+        Error::Apply(a) => a,
         other => ApplyError::Failed {
             path: String::new(),
             message: other.to_string(),

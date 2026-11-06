@@ -7,9 +7,9 @@ use std::process::Command;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::shallow::load_shallow_oids;
 use grit_test_support::git;
 
@@ -122,7 +122,7 @@ fn clone_depth_one_lightweight_tag_matches_git() {
             branch: Some("v1".to_owned()),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -186,7 +186,7 @@ fn clone_depth_one_annotated_tag_matches_git() {
             branch: Some("v2".to_owned()),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -235,7 +235,7 @@ fn clone_depth_one_records_shallow_boundary_and_limits_history() {
             depth: Some(1),
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -354,7 +354,7 @@ fn shallow_clone_matches_git_single_branch_on_multi_branch_remote() {
             depth: Some(1),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -451,7 +451,7 @@ fn shallow_clone_with_root_annotated_tag_matches_git_shallow_file() {
             depth: Some(1),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -499,7 +499,7 @@ fn shallow_clone_includes_annotated_tag_on_tip_not_on_old_commit() {
             depth: Some(1),
             ..CloneOptions::new(url, grit_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -563,7 +563,7 @@ fn shallow_depth_two_keeps_annotated_tag_on_fetched_parent() {
             depth: Some(2),
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

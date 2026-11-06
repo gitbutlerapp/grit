@@ -57,13 +57,6 @@ pub mod log_walk {
     //! Log-order revision walking helpers re-exported at this path.
     pub use crate::log_walk::*;
 }
-pub use crate::revision_error::RevisionError;
-pub mod revision_error {
-    //! Typed revision failures ([`RevisionError`]).
-    pub use crate::revision_error::{
-        ObjectFilterParseError, ObjectFilterProtocolError, RevisionError,
-    };
-}
 pub mod rev_list_error {
     //! Typed `rev-list` failures surfaced on [`crate::revwalk::RevWalk`].
     pub use crate::rev_list_error::RevListError;

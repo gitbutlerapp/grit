@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use crate::error::Result;
 use crate::reflog::ReflogEntry;
-use crate::refs::RefError;
 use crate::refs::SYMREF_MAXDEPTH;
 
 use super::apply::{apply_update, ref_change_target, simulate_batch_apply, RefBatchState};
@@ -143,7 +142,7 @@ impl LinkedWorktreeRefStore {
 
 fn store_error(err: crate::error::Error) -> RefStoreError {
     match err {
-        crate::error::Error::Ref(RefError::Store(err)) => err,
+        crate::error::Error::RefStore(err) => err,
         other => RefStoreError::Corrupt(other.to_string()),
     }
 }

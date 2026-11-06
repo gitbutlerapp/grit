@@ -8,8 +8,9 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{read_advertisement, Connection};
@@ -146,7 +147,7 @@ fn fetch_v0_malicious_advertisement_preserves_config() {
         &git_dir,
         &mut conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("fetch completes");
@@ -182,7 +183,7 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
         &git_dir,
         &mut conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("v2 fetch completes");

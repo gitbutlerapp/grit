@@ -40,8 +40,7 @@ impl ObjectFilterSpec {
     ///
     /// Returns [`PartialCloneError::InvalidFilter`] for unsupported filter kinds.
     pub fn parse(spec: &str) -> std::result::Result<Self, PartialCloneError> {
-        let filter = ObjectFilter::parse(spec.trim())
-            .map_err(|e| PartialCloneError::InvalidFilter(e.to_string()))?;
+        let filter = ObjectFilter::parse(spec.trim()).map_err(PartialCloneError::InvalidFilter)?;
         Self::from_object_filter(&filter)
     }
 
@@ -84,7 +83,7 @@ impl ObjectFilterSpec {
     /// Returns [`PartialCloneError::InvalidFilter`] when expansion fails.
     pub fn expand_for_protocol(&self) -> std::result::Result<String, PartialCloneError> {
         expand_object_filter_for_protocol(&self.to_wire_spec())
-            .map_err(|e| PartialCloneError::InvalidFilter(e.to_string()))
+            .map_err(PartialCloneError::InvalidFilter)
     }
 
     /// Parse `grit clone --blobs` values: `none` or a size with optional `k`/`m`/`g` suffix.

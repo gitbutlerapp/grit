@@ -15,7 +15,6 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefStore};
-use grit_lib::refs::RefError;
 use grit_lib::repo::{Repository, RepositoryBuilder};
 use grit_lib::repo_handles::{ExpireOptions, ReflogQuery};
 
@@ -163,9 +162,7 @@ fn injected_store_unknown_ref_is_a_typed_error() {
     commit_n(&repo, &tmp.path().join("wt"), 1);
     let missing = RefName::try_from("refs/heads/missing").expect("name");
     match repo.reflogs().entries(&missing) {
-        Err(Error::Ref(RefError::ReflogUnknownRef { refname })) => {
-            assert_eq!(refname, "refs/heads/missing")
-        }
+        Err(Error::ReflogUnknownRef { refname }) => assert_eq!(refname, "refs/heads/missing"),
         other => panic!("expected ReflogUnknownRef, got {other:?}"),
     }
 }
@@ -197,7 +194,7 @@ fn injected_store_delete_rewrites_the_store() {
     );
 
     match repo.reflogs().delete(&head(), &[5], false) {
-        Err(Error::Ref(RefError::ReflogIndexOutOfRange { refname, index })) => {
+        Err(Error::ReflogIndexOutOfRange { refname, index }) => {
             assert_eq!((refname.as_str(), index), ("HEAD", 5));
         }
         other => panic!("expected ReflogIndexOutOfRange, got {other:?}"),

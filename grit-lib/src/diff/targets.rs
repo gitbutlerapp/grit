@@ -29,8 +29,7 @@ use crate::porcelain::pathspec_match::{
 };
 use crate::repo::Repository;
 use crate::rev_parse::peel_tags_to_commit;
-use crate::revision_error::RevisionError;
-use crate::revwalk::merge_base::merge_base_for_diff_two_commits;
+use crate::revwalk::merge_base::{merge_base_for_diff_two_commits, MergeBaseForDiffError};
 use crate::revwalk::rev_parse::{
     resolve_revision, resolve_revision_for_range_end, split_double_dot_range,
     split_triple_dot_range,
@@ -204,12 +203,6 @@ pub enum ResolveDiffArgumentsError {
 impl From<Error> for ResolveDiffArgumentsError {
     fn from(err: Error) -> Self {
         Self::Library(Box::new(err))
-    }
-}
-
-impl From<crate::revision_error::RevisionError> for ResolveDiffArgumentsError {
-    fn from(err: crate::revision_error::RevisionError) -> Self {
-        Self::from(Error::from(err))
     }
 }
 
@@ -1155,7 +1148,7 @@ fn resolve_diff_commit(repo: &Repository, spec: &str) -> ResolveResult<ObjectId>
     let oid = resolve_revision(repo, spec).map_err(|source| {
         ResolveDiffArgumentsError::UnresolvedRevision {
             spec: spec.to_owned(),
-            source: Box::new(source.into()),
+            source: Box::new(source),
         }
     })?;
     peel_diff_commit(repo, oid)
@@ -1176,9 +1169,9 @@ fn parse_commit_range(
         let left = resolve_diff_range_end(repo, left)?;
         let right = resolve_diff_range_end(repo, right)?;
         let base = merge_base_for_diff_two_commits(repo, left, right).map_err(|e| match e {
-            RevisionError::NoMergeBase => ResolveDiffArgumentsError::NoMergeBase,
-            RevisionError::MultipleMergeBases => ResolveDiffArgumentsError::MultipleMergeBases,
-            other => ResolveDiffArgumentsError::Library(Box::new(other.into())),
+            MergeBaseForDiffError::None => ResolveDiffArgumentsError::NoMergeBase,
+            MergeBaseForDiffError::Multiple => ResolveDiffArgumentsError::MultipleMergeBases,
+            MergeBaseForDiffError::Other(msg) => Error::Message(msg).into(),
         })?;
         return Ok(Some((base, right)));
     }

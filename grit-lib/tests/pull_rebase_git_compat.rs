@@ -7,7 +7,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions, PullResult};
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -85,7 +85,7 @@ fn fetch_opts(env: &Environment) -> FetchOptions {
 }
 
 fn pull_rebase_grit(repo: &Repository) -> grit_lib::porcelain::pull::PullOutcome {
-    let mut progress = NoProgress;
+    let mut progress = NullProgress;
     pull(
         repo,
         &PullOptions {
@@ -556,7 +556,7 @@ fn pull_rebase_conflict_keeps_autostash_on_stash_ref() {
             fetch: fetch_opts(&Environment::empty()),
             ..PullOptions::default()
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -586,7 +586,7 @@ fn pull_rebase_conflict_with_local_changes_refuses_and_keeps_them() {
     let local_tip = rev(&grit_dir, "HEAD");
     write_file(&grit_dir, "f", "seed\ndirty\n");
     let repo = open(&grit_dir);
-    let mut progress = NoProgress;
+    let mut progress = NullProgress;
     let err = pull(
         &repo,
         &PullOptions {
@@ -632,7 +632,7 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
             fetch: fetch_opts(&Environment::empty()),
             ..PullOptions::default()
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -657,7 +657,7 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
             fetch: fetch_opts(&Environment::empty()),
             ..PullOptions::default()
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

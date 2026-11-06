@@ -1,5 +1,5 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::git_date::parse::DateParseError;
 use crate::git_date::parse_date_cutoff;
 use crate::merge_base::{
@@ -9,7 +9,6 @@ use crate::merge_base::{
 use crate::objects::ObjectId;
 use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
-use crate::revision_error::{RevResult, RevisionError};
 use std::sync::Arc;
 
 use crate::rev_list::{
@@ -161,7 +160,7 @@ pub struct RevWalkParsedSpecs {
 /// # Errors
 ///
 /// Returns rev-parse and merge-base errors from symmetric-diff expansion.
-pub fn parse_rev_walk_tokens(repo: &Repository, tokens: &[&str]) -> RevResult<RevWalkParsedSpecs> {
+pub fn parse_rev_walk_tokens(repo: &Repository, tokens: &[&str]) -> Result<RevWalkParsedSpecs> {
     let mut positive = Vec::new();
     let mut negative = Vec::new();
     let mut symmetric_left = None;
@@ -325,7 +324,7 @@ pub(crate) fn rev_list_options_from_walk(
 ///
 /// # Errors
 ///
-/// Returns [`DateParseError`](crate::git_date::parse::DateParseError) when the string cannot be parsed.
+/// Returns [`Error::Message`] when the string cannot be parsed.
 pub fn committer_cutoff_from_date(
     date: &str,
     now_sec: i64,
@@ -344,7 +343,7 @@ pub fn resolve_log_walk_tips_and_hide(
     repo: &Repository,
     tokens: &[&str],
     walk: &RevWalkListOptions,
-) -> RevResult<(Vec<ObjectId>, Vec<ObjectId>)> {
+) -> Result<(Vec<ObjectId>, Vec<ObjectId>)> {
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk)?;
     let mut include = crate::rev_list::resolve_revision_specs_to_commits(repo, &positive)?;
     if all_refs {
@@ -387,12 +386,10 @@ pub(crate) fn positive_specs_for_walk(
 fn single_symmetric_range(
     tokens: &[&str],
     parsed: &RevWalkParsedSpecs,
-) -> RevResult<(ObjectId, ObjectId)> {
+) -> Result<(ObjectId, ObjectId)> {
     match (tokens, parsed.symmetric_left, parsed.symmetric_right) {
         ([_], Some(left), Some(right)) => Ok((left, right)),
-        _ => Err(crate::revision_error::RevisionError::RevList(
-            RevListError::SymmetricRangeRequired,
-        )),
+        _ => Err(Error::RevList(RevListError::SymmetricRangeRequired)),
     }
 }
 
@@ -485,7 +482,7 @@ pub struct RevWalkCommitStreamItem {
 pub struct RevWalkCommitStream<'repo>(pub(crate) CommitStream<'repo>);
 
 impl Iterator for RevWalkCommitStream<'_> {
-    type Item = RevResult<RevWalkCommitStreamItem>;
+    type Item = Result<RevWalkCommitStreamItem>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|item| {
@@ -493,7 +490,6 @@ impl Iterator for RevWalkCommitStream<'_> {
                 oid: row.oid,
                 commit_bytes: row.commit_bytes,
             })
-            .map_err(Into::into)
         })
     }
 }
@@ -512,7 +508,7 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         walk: &RevWalkListOptions,
-    ) -> RevResult<Option<RevWalkCommitStream<'repo>>> {
+    ) -> Result<Option<RevWalkCommitStream<'repo>>> {
         if !rev_walk_list_supports_stream(walk) {
             return Ok(None);
         }
@@ -544,11 +540,7 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse and rev-list errors.
-    pub fn commits(
-        &self,
-        tokens: &[&str],
-        options: &RevWalkListOptions,
-    ) -> RevResult<Vec<ObjectId>> {
+    pub fn commits(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<Vec<ObjectId>> {
         Ok(self.rev_list_result(tokens, options)?.commits)
     }
 
@@ -565,7 +557,7 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         options: &RevWalkListOptions,
-    ) -> RevResult<crate::rev_list::RevListResult> {
+    ) -> Result<crate::rev_list::RevListResult> {
         let repo = self.repository();
         let sides = options.left_right || options.cherry_mark;
         if !sides {
@@ -578,7 +570,7 @@ impl<'repo> RevWalk<'repo> {
             single_symmetric_range(tokens, &parsed)?;
         }
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
-        rev_list(repo, &positive, &parsed.negative, &opts).map_err(Into::into)
+        rev_list(repo, &positive, &parsed.negative, &opts)
     }
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.
@@ -586,7 +578,7 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse and rev-list errors.
-    pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> RevResult<usize> {
+    pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<usize> {
         let repo = self.repository();
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         if parsed.negative.is_empty()
@@ -647,7 +639,7 @@ impl<'repo> RevWalk<'repo> {
         }
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
-        commit_count_from_result(result).map_err(RevisionError::from)
+        commit_count_from_result(result)
     }
 
     /// Left and right tips of `tokens` when it is exactly one symmetric range (`A...B`).
@@ -660,11 +652,9 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// Returns [`RevListError::SymmetricRangeRequired`] when `tokens` is not exactly one `A...B`
     /// range, or rev-parse / merge-base errors from resolving the tips.
-    pub fn symmetric_range_tips(&self, tokens: &[&str]) -> RevResult<(ObjectId, ObjectId)> {
+    pub fn symmetric_range_tips(&self, tokens: &[&str]) -> Result<(ObjectId, ObjectId)> {
         if tokens.len() != 1 {
-            return Err(crate::revision_error::RevisionError::RevList(
-                RevListError::SymmetricRangeRequired,
-            ));
+            return Err(Error::RevList(RevListError::SymmetricRangeRequired));
         }
         let parsed = parse_rev_walk_tokens(self.repository(), tokens)?;
         single_symmetric_range(tokens, &parsed)
@@ -682,7 +672,7 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         options: &RevWalkListOptions,
-    ) -> RevResult<LeftRightCounts> {
+    ) -> Result<LeftRightCounts> {
         let repo = self.repository();
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let (left, right) = single_symmetric_range(tokens, &parsed)?;
@@ -740,7 +730,7 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse, peel, and merge-base errors.
-    pub fn merge_bases(&self, a: &str, b: &str, all: bool) -> RevResult<Vec<ObjectId>> {
+    pub fn merge_bases(&self, a: &str, b: &str, all: bool) -> Result<Vec<ObjectId>> {
         let repo = self.repository();
         let a_tip = resolve_revision(repo, a)?;
         let b_tip = resolve_revision(repo, b)?;
@@ -758,7 +748,7 @@ impl<'repo> RevWalk<'repo> {
     /// # Errors
     ///
     /// Propagates rev-parse, peel, and merge-base errors.
-    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> RevResult<bool> {
+    pub fn is_ancestor(&self, ancestor: &str, descendant: &str) -> Result<bool> {
         let repo = self.repository();
         let ancestor_tip = resolve_revision(repo, ancestor)?;
         let descendant_tip = resolve_revision(repo, descendant)?;

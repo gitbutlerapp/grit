@@ -1798,8 +1798,6 @@ mod rev_parse_syntax;
 #[cfg(feature = "full-tests")]
 #[path = "revert_range_order_git_compat.rs"]
 mod revert_range_order_git_compat;
-#[path = "revision_diff_errors.rs"]
-mod revision_diff_errors;
 #[cfg(feature = "full-tests")]
 #[path = "revision_label_git_compat.rs"]
 mod revision_label_git_compat;

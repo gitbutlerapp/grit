@@ -12,7 +12,6 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
 use grit_lib::refs::store::RefStoreError;
-use grit_lib::refs::RefError;
 use grit_lib::refs::RefnameUnavailable;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -74,7 +73,7 @@ fn lock_files(dir: &Path) -> Vec<String> {
 
 fn name_unavailable(err: Error) -> RefnameUnavailable {
     match err {
-        Error::Ref(RefError::Store(RefStoreError::NameUnavailable { reason })) => reason,
+        Error::RefStore(RefStoreError::NameUnavailable { reason }) => reason,
         other => panic!("expected a refname conflict, got {other:?}"),
     }
 }

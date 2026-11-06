@@ -7,9 +7,7 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::pack::packed_full_object_slice;
-use grit_lib::objects::pack_objects::{
-    write_upload_pack_stream, PackBuildOptions, PackProgress, PackStats,
-};
+use grit_lib::objects::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackStats};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
@@ -133,7 +131,7 @@ fn stream_clone_pack(
     opts: &PackBuildOptions,
 ) -> (Vec<u8>, PackStats) {
     let mut buf = Vec::new();
-    let mut progress = |_ev: PackProgress| {};
+    let mut progress = grit_lib::progress::NullProgress;
     let stats = write_upload_pack_stream(
         repo,
         wants,
@@ -142,7 +140,7 @@ fn stream_clone_pack(
         &HashSet::new(),
         None,
         opts,
-        &mut progress,
+        &mut grit_lib::progress::NullProgress,
         &mut buf,
     )
     .expect("stream pack");
@@ -342,7 +340,6 @@ fn reuse_skips_when_have_shallow_grafts_present() {
         ..PackBuildOptions::default()
     };
     let mut buf = Vec::new();
-    let mut progress = |_ev: PackProgress| {};
     let out = grit_lib::objects::pack::try_write_streaming_pack(
         &repo,
         &[tip],
@@ -351,7 +348,7 @@ fn reuse_skips_when_have_shallow_grafts_present() {
         &have_shallow,
         None,
         &opts,
-        &mut progress,
+        &mut grit_lib::progress::NullProgress,
         &mut buf,
     )
     .expect("try reuse");
@@ -378,7 +375,6 @@ fn thin_pack_bitmap_reuse_index_pack_strict_ok() {
         ..PackBuildOptions::default()
     };
     let mut buf = Vec::new();
-    let mut progress = |_ev: PackProgress| {};
     write_upload_pack_stream(
         &repo,
         &[tip],
@@ -387,7 +383,7 @@ fn thin_pack_bitmap_reuse_index_pack_strict_ok() {
         &HashSet::new(),
         None,
         &opts,
-        &mut progress,
+        &mut grit_lib::progress::NullProgress,
         &mut buf,
     )
     .expect("thin pack with bitmap ofs reuse");
@@ -466,7 +462,7 @@ fn thin_pack_ref_delta_conversion() {
         ..PackBuildOptions::default()
     };
     let mut buf = Vec::new();
-    let mut progress = |_ev: PackProgress| {};
+    let mut progress = grit_lib::progress::NullProgress;
     let stats = write_upload_pack_stream(
         &repo,
         &[tip],
@@ -475,7 +471,7 @@ fn thin_pack_ref_delta_conversion() {
         &HashSet::new(),
         None,
         &opts,
-        &mut progress,
+        &mut grit_lib::progress::NullProgress,
         &mut buf,
     )
     .expect("thin pack");
@@ -685,7 +681,6 @@ fn full_clone_without_bitmap_streams_verbatim_pack_entries() {
         ..PackBuildOptions::default()
     };
     let mut writer = RecordingWriter::default();
-    let mut progress = |_ev: PackProgress| {};
     let stats = write_upload_pack_stream(
         &repo,
         &[tip],
@@ -694,7 +689,7 @@ fn full_clone_without_bitmap_streams_verbatim_pack_entries() {
         &HashSet::new(),
         None,
         &opts,
-        &mut progress,
+        &mut grit_lib::progress::NullProgress,
         &mut writer,
     )
     .expect("stream pack");
@@ -1061,7 +1056,7 @@ fn upload_pack_propagates_verbatim_reuse_io_error_without_fallback() {
         &HashSet::new(),
         None,
         &opts,
-        &mut |_p: PackProgress| {},
+        &mut grit_lib::progress::NullProgress,
         &mut writer,
     )
     .expect_err("broken pipe must abort the pack");

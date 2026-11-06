@@ -4,9 +4,9 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::pack::read_pack_index_no_verify;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{NeverCancel, ProgressPhase, ProgressSink};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")
@@ -51,7 +51,7 @@ struct CopyProgress {
     completed: Vec<u64>,
 }
 
-impl grit_lib::remote::fetch::Progress for CopyProgress {}
+impl grit_lib::progress::ProgressSink for CopyProgress {}
 
 impl ProgressSink for CopyProgress {
     fn start(&mut self, phase: ProgressPhase, _total: Option<u64>) {
@@ -135,7 +135,7 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
         CloneOptions {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -204,7 +204,7 @@ fn clone_local_repacked_plus_unreachable_loose_still_links_pack() {
         CloneOptions {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

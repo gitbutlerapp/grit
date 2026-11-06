@@ -25,7 +25,6 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
@@ -177,7 +176,7 @@ impl Fixture {
         let mut opts = CloneOptions::new(format!("file://{}", server_dir.display()), dest);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(LIMIT));
         opts.checkout = false;
-        let outcome = clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone");
+        let outcome = clone(opts, &mut NullProgress, &NeverCancel, None).expect("clone");
         let git_dir = outcome.repo.git_dir().to_path_buf();
         drop(outcome);
         clear_pack_cache();

@@ -20,7 +20,7 @@ use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd, git_fsck, unique_tmp};
@@ -497,7 +497,7 @@ fn grit_pull(dir: &Path, mode: PullMode) {
             fetch: fetch_opts,
             ..PullOptions::default()
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

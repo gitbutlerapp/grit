@@ -22,8 +22,8 @@ use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
 use grit_lib::repo_relpath;
 use grit_test_support::git;
@@ -523,7 +523,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         CloneOptions {
             ..CloneOptions::new(r1.to_string_lossy(), clone_dest.clone())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

@@ -49,7 +49,6 @@ use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::refs::RefError;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;
@@ -373,7 +372,7 @@ impl RepositoryBuilder {
 fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> Result<()> {
     use crate::refs::store::{Expected, RawRef, RefStoreError, RefTransaction, RefUpdate};
 
-    RefName::branch(branch).map_err(|e| Error::Ref(RefError::invalid_reason(e.to_string())))?;
+    RefName::branch(branch).map_err(|e| Error::InvalidRef(e.to_string()))?;
     if store.read_raw("HEAD")?.is_some() {
         return Ok(());
     }
@@ -4202,7 +4201,7 @@ pub fn resolve_initial_branch(env: &Environment, explicit: Option<&str>) -> Resu
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "main".to_owned()),
     };
-    RefName::branch(&name).map_err(|e| Error::Ref(RefError::invalid_reason(e.to_string())))?;
+    RefName::branch(&name).map_err(|e| Error::InvalidRef(e.to_string()))?;
     Ok(name)
 }
 

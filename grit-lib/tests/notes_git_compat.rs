@@ -5,8 +5,8 @@ use std::io::Write;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::{
-    notes_merge_inner, read_notes_tree, upsert_note_entry, write_notes_commit, NotesError,
-    NotesMergeStrategy, NotesRef,
+    notes_merge_inner, read_notes_tree, upsert_note_entry, write_notes_commit, NotesMergeStrategy,
+    NotesRef,
 };
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
@@ -503,10 +503,7 @@ fn uppercase_hex_leaf_read_and_add_sees_existing_note() {
         )
         .expect_err("note already exists");
     assert!(
-        matches!(
-            outcome,
-            grit_lib::error::Error::Notes(NotesError::NoteAlreadyExists { .. })
-        ),
+        matches!(outcome, grit_lib::error::Error::NoteAlreadyExists { .. }),
         "add without force must not treat uppercase leaf as missing"
     );
 

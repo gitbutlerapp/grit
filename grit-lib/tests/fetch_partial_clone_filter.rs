@@ -12,9 +12,9 @@ use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions, FsckReport};
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::repo_treats_promisor_packs;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::Remote;
@@ -135,7 +135,7 @@ fn grit_clone_filtered(
             checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -300,7 +300,7 @@ fn refetch_reapplies_stored_filter() {
     fetch_opts.tags = TagMode::Following;
     fetch_opts.remote_name = Some("origin".to_owned());
     remote
-        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
         .expect("refetch");
     clear_pack_cache();
     let objects = git_dir.join("objects");
@@ -462,7 +462,7 @@ mod http_v2 {
                 checkout: false,
                 ..CloneOptions::new(&url, dest.path().to_path_buf())
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             Some(&grit_lib::remote::DefaultHttpClientFactory::new()),
         )

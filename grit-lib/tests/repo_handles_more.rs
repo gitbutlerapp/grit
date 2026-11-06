@@ -7,8 +7,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::ListRefsOptions;
 use grit_lib::repo::Repository;
@@ -359,7 +359,7 @@ fn handle_fetch_push_local_bare_remote() {
     repo.reload_config().expect("reload");
 
     let remote = repo.remotes().get("origin").expect("get remote");
-    let mut progress = NoProgress;
+    let mut progress = NullProgress;
     let head: ObjectId = git_cmd(consumer.path(), &["rev-parse", "HEAD"])
         .trim()
         .parse()

@@ -17,8 +17,6 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::refs::RefError;
-
 pub use crate::git_dir::GitDirPathOperation;
 pub use crate::midx_error::MidxError;
 pub use crate::worktree::io_error::WorktreePathOperation;
@@ -73,18 +71,6 @@ fn preserve_io_error(source: &std::io::Error) -> std::io::Error {
         std::io::Error::from_raw_os_error(raw)
     } else {
         std::io::Error::new(source.kind(), source.to_string())
-    }
-}
-
-impl std::fmt::Display for PathIoError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message())
-    }
-}
-
-impl std::error::Error for PathIoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
     }
 }
 
@@ -1026,145 +1012,6 @@ pub enum ApplyError {
         hunk_index: usize,
     },
 
-    /// Patch path bytes are not valid UTF-8.
-    #[error("diff path is not valid UTF-8: {detail}")]
-    DiffPathNotUtf8 {
-        /// Underlying UTF-8 error detail.
-        detail: String,
-    },
-
-    /// Traditional unified diff without a recognizable `---` / `+++` filename.
-    #[error("unable to find filename in traditional patch")]
-    TraditionalPatchFilenameMissing,
-
-    /// Malformed `a/` or `b/` path in a `diff --git` header line.
-    #[error("malformed {side} path in diff --git header: {raw}")]
-    MalformedDiffGitPath {
-        /// Which side failed (`old` or `new`).
-        side: &'static str,
-        /// Raw header fragment.
-        raw: String,
-    },
-
-    /// Binary patch section size could not be parsed.
-    #[error("invalid binary patch section size: {detail}")]
-    InvalidBinaryPatchSectionSize {
-        /// Parse failure detail.
-        detail: String,
-    },
-
-    /// Binary patch payload ended before a complete section.
-    #[error("binary patch section missing or truncated")]
-    BinaryPatchSectionMissing,
-
-    /// Base85 decode failure in a binary patch line.
-    #[error("invalid binary patch base85: {detail}")]
-    InvalidBinaryPatchBase85 {
-        /// Decode error detail.
-        detail: String,
-    },
-
-    /// Unexpected character while decoding binary patch length prefix.
-    #[error("unexpected character in binary patch line: '{ch}'")]
-    BinaryPatchUnexpectedChar {
-        /// Offending character.
-        ch: char,
-    },
-
-    /// Binary patch line exceeds the encoded length limit.
-    #[error("binary patch line too long")]
-    BinaryPatchLineTooLong,
-
-    /// Zlib compression failed while building a binary patch.
-    #[error("zlib compress failed: {detail}")]
-    ZlibCompressFailed {
-        /// Underlying zlib message.
-        detail: String,
-    },
-
-    /// Zlib finish failed while building a binary patch.
-    #[error("zlib compress finish failed: {detail}")]
-    ZlibCompressFinishFailed {
-        /// Underlying zlib message.
-        detail: String,
-    },
-
-    /// Writing binary patch text failed.
-    #[error("write binary patch {phase} failed: {detail}")]
-    WriteBinaryPatchFailed {
-        /// Which section was being written (`header`, `forward`, `reverse`).
-        phase: &'static str,
-        /// Underlying error detail.
-        detail: String,
-    },
-
-    /// Inflating binary patch payload failed.
-    #[error("failed to inflate binary patch payload: {detail}")]
-    BinaryPatchInflateFailed {
-        /// Underlying zlib message.
-        detail: String,
-    },
-
-    /// Delta-style binary patch without a base blob.
-    #[error("binary patch delta requires a base blob")]
-    BinaryPatchDeltaRequiresBase,
-
-    /// Binary patch lacks a reverse section.
-    #[error("binary patch has no reverse section")]
-    BinaryPatchNoReverseSection,
-
-    /// Extended header line has an invalid or empty mode value.
-    #[error("invalid mode on line {line}: {raw}")]
-    InvalidPatchModeLine {
-        /// One-based line number in the patch input.
-        line: usize,
-        /// Full header line text.
-        raw: String,
-    },
-
-    /// Binary patch section header is not `literal` or `delta`.
-    #[error("unsupported binary patch section: '{header}'")]
-    UnsupportedBinaryPatchSection {
-        /// Raw section header line.
-        header: String,
-    },
-
-    /// A binary patch payload line was empty.
-    #[error("empty binary patch payload line")]
-    EmptyBinaryPatchPayloadLine,
-
-    /// Encoded binary patch line length is outside the supported range.
-    #[error("binary patch line length out of range: {raw_len}")]
-    BinaryPatchLineLengthOutOfRange {
-        /// Requested encoded length.
-        raw_len: usize,
-    },
-
-    /// Inflated literal size does not match the declared size.
-    #[error("binary patch literal size {actual} != declared {declared}")]
-    BinaryPatchLiteralSizeMismatch {
-        /// Size after inflation.
-        actual: usize,
-        /// Size from the section header.
-        declared: usize,
-    },
-
-    /// Hunk header line could not be parsed.
-    #[error("invalid hunk header: {header}: {detail}")]
-    InvalidHunkHeader {
-        /// Raw `@@` line.
-        header: String,
-        /// Parse failure detail.
-        detail: String,
-    },
-
-    /// Hunk range field could not be parsed.
-    #[error("invalid hunk range: {detail}")]
-    InvalidHunkRange {
-        /// Parse failure detail.
-        detail: String,
-    },
-
     /// Other apply parse failures.
     #[error("{0}")]
     Other(String),
@@ -1205,14 +1052,6 @@ pub enum ApplyError {
     /// Cancellation stopped the apply between files.
     #[error("operation cancelled")]
     Cancelled,
-}
-
-impl ApplyError {
-    /// Stable kind slug for all apply failures (`apply`).
-    #[must_use]
-    pub fn kind_name(&self) -> &'static str {
-        "apply"
-    }
 }
 
 /// `--pathspec-from-file` / `--pathspec-file-nul` parse failure.
@@ -1440,6 +1279,11 @@ pub enum Error {
     #[error("object not found: {0}")]
     ObjectNotFound(String),
 
+    /// A revision expression (branch, tag, object id, `x~n`, `ORIG_HEAD`, …) names nothing in
+    /// the repository. Holds the expression as the caller wrote it.
+    #[error("unknown revision '{0}'")]
+    RevisionNotFound(String),
+
     /// A partial-clone promisor object is not present locally and no fetcher ran.
     #[error("promised object not available locally: {0}")]
     PromisedObjectMissing(crate::objects::ObjectId),
@@ -1520,6 +1364,16 @@ pub enum Error {
         expected: crate::objects::ObjectKind,
         /// The kind the object actually has.
         actual: crate::objects::ObjectKind,
+    },
+
+    /// Two commits that were asked to be merged share no merge base, and the caller did not
+    /// allow merging unrelated histories.
+    #[error("commits {ours} and {theirs} have no common ancestor")]
+    UnrelatedHistories {
+        /// The commit being merged into.
+        ours: crate::objects::ObjectId,
+        /// The commit being merged in.
+        theirs: crate::objects::ObjectId,
     },
 
     /// A commit-graph write was given a commit whose parent is neither among the commits
@@ -1714,13 +1568,18 @@ pub enum Error {
     #[error("corrupted cache-tree has entries not present in index")]
     CacheTreeCorrupt,
 
-    /// Reference storage, resolution, HEAD state, and reflog failures.
-    #[error(transparent)]
-    Ref(#[from] crate::refs::RefError),
+    /// A reference name or value is invalid.
+    #[error("invalid ref: {0}")]
+    InvalidRef(String),
 
-    /// Git notes read, write, and merge failures.
-    #[error(transparent)]
-    Notes(#[from] crate::notes::NotesError),
+    /// A `packed-refs` line Git would reject when reading the ref database.
+    #[error("unexpected line in {path}: {line}")]
+    PackedRefsUnexpectedLine {
+        /// Path to the `packed-refs` file being read.
+        path: String,
+        /// Offending line contents.
+        line: String,
+    },
 
     /// A general path-related error (invalid UTF-8, out-of-bounds, etc.).
     #[error("path error: {0}")]
@@ -1755,17 +1614,25 @@ pub enum Error {
     #[error(transparent)]
     Branch(#[from] crate::porcelain::branch_error::BranchError),
 
+    /// Reference lock failure while updating refs.
+    #[error(transparent)]
+    RefLock(#[from] RefLockError),
+
+    /// Reference store transaction or iteration failure.
+    #[error(transparent)]
+    RefStore(crate::refs::store::RefStoreError),
+
+    /// Reftable file, stack, or transaction failure.
+    #[error(transparent)]
+    Reftable(#[from] crate::reftable::ReftableError),
+
     /// Filter or EOL conversion failure.
     #[error(transparent)]
     Filter(#[from] FilterError),
 
-    /// Revision parsing, walking, merge-base, and object-filter failure.
+    /// Patch application failure.
     #[error(transparent)]
-    Revision(#[from] crate::revision_error::RevisionError),
-
-    /// Diff, patch apply, and blame failure.
-    #[error(transparent)]
-    Diff(#[from] crate::diff::error::DiffError),
+    Apply(#[from] ApplyError),
 
     /// Path resolves outside the repository.
     #[error(transparent)]
@@ -2172,6 +2039,20 @@ pub enum Error {
         untracked: usize,
     },
 
+    /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
+    #[error("HEAD is detached")]
+    DetachedHead,
+
+    /// `HEAD` is on a branch with no commits yet, but the operation needs a commit
+    /// ([`Repository::head_commit`](crate::repo::Repository::head_commit),
+    /// [`replay_commit`](crate::porcelain::replay::replay_commit)).
+    #[error("no commits yet on this branch")]
+    UnbornHead,
+
+    /// `HEAD` could not be resolved to a branch, detached commit, or unborn branch.
+    #[error("HEAD is in an unknown state")]
+    InvalidHead,
+
     /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits
     /// until callers can select a mainline parent explicitly.
     #[error("merge commit {oid}")]
@@ -2208,6 +2089,26 @@ pub enum Error {
     #[error("{} in progress", .0.description())]
     OperationInProgress(crate::state::InProgressOperation),
 
+    /// A local branch is checked out as `HEAD` in a linked or main worktree.
+    #[error("branch '{branch}' is already checked out in '{worktree_path}'")]
+    BranchCheckedOutInWorktree {
+        /// Short branch name (e.g. `main`).
+        branch: String,
+        /// Path to the worktree that has the branch checked out.
+        worktree_path: String,
+    },
+
+    /// `refs/heads/<branch>` does not exist.
+    #[error("no branch named '{branch}'")]
+    BranchNotFound {
+        /// Short branch name (e.g. `topic`).
+        branch: String,
+    },
+
+    /// [`list_branches`](crate::branch_tracking::list_branches) with [`BranchDetail::Names`](crate::branch_tracking::BranchDetail::Names) cannot use date sort.
+    #[error("branch list with Names detail cannot use date sort (date sort reads commit objects)")]
+    BranchListNamesDateSort,
+
     /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
     #[error(transparent)]
     Tag(#[from] crate::porcelain::tag::TagError),
@@ -2235,6 +2136,39 @@ pub enum Error {
         oid: crate::objects::ObjectId,
     },
 
+    /// Ref does not exist and has no reflog entries.
+    #[error("unknown ref '{refname}'")]
+    ReflogUnknownRef {
+        /// User-supplied or DWIM ref name.
+        refname: String,
+    },
+
+    /// A reflog selector is missing its reference or `@{n}` delimiters.
+    #[error("expected ref@{{n}} form, got '{spec}'")]
+    ReflogInvalidSelector {
+        /// Selector after trimming surrounding whitespace.
+        spec: String,
+    },
+
+    /// A reflog selector index is not a nonnegative integer that fits in `usize`.
+    #[error("invalid reflog index in '{spec}'")]
+    ReflogInvalidIndex {
+        /// Selector after trimming surrounding whitespace.
+        spec: String,
+        /// Integer parsing failure, including overflow.
+        #[source]
+        source: std::num::ParseIntError,
+    },
+
+    /// `ref@{{n}}` is out of range for the current reflog.
+    #[error("reflog entry {refname}@{{{index}}} not found")]
+    ReflogIndexOutOfRange {
+        /// Ref whose reflog was read.
+        refname: String,
+        /// Requested newest-first index.
+        index: usize,
+    },
+
     /// Pushing or creating a stash ([`crate::repo_handles::RepositoryStash::push`]) requires at least one commit.
     #[error("cannot stash without a commit")]
     StashNoInitialCommit,
@@ -2242,6 +2176,10 @@ pub enum Error {
     /// Stash create/apply/pop requires a working tree (not a bare repository).
     #[error("cannot stash in a bare repository")]
     StashBareRepository,
+
+    /// [`crate::blame::BlameFinalSource::Worktree`] was requested in a bare repository.
+    #[error("cannot blame the working tree of a bare repository")]
+    BlameWorktreeBareRepository,
 
     /// [`crate::repo_handles::RepositoryStash::apply`] with `restore_index` could
     /// not merge the current index with the stashed index parent.
@@ -2288,6 +2226,62 @@ pub enum Error {
     #[error("cannot amend: no commits on this branch yet")]
     AmendUnborn,
 
+    /// [`RepositoryNotes::add`](crate::repo_handles::RepositoryNotes::add) was called without
+    /// `force` when a note already exists on the object.
+    #[error("note for object {object} already exists")]
+    NoteAlreadyExists {
+        /// Annotated object that already has a note.
+        object: crate::objects::ObjectId,
+    },
+
+    /// A configured or environment notes ref is not under `refs/notes/`.
+    #[error("notes ref '{0}' must start with 'refs/notes/'")]
+    InvalidNotesRef(String),
+
+    /// Unknown `notes.rewriteMode` or `GIT_NOTES_REWRITE_MODE` value.
+    #[error("unknown notes rewrite mode '{0}'")]
+    NotesRewriteMode(String),
+
+    /// A notes ref resolves to an object that cannot hold notes (notes reads accept a commit or
+    /// a tree; notes merges require a commit).
+    #[error("notes ref '{notes_ref}' points to a {found}, not a notes commit")]
+    NotesRefNotCommit {
+        /// Notes ref (or revision) that was read.
+        notes_ref: String,
+        /// Kind of object the ref resolved to.
+        found: crate::objects::ObjectKind,
+    },
+
+    /// An object reached while reading a notes tree has the wrong kind (for example a note
+    /// entry that is not a blob).
+    #[error("notes object {oid} is a {found}, expected a {expected}")]
+    NotesObjectKind {
+        /// Object that was read.
+        oid: crate::objects::ObjectId,
+        /// Kind the notes layout requires at this position.
+        expected: crate::objects::ObjectKind,
+        /// Kind actually stored.
+        found: crate::objects::ObjectKind,
+    },
+
+    /// [`notes_merge_inner`](crate::notes::notes_merge_inner) was asked to merge two notes refs
+    /// that both have no notes commit.
+    #[error("cannot merge notes: neither '{local}' nor '{remote}' has any notes")]
+    NotesMergeBothEmpty {
+        /// Local notes ref (merge destination).
+        local: String,
+        /// Remote notes ref (merge source).
+        remote: String,
+    },
+
+    /// A manual notes merge was started while an earlier one still has conflict files in the
+    /// notes merge worktree.
+    #[error("unfinished notes merge: conflict files remain in {}", crate::git_path::user_display_path(.path))]
+    NotesMergeInProgress {
+        /// The notes merge worktree directory.
+        path: std::path::PathBuf,
+    },
+
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
     Midx(#[from] MidxError),
@@ -2296,6 +2290,14 @@ pub enum Error {
     /// ([`crate::maintenance::offload_blobs`]).
     #[error(transparent)]
     Offload(#[from] crate::offload::OffloadError),
+
+    /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
+    #[error(transparent)]
+    RevParse(#[from] crate::rev_parse_error::RevParseError),
+
+    /// Revision walking / `rev-list` option parsing failed ([`crate::rev_list_error::RevListError`]).
+    #[error(transparent)]
+    RevList(#[from] crate::rev_list_error::RevListError),
 
     /// A Git hook subprocess failed or could not be started.
     #[error(transparent)]
@@ -2404,6 +2406,32 @@ pub enum Error {
     /// Annotated tag tree-sha256 header parsing failed.
     #[error(transparent)]
     TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
+
+    /// `grit blame --ignore-rev` did not resolve to a commit.
+    #[error("cannot find revision {rev} to ignore")]
+    BlameIgnoreRevUnknown {
+        /// Revision expression from `--ignore-rev`.
+        rev: String,
+    },
+
+    /// `--ignore-revs-file` could not be read.
+    #[error("could not open object name list: {path}")]
+    BlameIgnoreRevsFileOpen {
+        /// Path argument (before expansion).
+        path: String,
+        /// Underlying open error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A line in an ignore-revs file is not a full-length object id.
+    #[error("invalid object name: {rev}")]
+    BlameIgnoreRevsFileInvalidRev {
+        /// Path argument for the file.
+        path: String,
+        /// Offending line text after comment/trim handling.
+        rev: String,
+    },
 }
 
 impl Error {
@@ -2434,6 +2462,7 @@ impl Error {
             Self::InvalidObjectId(..) => "invalid_object_id",
             Self::HashCollision { .. } => "hash_collision",
             Self::ObjectNotFound(..) => "object_not_found",
+            Self::RevisionNotFound(..) => "revision_not_found",
             Self::PromisedObjectMissing(..) => "promised_object_missing",
             Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
             Self::CorruptObject(..) => "corrupt_object",
@@ -2468,8 +2497,8 @@ impl Error {
             Self::IndexFsmonitorExtensionBadVersion(..) => "index_fsmonitor_extension_bad_version",
             Self::IndexFsmonitorExtensionEwahInvalid => "index_fsmonitor_extension_ewah_invalid",
             Self::CacheTreeCorrupt => "cache_tree_corrupt",
-            Self::Ref(e) => e.kind_name(),
-            Self::Notes(e) => e.kind_name(),
+            Self::InvalidRef(..) => "invalid_ref",
+            Self::PackedRefsUnexpectedLine { .. } => "packed_refs_unexpected_line",
             Self::PathError(..) => "path_error",
             Self::PathspecFromFile(..) => "pathspec_from_file",
             Self::InvalidPath(..) => "invalid_path",
@@ -2477,9 +2506,11 @@ impl Error {
             Self::Config(..) => "config",
             Self::Submodule(..) => "submodule",
             Self::Branch(..) => "branch",
+            Self::RefLock(..) => "ref_lock",
+            Self::RefStore(..) => "ref_store",
+            Self::Reftable(..) => "reftable",
             Self::Filter(..) => "filter",
-            Self::Revision(re) => re.kind_name(),
-            Self::Diff(de) => de.kind_name(),
+            Self::Apply(..) => "apply",
             Self::PathOutsideRepo(..) => "path_outside_repo",
             Self::Signing(..) => "signing",
             Self::Auth { .. } => "auth",
@@ -2536,9 +2567,13 @@ impl Error {
             Self::Message(..) => "message",
             Self::NotFastForward => "not_fast_forward",
             Self::NothingToCommit => "nothing_to_commit",
+            Self::UnrelatedHistories { .. } => "unrelated_histories",
             Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
             Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
+            Self::DetachedHead => "detached_head",
+            Self::UnbornHead => "unborn_head",
+            Self::InvalidHead => "invalid_head",
             Self::MergeCommit { .. } => "merge_commit",
             Self::ReplaySourceAtHead => "replay_source_at_head",
             Self::SequencerUnknownCommand { .. } => "sequencer_unknown_command",
@@ -2546,13 +2581,21 @@ impl Error {
             Self::NoReplayInProgress => "no_replay_in_progress",
             Self::NoMergeInProgress => "no_merge_in_progress",
             Self::OperationInProgress(..) => "operation_in_progress",
+            Self::BranchCheckedOutInWorktree { .. } => "branch_checked_out_in_worktree",
+            Self::BranchNotFound { .. } => "branch_not_found",
+            Self::BranchListNamesDateSort => "branch_list_names_date_sort",
             Self::Tag(..) => "tag",
             Self::Worktree(..) => "worktree",
             Self::CorruptStash(..) => "corrupt_stash",
             Self::StashNotFound { .. } => "stash_not_found",
             Self::StashCommitNotOnStack { .. } => "stash_commit_not_on_stack",
+            Self::ReflogUnknownRef { .. } => "reflog_unknown_ref",
+            Self::ReflogInvalidSelector { .. } => "reflog_invalid_selector",
+            Self::ReflogInvalidIndex { .. } => "reflog_invalid_index",
+            Self::ReflogIndexOutOfRange { .. } => "reflog_index_out_of_range",
             Self::StashNoInitialCommit => "stash_no_initial_commit",
             Self::StashBareRepository => "stash_bare_repository",
+            Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
             Self::StashIndexConflict => "stash_index_conflict",
             Self::StashOptionConflict(..) => "stash_option_conflict",
             Self::HunkSelection(..) => "hunk_selection",
@@ -2562,8 +2605,17 @@ impl Error {
             Self::StashSymlinkNotUtf8 => "stash_symlink_not_utf8",
             Self::StashCouldNotRestoreUntracked { .. } => "stash_could_not_restore_untracked",
             Self::AmendUnborn => "amend_unborn",
+            Self::NoteAlreadyExists { .. } => "note_already_exists",
+            Self::InvalidNotesRef(..) => "invalid_notes_ref",
+            Self::NotesRewriteMode(..) => "notes_rewrite_mode",
+            Self::NotesRefNotCommit { .. } => "notes_ref_not_commit",
+            Self::NotesObjectKind { .. } => "notes_object_kind",
+            Self::NotesMergeBothEmpty { .. } => "notes_merge_both_empty",
+            Self::NotesMergeInProgress { .. } => "notes_merge_in_progress",
             Self::Midx(..) => "midx",
             Self::Offload(..) => "offload",
+            Self::RevParse(..) => "rev_parse",
+            Self::RevList(..) => "rev_list",
             Self::Hook(..) => "hook",
             Self::History(..) => "history",
             Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
@@ -2578,6 +2630,9 @@ impl Error {
             Self::TagVerifyMissingObjectHeader => "tag_verify_missing_object_header",
             Self::TagVerifyDuplicateTreeSha256Header => "tag_verify_duplicate_tree_sha256_header",
             Self::TreeSha256Claim(..) => "tree_sha256_claim",
+            Self::BlameIgnoreRevUnknown { .. } => "blame_ignore_rev_unknown",
+            Self::BlameIgnoreRevsFileOpen { .. } => "blame_ignore_revs_file_open",
+            Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame_ignore_revs_file_invalid_rev",
         }
     }
 
@@ -2782,7 +2837,7 @@ impl Error {
             self,
             Error::Config(_)
                 | Error::Submodule(_)
-                | Error::Ref(RefError::RefLock(_))
+                | Error::RefLock(_)
                 | Error::Filter(_)
                 | Error::PathOutsideRepo(_)
         )
@@ -2792,32 +2847,14 @@ impl Error {
     #[must_use]
     pub fn git_stderr_message(&self) -> String {
         match self {
-            Error::Diff(crate::diff::error::DiffError::Apply(ApplyError::CorruptPatch {
-                ..
-            })) => crate::diagnostics::error_line(&self.to_string()),
+            Error::Apply(ApplyError::CorruptPatch { .. }) => {
+                crate::diagnostics::error_line(&self.to_string())
+            }
             Error::Message(s) => s.clone(),
             Error::WouldOverwrite { message, .. } => message.clone(),
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
         }
-    }
-}
-
-impl From<crate::rev_parse_error::RevParseError> for Error {
-    fn from(err: crate::rev_parse_error::RevParseError) -> Self {
-        Self::Revision(crate::revision_error::RevisionError::RevParse(err))
-    }
-}
-
-impl From<crate::rev_list_error::RevListError> for Error {
-    fn from(err: crate::rev_list_error::RevListError) -> Self {
-        Self::Revision(crate::revision_error::RevisionError::RevList(err))
-    }
-}
-
-impl From<ApplyError> for Error {
-    fn from(err: ApplyError) -> Self {
-        Self::Diff(crate::diff::error::DiffError::Apply(err))
     }
 }
 
@@ -2843,20 +2880,8 @@ impl From<crate::refs::store::RefStoreError> for Error {
                 source: crate::refs::store::RefStoreError::git_dir_io_source(os_error),
             },
             crate::refs::store::RefStoreError::Hook(hook) => Error::Hook(hook.into_hook_error()),
-            other => Error::Ref(other.into()),
+            other => Error::RefStore(other),
         }
-    }
-}
-
-impl From<crate::reftable::ReftableError> for Error {
-    fn from(err: crate::reftable::ReftableError) -> Self {
-        Error::Ref(err.into())
-    }
-}
-
-impl From<RefLockError> for Error {
-    fn from(err: RefLockError) -> Self {
-        Error::Ref(err.into())
     }
 }
 

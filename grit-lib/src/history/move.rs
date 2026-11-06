@@ -6,6 +6,7 @@ use crate::repo::Repository;
 use super::error::HistoryError;
 use super::plan::plan_replay_linear_segment;
 use super::types::{RewriteOptions, RewritePlan};
+
 fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, HistoryError> {
     Ok(repo.odb().read_commit(&oid)?.parents)
 }
@@ -29,8 +30,8 @@ pub enum Placement {
 /// Returns [`HistoryError::NotInHistory`], [`HistoryError::MoveTargetNotInHistory`],
 /// [`HistoryError::NoOp`], [`HistoryError::NotLinear`], or errors from replay planning.
 /// An unborn or invalid `HEAD` is [`HistoryError::Library`] wrapping
-/// [`Error::Ref(RefError::UnbornHead)`](crate::error::Error::Ref(RefError::UnbornHead)) or
-/// [`Error::Ref(RefError::InvalidHead)`](crate::error::Error::Ref(RefError::InvalidHead)).
+/// [`Error::UnbornHead`](crate::error::Error::UnbornHead) or
+/// [`Error::InvalidHead`](crate::error::Error::InvalidHead).
 pub fn move_commit(
     repo: &Repository,
     commit: ObjectId,

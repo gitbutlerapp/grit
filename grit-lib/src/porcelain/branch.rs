@@ -31,7 +31,6 @@ use crate::worktree::{
 };
 
 pub use crate::porcelain::branch_error::{BranchError, DeleteMode, StartPoint, TrackMode};
-use crate::refs::RefError;
 
 const HEADS_PREFIX: &str = "refs/heads/";
 
@@ -751,21 +750,18 @@ fn resolve_create_start(
 }
 
 fn validate_start_commit(repo: &Repository, oid: ObjectId, label: &str) -> Result<ObjectId> {
-    peel_to_commit_for_merge_base(repo, oid).map_err(|err| {
-        let err: Error = err.into();
-        match err {
-            Error::ObjectNotFound(_) => Error::Branch(BranchError::InvalidStartPoint {
+    peel_to_commit_for_merge_base(repo, oid).map_err(|err| match err {
+        Error::ObjectNotFound(_) => Error::Branch(BranchError::InvalidStartPoint {
+            label: label.to_owned(),
+            reason: "object not found".into(),
+        }),
+        Error::InvalidRef(msg) | Error::CorruptObject(msg) => {
+            Error::Branch(BranchError::InvalidStartPoint {
                 label: label.to_owned(),
-                reason: "object not found".into(),
-            }),
-            Error::Ref(RefError::InvalidName { reason: msg, .. }) | Error::CorruptObject(msg) => {
-                Error::Branch(BranchError::InvalidStartPoint {
-                    label: label.to_owned(),
-                    reason: msg,
-                })
-            }
-            other => other,
+                reason: msg,
+            })
         }
+        other => other,
     })
 }
 
@@ -806,10 +802,10 @@ fn checked_out_error(repo: &Repository, name: &str) -> Result<Error> {
 
 fn map_checked_out_err(err: Error, name: &str) -> Error {
     match err {
-        Error::Branch(BranchError::CheckedOut { worktree, .. }) => {
+        Error::BranchCheckedOutInWorktree { worktree_path, .. } => {
             Error::Branch(BranchError::CheckedOut {
                 name: name.to_owned(),
-                worktree: path_for_error_message(Path::new(&worktree)),
+                worktree: path_for_error_message(Path::new(&worktree_path)),
             })
         }
         other => other,
@@ -994,10 +990,10 @@ mod tests {
     #[test]
     fn checked_out_in_other_worktree_strips_verbatim_path() {
         let err = map_checked_out_err(
-            Error::Branch(BranchError::CheckedOut {
-                name: "side".into(),
-                worktree: r"\\?\C:\Users\tmp\repo".into(),
-            }),
+            Error::BranchCheckedOutInWorktree {
+                branch: "side".into(),
+                worktree_path: r"\\?\C:\Users\tmp\repo".into(),
+            },
             "side",
         );
         match err {

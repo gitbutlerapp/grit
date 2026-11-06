@@ -35,8 +35,8 @@ use std::process::Command;
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push::push_remote;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
@@ -166,7 +166,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         &mut *conn,
         &[spec_update(main_oid, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push_remote over ssh");
@@ -242,7 +242,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         &mut *conn2,
         &[spec_update(diverged, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("non-ff push_remote over ssh completes");
@@ -280,7 +280,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         &mut *conn3,
         &[spec_update(diverged, "refs/heads/main", true)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("forced push_remote over ssh completes");
@@ -365,7 +365,7 @@ fn incremental_ssh_push_with_advertised_blob_and_tree_tags() {
         &mut *conn,
         &[spec_update(tip, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("incremental push with non-commit tags");
@@ -439,7 +439,7 @@ fn one_commit_ssh_push_over_many_advertised_tips_sends_a_thin_pack() {
         &mut *conn,
         &[spec_update(tip, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push one commit");

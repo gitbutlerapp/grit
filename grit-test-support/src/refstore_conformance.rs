@@ -31,7 +31,6 @@ use grit_lib::refs::store::{
     Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefStore, RefStoreError, RefTransaction,
     RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
-use grit_lib::refs::RefError;
 
 /// One conformance case: receives a fresh empty store and panics on a violation.
 pub type Case = fn(Arc<dyn RefStore>);
@@ -319,7 +318,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     assert!(
         matches!(
             missing,
-            Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/absent"
+            Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/absent"
         ),
         "{missing:?}"
     );
@@ -331,7 +330,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     assert!(
         matches!(
             dangling,
-            Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/unborn"
+            Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/unborn"
         ),
         "{dangling:?}"
     );

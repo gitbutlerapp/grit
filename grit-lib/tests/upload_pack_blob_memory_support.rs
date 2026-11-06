@@ -3,9 +3,7 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::objects::pack_objects::{
-    write_upload_pack_stream, PackBuildOptions, PackProgress, PackStats,
-};
+use grit_lib::objects::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackStats};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
@@ -85,7 +83,7 @@ pub fn stream_blob_to_sink(
         &HashSet::new(),
         None,
         opts,
-        &mut |_p: PackProgress| {},
+        &mut grit_lib::progress::NullProgress,
         &mut std::io::sink(),
     )
     .expect("upload-pack stream")
@@ -106,7 +104,7 @@ pub fn write_blob_pack_file(
         &HashSet::new(),
         None,
         opts,
-        &mut |_p: PackProgress| {},
+        &mut grit_lib::progress::NullProgress,
         &mut file,
     )
     .expect("upload-pack stream");

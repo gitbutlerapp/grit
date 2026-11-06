@@ -3,8 +3,8 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::list_refs;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -81,7 +81,7 @@ fn fetch_all_remotes_matches_git_fetch_all() {
         ),
     )
     .expect("config");
-    let mut progress = NoProgress;
+    let mut progress = NullProgress;
     let results = repo
         .remotes()
         .fetch_all(

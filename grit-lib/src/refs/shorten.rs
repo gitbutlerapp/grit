@@ -4,7 +4,6 @@ use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::diagnostics::Warning;
 use crate::error::{Error, Result};
 use crate::refs::store::RawRef;
-use crate::refs::RefError;
 use crate::refs::SYMREF_MAXDEPTH;
 use crate::repo::Repository;
 use crate::worktree_ref::DWIM_RULES;
@@ -60,9 +59,9 @@ pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<Str
             }
         }
     }
-    Err(Error::Ref(RefError::Store(
+    Err(Error::RefStore(
         crate::refs::store::RefStoreError::SymrefLoop,
-    )))
+    ))
 }
 
 fn symref_target_resolves(repo: &Repository, start: &str) -> Result<bool> {

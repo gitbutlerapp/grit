@@ -8,7 +8,6 @@ use grit_lib::ident::Signature;
 use grit_lib::porcelain::commit::create_commit;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::lock_path_for_ref;
-use grit_lib::refs::RefError;
 use grit_lib::repo::{InitOptions, Repository};
 
 struct Harness {
@@ -72,7 +71,7 @@ fn concurrent_allow_empty_commits_avoid_permission_errors() {
             "unexpected permission error: {text}"
         );
         match err {
-            Error::Ref(RefError::Store(store)) => {
+            Error::RefStore(store) => {
                 assert!(
                     matches!(
                         store,
@@ -156,7 +155,7 @@ fn concurrent_commit_while_index_and_ref_handles_open() {
             "unexpected permission error: {text}"
         );
         match err {
-            Error::Ref(RefError::Store(store)) => assert!(
+            Error::RefStore(store) => assert!(
                 matches!(
                     store,
                     grit_lib::refs::store::RefStoreError::ExpectedMismatch { .. }

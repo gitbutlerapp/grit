@@ -9,7 +9,7 @@ use std::path::Path;
 use anyhow::Context as _;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::transfer::FetchOutcome;
 use grit_lib::remote::transfer::PushOptions;
@@ -178,7 +178,7 @@ pub fn fetch(
         .fetch(
             repo,
             opts.clone(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::NeverCancel,
             Some(&factory),
         )
@@ -199,7 +199,7 @@ pub fn push(
             repo,
             refs,
             opts.clone(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::NeverCancel,
             Some(&factory),
         )

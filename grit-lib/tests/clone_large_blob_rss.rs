@@ -9,8 +9,8 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 
 const BLOB_MIB: usize = 64;
 const MAX_GROWTH_KIB: i64 = 16 * 1024;
@@ -87,7 +87,7 @@ fn local_clone_links_large_loose_blob_in_bounded_memory() {
     git(&tiny, &["commit", "-qm", "small"]);
     clone_repo(
         CloneOptions::new(tiny.to_string_lossy(), dir.path().join("warm-clone")),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -97,7 +97,7 @@ fn local_clone_links_large_loose_blob_in_bounded_memory() {
     let before = peak_rss_kib();
     clone_repo(
         CloneOptions::new(source.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

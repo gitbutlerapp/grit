@@ -13,7 +13,6 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
     ReflogUpdate,
 };
-use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 
@@ -266,10 +265,7 @@ fn rename_force_refuses_when_target_checked_out_in_worktree() {
     )
     .unwrap_err();
     assert!(
-        matches!(
-            err,
-            Error::Branch(grit_lib::porcelain::branch_error::BranchError::CheckedOut { .. })
-        ),
+        matches!(err, Error::BranchCheckedOutInWorktree { .. }),
         "{err:?}"
     );
 }
@@ -502,14 +498,9 @@ fn rename_aborts_when_destination_reflog_path_is_directory() {
     assert!(
         matches!(
             err,
-            Error::Ref(RefError::Store(
-                grit_lib::refs::store::RefStoreError::NameUnavailable {
-                    reason: grit_lib::refs::RefnameUnavailable::DescendantExists {
-                        ref blocking,
-                        ..
-                    },
-                },
-            )) if blocking == "refs/heads/new/x/y"
+            Error::RefStore(grit_lib::refs::store::RefStoreError::NameUnavailable {
+                reason: grit_lib::refs::RefnameUnavailable::DescendantExists { ref blocking, .. }
+            }) if blocking == "refs/heads/new/x/y"
         ),
         "{err:?}"
     );

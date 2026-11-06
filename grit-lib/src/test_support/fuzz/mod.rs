@@ -11,9 +11,7 @@ use std::path::Path;
 
 use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::{ConfigFile, ConfigScope};
-use crate::fetch::{
-    parse_v2_ls_refs_response, read_v2_fetch_pack_response, NoProgress, ShallowUpdate,
-};
+use crate::fetch::{parse_v2_ls_refs_response, read_v2_fetch_pack_response, ShallowUpdate};
 use crate::index::Index;
 use crate::objects::{
     parse_commit, parse_tag, parse_tree, serialize_commit, serialize_tag, serialize_tree,
@@ -95,7 +93,7 @@ pub fn protocol_v2_response(data: &[u8]) {
     let mut fetch = Cursor::new(data);
     let mut pack = Vec::new();
     let mut shallow = ShallowUpdate::default();
-    let mut progress = NoProgress;
+    let mut progress = crate::progress::NullProgress;
     let _ = read_v2_fetch_pack_response(
         &mut fetch,
         &mut pack,

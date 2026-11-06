@@ -10,7 +10,6 @@ use grit_lib::objects::NewCommit;
 use grit_lib::refs::append_reflog;
 use grit_lib::refs::store::{RefName, RefStoreError};
 use grit_lib::refs::write_ref;
-use grit_lib::refs::RefError;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 use std::fs;
@@ -238,7 +237,7 @@ fn compare_and_swap_refuses_stale_tip() {
         .expect_err("stale");
     assert!(matches!(
         err,
-        Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
+        Error::RefStore(RefStoreError::ExpectedMismatch { .. })
     ));
     assert_eq!(repo.references().resolve(&main).expect("main"), c1);
 }

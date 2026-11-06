@@ -162,7 +162,7 @@ pub mod pack_objects {
     pub use crate::pack_objects::{
         build_pack, build_pack_from_send_list, build_pack_with_shallow_and_filter,
         write_pack_for_push, write_upload_pack_stream, PackBuildOptions, PackObjects,
-        PackObjectsOptions, PackProgress, PackStats, SERVE_WINDOW_MEMORY,
+        PackObjectsOptions, PackStats, SERVE_WINDOW_MEMORY,
     };
 }
 

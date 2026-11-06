@@ -22,9 +22,9 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::credentials::{Credential, CredentialProvider};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
@@ -288,7 +288,7 @@ fn cross_authority_redirect_does_not_forward_cached_basic_auth() {
         &fx.local_git,
         &fx.gateway_url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("fetch through cross-origin redirect");
 
@@ -334,7 +334,7 @@ fn cross_authority_redirect_does_not_forward_host_only_cookies() {
         &fx.local_git,
         &fx.gateway_url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("fetch with host-only cookie file");
 

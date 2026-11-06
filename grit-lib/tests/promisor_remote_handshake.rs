@@ -13,8 +13,9 @@ use grit_lib::config::ConfigSet;
 use grit_lib::objects::promisor_remote::{PromisorField, PromisorRejection};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::remote::transfer::{FetchOptions, FetchOutcome};
@@ -223,8 +224,14 @@ fn fetch_from(
     opts.remote_name = Some(remote.to_owned());
     opts.filter = filter;
     opts.auto_filter = auto_filter;
-    let outcome =
-        fetch_remote(client, &mut conn, &mut opts, &mut NoProgress, &NeverCancel).expect("fetch");
+    let outcome = fetch_remote(
+        client,
+        &mut conn,
+        &mut opts,
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("fetch");
     let served = conn.finish();
     let sent = String::from_utf8_lossy(&sent.lock().unwrap()).into_owned();
     (outcome, sent, served)
@@ -443,7 +450,7 @@ fn object_want_fetch_sends_no_reply() {
         client.path(),
         &mut conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("object fetch");

@@ -43,13 +43,13 @@ impl DiffMerges {
     /// # Errors
     ///
     /// Returns an error when `value` is not a known mode name.
-    pub fn parse(value: &str) -> std::result::Result<Self, crate::diff::error::DiffError> {
+    pub fn parse(value: &str) -> std::result::Result<Self, String> {
         match value {
             "first-parent" | "first_parent" => Ok(Self::FirstParent),
             "combined" | "dense-combined" | "dense_combined" => Ok(Self::Combined),
-            other => Err(crate::diff::error::DiffError::DiffMergesParse {
-                value: other.to_owned(),
-            }),
+            other => Err(format!(
+                "unknown --diff-merges mode '{other}' (expected first-parent or combined)"
+            )),
         }
     }
 }

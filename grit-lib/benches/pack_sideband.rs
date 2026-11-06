@@ -9,7 +9,7 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use grit_lib::objects::pack_receive::{read_sideband_pack_to, PackReceiveTarget};
 
 use grit_lib::progress::NeverCancel;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 
 fn sideband_band1_stream(pack_bytes: usize) -> Vec<u8> {
     let mut out = Vec::new();
@@ -47,7 +47,7 @@ fn bench_sideband_demux(c: &mut Criterion) {
             b.iter(|| {
                 let mut target_buf = Vec::with_capacity(size);
                 let mut target = PackReceiveTarget::Memory(&mut target_buf);
-                let mut progress = NoProgress;
+                let mut progress = NullProgress;
                 read_sideband_pack_to(
                     &mut Cursor::new(stream.as_slice()),
                     &mut target,

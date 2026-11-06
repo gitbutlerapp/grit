@@ -16,7 +16,6 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefCaseOnlyRename, RefName, RefStore,
     RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
-use grit_lib::refs::RefError;
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -326,7 +325,7 @@ fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
         };
         let err = commit_ref_update_on_store(fx.repo.refs(), log_only).expect_err("{format:?}");
         assert!(
-            matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == missing("refs/heads/main", bogus())),
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/main", bogus())),
             "{format:?}: {err:?}"
         );
         assert_eq!(
@@ -372,7 +371,7 @@ fn issue_2258_invalid_symref_targets_are_refused_and_store_is_unchanged() {
             let err = commit_ref_update_on_store(fx.repo.refs(), symref_update(name, target))
                 .expect_err("{format:?} {name} -> {target}");
             assert!(
-                matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == invalid_symref(name, target)),
+                matches!(&err, Error::RefStore(e) if *e == invalid_symref(name, target)),
                 "{format:?} {name} -> {target}: {err:?}"
             );
             assert_eq!(fx.raw("HEAD"), head_before, "{format:?} {name}");
@@ -477,7 +476,7 @@ fn references_update_refuses_missing_objects_and_non_commit_branches() {
         assert!(
             matches!(
                 &err,
-                Error::Ref(RefError::Store(ref e)) if *e == not_a_commit("refs/heads/totree", fx.tree, ObjectKind::Tree)
+                Error::RefStore(e) if *e == not_a_commit("refs/heads/totree", fx.tree, ObjectKind::Tree)
             ),
             "{format:?}: {err:?}"
         );
@@ -485,7 +484,7 @@ fn references_update_refuses_missing_objects_and_non_commit_branches() {
             .update(&name("refs/heads/bogus2"), &bogus())
             .expect_err("branch at a missing object");
         assert!(
-            matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == missing("refs/heads/bogus2", bogus())),
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/bogus2", bogus())),
             "{format:?}: {err:?}"
         );
         refs.update(&name("refs/tags/tree"), &fx.tree)
@@ -502,7 +501,7 @@ fn git_dir_writers_refuse_missing_objects() {
         let err = grit_lib::refs::write_ref(git_dir, "refs/heads/w", &bogus())
             .expect_err("write_ref to a missing object");
         assert!(
-            matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == missing("refs/heads/w", bogus())),
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/w", bogus())),
             "{format:?}: {err:?}"
         );
         let err = grit_lib::refs::write_ref_cas(git_dir, "refs/heads/main", &fx.tree, fx.commit)
@@ -510,7 +509,7 @@ fn git_dir_writers_refuse_missing_objects() {
         assert!(
             matches!(
                 &err,
-                Error::Ref(RefError::Store(ref e)) if *e == not_a_commit("refs/heads/main", fx.tree, ObjectKind::Tree)
+                Error::RefStore(e) if *e == not_a_commit("refs/heads/main", fx.tree, ObjectKind::Tree)
             ),
             "{format:?}: {err:?}"
         );
@@ -520,7 +519,7 @@ fn git_dir_writers_refuse_missing_objects() {
         )
         .expect_err("batch with a missing object");
         assert!(
-            matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == missing("refs/heads/y", bogus())),
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/y", bogus())),
             "{format:?}: {err:?}"
         );
         for refname in ["refs/heads/w", "refs/heads/x", "refs/heads/y"] {
@@ -578,7 +577,7 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
         .update(&name("refs/heads/tree"), &fx.tree)
         .expect_err("branch at a tree");
     assert!(
-        matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == not_a_commit("refs/heads/tree", fx.tree, ObjectKind::Tree)),
+        matches!(&err, Error::RefStore(e) if *e == not_a_commit("refs/heads/tree", fx.tree, ObjectKind::Tree)),
         "{err:?}"
     );
     repo.references()
@@ -617,7 +616,7 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
         )
         .expect_err("missing tip");
         assert!(
-            matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == missing("refs/heads/main", bogus())),
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/main", bogus())),
             "{format:?}: {err:?}"
         );
         let err = update_branch_for_commit_on_store(
@@ -629,14 +628,14 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
         assert!(
             matches!(
                 &err,
-                Error::Ref(RefError::Store(ref e)) if *e == not_a_commit("refs/heads/main", fx.tree, ObjectKind::Tree)
+                Error::RefStore(e) if *e == not_a_commit("refs/heads/main", fx.tree, ObjectKind::Tree)
             ),
             "{format:?}: {err:?}"
         );
         let err = update_branch_for_commit(fx.repo.git_dir(), &branch_commit(fx.commit, bogus()))
             .expect_err("path-based writer, missing tip");
         assert!(
-            matches!(&err, Error::Ref(RefError::Store(ref e)) if *e == missing("refs/heads/main", bogus())),
+            matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/main", bogus())),
             "{format:?}: {err:?}"
         );
         assert_eq!(

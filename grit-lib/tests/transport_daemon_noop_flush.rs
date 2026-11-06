@@ -154,7 +154,7 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
         .fetch(
             &repo,
             fetch_opts.clone(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &NeverCancel,
             None,
         )
@@ -165,7 +165,7 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &NeverCancel,
             None,
         )
@@ -186,7 +186,7 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
                 ..Default::default()
             }],
             PushOptions::default(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &NeverCancel,
             None,
         )

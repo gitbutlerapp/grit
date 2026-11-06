@@ -22,7 +22,6 @@ use grit_lib::porcelain::replay_sequence::{
     skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayOptions,
     ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
-use grit_lib::refs::RefError;
 use grit_lib::state::InProgressOperation;
 use grit_lib::state::{operation_alternatives, operation_next_steps_empty};
 use schemars::JsonSchema;
@@ -416,7 +415,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
         Error::OperationInProgress(kind) => {
             crate::json_error::operation_in_progress_for_repo(repo, "pick", kind)
         }
-        Error::Ref(RefError::UnbornHead) => anyhow::anyhow!("no commits yet on this branch to pick onto"),
+        Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to pick onto"),
         Error::MergeCommit { oid } => {
             let s = oid.to_short_hex();
             anyhow::anyhow!(

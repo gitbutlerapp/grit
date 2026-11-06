@@ -5,7 +5,6 @@ use std::io::Write;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::notes::NotesError;
 use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::repo::Repository;
@@ -405,7 +404,7 @@ fn remove_notes(
 }
 
 fn resolve_object(repo: &Repository, rev: &str) -> Result<ObjectId> {
-    resolve_revision(repo, rev).map_err(|e| map_notes_error(e.into()))
+    resolve_revision(repo, rev).map_err(map_notes_error)
 }
 
 fn notes_write_options(
@@ -422,7 +421,7 @@ fn notes_write_options(
 
 fn map_notes_error(err: Error) -> anyhow::Error {
     match err {
-        Error::Notes(NotesError::NoteAlreadyExists { object }) => {
+        Error::NoteAlreadyExists { object } => {
             anyhow::anyhow!(
                 "note for object {} already exists (use --force)",
                 object.to_hex()

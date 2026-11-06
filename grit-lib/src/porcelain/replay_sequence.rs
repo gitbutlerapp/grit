@@ -35,7 +35,6 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
-use crate::refs::RefError;
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -275,7 +274,7 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 ///
 /// # Errors
 ///
-/// - [`Error::Ref(RefError::UnbornHead)`], [`Error::MergeCommit`] (without `mainline`).
+/// - [`Error::UnbornHead`], [`Error::MergeCommit`] (without `mainline`).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
 /// - Worktree cleanliness, merge, checkout, and ref update failures.
 pub fn start_replay_sequence(
@@ -716,7 +715,7 @@ fn branch_head(repo: &Repository) -> Result<(Option<String>, ObjectId)> {
             oid: Some(oid),
             ..
         } => Ok((Some(refname), oid)),
-        HeadState::Branch { .. } => Err(Error::Ref(RefError::UnbornHead)),
+        HeadState::Branch { .. } => Err(Error::UnbornHead),
         HeadState::Detached { oid } => Ok((None, oid)),
         HeadState::Invalid => Err(Error::Message("HEAD is in an unknown state".into())),
     }

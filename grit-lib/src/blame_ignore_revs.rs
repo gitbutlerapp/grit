@@ -6,12 +6,10 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use crate::config::parse_path;
-use crate::diff::error::DiffError;
-use crate::error::{Error, PathIoError, Result};
+use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision_as_commit;
-use crate::worktree::io_error::WorktreePathOperation;
 
 /// Where to load ignored revisions from (config, CLI files, CLI rev specs).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -71,11 +69,8 @@ impl IgnoreRevs {
         }
 
         for spec in &sources.revs {
-            let oid = resolve_revision_as_commit(repo, spec).map_err(|_| {
-                Error::Diff(crate::diff::error::DiffError::BlameIgnoreRevUnknown {
-                    rev: spec.clone(),
-                })
-            })?;
+            let oid = resolve_revision_as_commit(repo, spec)
+                .map_err(|_| Error::BlameIgnoreRevUnknown { rev: spec.clone() })?;
             revs.insert(oid);
         }
 
@@ -109,23 +104,17 @@ fn resolve_ignore_revs_file_path(repo: &Repository, path: &str) -> Option<PathBu
     Some(resolved)
 }
 
-fn blame_ignore_revs_file_io(path_arg: &str, resolved: &Path, source: std::io::Error) -> Error {
-    let display = resolved.to_string_lossy().into_owned();
-    Error::Diff(DiffError::BlameIgnoreRevsFileOpen {
-        path: path_arg.to_owned(),
-        io: PathIoError::worktree(display, WorktreePathOperation::Read, source),
-    })
-}
-
 fn load_file_into(repo: &Repository, path: &str, revs: &mut HashSet<ObjectId>) -> Result<()> {
     let Some(resolved) = resolve_ignore_revs_file_path(repo, path) else {
         return Ok(());
     };
-    let file =
-        fs::File::open(&resolved).map_err(|e| blame_ignore_revs_file_io(path, &resolved, e))?;
+    let file = fs::File::open(&resolved).map_err(|e| Error::BlameIgnoreRevsFileOpen {
+        path: path.to_owned(),
+        source: e,
+    })?;
     let reader = BufReader::new(file);
     for line in reader.lines() {
-        let line = line.map_err(|e| blame_ignore_revs_file_io(path, &resolved, e))?;
+        let line = line?;
         parse_ignore_revs_line(repo, path, &line, revs)?;
     }
     Ok(())
@@ -146,22 +135,16 @@ fn parse_ignore_revs_line(
     if trimmed.is_empty() {
         return Ok(());
     }
-    let oid = ObjectId::from_hex(trimmed).map_err(|_| {
-        Error::Diff(
-            crate::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev {
-                path: file_path.to_owned(),
-                rev: trimmed.to_owned(),
-            },
-        )
+    let oid = ObjectId::from_hex(trimmed).map_err(|_| Error::BlameIgnoreRevsFileInvalidRev {
+        path: file_path.to_owned(),
+        rev: trimmed.to_owned(),
     })?;
     let expected_len = repo.odb().hash_algo().hex_len();
     if trimmed.len() != expected_len {
-        return Err(Error::Diff(
-            crate::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev {
-                path: file_path.to_owned(),
-                rev: trimmed.to_owned(),
-            },
-        ));
+        return Err(Error::BlameIgnoreRevsFileInvalidRev {
+            path: file_path.to_owned(),
+            rev: trimmed.to_owned(),
+        });
     }
     match repo.odb().peel_to_commit(oid) {
         Ok(Some(commit)) => {
@@ -201,10 +184,7 @@ mod tests {
         let repo = init_repo(dir.path());
         let mut revs = HashSet::new();
         let err = parse_ignore_revs_line(&repo, "f", "deadbeef", &mut revs).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Diff(crate::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev { .. })
-        ));
+        assert!(matches!(err, Error::BlameIgnoreRevsFileInvalidRev { .. }));
     }
 
     #[test]
@@ -214,10 +194,7 @@ mod tests {
         let mut revs = HashSet::new();
         let hex = "g".repeat(40);
         let err = parse_ignore_revs_line(&repo, "f", &hex, &mut revs).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Diff(crate::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev { .. })
-        ));
+        assert!(matches!(err, Error::BlameIgnoreRevsFileInvalidRev { .. }));
     }
 
     #[cfg_attr(
@@ -283,10 +260,7 @@ mod tests {
         let mut revs = HashSet::new();
         let forty = "a".repeat(40);
         let err = parse_ignore_revs_line(&repo, "f", &forty, &mut revs).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Diff(crate::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev { .. })
-        ));
+        assert!(matches!(err, Error::BlameIgnoreRevsFileInvalidRev { .. }));
     }
 
     #[test]

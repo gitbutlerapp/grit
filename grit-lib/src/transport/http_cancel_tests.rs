@@ -14,10 +14,10 @@ use crate::config::ConfigSet;
 use crate::environment::Environment;
 use crate::error::Error;
 use crate::pkt_line::write_line_to_vec;
+use crate::progress::NullProgress;
 use crate::progress::{
     connect_cancel_arc, mirror_stack_cancel, Cancel, CancelToken, HttpWaitGuard, NeverCancel,
 };
-use crate::remote::fetch::NoProgress;
 use crate::remote::transfer::FetchOptions;
 use crate::remote::{DefaultHttpClientFactory, Remote};
 use crate::repo::{InitOptions, Repository};
@@ -305,7 +305,7 @@ fn remote_fetch_cancels_during_stalled_discovery_without_shared_watch() {
                 .fetch(
                     &repo,
                     FetchOptions::default(),
-                    &mut NoProgress,
+                    &mut NullProgress,
                     &cancel,
                     Some(&DefaultHttpClientFactory::new()),
                 )
@@ -437,7 +437,7 @@ fn remote_fetch_cancels_during_stalled_upload_pack_post_without_shared_watch() {
                         http_protocol_version: Some(0),
                         ..FetchOptions::default()
                     },
-                    &mut NoProgress,
+                    &mut NullProgress,
                     &cancel,
                     Some(&DefaultHttpClientFactory::new()),
                 )
@@ -568,7 +568,7 @@ fn clone_cancels_during_stalled_bundle_uri_probe() {
                 checkout: false,
                 ..CloneOptions::new(url.clone(), dest)
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &cancel,
             Some(&DefaultHttpClientFactory::new()),
         )
@@ -631,7 +631,7 @@ fn clone_times_out_on_low_speed_stall_without_cancel() {
                 environment: env,
                 ..CloneOptions::new(url, dest)
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             Some(&factory),
         )
@@ -852,7 +852,7 @@ fn clone_aborts_on_silent_stall_with_low_speed_env_and_bundle_cache() {
                     environment: env,
                     ..CloneOptions::new(url, dest)
                 },
-                &mut NoProgress,
+                &mut NullProgress,
                 &NeverCancel,
                 Some(&factory),
             )
@@ -894,7 +894,7 @@ fn remote_fetch_aborts_on_silent_stall_with_low_speed_env() {
                         environment: env,
                         ..FetchOptions::default()
                     },
-                    &mut NoProgress,
+                    &mut NullProgress,
                     &NeverCancel,
                     Some(&DefaultHttpClientFactory::with_environment(
                         low_speed_test_env(),
@@ -933,7 +933,7 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
                         environment: env,
                         ..FetchOptions::default()
                     },
-                    &mut NoProgress,
+                    &mut NullProgress,
                     &NeverCancel,
                     Some(&DefaultHttpClientFactory::with_environment(
                         low_speed_test_env(),

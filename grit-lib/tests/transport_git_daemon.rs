@@ -22,8 +22,9 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::push::push_remote;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
@@ -166,7 +167,7 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("fetch_remote over git daemon");
@@ -306,7 +307,7 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("fetch with TagMode::Following");
@@ -393,7 +394,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("initial fetch");
@@ -410,7 +411,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("incremental fetch with new annotated tag");
@@ -492,7 +493,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
         &local_git,
         &mut *conn,
         &mut fetch_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("fetch main");
@@ -540,7 +541,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push annotated tag");
@@ -621,7 +622,7 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
         &local_git,
         &mut *conn,
         &mut seed_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("seed fetch");
@@ -650,7 +651,7 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
         &local_git,
         &mut *conn,
         &mut dry_run_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("dry-run fetch");

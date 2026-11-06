@@ -763,12 +763,7 @@ mod tests {
             matches!(
                 &refused,
                 Err(CheckoutError::Library(e))
-                    if matches!(
-                        **e,
-                        crate::error::Error::Branch(
-                            crate::porcelain::branch_error::BranchError::CheckedOut { .. },
-                        )
-                    )
+                    if matches!(**e, crate::error::Error::BranchCheckedOutInWorktree { .. })
             ),
             "{refused:?}"
         );

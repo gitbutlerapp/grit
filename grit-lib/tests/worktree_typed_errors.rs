@@ -271,10 +271,7 @@ fn add_branch_refusals_use_branch_errors() {
                 Some(WorktreeBranch::Existing("main".into()))
             )
         ),
-        Err(Error::Branch(grit_lib::porcelain::branch_error::BranchError::CheckedOut {
-            name,
-            ..
-        })) if name == "main"
+        Err(Error::BranchCheckedOutInWorktree { branch, .. }) if branch == "main"
     ));
 
     let tree = git(&main, &["rev-parse", "HEAD^{tree}"]);

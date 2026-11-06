@@ -546,10 +546,7 @@ fn typed_errors_for_bad_rev_and_file() {
         },
     )
     .unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Diff(grit_lib::diff::error::DiffError::BlameIgnoreRevUnknown { .. })
-    ));
+    assert!(matches!(err, Error::BlameIgnoreRevUnknown { .. }));
 
     let err = IgnoreRevs::load(
         &repo,
@@ -559,10 +556,7 @@ fn typed_errors_for_bad_rev_and_file() {
         },
     )
     .unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Diff(grit_lib::diff::error::DiffError::BlameIgnoreRevsFileOpen { .. })
-    ));
+    assert!(matches!(err, Error::BlameIgnoreRevsFileOpen { .. }));
 
     std::fs::write(dir.path().join("ignore_norev"), "NOREV\n").unwrap();
     let err = IgnoreRevs::load(
@@ -573,8 +567,5 @@ fn typed_errors_for_bad_rev_and_file() {
         },
     )
     .unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Diff(grit_lib::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev { .. })
-    ));
+    assert!(matches!(err, Error::BlameIgnoreRevsFileInvalidRev { .. }));
 }

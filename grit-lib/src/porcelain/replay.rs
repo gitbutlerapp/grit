@@ -24,7 +24,6 @@ use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
-use crate::refs::RefError;
 use crate::refs::{
     should_autocreate_reflog_with_config, update_branch_for_commit_on_store,
     update_detached_head_for_commit_on_store, BranchCommitRefLock, BranchCommitRefUpdate,
@@ -90,7 +89,7 @@ pub enum ReplayOutcome {
 ///
 /// # Errors
 ///
-/// - [`Error::Ref(RefError::UnbornHead)`] when `HEAD` has no commits yet.
+/// - [`Error::UnbornHead`] when `HEAD` has no commits yet.
 /// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
@@ -117,7 +116,7 @@ pub fn replay_commit(
             oid: Some(oid),
             ..
         } => (CheckoutTip::Branch(refname), oid),
-        HeadState::Branch { .. } => return Err(Error::Ref(RefError::UnbornHead)),
+        HeadState::Branch { .. } => return Err(Error::UnbornHead),
         HeadState::Detached { oid } => (CheckoutTip::Detached, oid),
         HeadState::Invalid => {
             return Err(Error::Message("HEAD is in an unknown state".into()));

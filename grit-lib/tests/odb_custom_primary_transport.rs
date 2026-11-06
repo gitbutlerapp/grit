@@ -20,9 +20,9 @@ use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
@@ -164,7 +164,7 @@ fn fetch_into_custom_primary_round_trips_with_git() {
         .fetch(
             &remote,
             fetch_all_branches(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -199,7 +199,7 @@ fn fetch_from_bundle_into_custom_primary_succeeds() {
         .fetch(
             &remote,
             fetch_all_branches(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -219,7 +219,7 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
         .fetch(
             &remote,
             fetch_main_tracking(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -234,7 +234,7 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
         .fetch(
             &remote,
             fetch_main_tracking(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -260,7 +260,7 @@ fn fetch_dry_run_into_custom_primary_classifies_without_persisting() {
                 opts.dry_run = true;
                 opts
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -407,7 +407,7 @@ fn fetch_all_succeeds_with_custom_primary() {
             &FetchOptions::default(),
             None,
             None,
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -442,7 +442,7 @@ fn push_from_custom_primary_round_trips_with_git() {
             &remote,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -469,7 +469,7 @@ fn partial_fetch_custom_primary_is_refused() {
                 opts.filter = Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone);
                 opts
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -605,7 +605,7 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
         .fetch(
             &remote,
             fetch_all_branches(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -632,7 +632,7 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
             &dest,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )

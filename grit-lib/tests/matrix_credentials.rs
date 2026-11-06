@@ -770,8 +770,8 @@ mod http_401 {
     use std::time::Instant;
 
     use grit_lib::error::Error;
+    use grit_lib::progress::NullProgress;
     use grit_lib::refs::resolve_ref;
-    use grit_lib::remote::fetch::NoProgress;
     use grit_lib::remote::transfer::{FetchOptions, TagMode};
     use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
     use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
@@ -978,7 +978,7 @@ mod http_401 {
                 &local_git,
                 &url,
                 &mut opts,
-                &mut NoProgress,
+                &mut NullProgress,
             )
             .expect_err("wrong creds from helper must fail typed, not hang");
             assert!(
@@ -1019,7 +1019,7 @@ mod http_401 {
             &local_git,
             &url,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
         )
         .expect("authed fetch via helper-filled Basic creds must succeed");
 

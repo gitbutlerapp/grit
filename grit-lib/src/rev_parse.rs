@@ -28,10 +28,8 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, O
 use crate::reflog::ReflogEntry;
 use crate::refs;
 use crate::refs::store::RawRef;
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
-use crate::revision_error::{RevResult, RevisionError};
 
 /// Return `Some(repo)` when a repository can be discovered at `start`.
 ///
@@ -210,27 +208,23 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
 ///   to a branch name.
 /// - `Ok(None)` when `spec` is not an `@{-N}` token.
 /// - `Err(...)` when `spec` matches `@{-N}` syntax but cannot be resolved.
-pub fn expand_at_minus_to_branch_name(repo: &Repository, spec: &str) -> RevResult<Option<String>> {
+pub fn expand_at_minus_to_branch_name(repo: &Repository, spec: &str) -> Result<Option<String>> {
     if !spec.starts_with("@{-") || !spec.ends_with('}') {
         return Ok(None);
     }
     let inner = &spec[3..spec.len() - 1];
-    let n: usize = inner.parse().map_err(|_| {
-        Error::Ref(RefError::invalid_reason(format!(
-            "invalid N in @{{-N}} for '{spec}'"
-        )))
-    })?;
+    let n: usize = inner
+        .parse()
+        .map_err(|_| Error::InvalidRef(format!("invalid N in @{{-N}} for '{spec}'")))?;
     if n < 1 {
         return Ok(None);
     }
-    resolve_at_minus_to_branch(repo, n)
-        .map(Some)
-        .map_err(Into::into)
+    resolve_at_minus_to_branch(repo, n).map(Some)
 }
 
 /// Resolve `@{-N}` to the commit OID it points to.
-pub fn resolve_at_minus_to_oid(repo: &Repository, spec: &str) -> RevResult<Option<ObjectId>> {
-    try_resolve_at_minus(repo, spec).map_err(Into::into)
+pub fn resolve_at_minus_to_oid(repo: &Repository, spec: &str) -> Result<Option<ObjectId>> {
+    try_resolve_at_minus(repo, spec)
 }
 
 /// Abbreviate a full ref name to its shortest unambiguous form.
@@ -270,14 +264,11 @@ pub fn upstream_suffix_info(spec: &str) -> Option<(&str, bool)> {
 }
 
 /// Resolve `@{upstream}` / `@{u}` / `@{push}` to the symbolic full ref name (for `rev-parse --symbolic-full-name`).
-pub fn resolve_upstream_symbolic_name(repo: &Repository, spec: &str) -> RevResult<String> {
+pub fn resolve_upstream_symbolic_name(repo: &Repository, spec: &str) -> Result<String> {
     let Some((base, is_push)) = upstream_suffix_info(spec) else {
-        return Err(RevParseError::InvalidObjectName {
-            name: spec.to_owned(),
-        }
-        .into());
+        return Err(Error::InvalidRef(format!("not an upstream spec: {spec}")));
     };
-    resolve_upstream_full_ref_name(repo, base, is_push).map_err(Into::into)
+    resolve_upstream_full_ref_name(repo, base, is_push)
 }
 
 fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) -> Result<String> {
@@ -301,11 +292,9 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         }
         return Ok(format!("refs/heads/{m}"));
     }
-    let merge_branch = merge.strip_prefix("refs/heads/").ok_or_else(|| {
-        Error::Ref(RefError::invalid_reason(format!(
-            "invalid merge ref: {merge}"
-        )))
-    })?;
+    let merge_branch = merge
+        .strip_prefix("refs/heads/")
+        .ok_or_else(|| Error::InvalidRef(format!("invalid merge ref: {merge}")))?;
     let tracking = format!("refs/remotes/{remote}/{merge_branch}");
     if repo.resolve_ref_oid(&tracking).is_err() {
         return Err(RevParseError::UpstreamNotTracked {
@@ -320,10 +309,7 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
 ///
 /// Honors `remote.pushRemote`, `branch.<name>.pushRemote`, `push.default`, and per-remote
 /// `push` refspecs (exact `refs/heads/<branch>:refs/heads/<dest>` mappings).
-pub fn resolve_push_full_ref_for_branch(
-    repo: &Repository,
-    branch_short: &str,
-) -> RevResult<String> {
+pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -> Result<String> {
     let config_path = repo.common_git_dir().join("config");
     let _ = repo.config().snapshot()?;
     let config_content = repo.caches().local_config_text(&config_path)?;
@@ -562,7 +548,7 @@ fn map_dest_to_tracking(config_content: &str, remote_name: &str, dst: &str) -> O
 
 fn resolve_push_ref_name(repo: &Repository, base: &str) -> Result<String> {
     let (branch_key, _display) = resolve_upstream_branch_context(repo, base)?;
-    resolve_push_full_ref_for_branch(repo, &branch_key).map_err(Into::into)
+    resolve_push_full_ref_for_branch(repo, &branch_key)
 }
 
 /// Returns `(config_branch_key, display_name_for_errors)` for upstream resolution.
@@ -799,9 +785,9 @@ impl<'repo> NavParentCache<'repo> {
         }
         let bytes = match self.repo.read_commit_bytes_with_replace(&commit_oid) {
             Err(Error::UnexpectedObjectKind { .. }) => {
-                return Err(Error::Ref(RefError::invalid_reason(format!(
+                return Err(Error::InvalidRef(format!(
                     "invalid ref: {commit_oid} is not a commit"
-                ))));
+                )));
             }
             Err(other) => return Err(other),
             Ok(bytes) => bytes,
@@ -1111,15 +1097,13 @@ pub(crate) fn split_top_level_triple_dot_range(spec: &str) -> Option<(&str, &str
 
 /// Like [`resolve_revision`], but does not treat a bare filename as an index path
 /// (matches `git rev-parse` / plumbing, where `file.txt` stays ambiguous).
-pub fn resolve_revision_without_index_dwim(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision_without_index_dwim(repo: &Repository, spec: &str) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, false, false, true, false, false, false, false)
-        .map_err(Into::into)
 }
 
 /// Resolve a revision string to an object ID.
-pub fn resolve_revision(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision(repo: &Repository, spec: &str) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, true, false, true, false, false, false, true)
-        .map_err(Into::into)
 }
 
 /// Like [`resolve_revision`], but can disable remote-tracking DWIM used by `git checkout`
@@ -1128,7 +1112,7 @@ pub fn resolve_revision_for_checkout_guess(
     repo: &Repository,
     spec: &str,
     remote_branch_guess: bool,
-) -> RevResult<ObjectId> {
+) -> Result<ObjectId> {
     resolve_revision_impl(
         repo,
         spec,
@@ -1140,14 +1124,12 @@ pub fn resolve_revision_for_checkout_guess(
         false,
         remote_branch_guess,
     )
-    .map_err(Into::into)
 }
 
 /// Resolve `spec` when it appears as the end of a revision range (`A..B`, `A...B`, etc.):
 /// abbreviated hex and `core.disambiguate` prefer a commit (porcelain range parsing).
-pub fn resolve_revision_for_range_end(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision_for_range_end(repo: &Repository, spec: &str) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, true, true, true, false, false, false, true)
-        .map_err(Into::into)
 }
 
 /// Like [`resolve_revision_for_range_end`], but does not resolve a bare filename as an index path.
@@ -1159,30 +1141,26 @@ pub fn resolve_revision_for_range_end(repo: &Repository, spec: &str) -> RevResul
 pub fn resolve_revision_for_range_end_without_index_dwim(
     repo: &Repository,
     spec: &str,
-) -> RevResult<ObjectId> {
+) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, false, true, true, false, false, false, true)
-        .map_err(Into::into)
 }
 
 /// Resolve a single revision for `git rev-parse --verify` (no index path DWIM).
 ///
 /// Git's `--verify` mode must reject tokens that only match an index entry when the path is
 /// missing from the work tree (`t7102-reset` disambiguation).
-pub fn resolve_revision_for_verify(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision_for_verify(repo: &Repository, spec: &str) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, false, true, true, false, false, false, true)
-        .map_err(Into::into)
 }
 
 /// First argument to `commit-tree`: ambiguous short hex uses tree-ish rules (blob vs tree).
-pub fn resolve_revision_for_commit_tree_tree(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision_for_commit_tree_tree(repo: &Repository, spec: &str) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, true, false, true, false, true, false, true)
-        .map_err(Into::into)
 }
 
 /// Old blob OID from a patch `index <old>..<new>` line (`git apply --build-fake-ancestor`).
-pub fn resolve_revision_for_patch_old_blob(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision_for_patch_old_blob(repo: &Repository, spec: &str) -> Result<ObjectId> {
     resolve_revision_impl(repo, spec, true, false, true, false, false, true, true)
-        .map_err(Into::into)
 }
 
 /// When `spec` uses two-dot range syntax (`A..B`, `..B`, `A..`), returns the commits to
@@ -1197,7 +1175,7 @@ pub fn resolve_revision_for_patch_old_blob(repo: &Repository, spec: &str) -> Rev
 pub fn try_parse_double_dot_log_range(
     repo: &Repository,
     spec: &str,
-) -> RevResult<Option<(ObjectId, ObjectId)>> {
+) -> Result<Option<(ObjectId, ObjectId)>> {
     let Some((left, right)) = split_double_dot_range(spec) else {
         return Ok(None);
     };
@@ -1219,7 +1197,7 @@ pub fn try_parse_double_dot_log_range(
 fn try_parse_double_dot_log_range_without_index_dwim(
     repo: &Repository,
     spec: &str,
-) -> RevResult<Option<(ObjectId, ObjectId)>> {
+) -> Result<Option<(ObjectId, ObjectId)>> {
     let Some((left, right)) = split_double_dot_range(spec) else {
         return Ok(None);
     };
@@ -1254,7 +1232,7 @@ pub fn revision_spec_contains_ancestry_navigation(spec: &str) -> bool {
 }
 
 /// `resolve_revision_as_commit` function.
-pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> RevResult<ObjectId> {
+pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> Result<ObjectId> {
     if let Some((left, right)) = split_triple_dot_range(spec) {
         let left_tip = if left.is_empty() {
             resolve_revision_for_range_end(repo, "HEAD")?
@@ -1269,11 +1247,10 @@ pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> RevResult<Ob
         let left_c = peel_to_commit_for_merge_base(repo, left_tip)?;
         let right_c = peel_to_commit_for_merge_base(repo, right_tip)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
-        return bases.into_iter().next().ok_or_else(|| {
-            crate::revision_error::RevisionError::NotFound {
-                spec: spec.to_owned(),
-            }
-        });
+        return bases
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::ObjectNotFound(format!("no merge base for '{spec}'")));
     }
     if let Some((_excl, tip)) = try_parse_double_dot_log_range(repo, spec)? {
         return Ok(tip);
@@ -1289,7 +1266,7 @@ pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> RevResult<Ob
 pub fn resolve_revision_as_commit_without_index_dwim(
     repo: &Repository,
     spec: &str,
-) -> RevResult<ObjectId> {
+) -> Result<ObjectId> {
     if let Some((left, right)) = split_triple_dot_range(spec) {
         let left_tip = if left.is_empty() {
             resolve_revision_for_range_end_without_index_dwim(repo, "HEAD")?
@@ -1304,11 +1281,10 @@ pub fn resolve_revision_as_commit_without_index_dwim(
         let left_c = peel_to_commit_for_merge_base(repo, left_tip)?;
         let right_c = peel_to_commit_for_merge_base(repo, right_tip)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
-        return bases.into_iter().next().ok_or_else(|| {
-            crate::revision_error::RevisionError::NotFound {
-                spec: spec.to_owned(),
-            }
-        });
+        return bases
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::ObjectNotFound(format!("no merge base for '{spec}'")));
     }
     if let Some((_excl, tip)) = try_parse_double_dot_log_range_without_index_dwim(repo, spec)? {
         return Ok(tip);
@@ -1460,11 +1436,9 @@ fn resolve_revision_with_navigation(
             })
         })?;
         let line = raw.lines().next().unwrap_or("").trim();
-        return line.parse::<ObjectId>().map_err(|_| {
-            Error::Ref(RefError::invalid_reason(
-                "AUTO_MERGE: invalid object id".to_owned(),
-            ))
-        });
+        return line
+            .parse::<ObjectId>()
+            .map_err(|_| Error::InvalidRef("AUTO_MERGE: invalid object id".to_owned()));
     }
 
     // `refs/...` spelled in full (e.g. `refs/tags/other`): resolve as a ref before any
@@ -1568,9 +1542,7 @@ fn resolve_revision_with_navigation(
                     }
                     .into());
                 }
-                Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
-                    RevParseError::AmbiguousArgument { .. },
-                ))) => {
+                Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
                     return Err(RevParseError::InvalidObjectName {
                         name: before.to_owned(),
                     }
@@ -1585,9 +1557,7 @@ fn resolve_revision_with_navigation(
             }
             let clean_path = match normalize_colon_path_for_tree(repo, after) {
                 Ok(p) => p,
-                Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
-                    if msg == "outside repository" =>
-                {
+                Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
                     let wt = repo
                         .work_tree()
                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -1662,9 +1632,9 @@ fn normalize_path_components(path: PathBuf) -> PathBuf {
 fn normalize_colon_path_for_bare_tree(raw_path: &str) -> Result<String> {
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
     if cwd_relative {
-        return Err(Error::Ref(RefError::invalid_reason(
+        return Err(Error::InvalidRef(
             "relative path syntax can't be used outside working tree".to_owned(),
-        )));
+        ));
     }
     let s = raw_path.trim_start_matches('/');
     let mut stack: Vec<&str> = Vec::new();
@@ -1691,9 +1661,9 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
 
     let cwd_relative = raw_path.starts_with("./") || raw_path.starts_with("../") || raw_path == ".";
     if cwd_relative && !path_is_within(&cwd, work_tree) {
-        return Err(Error::Ref(RefError::invalid_reason(
+        return Err(Error::InvalidRef(
             "relative path syntax can't be used outside working tree".to_owned(),
-        )));
+        ));
     }
 
     // `./` / `../` / `.` are relative to cwd; other relative paths are relative to work tree.
@@ -1707,13 +1677,11 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
     let full = normalize_path_components(full);
 
     if !path_is_within(&full, &wt_canon) {
-        return Err(Error::Ref(RefError::invalid_reason(
-            "outside repository".to_owned(),
-        )));
+        return Err(Error::InvalidRef("outside repository".to_owned()));
     }
     let rel = full
         .strip_prefix(&wt_canon)
-        .map_err(|_| Error::Ref(RefError::invalid_reason("outside repository".to_owned())))?;
+        .map_err(|_| Error::InvalidRef("outside repository".to_owned()))?;
     let s = rel.to_string_lossy().replace('\\', "/");
     Ok(s.trim_end_matches('/').to_owned())
 }
@@ -1738,12 +1706,9 @@ fn is_unreplaced_commit(repo: &Repository, oid: ObjectId) -> bool {
 }
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
-pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> RevResult<ObjectId> {
-    peel_tags_to_commit(repo, oid)?.map_err(|other| {
-        RevisionError::RevParse(RevParseError::InvalidObjectName {
-            name: other.to_string(),
-        })
-    })
+pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+    peel_tags_to_commit(repo, oid)?
+        .map_err(|other| Error::InvalidRef(format!("object {other} does not name a commit")))
 }
 
 /// Peel tags starting at `oid` until a non-tag object.
@@ -1778,9 +1743,7 @@ pub fn try_peel_to_commit_for_merge_base(
     match obj.kind {
         ObjectKind::Commit => Ok(Some(oid)),
         ObjectKind::Tree | ObjectKind::Blob => Ok(None),
-        ObjectKind::Tag => Err(Error::Ref(RefError::invalid_reason(
-            "unexpected tag after peel".to_owned(),
-        ))),
+        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".to_owned())),
     }
 }
 
@@ -1842,9 +1805,9 @@ fn resolve_tree_path_rev_parse(
     let entries = crate::objects::parse_tree(&obj.data)?;
     let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
     if components.is_empty() {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
+        return Err(Error::InvalidRef(format!(
             "path '{path}' does not name an object in tree {tree_oid}"
-        )))
+        ))
         .into());
     }
 
@@ -1888,11 +1851,8 @@ pub struct TreeishBlobAtPath {
 /// Fails when `spec` is not `treeish:path`, when the path is missing, or when the
 /// target is a tree or gitlink rather than a blob/symlink blob.
 pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<TreeishBlobAtPath> {
-    let (before, after) = split_treeish_colon(spec).ok_or_else(|| {
-        Error::Ref(RefError::invalid_reason(format!(
-            "'{spec}' is not a treeish:path revision"
-        )))
-    })?;
+    let (before, after) = split_treeish_colon(spec)
+        .ok_or_else(|| Error::InvalidRef(format!("'{spec}' is not a treeish:path revision")))?;
 
     let rev_oid =
         match resolve_revision_impl(repo, before, true, false, true, true, false, false, true) {
@@ -1903,9 +1863,7 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
                 }
                 .into());
             }
-            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousArgument { .. },
-            ))) => {
+            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
                 return Err(RevParseError::InvalidObjectName {
                     name: before.to_owned(),
                 }
@@ -1927,9 +1885,7 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
 
     let clean_path = match normalize_colon_path_for_tree(repo, after) {
         Ok(p) => p,
-        Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
-            if msg == "outside repository" =>
-        {
+        Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
             let wt = repo
                 .work_tree()
                 .and_then(|p| p.canonicalize_simplified().ok())
@@ -1965,9 +1921,9 @@ fn walk_tree_to_blob_entry(
     let entries = crate::objects::parse_tree(&obj.data)?;
     let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
     if components.is_empty() {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
+        return Err(Error::InvalidRef(format!(
             "path '{path}' does not name a blob in tree {tree_oid}"
-        )))
+        ))
         .into());
     }
 
@@ -1978,10 +1934,7 @@ fn walk_tree_to_blob_entry(
         if name == first {
             if rest.is_empty() {
                 if entry.mode == crate::index::MODE_TREE {
-                    return Err(Error::Ref(RefError::invalid_reason(format!(
-                        "'{path}' is a tree, not a blob"
-                    )))
-                    .into());
+                    return Err(Error::InvalidRef(format!("'{path}' is a tree, not a blob")).into());
                 }
                 return Ok((entry.oid, entry.mode_str()));
             }
@@ -2474,9 +2427,7 @@ fn resolve_base(
 
     if spec == "HEAD" {
         return match crate::state::resolve_head_for_repository(repo) {
-            Ok(crate::state::HeadState::Branch { oid: None, .. }) => {
-                Err(Error::Ref(RefError::UnbornHead))
-            }
+            Ok(crate::state::HeadState::Branch { oid: None, .. }) => Err(Error::UnbornHead),
             Ok(crate::state::HeadState::Branch { oid: Some(oid), .. }) => Ok(oid),
             Ok(crate::state::HeadState::Detached { oid }) => Ok(oid),
             Ok(crate::state::HeadState::Invalid) | Err(_) => {
@@ -2502,11 +2453,9 @@ fn resolve_base(
                 continue;
             };
             if ObjectId::is_full_hex(oid_hex) {
-                let oid = oid_hex.parse::<ObjectId>().map_err(|_| {
-                    Error::Ref(RefError::invalid_reason(
-                        "invalid FETCH_HEAD object id".to_owned(),
-                    ))
-                })?;
+                let oid = oid_hex
+                    .parse::<ObjectId>()
+                    .map_err(|_| Error::InvalidRef("invalid FETCH_HEAD object id".to_owned()))?;
                 first_oid.get_or_insert(oid);
                 let not_for_merge = parts.next().is_some_and(|v| v == "not-for-merge");
                 if !not_for_merge {
@@ -2580,9 +2529,7 @@ fn resolve_base(
                             let raw_path = &rest[2..];
                             let path = match normalize_colon_path_for_tree(repo, raw_path) {
                                 Ok(p) => p,
-                                Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
-                                    if msg == "outside repository" =>
-                                {
+                                Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
                                     let wt = repo
                                         .work_tree()
                                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -2605,9 +2552,7 @@ fn resolve_base(
             }
             let clean_rest = match normalize_colon_path_for_tree(repo, rest) {
                 Ok(p) => p,
-                Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
-                    if msg == "outside repository" =>
-                {
+                Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
                     let wt = repo
                         .work_tree()
                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -2831,9 +2776,9 @@ fn resolve_base(
                 return Ok(matches[0]);
             }
             if matches.len() > 1 {
-                return Err(Error::Ref(RefError::invalid_reason(format!(
+                return Err(Error::InvalidRef(format!(
                     "ambiguous refname '{spec}': matches multiple remote-tracking branches"
-                ))));
+                )));
             }
         }
     }
@@ -2892,9 +2837,9 @@ fn resolve_at_minus_to_branch(repo: &Repository, n: usize) -> Result<String> {
             }
         }
     }
-    Err(Error::Ref(RefError::invalid_reason(format!(
+    Err(Error::InvalidRef(format!(
         "@{{-{n}}}: only {count} checkout(s) in reflog"
-    ))))
+    )))
 }
 
 /// Try to resolve `@{-N}` syntax — the Nth previously checked out branch.
@@ -2936,17 +2881,17 @@ fn try_resolve_at_minus(repo: &Repository, spec: &str) -> Result<Option<ObjectId
                             return Ok(Some(oid));
                         }
                     }
-                    return Err(Error::Ref(RefError::invalid_reason(format!(
+                    return Err(Error::InvalidRef(format!(
                         "cannot resolve @{{-{n}}}: branch '{}' not found",
                         from_branch
-                    ))));
+                    )));
                 }
             }
         }
     }
-    Err(Error::Ref(RefError::invalid_reason(format!(
+    Err(Error::InvalidRef(format!(
         "@{{-{n}}}: only {count} checkout(s) in reflog"
-    ))))
+    )))
 }
 
 #[derive(Debug, Clone)]
@@ -3162,11 +3107,9 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
         return Ok(None);
     }
     let inner = &token[3..token.len() - 1];
-    let n: usize = inner.parse().map_err(|_| {
-        Error::Ref(RefError::invalid_reason(format!(
-            "invalid N in @{{-N}} for '{token}'"
-        )))
-    })?;
+    let n: usize = inner
+        .parse()
+        .map_err(|_| Error::InvalidRef(format!("invalid N in @{{-N}} for '{token}'")))?;
     if n < 1 {
         return Ok(None);
     }
@@ -3176,7 +3119,7 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
 /// Ref whose reflog `git log -g` should walk for a revision like `other@{u}` or `main@{1}`.
 ///
 /// Returns `None` when `spec` is not a reflog-chain form (no `@{` step after the prefix).
-pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> RevResult<Option<String>> {
+pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> Result<Option<String>> {
     let now_sec = repo.wall_clock_epoch();
     let Some((prefix, steps)) = split_reflog_at_chain(spec, now_sec)? else {
         return Ok(None);
@@ -3238,7 +3181,7 @@ pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> RevResult<Option<St
 ///
 /// Mirrors Git `add_reflog_for_walk` / `read_complete_reflog` ref resolution before reading
 /// `logs/<ref>`.
-pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> RevResult<String> {
+pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> Result<String> {
     if let Ok(Some(w)) = reflog_walk_refname(repo, r) {
         return Ok(w);
     }
@@ -3637,9 +3580,7 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
     };
     let path = match normalize_colon_path_for_tree(repo, colon.raw_path) {
         Ok(p) => p,
-        Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
-            if msg == "outside repository" =>
-        {
+        Err(Error::InvalidRef(msg)) if msg == "outside repository" => {
             let wt = repo
                 .work_tree()
                 .and_then(|p| p.canonicalize_simplified().ok())
@@ -3759,9 +3700,9 @@ pub(crate) fn resolve_treeish_path_to_object(
         ObjectKind::Commit => parse_commit(&object.data)?.tree,
         ObjectKind::Tree => treeish,
         _ => {
-            return Err(Error::Ref(RefError::invalid_reason(format!(
+            return Err(Error::InvalidRef(format!(
                 "object {treeish} does not name a tree"
-            ))))
+            )))
         }
     };
 
@@ -3806,9 +3747,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
         Some(search) if search.starts_with('/') => {
             let pattern = &search[1..];
             if pattern.is_empty() {
-                return Err(Error::Ref(RefError::invalid_reason(
+                return Err(Error::InvalidRef(
                     "empty commit message search pattern".to_owned(),
-                )));
+                ));
             }
             resolve_commit_message_search_from(repo, oid, pattern)
         }
@@ -3827,9 +3768,7 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             if obj.kind == ObjectKind::Commit {
                 Ok(oid)
             } else {
-                Err(Error::Ref(RefError::invalid_reason(
-                    "expected commit".to_owned(),
-                )))
+                Err(Error::InvalidRef("expected commit".to_owned()))
             }
         }
         Some("tree") => {
@@ -3839,9 +3778,7 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             match obj.kind {
                 ObjectKind::Tree => Ok(oid),
                 ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
-                _ => Err(Error::Ref(RefError::invalid_reason(
-                    "expected tree or commit".to_owned(),
-                ))),
+                _ => Err(Error::InvalidRef("expected tree or commit".to_owned())),
             }
         }
         Some("blob") => {
@@ -3854,11 +3791,7 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
                     ObjectKind::Tag => {
                         cur = parse_tag_target(&obj.data)?;
                     }
-                    _ => {
-                        return Err(Error::Ref(RefError::invalid_reason(
-                            "expected blob".to_owned(),
-                        )))
-                    }
+                    _ => return Err(Error::InvalidRef("expected blob".to_owned())),
                 }
             }
         }
@@ -3869,14 +3802,12 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             if obj.kind == ObjectKind::Tag {
                 Ok(oid)
             } else {
-                Err(Error::Ref(RefError::invalid_reason(
-                    "expected tag".to_owned(),
-                )))
+                Err(Error::InvalidRef("expected tag".to_owned()))
             }
         }
-        Some(other) => Err(Error::Ref(RefError::invalid_reason(format!(
+        Some(other) => Err(Error::InvalidRef(format!(
             "unsupported peel operator '{{{other}}}'"
-        )))),
+        ))),
     }
 }
 
@@ -4478,14 +4409,13 @@ mod line_coverage_tests {
         for not_commit in [tree, blob, blob_tag] {
             assert!(matches!(
                 peel_to_commit_for_merge_base(&repo, not_commit),
-                Err(crate::revision_error::RevisionError::RevParse(_))
+                Err(crate::error::Error::InvalidRef(_))
             ));
         }
         let absent = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
         assert!(matches!(
             peel_to_commit_for_merge_base(&repo, absent),
-            Err(crate::revision_error::RevisionError::RevParse(_))
-                | Err(crate::revision_error::RevisionError::Nested(_))
+            Err(crate::error::Error::ObjectNotFound(_))
         ));
         Ok(())
     }
@@ -5018,14 +4948,7 @@ mod line_coverage_tests {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
         let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let err = resolve_revision_for_range_end(&repo, "HEAD").expect_err("HEAD");
-        assert!(
-            matches!(
-                err,
-                crate::revision_error::RevisionError::Nested(ref nested)
-                    if matches!(**nested, Error::Ref(RefError::UnbornHead))
-            ),
-            "{err:?}"
-        );
+        assert!(matches!(err, Error::UnbornHead), "{err:?}");
         Ok(())
     }
 
@@ -5195,9 +5118,7 @@ mod line_coverage_tests {
             assert!(
                 matches!(
                     err,
-                    Error::Revision(crate::revision_error::RevisionError::RevParse(
-                        RevParseError::OutsideRepository { .. },
-                    ))
+                    Error::RevParse(RevParseError::OutsideRepository { .. })
                 ),
                 "{spec}: {err:?}"
             );
@@ -5356,10 +5277,7 @@ mod line_coverage_tests {
         assert_eq!(resolve_walk_range_end(&repo, &spec)?, root);
         let nav = NavParentCache::new(&repo, NavigationMetadata::RetainForWalk);
         assert_eq!(nav.parents_of(child)?, vec![root]);
-        assert!(matches!(
-            nav.parents_of(blob),
-            Err(Error::Ref(RefError::InvalidName { .. }))
-        ));
+        assert!(matches!(nav.parents_of(blob), Err(Error::InvalidRef(_))));
         assert_eq!(nav.parents_of(root)?, Vec::<ObjectId>::new());
         assert!(matches!(
             nav.parents_of(malformed),

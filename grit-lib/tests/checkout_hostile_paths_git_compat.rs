@@ -17,8 +17,8 @@ use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::{resolve_switch_target, switch_repository, SwitchOptions};
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneError, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, git_hash_object_literally, HashAlgo};
 
@@ -256,7 +256,7 @@ fn grit_lib_clone_hostile_path_rejected(
     // also skips clone-failure assertions for this case (see below).
     if case_label == "hfs dotgit" {
         opts.checkout = false;
-        let outcome = clone_repo(opts, &mut NoProgress, &NeverCancel, None)
+        let outcome = clone_repo(opts, &mut NullProgress, &NeverCancel, None)
             .unwrap_or_else(|e| panic!("{case_label}: clone fetch: {e:?}"));
         if !local_config.is_empty() {
             append_local_config(outcome.repo.git_dir(), local_config);
@@ -270,7 +270,7 @@ fn grit_lib_clone_hostile_path_rejected(
         );
         return checkout_result.unwrap_err();
     }
-    match clone_repo(opts, &mut NoProgress, &NeverCancel, None) {
+    match clone_repo(opts, &mut NullProgress, &NeverCancel, None) {
         Ok(outcome) => panic!(
             "{case_label}: clone should not succeed with hostile default branch (checked out {} files)",
             outcome.files
@@ -330,7 +330,7 @@ fn open_cloned_main(parent: &Path, upstream: &Path) -> Repository {
         environment: Environment::empty(),
         ..CloneOptions::new(upstream.to_string_lossy(), dest.clone())
     };
-    let outcome = clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("clone main");
+    let outcome = clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("clone main");
     let commit = outcome
         .repo
         .odb()
@@ -364,7 +364,7 @@ fn dotdot_tree_rejected_at_index_population() {
             environment: Environment::empty(),
             ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -546,7 +546,7 @@ fn win32_only_names_check_out_off_windows_like_git() {
             environment: Environment::empty(),
             ..CloneOptions::new(url, dest.clone())
         };
-        clone_repo(opts, &mut NoProgress, &NeverCancel, None)
+        clone_repo(opts, &mut NullProgress, &NeverCancel, None)
             .unwrap_or_else(|e| panic!("{label}: grit clone should succeed: {e:?}"));
         assert_eq!(
             dir_bytes_snapshot(&dest)

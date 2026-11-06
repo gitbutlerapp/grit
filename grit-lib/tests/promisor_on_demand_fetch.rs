@@ -24,8 +24,8 @@ use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::repo::Repository;
@@ -102,7 +102,7 @@ fn grit_blobless_clone(
             checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

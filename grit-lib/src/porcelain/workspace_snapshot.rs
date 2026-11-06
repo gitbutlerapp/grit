@@ -19,7 +19,6 @@ use crate::porcelain::stash::{collect_untracked_paths, flatten_tree_full};
 use crate::progress::{Cancel, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
 use crate::refs::store::{Expected, RawRef, RefName, RefTransaction, RefUpdate, RefUpdateFlags};
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::state::{
     merge_completion_sentinels, resolve_head_for_repository, HeadState, InProgressOperation,
@@ -73,8 +72,7 @@ pub struct WorkspaceRestoreOptions {}
 /// Returns [`Error::InvalidRef`] when `caller_id` produces an invalid refname.
 pub fn workspace_snapshot_pin_ref_name(caller_id: &str) -> Result<String> {
     let name = format!("{WORKSPACE_SNAPSHOT_PIN_REF_PREFIX}{caller_id}");
-    RefName::try_from(name.as_str())
-        .map_err(|err| Error::Ref(RefError::invalid_reason(err.to_string())))?;
+    RefName::try_from(name.as_str()).map_err(|err| Error::InvalidRef(err.to_string()))?;
     Ok(name)
 }
 

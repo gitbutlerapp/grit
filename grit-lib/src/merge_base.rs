@@ -19,13 +19,11 @@ use crate::objects::{
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse::{
     load_graft_parents, peel_to_commit_for_merge_base, resolve_revision,
     resolve_upstream_symbolic_name, try_peel_to_commit_for_merge_base, upstream_suffix_info,
 };
-use crate::revision_error::RevResult;
 use crate::shallow::load_shallow_boundaries;
 
 /// Resolve commit-ish command arguments to commit object IDs.
@@ -39,7 +37,7 @@ use crate::shallow::load_shallow_boundaries;
 ///
 /// Returns [`Error::ObjectNotFound`] when a revision does not resolve and
 /// [`Error::CorruptObject`] when the resolved object is not a commit.
-pub fn resolve_commit_specs(repo: &Repository, specs: &[String]) -> RevResult<Vec<ObjectId>> {
+pub fn resolve_commit_specs(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     let mut out = Vec::with_capacity(specs.len());
     for spec in specs {
         let oid = resolve_revision(repo, spec)?;
@@ -67,7 +65,7 @@ pub fn merge_bases_first_vs_rest(
     repo: &Repository,
     first: ObjectId,
     others: &[ObjectId],
-) -> RevResult<Vec<ObjectId>> {
+) -> Result<Vec<ObjectId>> {
     if others.is_empty() {
         return Ok(vec![first]);
     }
@@ -126,12 +124,13 @@ pub fn merge_base_for_diff_index(
     repo: &Repository,
     head: ObjectId,
     other: ObjectId,
-) -> std::result::Result<ObjectId, crate::revision_error::RevisionError> {
-    let bases = merge_bases_first_vs_rest(repo, other, &[head])?;
+) -> std::result::Result<ObjectId, MergeBaseForDiffError> {
+    let bases = merge_bases_first_vs_rest(repo, other, &[head])
+        .map_err(|e| MergeBaseForDiffError::Other(e.to_string()))?;
     match bases.len() {
-        0 => Err(crate::revision_error::RevisionError::NoMergeBase),
+        0 => Err(MergeBaseForDiffError::None),
         1 => Ok(bases[0]),
-        _ => Err(crate::revision_error::RevisionError::MultipleMergeBases),
+        _ => Err(MergeBaseForDiffError::Multiple),
     }
 }
 
@@ -142,13 +141,25 @@ pub fn merge_base_for_diff_two_commits(
     repo: &Repository,
     a: ObjectId,
     b: ObjectId,
-) -> std::result::Result<ObjectId, crate::revision_error::RevisionError> {
-    let bases = merge_bases_first_vs_rest(repo, a, &[b])?;
+) -> std::result::Result<ObjectId, MergeBaseForDiffError> {
+    let bases = merge_bases_first_vs_rest(repo, a, &[b])
+        .map_err(|e| MergeBaseForDiffError::Other(e.to_string()))?;
     match bases.len() {
-        0 => Err(crate::revision_error::RevisionError::NoMergeBase),
+        0 => Err(MergeBaseForDiffError::None),
         1 => Ok(bases[0]),
-        _ => Err(crate::revision_error::RevisionError::MultipleMergeBases),
+        _ => Err(MergeBaseForDiffError::Multiple),
     }
+}
+
+/// Failure modes for [`merge_base_for_diff_index`] and [`merge_base_for_diff_two_commits`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeBaseForDiffError {
+    /// No common ancestor between the commits.
+    None,
+    /// More than one minimal merge base (criss-cross history).
+    Multiple,
+    /// Resolution or object read error; message is suitable for stderr.
+    Other(String),
 }
 
 /// Compute merge bases common to all supplied commits (`--octopus` mode).
@@ -161,7 +172,7 @@ pub fn merge_base_for_diff_two_commits(
 /// # Errors
 ///
 /// Returns parse and object read errors from commit traversal.
-pub fn merge_bases_octopus(repo: &Repository, commits: &[ObjectId]) -> RevResult<Vec<ObjectId>> {
+pub fn merge_bases_octopus(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId>> {
     let mut cache = CommitGraphCache::new(repo);
     let mut iter = commits.iter();
     let Some(&first) = iter.next() else {
@@ -185,7 +196,7 @@ pub fn merge_bases_octopus(repo: &Repository, commits: &[ObjectId]) -> RevResult
 ///
 /// For two commits the bases come newest committer date first, and bases with equal
 /// dates in the order Git reports them (the order its history walk reaches them).
-pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> RevResult<Vec<ObjectId>> {
+pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId>> {
     if commits.is_empty() {
         return Ok(Vec::new());
     }
@@ -203,8 +214,7 @@ pub fn merge_bases_all(repo: &Repository, commits: &[ObjectId]) -> RevResult<Vec
             FirstParentRelation::SecondIsAncestor => return Ok(vec![commits[1]]),
             FirstParentRelation::Unrelated => {}
         }
-        return all_merge_bases_vs_union(&mut cache, commits[0], &commits[1..2])
-            .map_err(Into::into);
+        return all_merge_bases_vs_union(&mut cache, commits[0], &commits[1..2]);
     }
     merge_bases_octopus(repo, commits)
 }
@@ -244,12 +254,12 @@ fn all_merge_bases_vs_union(
 /// # Errors
 ///
 /// Returns parse and object read errors from commit traversal.
-pub fn is_ancestor(repo: &Repository, ancestor: ObjectId, descendant: ObjectId) -> RevResult<bool> {
+pub fn is_ancestor(repo: &Repository, ancestor: ObjectId, descendant: ObjectId) -> Result<bool> {
     if ancestor == descendant {
         return Ok(true);
     }
     let mut cache = CommitGraphCache::new(repo);
-    Ok(cache.is_ancestor(ancestor, descendant)?)
+    cache.is_ancestor(ancestor, descendant)
 }
 
 /// [`is_ancestor`] that first looks for `descendant` on `ancestor`'s first-parent chain, the
@@ -429,10 +439,8 @@ pub fn is_ancestor_odb_walk(
     odb: &crate::odb::Odb,
     ancestor: ObjectId,
     descendant: ObjectId,
-) -> RevResult<bool> {
-    Ok(is_ancestor_odb_walk_with_graph(
-        odb, None, ancestor, descendant,
-    )?)
+) -> Result<bool> {
+    is_ancestor_odb_walk_with_graph(odb, None, ancestor, descendant)
 }
 
 /// [`is_ancestor_odb_walk`] that also uses `graph`, the commit-graph of the
@@ -602,7 +610,8 @@ fn reflog_commits_for_fork_point(
     reflog_ref: &str,
     upstream_tip: ObjectId,
 ) -> Result<Vec<ObjectId>> {
-    let entries = read_reflog(repo.git_dir(), reflog_ref)?;
+    let entries = read_reflog(repo.git_dir(), reflog_ref)
+        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
     let mut commits = Vec::new();
     let mut seen = oid_hash_set();
     let mut initial = true;
@@ -652,7 +661,7 @@ pub fn try_reflog_fork_point(
     reflog_ref: &str,
     upstream_tip: ObjectId,
     head: ObjectId,
-) -> RevResult<Option<ObjectId>> {
+) -> Result<Option<ObjectId>> {
     let commits = reflog_commits_for_fork_point(repo, reflog_ref, upstream_tip)?;
     let bases = merge_bases_all_vs_union(repo, head, &commits)?;
     if bases.len() != 1 {
@@ -676,7 +685,7 @@ pub fn rebase_boundary_from_fork_point(
     head: ObjectId,
     upstream_tip: ObjectId,
     fork_point: Option<ObjectId>,
-) -> RevResult<ObjectId> {
+) -> Result<ObjectId> {
     let Some(fork) = fork_point else {
         return Ok(upstream_tip);
     };
@@ -744,14 +753,15 @@ pub fn fork_point(
     upstream_spec: &str,
     upstream_tip: ObjectId,
     head: ObjectId,
-) -> RevResult<ObjectId> {
+) -> Result<ObjectId> {
     let reflog_ref = if upstream_suffix_info(upstream_spec).is_some() {
         resolve_upstream_symbolic_name(repo, upstream_spec)?
     } else {
         resolve_fork_point_reflog_ref(repo, upstream_spec)
     };
 
-    let entries = read_reflog(repo.git_dir(), &reflog_ref)?;
+    let entries = read_reflog(repo.git_dir(), &reflog_ref)
+        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
 
     let mut candidates = Vec::new();
     let mut seen = oid_hash_set();
@@ -776,7 +786,9 @@ pub fn fork_point(
 
     let mut bases = merge_bases_first_vs_rest(repo, upstream_tip, &[head])?;
     if bases.is_empty() {
-        return Err(crate::revision_error::RevisionError::NoMergeBase);
+        return Err(Error::Message(
+            "no merge base found between upstream and HEAD".to_owned(),
+        ));
     }
     bases.sort();
     Ok(bases[0])
@@ -787,7 +799,7 @@ pub fn fork_point(
 /// # Errors
 ///
 /// Returns [`Error::CorruptObject`] if an encountered object is not a commit.
-pub fn ancestor_closure(repo: &Repository, tip: ObjectId) -> RevResult<HashSet<ObjectId>> {
+pub fn ancestor_closure(repo: &Repository, tip: ObjectId) -> Result<HashSet<ObjectId>> {
     let mut cache = CommitGraphCache::new(repo);
     Ok(cache.ancestor_closure(tip)?.into_iter().collect())
 }
@@ -804,7 +816,7 @@ pub fn count_symmetric_ahead_behind(
     repo: &Repository,
     local: ObjectId,
     other: ObjectId,
-) -> RevResult<(usize, usize)> {
+) -> Result<(usize, usize)> {
     let (ahead, behind, _, _) = ahead_behind_of_target_commits(repo, local, other, 0, 0)?;
     Ok((ahead, behind))
 }
@@ -826,7 +838,7 @@ pub fn ahead_behind_of_target_commits(
     target: ObjectId,
     retain_newest_ahead: usize,
     retain_newest_behind: usize,
-) -> RevResult<(usize, usize, Vec<ObjectId>, Vec<ObjectId>)> {
+) -> Result<(usize, usize, Vec<ObjectId>, Vec<ObjectId>)> {
     if head == target {
         return Ok((0, 0, Vec::new(), Vec::new()));
     }
@@ -1332,7 +1344,7 @@ pub fn walk_commits_reachable_excluding_ancestors_of(
     tips: &[ObjectId],
     hide: &[ObjectId],
     limit: ReachableWalkLimit,
-) -> RevResult<(usize, Vec<ObjectId>)> {
+) -> Result<(usize, Vec<ObjectId>)> {
     walk_commits_reachable_excluding_ancestors_of_cutoffs(
         repo,
         tips,
@@ -1349,7 +1361,7 @@ pub fn walk_commits_reachable_excluding_ancestors_of_cutoffs(
     hide: &[ObjectId],
     limit: ReachableWalkLimit,
     cutoffs: ReachableWalkCommitterCutoffs,
-) -> RevResult<(usize, Vec<ObjectId>)> {
+) -> Result<(usize, Vec<ObjectId>)> {
     if tips.is_empty() {
         return Ok((0, Vec::new()));
     }
@@ -1494,7 +1506,7 @@ pub fn ahead_of_target_commits(
     head: ObjectId,
     target: ObjectId,
     retain_newest: usize,
-) -> RevResult<(usize, Vec<ObjectId>)> {
+) -> Result<(usize, Vec<ObjectId>)> {
     if head == target {
         return Ok((0, Vec::new()));
     }
@@ -1570,7 +1582,7 @@ pub fn count_commits_reachable_excluding_ancestors_of(
     tips: &[ObjectId],
     hide: &[ObjectId],
     filter: ReachableCountFilter,
-) -> RevResult<usize> {
+) -> Result<usize> {
     if tips.is_empty() {
         return Ok(0);
     }
@@ -1922,11 +1934,9 @@ impl RangeWalkHide {
             return Ok(true);
         }
         if let Some(lazy) = &self.lazy {
-            let cache = cache.as_mut().ok_or(Error::Revision(
-                crate::revision_error::RevisionError::RevList(
-                    crate::rev_list_error::RevListError::LazyRangeHideRequiresCommitGraph,
-                ),
-            ))?;
+            let cache = cache.as_mut().ok_or_else(|| {
+                Error::Message("lazy range hide requires a CommitGraphCache".into())
+            })?;
             return lazy.borrow_mut().is_hidden(cache, &self.hide_tips, oid);
         }
         Ok(self.is_hidden_eager(oid))
@@ -2003,7 +2013,7 @@ pub fn try_linear_chain_commits_with_cutoffs(
     tip: ObjectId,
     limit: usize,
     cutoffs: ReachableWalkCommitterCutoffs,
-) -> RevResult<Option<Vec<ObjectId>>> {
+) -> Result<Option<Vec<ObjectId>>> {
     // Parent-chain order is not committer-date order; `--since` needs the heap walk's frontier
     // (see [`ReachableWalkState::pop_next_emit`]) so clock-skewed histories stay correct.
     if cutoffs.since.is_some() {
@@ -2074,7 +2084,7 @@ pub fn commits_reachable_excluding_ancestors_of(
     tips: &[ObjectId],
     hide: &[ObjectId],
     limit: Option<usize>,
-) -> RevResult<Vec<ObjectId>> {
+) -> Result<Vec<ObjectId>> {
     commits_reachable_excluding_ancestors_of_cutoffs(
         repo,
         tips,
@@ -2091,7 +2101,7 @@ pub fn commits_reachable_excluding_ancestors_of_cutoffs(
     hide: &[ObjectId],
     limit: Option<usize>,
     cutoffs: ReachableWalkCommitterCutoffs,
-) -> RevResult<Vec<ObjectId>> {
+) -> Result<Vec<ObjectId>> {
     let walk_limit = match limit {
         Some(n) => ReachableWalkLimit::StopAfter(n),
         None => ReachableWalkLimit::Unlimited,
@@ -2127,7 +2137,7 @@ pub(crate) fn commits_reachable_excluding_ancestors_of_with_graph(
 /// # Errors
 ///
 /// Returns parse and object read errors from commit traversal.
-pub fn independent_commits(repo: &Repository, commits: &[ObjectId]) -> RevResult<Vec<ObjectId>> {
+pub fn independent_commits(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId>> {
     let mut cache = CommitGraphCache::new(repo);
     let mut out = Vec::new();
     for (i, &candidate) in commits.iter().enumerate() {
@@ -2167,7 +2177,7 @@ pub fn branch_base_for_tip(
     repo: &Repository,
     tip: ObjectId,
     bases: &[ObjectId],
-) -> RevResult<Option<usize>> {
+) -> Result<Option<usize>> {
     if bases.is_empty() {
         return Ok(None);
     }
@@ -3489,16 +3499,11 @@ impl<'r> CommitGraphCache<'r> {
             return Ok(parents);
         }
         if self.shallow_boundaries.contains(&oid) {
-            let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| {
-                let e: Error = e.into();
-                match e {
-                    Error::Ref(RefError::InvalidName { reason: msg, .. }) => {
-                        Error::CorruptObject(msg)
-                    }
-                    Error::Revision(re) => Error::CorruptObject(re.to_string()),
+            let commit_oid =
+                peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
                     other => other,
-                }
-            })?;
+                })?;
             let object = self.repo.odb().read(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
                 return Err(Error::CorruptObject(format!(
@@ -3553,16 +3558,11 @@ impl<'r> CommitGraphCache<'r> {
         let commit_oid = if direct_commit {
             oid
         } else {
-            let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| {
-                let e: Error = e.into();
-                match e {
-                    Error::Ref(RefError::InvalidName { reason: msg, .. }) => {
-                        Error::CorruptObject(msg)
-                    }
-                    Error::Revision(re) => Error::CorruptObject(re.to_string()),
+            let commit_oid =
+                peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
                     other => other,
-                }
-            })?;
+                })?;
             let kind =
                 self.read_object_into(&self.repo.object_id_after_replace(&commit_oid), buf)?;
             if kind != ObjectKind::Commit {
@@ -5372,11 +5372,7 @@ mod tests {
         let tip = write_commit_same_time(&repo.odb(), &[missing], "tip", 100)?;
 
         let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
-        assert!(matches!(
-            err,
-            crate::revision_error::RevisionError::Nested(ref nested)
-                if matches!(**nested, Error::ObjectNotFound(_))
-        ));
+        assert!(matches!(err, Error::ObjectNotFound(_)));
 
         Ok(())
     }
@@ -5439,8 +5435,7 @@ mod tests {
         assert!(!is_ancestor_odb_walk(&odb, base, tip)?);
         assert!(matches!(
             is_ancestor_odb_walk(&odb, missing, base),
-            Err(crate::revision_error::RevisionError::Nested(ref nested))
-                if matches!(**nested, Error::ObjectNotFound(_))
+            Err(Error::ObjectNotFound(_))
         ));
         Ok(())
     }

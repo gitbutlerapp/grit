@@ -270,9 +270,7 @@ fn blame_from_subdirectory_cwd_is_repository_relative() {
 
     let err = blame_file(&repo, "f.txt", &BlameOptions::default()).unwrap_err();
     match err {
-        Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
-            RevParseError::PathNotInRevision { path, .. },
-        )) => {
+        Error::RevParse(RevParseError::PathNotInRevision { path, .. }) => {
             assert_eq!(path, "f.txt");
         }
         other => panic!("expected PathNotInRevision, got {other:?}"),

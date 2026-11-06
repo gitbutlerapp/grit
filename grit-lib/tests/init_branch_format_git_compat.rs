@@ -7,7 +7,6 @@ use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::RefError;
 use grit_lib::repo::{resolve_initial_branch, InitOptions, Repository};
 use tempfile::TempDir;
 
@@ -71,7 +70,7 @@ fn init_falls_back_to_main() {
 #[test]
 fn init_invalid_branch_name_is_typed_error() {
     let err = resolve_initial_branch(&Environment::empty(), Some("-bad")).unwrap_err();
-    assert!(matches!(err, Error::Ref(RefError::InvalidName { .. })));
+    assert!(matches!(err, Error::InvalidRef(_)));
 }
 
 #[test]

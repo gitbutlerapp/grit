@@ -3342,9 +3342,9 @@ pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
 /// errors when it is missing or malformed.
 pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> {
     odb.commit_tree(commit_oid).map_err(|err| match err {
-        Error::UnexpectedObjectKind { .. } => Error::Ref(RefError::invalid_reason(format!(
-            "invalid ref: {commit_oid} is not a commit"
-        ))),
+        Error::UnexpectedObjectKind { .. } => {
+            Error::InvalidRef(format!("invalid ref: {commit_oid} is not a commit"))
+        }
         other => other,
     })
 }
@@ -3361,9 +3361,9 @@ pub(crate) fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<Object
     match object.kind {
         ObjectKind::Commit => Ok(CommitRef::parse(&object.data)?.tree()),
         ObjectKind::Tree => Ok(*oid),
-        actual => Err(Error::Ref(RefError::invalid_reason(format!(
+        actual => Err(Error::InvalidRef(format!(
             "invalid ref: {oid} is not a commit or tree ({actual:?})"
-        )))),
+        ))),
     }
 }
 
@@ -3547,7 +3547,6 @@ fn diff_trees_opts(
     Ok(result)
 }
 
-use crate::refs::RefError;
 #[cfg(test)]
 use std::cell::RefCell;
 #[cfg(test)]
@@ -6374,7 +6373,7 @@ fn diff_index_to_worktree_inner(
         .map(|shared| {
             shared
                 .lock()
-                .map_err(|_| Error::Diff(crate::diff::error::DiffError::WorktreeRulesLockPoisoned))
+                .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))
         })
         .transpose()?;
     let config = if let Some(rules) = rules_lock.as_ref() {
@@ -7801,7 +7800,7 @@ pub(crate) fn refresh_index_stat_content_verified_with_rules(
         .map(|shared| {
             shared
                 .lock()
-                .map_err(|_| Error::Diff(crate::diff::error::DiffError::WorktreeRulesLockPoisoned))
+                .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))
         })
         .transpose()?;
     let config = rules_lock
@@ -16720,11 +16719,11 @@ mod line_coverage_tests {
         assert_eq!(tree_oid_of_commit(&odb, &commit).expect("tree"), tree);
         assert!(matches!(
             tree_oid_of_commit(&odb, &blob),
-            Err(Error::Ref(RefError::InvalidName { .. }))
+            Err(Error::InvalidRef(_))
         ));
         assert!(matches!(
             tree_oid_of_commit(&odb, &tree),
-            Err(Error::Ref(RefError::InvalidName { .. }))
+            Err(Error::InvalidRef(_))
         ));
     }
 

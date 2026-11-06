@@ -15,7 +15,7 @@ use std::rc::Rc;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::ProgressSink;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, Progress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, Connection, Service, SshTransport, Transport};
 
@@ -127,9 +127,7 @@ impl Connection for TeeConn {
 
 struct RemoteCap(Vec<u8>);
 
-impl ProgressSink for RemoteCap {}
-
-impl Progress for RemoteCap {
+impl ProgressSink for RemoteCap {
     fn message(&mut self, bytes: &[u8]) {
         self.0.extend_from_slice(bytes);
     }

@@ -4,8 +4,8 @@ use std::process::Command;
 
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneCheckout, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 
 fn git_env(cmd: &mut Command) {
     cmd.env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -106,7 +106,7 @@ fn clone_bare_matches_git_layout() {
                 grit_bare.path().to_path_buf(),
             )
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -185,7 +185,7 @@ fn clone_no_checkout_leaves_no_index() {
                 grit_dest.path().to_path_buf(),
             )
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -225,7 +225,7 @@ fn clone_checkout_counts_files() {
     let dest = tempfile::tempdir().expect("dest");
     let outcome = clone_repo(
         CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf()),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -267,7 +267,7 @@ fn local_clone_checkout_honors_thread_policy_on_repository() {
             thread_policy: policy,
             ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

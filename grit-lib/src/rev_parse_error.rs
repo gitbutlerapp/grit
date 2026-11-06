@@ -253,7 +253,7 @@ mod tests {
 
     fn assert_rev_parse_variant(result: Result<(), Error>, f: impl FnOnce(&RevParseError) -> bool) {
         match result {
-            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(e))) if f(&e) => {}
+            Err(Error::RevParse(e)) if f(&e) => {}
             other => panic!("expected RevParse variant, got {other:?}"),
         }
     }
@@ -265,9 +265,7 @@ mod tests {
         });
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::RevParse(
-                RevParseError::NoUpstream { .. },
-            ))
+            Error::RevParse(RevParseError::NoUpstream { .. })
         ));
     }
 
@@ -276,9 +274,7 @@ mod tests {
         let err = Error::from(RevParseError::PushDefaultNothing);
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::RevParse(
-                RevParseError::PushDefaultNothing,
-            ))
+            Error::RevParse(RevParseError::PushDefaultNothing)
         ));
     }
 
@@ -287,9 +283,7 @@ mod tests {
         let err = Error::from(RevParseError::AmbiguousArgument { spec: "foo".into() });
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousArgument { .. },
-            ))
+            Error::RevParse(RevParseError::AmbiguousArgument { .. })
         ));
     }
 

@@ -2092,7 +2092,7 @@ eval "$cmd"
                 repo.git_dir(),
                 conn.as_mut(),
                 &mut fetch,
-                &mut crate::fetch::NoProgress,
+                &mut crate::progress::NullProgress,
                 &crate::progress::NeverCancel,
             )
             .expect_err("git refuses a want for an object it does not have");

@@ -146,8 +146,10 @@ fn pick_newer_boundary(
     }
 }
 
-fn history_repo_err(err: impl Into<HistoryError>) -> HistoryError {
-    err.into()
+fn history_repo_err(err: crate::error::Error) -> HistoryError {
+    HistoryError::Planning {
+        message: err.to_string(),
+    }
 }
 
 /// Builds a [`RebaseRequest`] for `grit rebase` / `grit history rebase`.

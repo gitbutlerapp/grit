@@ -11,7 +11,6 @@ use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::store::{
     Expected, RawRef, RefName, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
 };
-use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 
 use support::{
@@ -93,10 +92,10 @@ fn issue_2176_reproduction_is_refused_and_git_fsck_stays_clean() {
         assert!(
             matches!(
                 &to_tree,
-                Err(Error::Ref(RefError::Store(RefStoreError::NotACommit {
+                Err(Error::RefStore(RefStoreError::NotACommit {
                     kind: ObjectKind::Tree,
                     ..
-                })))
+                }))
             ),
             "{backend:?}: {to_tree:?}"
         );
@@ -107,9 +106,7 @@ fn issue_2176_reproduction_is_refused_and_git_fsck_stays_clean() {
         assert!(
             matches!(
                 &missing,
-                Err(Error::Ref(RefError::Store(
-                    RefStoreError::MissingObject { .. }
-                )))
+                Err(Error::RefStore(RefStoreError::MissingObject { .. }))
             ),
             "{backend:?}: {missing:?}"
         );
@@ -303,10 +300,7 @@ fn branch_commit_writer_to_a_missing_object_is_refused_and_git_fsck_stays_clean(
         )
         .expect_err("missing tip");
         assert!(
-            matches!(
-                &err,
-                Error::Ref(RefError::Store(RefStoreError::MissingObject { .. }))
-            ),
+            matches!(&err, Error::RefStore(RefStoreError::MissingObject { .. })),
             "{backend:?}: {err:?}"
         );
         // Git refuses the equivalent update too.

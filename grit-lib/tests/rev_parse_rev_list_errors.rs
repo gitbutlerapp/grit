@@ -5,7 +5,6 @@ use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revision_error::RevisionError;
 use grit_lib::revwalk::rev_list::{rev_list, ObjectFilter, RevListOptions};
 use grit_lib::revwalk::rev_list_error::RevListError;
 use grit_lib::revwalk::rev_parse::{
@@ -57,7 +56,7 @@ fn upstream_missing_reports_no_upstream_variant() {
     let err = resolve_upstream_symbolic_name(&repo, "main@{u}").unwrap_err();
     assert!(matches!(
         err,
-        RevisionError::RevParse(RevParseError::NoUpstream { .. })
+        Error::RevParse(RevParseError::NoUpstream { .. })
     ));
 }
 
@@ -81,7 +80,7 @@ fn push_default_nothing_reports_variant() {
     let err = resolve_push_full_ref_for_branch(&repo, "main").unwrap_err();
     assert!(matches!(
         err,
-        RevisionError::RevParse(RevParseError::PushDefaultNothing)
+        Error::RevParse(RevParseError::PushDefaultNothing)
     ));
 }
 
@@ -92,7 +91,7 @@ fn ambiguous_spec_reports_ambiguous_argument() {
     let err = resolve_revision(&repo, "not-a-ref-or-path").unwrap_err();
     assert!(matches!(
         err,
-        RevisionError::RevParse(RevParseError::AmbiguousArgument { .. })
+        Error::RevParse(RevParseError::AmbiguousArgument { .. })
     ));
 }
 
@@ -105,9 +104,7 @@ fn sparse_blob_unreadable_for_missing_spec() {
     let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
     assert!(matches!(
         err,
-        Error::Revision(RevisionError::RevList(
-            RevListError::SparseBlobUnreadable { .. }
-        ))
+        Error::RevList(RevListError::SparseBlobUnreadable { .. })
     ));
 }
 
@@ -120,9 +117,7 @@ fn sparse_filter_unparsable_when_commit_not_blob() {
     let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
     assert!(matches!(
         err,
-        Error::Revision(RevisionError::RevList(
-            RevListError::SparseFilterUnparsable { .. }
-        ))
+        Error::RevList(RevListError::SparseFilterUnparsable { .. })
     ));
 }
 
@@ -139,9 +134,7 @@ fn sparse_filter_unparsable_on_invalid_utf8_blob() {
     let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
     assert!(matches!(
         err,
-        Error::Revision(RevisionError::RevList(
-            RevListError::SparseFilterUnparsable { .. }
-        ))
+        Error::RevList(RevListError::SparseFilterUnparsable { .. })
     ));
 }
 
@@ -160,7 +153,7 @@ fn push_refspec_missing_when_branch_not_mapped() {
     assert!(
         matches!(
             err,
-            RevisionError::RevParse(RevParseError::PushRefspecMissing { .. })
+            Error::RevParse(RevParseError::PushRefspecMissing { .. })
         ),
         "unexpected error: {err:?}"
     );

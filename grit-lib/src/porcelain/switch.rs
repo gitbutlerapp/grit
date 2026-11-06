@@ -34,7 +34,6 @@ use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
 use crate::rev_parse_error::RevParseError;
 
-use crate::refs::RefError;
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::state::{resolve_head_for_repository, HeadState};
 
@@ -353,9 +352,8 @@ fn is_at_minus_branch_spec(spec: &str) -> bool {
     spec.starts_with("@{-") && spec.ends_with('}')
 }
 
-fn map_at_minus_switch_error(spec: &str, err: crate::revision_error::RevisionError) -> Error {
-    let err: Error = err.into();
-    if is_at_minus_branch_spec(spec) && matches!(err, Error::Ref(RefError::InvalidName { .. })) {
+fn map_at_minus_switch_error(spec: &str, err: Error) -> Error {
+    if is_at_minus_branch_spec(spec) && matches!(err, Error::InvalidRef(_)) {
         return Error::Branch(BranchError::NoPreviousBranch);
     }
     err
@@ -401,39 +399,26 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
 ///
 /// # Errors
 ///
-/// Returns [`crate::revision_error::RevisionError::NotFound`] when `spec` does not resolve;
-/// [`Error::InvalidRef`] when the
+/// Returns [`Error::RevisionNotFound`] when `spec` does not resolve; [`Error::InvalidRef`] when the
 /// resolved object is not a commit; other object database errors propagate.
 pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> {
     if crate::rev_parse::is_top_level_range(spec) {
-        return Err(Error::Revision(
-            crate::revision_error::RevisionError::NotFound {
-                spec: spec.to_owned(),
-            },
-        ));
+        return Err(Error::RevisionNotFound(spec.to_owned()));
     }
     let oid = resolve_revision(repo, spec).map_err(|err| map_revision_spec_error(spec, err))?;
-    peel_to_commit_for_merge_base(repo, oid).map_err(Into::into)
+    peel_to_commit_for_merge_base(repo, oid)
 }
 
-fn map_revision_spec_error(spec: &str, err: crate::revision_error::RevisionError) -> Error {
+fn map_revision_spec_error(spec: &str, err: Error) -> Error {
     match err {
-        crate::revision_error::RevisionError::Nested(ref nested)
-            if matches!(**nested, Error::ObjectNotFound(_)) =>
-        {
-            Error::Revision(crate::revision_error::RevisionError::NotFound {
-                spec: spec.to_owned(),
-            })
-        }
-        crate::revision_error::RevisionError::RevParse(
+        Error::ObjectNotFound(_)
+        | Error::RevParse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::NoSuchBranch { .. },
-        ) => Error::Revision(crate::revision_error::RevisionError::NotFound {
-            spec: spec.to_owned(),
-        }),
-        other => Error::Revision(other),
+        ) => Error::RevisionNotFound(spec.to_owned()),
+        other => other,
     }
 }
 
@@ -2225,7 +2210,7 @@ mod tests {
                 .expect_err("missing start");
         assert!(matches!(
             missing,
-            Error::Revision(crate::revision_error::RevisionError::NotFound { spec: spec }) if spec == "nosuchrev"
+            Error::RevisionNotFound(spec) if spec == "nosuchrev"
         ));
 
         let tree_oid = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
@@ -2233,10 +2218,7 @@ mod tests {
         let not_commit =
             resolve_create_branch(&repo, "from-tree", Some(&tree_spec), TrackMode::Auto)
                 .expect_err("tree start");
-        assert!(matches!(
-            not_commit,
-            Error::Revision(crate::revision_error::RevisionError::RevParse(_))
-        ));
+        assert!(matches!(not_commit, Error::InvalidRef(_)));
         let _ = tip;
     }
 
@@ -2247,7 +2229,7 @@ mod tests {
         let err = resolve_revision_spec(&repo, "nosuchrev").expect_err("missing");
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::NotFound { spec: spec }) if spec == "nosuchrev"
+            Error::RevisionNotFound(spec) if spec == "nosuchrev"
         ));
     }
 

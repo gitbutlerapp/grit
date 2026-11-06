@@ -500,7 +500,6 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     use grit_lib::error::Error;
     use grit_lib::refs::store::{Expected, RawRef, RefStoreError};
     use grit_lib::refs::verify_branch_commit_cas;
-    use grit_lib::refs::RefError;
 
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
@@ -521,11 +520,11 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
                 },
             )
             .expect_err("stale expected tip must be rejected");
-            let Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
+            let Error::RefStore(RefStoreError::ExpectedMismatch {
                 name,
                 expected,
                 actual,
-            })) = err
+            }) = err
             else {
                 panic!("{backend:?}: expected ExpectedMismatch, got {err:?}");
             };
@@ -546,11 +545,11 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("equal");
     assert!(matches!(
         verify_branch_commit_cas(Some(oid), None, "refs/heads/gone"),
-        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
+        Err(Error::RefStore(RefStoreError::ExpectedMismatch {
             expected: Expected::Oid(want),
             actual: None,
             ..
-        }))) if want == oid
+        })) if want == oid
     ));
 }
 

@@ -30,8 +30,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push::push_remote;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
@@ -224,7 +224,7 @@ fn push_options_are_delivered_to_receive_pack_hook_over_git_daemon() {
         &mut *conn,
         &[spec(main_oid, "refs/heads/main")],
         &opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push_remote with push-options over git daemon");
@@ -329,7 +329,7 @@ fn push_options_are_delivered_to_receive_pack_hook_over_ssh() {
         &mut *conn,
         &[spec(main_oid, "refs/heads/main")],
         &opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push_remote with push-options over ssh");
@@ -410,7 +410,7 @@ fn pushing_options_to_server_without_capability_errors_typed() {
         &mut *conn,
         &[spec(main_oid, "refs/heads/main")],
         &opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("push with options to a server lacking the capability must fail");

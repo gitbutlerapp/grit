@@ -49,7 +49,6 @@ use crate::porcelain::merge::squash_conflict_merge_in_progress;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::replay_sequence::finish_replay_commit_state;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
-use crate::refs::RefError;
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -496,7 +495,7 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 /// - [`Error::PartialCommitDuringMerge`] for [`CommitScope::Paths`] or [`CommitScope::Patch`]
 ///   during an in-progress merge, and pathspec validation errors.
 /// - [`Error::HunkSelection`] when a [`CommitScope::Patch`] hunk id is unknown, stale, binary, or
-///   for the wrong side, and [`ApplyError`] (via [`Error::Diff`]) when the selected patch does not apply to the
+///   for the wrong side, and [`Error::Apply`] when the selected patch does not apply to the
 ///   index. These carry the same values as [`CommitPatchError::Select`] and
 ///   [`CommitPatchError::Apply`] from [`commit_with_patch`].
 pub fn commit_with_scope(
@@ -520,9 +519,7 @@ pub fn commit_with_scope(
         CommitScope::Patch { input, pathspecs } => {
             commit_with_patch(repo, req, input, &pathspecs, progress, cancel).map_err(|e| match e {
                 CommitPatchError::Select(err) => Error::HunkSelection(err),
-                CommitPatchError::Apply(err) => {
-                    Error::Diff(crate::diff::error::DiffError::Apply(err))
-                }
+                CommitPatchError::Apply(err) => Error::Apply(err),
                 CommitPatchError::Commit(err) => err,
             })
         }
@@ -712,7 +709,7 @@ fn commit_paths_scope(
         .transpose()?;
     let head = resolve_head_for_repository(repo)?;
     if head == HeadState::Invalid {
-        return Err(Error::Ref(RefError::InvalidHead));
+        return Err(Error::InvalidHead);
     }
     let parent_tree = head.tree(repo.odb())?;
 
@@ -1589,7 +1586,7 @@ fn create_commit_with_index(
         } => (refname, Some(short_name), oid),
         HeadState::Detached { oid } => ("HEAD".to_owned(), None, Some(oid)),
         HeadState::Invalid => {
-            return Err(Error::Ref(RefError::InvalidHead));
+            return Err(Error::InvalidHead);
         }
     };
 
@@ -5517,10 +5514,7 @@ mod tests {
             &crate::progress::NeverCancel,
         )
         .unwrap_err();
-        assert!(
-            matches!(err, Error::Diff(crate::diff::error::DiffError::Apply(_))),
-            "got {err:?}"
-        );
+        assert!(matches!(err, Error::Apply(_)), "got {err:?}");
         assert_eq!(err.kind_name(), "apply");
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),

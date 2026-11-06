@@ -26,7 +26,6 @@ use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::receive_quarantine::{MigratedPackKeepGuard, ReceiveQuarantine};
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::shallow::{add_shallow_boundaries, load_shallow_boundaries, PushShallowInfo};
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
@@ -1361,7 +1360,7 @@ fn apply_commands_with_hooks(
     let ref_lock_wait = store.ref_lock_wait();
     if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
-        if let Err(crate::error::Error::Ref(RefError::Store(e))) =
+        if let Err(crate::error::Error::RefStore(e)) =
             crate::refs::commit_ref_updates_on_store_with_wait(store, &batch, || ref_lock_wait)
         {
             let refusal = ref_update_refusal_from_store(&e);
@@ -1635,7 +1634,7 @@ fn commit_receive_ref_updates_on_store(
                 (
                     idx,
                     match &e {
-                        crate::error::Error::Ref(RefError::Store(store)) => {
+                        crate::error::Error::RefStore(store) => {
                             ref_update_refusal_from_store(store)
                         }
                         other => RefUpdateRefusal::RefStore(other.to_string()),

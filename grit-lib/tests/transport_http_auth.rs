@@ -32,9 +32,9 @@ use std::time::{Duration, Instant};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::{AuthFailure, Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::credentials::{Credential, CredentialProvider, HelperCredentialProvider};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push::push_http;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
@@ -248,8 +248,14 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         git(&local, &["init", "-q", "-b", "main", "."]);
         let local_git = local.join(".git");
         let client = http_client_arc(UreqHttpClient::new().with_git_protocol("version=2"));
-        let err = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
-            .expect_err("fetch with no credentials against an authed server must fail");
+        let err = http_fetch(
+            client.clone(),
+            &local_git,
+            &url,
+            &mut opts,
+            &mut NullProgress,
+        )
+        .expect_err("fetch with no credentials against an authed server must fail");
         assert!(
             matches!(&err, Error::Auth { reason, .. } if !reason.is_rejected()),
             "expected a typed Error::Auth without credentials, got: {err:?}"
@@ -268,7 +274,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
             &local_git,
             &url_with_embedded_creds,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
         )
         .expect_err("fetch with embedded wrong creds in URL must fail");
         assert!(matches!(err, Error::Auth { .. }));
@@ -295,8 +301,14 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
             UreqHttpClient::with_credentials(Box::new(provider.clone()))
                 .with_git_protocol("version=2"),
         );
-        let err = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
-            .expect_err("fetch with wrong credentials must fail");
+        let err = http_fetch(
+            client.clone(),
+            &local_git,
+            &url,
+            &mut opts,
+            &mut NullProgress,
+        )
+        .expect_err("fetch with wrong credentials must fail");
         assert!(
             matches!(
                 err,
@@ -342,8 +354,14 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
     let client = http_client_arc(
         UreqHttpClient::with_credentials(Box::new(provider.clone())).with_git_protocol("version=2"),
     );
-    let outcome = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
-        .expect("authed fetch with correct credentials must succeed");
+    let outcome = http_fetch(
+        client.clone(),
+        &local_git,
+        &url,
+        &mut opts,
+        &mut NullProgress,
+    )
+    .expect("authed fetch with correct credentials must succeed");
 
     // Credentials were filled and approved (Git's credential_approve on success);
     // a connection-level auth cache means at most one fill regardless of POSTs.
@@ -453,7 +471,7 @@ fn fetch_missing_repo_with_valid_credentials_does_not_reject_them() {
         &local_git,
         &typo_url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect_err("fetch of a missing repo must fail");
     assert!(
@@ -481,8 +499,14 @@ fn fetch_missing_repo_with_valid_credentials_does_not_reject_them() {
     std::fs::create_dir_all(&local_ok).unwrap();
     git(&local_ok, &["init", "-q", "-b", "main", "."]);
     let local_ok_git = local_ok.join(".git");
-    http_fetch(client, &local_ok_git, &good_url, &mut opts, &mut NoProgress)
-        .expect("fetch of the real repo must still work with the same provider");
+    http_fetch(
+        client,
+        &local_ok_git,
+        &good_url,
+        &mut opts,
+        &mut NullProgress,
+    )
+    .expect("fetch of the real repo must still work with the same provider");
     assert!(
         provider.0.approves.load(Ordering::SeqCst) >= 1,
         "correct credentials should be approved after a successful fetch"
@@ -538,7 +562,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
             &url,
             std::slice::from_ref(&spec),
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::NeverCancel,
         )
         .expect_err("push with no credentials against an authed server must fail");
@@ -561,7 +585,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         &url,
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("authed push with correct credentials must succeed");
@@ -697,7 +721,7 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         &local_git,
         &format!("http://{host}/hw.git"),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("fetch authenticated by the host-level store entry");
     assert_eq!(
@@ -721,7 +745,7 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         &format!("http://{host}/push.git"),
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push authenticated by the host-level store entry");
@@ -870,7 +894,7 @@ fn git_askpass_authenticates_fetch_with_the_prompts_system_git_uses() {
         &local_git,
         &url,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("fetch authenticated through GIT_ASKPASS");
     assert_eq!(
@@ -955,7 +979,7 @@ fn core_askpass_authenticates_push_through_the_default_factory() {
         &format!("http://127.0.0.1:{port}/push.git"),
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("push authenticated through core.askPass");
@@ -1013,7 +1037,7 @@ fn wrong_credentials_in_the_url_are_rejected_without_asking_askpass() {
         &local.join(".git"),
         &format!("http://{USER}:wrong@127.0.0.1:{port}/hello.git"),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect_err("wrong URL credentials must fail");
     assert!(
@@ -1121,7 +1145,7 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
                 &repo,
                 std::slice::from_ref(&spec),
                 PushOptions::default(),
-                &mut NoProgress,
+                &mut NullProgress,
                 &grit_lib::progress::NeverCancel,
                 None,
             )
@@ -1275,7 +1299,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
             &repo,
             std::slice::from_ref(&spec),
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::NeverCancel,
             Some(&factory),
         )

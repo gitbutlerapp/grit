@@ -9,9 +9,8 @@ use std::path::Path;
 
 use crate::bundle::{plan_bundle_create, Bundle, BundleCreatePlan, BundleError, BundleSpec};
 use crate::error::{Error, Result};
-use crate::fetch::{NoProgress, Progress};
 use crate::objects::ObjectId;
-use crate::progress::ProgressSink;
+use crate::progress::{NullProgress, ProgressSink};
 use crate::repo::Repository;
 use crate::transfer::{
     apply_tag_mode, classify_update, prune_tracking_refs, FetchOptions, FetchOutcome, RefUpdate,
@@ -323,7 +322,7 @@ pub(crate) fn fetch_from_bundle(
         local_git_dir,
         bundle_path,
         opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &crate::progress::NeverCancel,
     )
 }
@@ -336,7 +335,7 @@ pub fn fetch_from_bundle_with_progress(
     local_git_dir: &Path,
     bundle_path: &Path,
     opts: &FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<FetchOutcome> {
     let repo = crate::fetch::open_fetch_target(local_git_dir, opts)?;
@@ -348,7 +347,7 @@ pub(crate) fn fetch_from_bundle_into(
     repo: &Repository,
     bundle_path: &Path,
     opts: &FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<FetchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;

@@ -30,8 +30,9 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -183,7 +184,7 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("v2 fetch_remote over git daemon");
@@ -342,7 +343,7 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
             &local_git,
             &mut *conn,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
         )
         .expect("seed v2 fetch");
@@ -378,7 +379,7 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("incremental v2 fetch");

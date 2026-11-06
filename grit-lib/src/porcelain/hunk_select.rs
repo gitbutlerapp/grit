@@ -1631,7 +1631,6 @@ mod tests {
     use crate::index::write_tree::write_tree_from_index;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
-    use crate::refs::RefError;
     use crate::repo::{InitOptions, Repository};
     use std::process::Command;
 
@@ -2024,15 +2023,10 @@ mod tests {
 
     #[test]
     fn repository_error_keeps_typed_source() {
-        let err = HunkSelectError::from(Error::Ref(RefError::InvalidHead));
-        assert_eq!(
-            err.to_string(),
-            Error::Ref(RefError::InvalidHead).to_string()
-        );
+        let err = HunkSelectError::from(Error::InvalidHead);
+        assert_eq!(err.to_string(), Error::InvalidHead.to_string());
         match err {
-            HunkSelectError::Repository(inner) => {
-                assert!(matches!(*inner, Error::Ref(RefError::InvalidHead)))
-            }
+            HunkSelectError::Repository(inner) => assert!(matches!(*inner, Error::InvalidHead)),
             other => panic!("expected Repository, got {other:?}"),
         }
     }

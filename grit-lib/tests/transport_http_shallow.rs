@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
@@ -168,7 +168,7 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
         &local_git,
         &url,
         &mut shallow_opts,
-        &mut NoProgress,
+        &mut NullProgress,
     ) {
         Ok(o) => o,
         Err(e) => {
@@ -253,7 +253,7 @@ fn shallow_depth1_then_unshallow_over_smart_http_v1() {
         &local_git,
         &url,
         &mut unshallow_opts,
-        &mut NoProgress,
+        &mut NullProgress,
     )
     .expect("unshallow http_fetch");
 

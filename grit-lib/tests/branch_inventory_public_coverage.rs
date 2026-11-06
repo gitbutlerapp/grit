@@ -30,8 +30,7 @@ fn branch_inventory_public_api_smoke() {
     )
     .unwrap();
 
-    // Names + date sort is rejected by `grit branch`, not by the library listing API.
-    list_branches(
+    let err = list_branches(
         &repo,
         &BranchListQuery {
             scope: BranchScope::Local,
@@ -45,5 +44,6 @@ fn branch_inventory_public_api_smoke() {
         },
         BranchDetail::Names,
     )
-    .expect("library list_branches allows date sort with Names detail");
+    .unwrap_err();
+    assert!(matches!(err, Error::BranchListNamesDateSort));
 }

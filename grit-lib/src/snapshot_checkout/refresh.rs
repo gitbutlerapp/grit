@@ -342,9 +342,7 @@ fn follow_landed_branches(
         // A branch another worktree has checked out moves only with that worktree.
         match crate::worktree::ensure_branch_not_checked_out_in_any_worktree(repo, &name) {
             Ok(()) => {}
-            Err(crate::error::Error::Branch(
-                crate::porcelain::branch_error::BranchError::CheckedOut { .. },
-            )) => continue,
+            Err(crate::error::Error::BranchCheckedOutInWorktree { .. }) => continue,
             Err(e) => return Err(e.into()),
         }
         let refname = format!("refs/heads/{name}");

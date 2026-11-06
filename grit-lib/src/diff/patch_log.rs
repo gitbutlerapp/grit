@@ -448,7 +448,7 @@ fn log_patch_funcname_matcher(
 ) -> Result<Option<FuncnameMatcher>> {
     let parsed = load_gitattributes_for_check_attr_source(repo, tree_oid)?;
     matcher_for_path_parsed(config, &parsed.rules, &parsed.macros, rel_path, false)
-        .map_err(crate::error::Error::from)
+        .map_err(crate::error::Error::Message)
 }
 
 /// Write one commit in `git log -p --no-color --format=%H` shape (no patch for merges).

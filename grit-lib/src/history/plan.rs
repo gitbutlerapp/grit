@@ -114,7 +114,7 @@ struct ChangeIdWriteContext {
 
 impl ChangeIdWriteContext {
     fn from_repo(repo: &Repository) -> Result<Self, HistoryError> {
-        let config = repo.config().snapshot().map_err(HistoryError::from)?;
+        let config = repo.config().snapshot().map_err(library_err)?;
         Ok(Self {
             policy: ChangeIdPolicy::from_config(config.as_ref()),
             generator: repo.change_id_generator(),
@@ -352,7 +352,7 @@ fn plan_rewrite_with_order_impl(
             ..RevListOptions::default()
         };
 
-        let walk = rev_list(repo, &tips, &negative, &walk_opts).map_err(HistoryError::from)?;
+        let walk = rev_list(repo, &tips, &negative, &walk_opts).map_err(library_err)?;
         let mut commits_to_replay: Vec<ObjectId> = walk.commits;
         if !commits_to_replay.contains(&oldest) {
             commits_to_replay.insert(0, oldest);
@@ -369,7 +369,7 @@ fn plan_rewrite_with_order_impl(
     if matches!(opts.scope, RefScope::Head) && seed.is_none() {
         let head_oid = repo.head_commit()?;
         for &edited in edits.keys() {
-            if !is_ancestor(repo, edited, head_oid).map_err(HistoryError::from)? {
+            if !is_ancestor(repo, edited, head_oid).map_err(library_err)? {
                 return Err(HistoryError::NotInHistory { commit: edited });
             }
         }
@@ -377,7 +377,7 @@ fn plan_rewrite_with_order_impl(
 
     if replay_order.is_none() {
         for (name, tip) in &scoped_refs {
-            if is_ancestor(repo, oldest, *tip).map_err(HistoryError::from)?
+            if is_ancestor(repo, oldest, *tip).map_err(library_err)?
                 && !commits_to_replay.contains(tip)
             {
                 return Err(HistoryError::DivergentBranch { name: name.clone() });
@@ -723,7 +723,7 @@ pub(crate) fn plan_replay_linear_segment(
 
     if matches!(opts.scope, RefScope::Head) {
         let head_oid = repo.head_commit()?;
-        if !is_ancestor(repo, oldest, head_oid).map_err(HistoryError::from)? {
+        if !is_ancestor(repo, oldest, head_oid).map_err(library_err)? {
             return Err(HistoryError::NotInHistory { commit: oldest });
         }
     }
@@ -954,7 +954,7 @@ fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> Result<Objec
             if other == candidate {
                 continue;
             }
-            if is_ancestor(repo, other, candidate).map_err(HistoryError::from)? {
+            if is_ancestor(repo, other, candidate).map_err(library_err)? {
                 is_oldest = false;
                 break;
             }
@@ -976,7 +976,7 @@ pub(crate) fn collect_scoped_refs(
     opts: &RewriteOptions,
     oldest: ObjectId,
 ) -> Result<Vec<(String, ObjectId)>, HistoryError> {
-    let head = resolve_head_for_repository(repo).map_err(HistoryError::from)?;
+    let head = resolve_head_for_repository(repo).map_err(library_err)?;
     let mut out = Vec::new();
 
     match opts.scope {
@@ -985,13 +985,13 @@ pub(crate) fn collect_scoped_refs(
                 let Some(oid) = oid else {
                     return Err(HistoryError::NotInHistory { commit: oldest });
                 };
-                if !is_ancestor(repo, oldest, oid).map_err(HistoryError::from)? {
+                if !is_ancestor(repo, oldest, oid).map_err(library_err)? {
                     return Err(HistoryError::NotInHistory { commit: oldest });
                 }
                 out.push((refname, oid));
             }
             crate::state::HeadState::Detached { oid } => {
-                if !is_ancestor(repo, oldest, oid).map_err(HistoryError::from)? {
+                if !is_ancestor(repo, oldest, oid).map_err(library_err)? {
                     return Err(HistoryError::NotInHistory { commit: oldest });
                 }
                 out.push(("HEAD".to_owned(), oid));
@@ -1008,22 +1008,19 @@ pub(crate) fn collect_scoped_refs(
                 crate::state::HeadState::Detached { oid } => (None, Some(*oid)),
                 crate::state::HeadState::Invalid => (None, None),
             };
-            let branches = repo
-                .references()
-                .list("refs/heads/")
-                .map_err(HistoryError::from)?;
+            let branches = repo.references().list("refs/heads/").map_err(library_err)?;
             for (name, oid) in branches {
                 // Another branch at the checked-out tip is a backup of it, not a stacked
                 // branch, so it keeps the pre-rewrite commits.
                 if head_tip == Some(oid) && checked_out != Some(name.as_str()) {
                     continue;
                 }
-                if is_ancestor(repo, oldest, oid).map_err(HistoryError::from)? {
+                if is_ancestor(repo, oldest, oid).map_err(library_err)? {
                     out.push((name, oid));
                 }
             }
             if let crate::state::HeadState::Detached { oid } = head {
-                if is_ancestor(repo, oldest, oid).map_err(HistoryError::from)? {
+                if is_ancestor(repo, oldest, oid).map_err(library_err)? {
                     out.push(("HEAD".to_owned(), oid));
                 }
             }
@@ -1046,8 +1043,8 @@ fn ensure_branches_not_checked_out_elsewhere(
         if short == "HEAD" {
             continue;
         }
-        if let Some(found) = find_worktree_with_branch_checked_out(repo, short, Some(&here))
-            .map_err(HistoryError::from)?
+        if let Some(found) =
+            find_worktree_with_branch_checked_out(repo, short, Some(&here)).map_err(library_err)?
         {
             return Err(HistoryError::BranchCheckedOutElsewhere {
                 name: name.clone(),
@@ -1807,7 +1804,7 @@ fn preserve_logical_change_id(
     template_oid: ObjectId,
     data: &mut CommitData,
 ) -> Result<(), HistoryError> {
-    let config = repo.config().snapshot().map_err(HistoryError::from)?;
+    let config = repo.config().snapshot().map_err(library_err)?;
     if !ChangeIdPolicy::from_config(config.as_ref()).enabled() {
         return Ok(());
     }
@@ -1871,7 +1868,7 @@ pub(crate) fn head_effect(
     repo: &Repository,
     mapping: &HashMap<ObjectId, ObjectId>,
 ) -> Result<HeadEffect, HistoryError> {
-    let head = resolve_head_for_repository(repo).map_err(HistoryError::from)?;
+    let head = resolve_head_for_repository(repo).map_err(library_err)?;
     let old_oid = match head {
         crate::state::HeadState::Branch { oid, .. } => oid,
         crate::state::HeadState::Detached { oid } => Some(oid),

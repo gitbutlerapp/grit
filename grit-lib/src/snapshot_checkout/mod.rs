@@ -99,7 +99,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::fetch::Progress;
 use crate::objects::{
     parse_commit, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry,
 };
@@ -744,12 +743,6 @@ pub enum CheckoutError {
 impl From<crate::error::Error> for CheckoutError {
     fn from(e: crate::error::Error) -> Self {
         Self::Library(Box::new(e))
-    }
-}
-
-impl From<crate::revision_error::RevisionError> for CheckoutError {
-    fn from(err: crate::revision_error::RevisionError) -> Self {
-        Self::from(crate::error::Error::from(err))
     }
 }
 
@@ -1603,7 +1596,7 @@ pub fn materialize(
     bundle: &Path,
     repo_url: &str,
     work: &str,
-    progress: &mut dyn Progress,
+    progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<Materialized> {
     if dest.is_dir() && std::fs::read_dir(dest)?.next().is_some() {

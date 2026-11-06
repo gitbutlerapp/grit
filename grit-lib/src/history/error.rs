@@ -333,12 +333,6 @@ impl HistoryError {
     }
 }
 
-impl From<crate::revision_error::RevisionError> for HistoryError {
-    fn from(err: crate::revision_error::RevisionError) -> Self {
-        Self::from(Error::from(err))
-    }
-}
-
 impl From<Error> for HistoryError {
     /// Unwraps [`Error::History`] back to the history failure it carries; every other library
     /// error becomes [`HistoryError::Library`].

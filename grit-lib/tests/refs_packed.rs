@@ -12,7 +12,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, RefLockError};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::list_branches;
-use grit_lib::refs::RefError;
 use grit_lib::refs::{
     delete_ref, list_refs, list_refs_glob, list_refs_physical, pack_remote_tracking_refs_for_clone,
     packed_refs_entry_exists, resolve_ref, resolve_ref_cached, write_ref, write_ref_cached,
@@ -348,9 +347,8 @@ fn t0600_delete_fails_cleanly_when_packed_refs_locked() {
     assert!(
         matches!(
             &err,
-            Error::Ref(RefError::RefLock(RefLockError::PackedRefsLockHeld {
-                lock_path,
-            })) if lock_path.ends_with("packed-refs.lock")
+            Error::RefLock(RefLockError::PackedRefsLockHeld { lock_path })
+                if lock_path.ends_with("packed-refs.lock")
         ),
         "expected typed packed-refs lock error, got {err:?}"
     );
@@ -523,7 +521,7 @@ fn t1408_packed_refs_garbage_line_rejected_like_git() {
     assert!(
         matches!(
             PackedRefs::load(&git_dir),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ),
         "PackedRefs::load must reject garbage lines"
     );
@@ -567,7 +565,7 @@ fn sorted_packed_refs_corrupt_record_only_breaks_listings_that_cover_it() {
     assert!(list_refs(&git_dir, "refs/").is_err());
     assert!(matches!(
         PackedRefs::load(&git_dir),
-        Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+        Err(Error::PackedRefsUnexpectedLine { .. })
     ));
     for prefix in ["refs/heads/", "refs/tags/", "refs/"] {
         assert_ref_listing_parity(wt, &git_dir, prefix);
@@ -589,7 +587,7 @@ fn sorted_packed_refs_short_last_record_breaks_every_listing() {
         assert!(
             matches!(
                 list_refs(&git_dir, prefix),
-                Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+                Err(Error::PackedRefsUnexpectedLine { .. })
             ),
             "{prefix}"
         );
@@ -618,7 +616,7 @@ fn sha256_packed_refs_short_last_record_rejected_like_git() {
         assert!(
             matches!(
                 list_refs(&git_dir, prefix),
-                Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+                Err(Error::PackedRefsUnexpectedLine { .. })
             ),
             "{prefix}"
         );
@@ -628,7 +626,7 @@ fn sha256_packed_refs_short_last_record_rejected_like_git() {
         .expect("open sha256 repo");
     assert!(matches!(
         list_branches(&repo),
-        Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+        Err(Error::PackedRefsUnexpectedLine { .. })
     ));
 }
 
@@ -786,7 +784,7 @@ fn corrupt_line_among_branches_fails_branch_listing() {
 
     assert!(matches!(
         list_refs(&git_dir, "refs/heads/"),
-        Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+        Err(Error::PackedRefsUnexpectedLine { .. })
     ));
     let tags = list_refs(&git_dir, "refs/tags/").expect("tags are outside the corrupt range");
     assert_eq!(tags.len(), 1);
@@ -821,7 +819,7 @@ fn assert_packed_refs_unreadable_like_git_show_ref(wt: &Path, git_dir: &Path) {
     assert!(
         matches!(
             PackedRefs::load(git_dir),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ),
         "PackedRefs::load must reject packed-refs Git cannot read"
     );
@@ -930,7 +928,7 @@ fn assert_git_show_ref_and_grit_load_both_reject(wt: &Path, git_dir: &Path) {
     assert!(
         matches!(
             PackedRefs::load(git_dir),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ),
         "PackedRefs::load must reject malformed packed-refs"
     );

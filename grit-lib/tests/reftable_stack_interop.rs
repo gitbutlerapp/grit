@@ -23,7 +23,6 @@ use grit_lib::refs::store::{
     open_ref_store, Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
     ReftableRefStore,
 };
-use grit_lib::refs::RefError;
 use grit_lib::refs::{read_head, read_symbolic_ref, resolve_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, HeadState};
@@ -349,8 +348,7 @@ fn stack_tables_list_and_update_index_mechanics() {
     assert!(
         matches!(
             &err,
-            Error::Ref(RefError::Reftable(ReftableError::Locked { lock_path }))
-                if *lock_path == lock
+            Error::Reftable(ReftableError::Locked { lock_path }) if *lock_path == lock
         ),
         "expected reftable Locked error, got {err:?}"
     );

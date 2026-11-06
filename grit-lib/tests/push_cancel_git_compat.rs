@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{Cancel, NeverCancel};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::{Remote, RemoteError};
@@ -53,7 +53,7 @@ fn push(
             local,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             cancel,
             None,
         )

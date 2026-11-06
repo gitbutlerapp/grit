@@ -133,7 +133,7 @@ pub fn try_write_streaming_pack(
     have_shallow: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
-    progress: &mut dyn FnMut(PackProgress),
+    progress: &mut dyn crate::progress::ProgressSink,
     w: &mut dyn Write,
 ) -> Result<Option<PackStats>> {
     try_write_streaming_pack_including_tags(
@@ -166,7 +166,7 @@ pub(crate) fn try_write_streaming_pack_including_tags(
     filter: Option<&ObjectFilter>,
     include_tags: &[TagCandidate],
     opts: &PackBuildOptions,
-    progress: &mut dyn FnMut(PackProgress),
+    progress: &mut dyn crate::progress::ProgressSink,
     w: &mut dyn Write,
     stop: &crate::progress::CancelSignal<'_>,
 ) -> Result<Option<PackStats>> {
@@ -194,7 +194,8 @@ pub(crate) fn try_write_streaming_pack_including_tags(
     send.extend(included_tag_chains(repo.odb(), include_tags, |oid| {
         send_set.contains(oid)
     })?);
-    progress(PackProgress::Enumerated { total: send.len() });
+    let mut reporter = crate::pack_objects::PackBuildProgress::new(progress);
+    reporter.report(PackProgress::Enumerated { total: send.len() });
 
     let send_bits = send_set.reuse_send_bits();
     let reuse_bits = compute_reuse_bits(&pack, send_bits, &send_set, opts)?;
@@ -211,7 +212,7 @@ pub(crate) fn try_write_streaming_pack_including_tags(
         None,
         stop,
     )?;
-    progress(PackProgress::PlannedDeltas);
+    reporter.report(PackProgress::PlannedDeltas);
     stop.poll()?;
 
     let mut reuse = StreamingReuse::new(pack, reuse_bits, &send_set);

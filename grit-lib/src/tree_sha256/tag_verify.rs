@@ -166,10 +166,10 @@ pub fn verify_tag(
 ) -> Result<TagVerification> {
     let obj = repo.odb().read(&oid)?;
     if obj.kind != ObjectKind::Tag {
-        return Err(Error::Tag(crate::porcelain::tag::TagError::VerifyNotTag {
+        return Err(Error::TagVerifyNotTag {
             oid,
             found: obj.kind,
-        }));
+        });
     }
     let headers = parse_tree_sha256_tag_headers(&obj.data)?;
     verify_tag_data(repo, &obj.data, &headers, options)

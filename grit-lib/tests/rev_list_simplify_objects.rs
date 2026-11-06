@@ -353,9 +353,7 @@ fn t6102_unexpected_object_types_typed_error() {
     };
     let result = rev_list(&grit_repo, &[blob_hex, broken_tree_hex.clone()], &[], &opts);
     match result {
-        Err(Error::Revision(grit_lib::revision_error::RevisionError::RevList(
-            RevListError::UnexpectedObjectKind { .. },
-        ))) => {}
+        Err(Error::RevList(RevListError::UnexpectedObjectKind { .. })) => {}
         other => panic!("unexpected result: {other:?} (blob={blob} broken={broken_tree_hex})"),
     }
 
@@ -383,9 +381,7 @@ fn t6102_unexpected_object_types_typed_error() {
         rev_list(&grit_repo, &[tree_hex, broken_blob_hex], &[], &opts).expect_err("non-blob seen");
     assert!(matches!(
         err,
-        Error::Revision(grit_lib::revision_error::RevisionError::RevList(
-            RevListError::UnexpectedObjectKind { .. },
-        ))
+        Error::RevList(RevListError::UnexpectedObjectKind { .. })
     ));
 }
 

@@ -9,7 +9,6 @@ use crate::refs::store::{Expected, RawRef, RefStoreError, ReflogUpdate};
 use crate::repo::Repository;
 
 use super::Result;
-use crate::refs::RefError;
 
 /// What [`swap_ref`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,7 +125,7 @@ pub(crate) fn swap_ref_as(
         reflog,
     ) {
         Ok(()) => Ok(Swap::Done),
-        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))) => Ok(Swap::Moved),
+        Err(Error::RefStore(RefStoreError::ExpectedMismatch { .. })) => Ok(Swap::Moved),
         Err(e) => Err(e.into()),
     }
 }

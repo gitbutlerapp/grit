@@ -480,7 +480,6 @@ mod update_refs_tests {
     use super::*;
     use crate::error::Error;
     use crate::refs::store::RefStoreError;
-    use crate::refs::RefError;
     use crate::repo::init_repository;
     use tempfile::TempDir;
 
@@ -514,7 +513,7 @@ mod update_refs_tests {
         ];
         let err = update_refs(&repo.git_dir(), &items).expect_err("duplicate");
         match &err {
-            Error::Ref(RefError::Store(RefStoreError::DuplicateUpdate { name })) => {
+            Error::RefStore(RefStoreError::DuplicateUpdate { name }) => {
                 assert_eq!(name, "refs/heads/dup");
             }
             other => panic!("expected DuplicateUpdate, got {other}"),
@@ -547,7 +546,7 @@ mod update_refs_tests {
         )
         .expect_err("stale cas");
         match &err {
-            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) => {
+            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
                 assert_eq!(name, "refs/heads/cas");
             }
             other => panic!("expected ExpectedMismatch, got {other}"),
@@ -580,10 +579,7 @@ mod update_refs_tests {
         )
         .expect_err("stale cas");
         assert!(
-            matches!(
-                err,
-                Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
-            ),
+            matches!(err, Error::RefStore(RefStoreError::ExpectedMismatch { .. })),
             "{err}"
         );
         assert_eq!(
@@ -707,7 +703,7 @@ mod update_refs_tests {
 
         let err = worker.join().expect("join").expect_err("stale CAS");
         match &err {
-            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) => {
+            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
                 assert_eq!(name, "refs/heads/last");
             }
             other => panic!("expected ExpectedMismatch for last ref, got {other}"),

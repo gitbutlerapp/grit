@@ -17,8 +17,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::prelude::Environment;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::{HttpClientFactory, ListRefsOptions, Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository};
@@ -237,7 +237,7 @@ fn fetch_from_missing_local_path_is_remote_unreadable() {
         .fetch(
             &repo,
             FetchOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -259,7 +259,7 @@ fn fetch_over_refused_http_port_is_remote_unreadable() {
         .fetch(
             &repo,
             FetchOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             http_factory(),
         )
@@ -286,7 +286,7 @@ fn push_to_missing_local_path_is_remote_unreadable() {
             &repo,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -315,7 +315,7 @@ fn push_over_refused_http_port_is_remote_unreadable() {
             &repo,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             http_factory(),
         )
@@ -332,7 +332,7 @@ fn clone_of_missing_local_path_is_remote_unreadable() {
             missing.to_str().expect("utf8").to_owned(),
             tmp.path().join("dest"),
         ),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -356,7 +356,7 @@ fn clone_missing_relative_source_with_dest_basename_is_remote_unreadable() {
     let dest = work.join(source);
     let mut opts = CloneOptions::new(source.to_owned(), dest.clone());
     opts.environment = clone_env_in(&work);
-    let err = clone(opts, &mut NoProgress, &NeverCancel, None)
+    let err = clone(opts, &mut NullProgress, &NeverCancel, None)
         .expect_err("clone must fail before creating the destination");
     assert!(err.is_remote_unreadable(), "{err:?}");
     assert!(
@@ -375,7 +375,7 @@ fn clone_existing_empty_dir_matching_source_is_remote_unreadable() {
     std::fs::create_dir(&dest).expect("empty dir at clone destination");
     let mut opts = CloneOptions::new(source.to_owned(), dest.clone());
     opts.environment = clone_env_in(&work);
-    let err = clone(opts, &mut NoProgress, &NeverCancel, None)
+    let err = clone(opts, &mut NullProgress, &NeverCancel, None)
         .expect_err("clone must fail when source path is an empty directory");
     assert!(err.is_remote_unreadable(), "{err:?}");
     assert!(
@@ -394,7 +394,7 @@ fn clone_missing_file_url_before_dest_is_remote_unreadable() {
     let dest = work.join("dest");
     let mut opts = CloneOptions::new(url, dest.clone());
     opts.environment = clone_env_in(&work);
-    let err = clone(opts, &mut NoProgress, &NeverCancel, None)
+    let err = clone(opts, &mut NullProgress, &NeverCancel, None)
         .expect_err("file:// clone of missing path must fail");
     assert!(err.is_remote_unreadable(), "{err:?}");
     assert!(!dest.exists());
@@ -407,7 +407,7 @@ fn clone_over_refused_http_port_is_remote_unreadable() {
     let url = format!("http://127.0.0.1:{}/repo.git", closed_port());
     let err = clone(
         CloneOptions::new(url, tmp.path().join("dest")),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         http_factory(),
     )
@@ -606,7 +606,7 @@ fn linked_worktree_checkout_is_a_readable_local_remote() {
     let dest = tmp.path().join("clone");
     let outcome = clone(
         CloneOptions::new(wt.to_str().expect("utf8").to_owned(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )
@@ -638,7 +638,7 @@ fn linked_worktree_checkout_is_a_readable_local_remote() {
             &repo,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -657,7 +657,7 @@ fn linked_worktree_checkout_is_a_readable_local_remote() {
         .fetch(
             &repo,
             FetchOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -725,7 +725,7 @@ fn git_daemon_without_advertisement_is_no_handshake() {
             &repo,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )
@@ -735,7 +735,7 @@ fn git_daemon_without_advertisement_is_no_handshake() {
         .fetch(
             &repo,
             FetchOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )

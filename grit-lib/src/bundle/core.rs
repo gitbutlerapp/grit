@@ -51,7 +51,7 @@ impl FilterSpec {
     pub fn parse(spec: &str) -> std::result::Result<Self, BundleError> {
         ObjectFilter::parse(spec)
             .map(Self)
-            .map_err(|e| BundleError::MalformedLine(e.to_string()))
+            .map_err(BundleError::MalformedLine)
     }
 
     /// Borrow the parsed filter.
@@ -757,29 +757,8 @@ fn write_bundle_pack_with_cancel(
     progress: &mut dyn ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> std::result::Result<PackStats, BundleError> {
-    use crate::pack_objects::PackProgress;
-
     let stop = crate::progress::CancelSignal::new(cancel);
     let io_err = map_pack_error;
-    let mut copying_started = false;
-    let mut on_pack = |ev: PackProgress| match ev {
-        PackProgress::Enumerated { total } => {
-            progress.start(ProgressPhase::EnumeratingObjects, Some(total as u64));
-            progress.set(total as u64);
-        }
-        PackProgress::PlannedDeltas => {
-            progress.finish();
-            progress.start(ProgressPhase::CopyingObjects, None);
-            copying_started = true;
-        }
-        PackProgress::WroteObject { written, total } => {
-            if !copying_started {
-                progress.start(ProgressPhase::CopyingObjects, Some(total as u64));
-                copying_started = true;
-            }
-            progress.set(written as u64);
-        }
-    };
     let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
     let mut haves: Vec<ObjectId> = spec
         .exclude
@@ -802,12 +781,11 @@ fn write_bundle_pack_with_cancel(
             None,
             &[],
             &pack_opts,
-            &mut on_pack,
+            progress,
             out,
             &stop,
         )
         .map_err(io_err)?;
-        progress.finish();
         return Ok(stats);
     };
     stop.poll().map_err(map_pack_error)?;

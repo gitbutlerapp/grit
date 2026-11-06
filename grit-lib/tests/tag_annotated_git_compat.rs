@@ -7,10 +7,10 @@ use grit_lib::objects::{parse_tag, ObjectKind};
 use grit_lib::porcelain::tag::{
     create_tag, list_tags_with_detail, tag_ref_metadata, CreateTagRequest, TagDetail, TagKind,
 };
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::listing::RefQuery;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
 use std::process::Command;
 
@@ -126,7 +126,7 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     let clone_dest = tmp.path().join("clone");
     clone_repo(
         CloneOptions::new(format!("file://{}", host.display()), clone_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

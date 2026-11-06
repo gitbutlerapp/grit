@@ -882,8 +882,8 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     use grit_lib::porcelain::replay_sequence::{
         start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
     };
+    use grit_lib::progress::NullProgress;
     use grit_lib::progress::{NeverCancel, NullProgress};
-    use grit_lib::remote::fetch::NoProgress;
 
     let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
     let wt = repo.worktree();
@@ -899,7 +899,7 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     let head_before = git_oid(wt, "HEAD");
     let branch_before = resolve_ref(grit.git_dir(), "refs/heads/topic").unwrap();
 
-    let mut pull_progress = NoProgress;
+    let mut pull_progress = NullProgress;
     let pull_err = pull(
         &grit,
         &PullOptions::default(),

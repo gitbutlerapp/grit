@@ -10,7 +10,7 @@ use crate::bundle::{write_bundle, BundleSpec};
 use crate::config::environment::RepositoryOptions;
 use crate::objects::ObjectId;
 use crate::progress::NeverCancel;
-use crate::remote::fetch::NoProgress;
+use crate::progress::NullProgress;
 use crate::repo::Repository;
 
 use super::{make_snapshot, materialize, target_ref, CheckoutInfo, CheckoutMarker, SnapshotRoot};
@@ -182,7 +182,7 @@ pub(crate) fn check_out(served: &mut Served, at: &Path) -> (PathBuf, Repository)
         &bundle,
         &served.url(),
         "work",
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("materialize");

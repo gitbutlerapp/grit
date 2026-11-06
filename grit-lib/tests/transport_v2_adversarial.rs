@@ -37,8 +37,9 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::transport::{
     ConnectOptions, Connection, GitDaemonTransport, Service, Transport,
@@ -361,7 +362,7 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("v2 clone");
@@ -450,7 +451,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
             &local_git,
             &mut *conn,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
         )
         .expect("seed fetch");
@@ -505,7 +506,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
         &local_git,
         &mut conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("incremental fetch");
@@ -614,7 +615,7 @@ fn v2_unborn_remote_is_empty_and_does_not_hang() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("v2 empty fetch");
@@ -689,7 +690,7 @@ fn v2_tag_modes_all_and_following() {
             &local_git,
             &mut *conn,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
         )
         .expect("v2 tags=all");
@@ -726,7 +727,7 @@ fn v2_tag_modes_all_and_following() {
             &local_git,
             &mut *conn,
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
         )
         .expect("v2 tags=following");
@@ -790,7 +791,7 @@ fn v2_ref_prefix_filtering_excludes_tags() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("v2 heads-only fetch");
@@ -923,7 +924,7 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
     )
     .expect("v2 sha256 fetch_remote");

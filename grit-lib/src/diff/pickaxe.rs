@@ -413,7 +413,11 @@ pub enum PickaxeError {
 
 impl From<PickaxeError> for Error {
     fn from(value: PickaxeError) -> Self {
-        Error::Diff(crate::diff::error::DiffError::Pickaxe(value))
+        match value {
+            PickaxeError::InvalidPattern { pattern, detail } => {
+                Error::Message(format!("invalid pickaxe pattern `{pattern}`: {detail}"))
+            }
+        }
     }
 }
 

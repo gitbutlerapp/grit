@@ -15,10 +15,8 @@ use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::paths::BlockedRemoval;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::refs::store::RefStoreError;
-use grit_lib::refs::RefError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
-use grit_lib::revision_error::RevisionError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 use time::OffsetDateTime;
@@ -120,26 +118,25 @@ fn format_ambiguous_change_id(spec: &str, candidates: &[AmbiguousChangeIdHint]) 
 #[must_use]
 pub fn human_message_for_lib(err: &LibError) -> String {
     match err {
-        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousChangeId {
-            prefix,
-            candidates,
-        })) => format_ambiguous_change_id(prefix, candidates),
-        LibError::Revision(RevisionError::RevParse(RevParseError::InvalidObjectName { name })) => {
+        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
+            format_ambiguous_change_id(prefix, candidates)
+        }
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             format!("revision '{name}' not found")
         }
-        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousArgument { spec })) => {
+        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
             format!("revision '{spec}' not found")
         }
-        LibError::Revision(RevisionError::RevParse(RevParseError::ReflogDateUnparseable {
-            date,
-        })) => format!("invalid reflog date '{date}'"),
+        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+            format!("invalid reflog date '{date}'")
+        }
         LibError::ObjectNotFound(spec) => format!("revision '{spec}' not found"),
         LibError::HashCollision { oid } => format!(
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
             oid.to_hex()
         ),
         LibError::LockHeld(lock) => lock_held(&lock.path, lock.holder).to_string(),
-        LibError::Ref(grit_lib::refs::RefError::Store(RefStoreError::NotFound { name })) => {
+        LibError::RefStore(RefStoreError::NotFound { name }) => {
             match name.strip_prefix("refs/heads/") {
                 Some(short) => format!("no branch named '{short}'"),
                 None => format!("ref not found: {name}"),
@@ -206,9 +203,7 @@ pub fn resolve_rebase_upstream_revision(
 ) -> Result<ObjectId, Error> {
     match resolve {
         Ok(oid) => Ok(oid),
-        Err(LibError::Revision(RevisionError::RevParse(RevParseError::NoUpstream { branch })))
-            if use_default_upstream =>
-        {
+        Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if use_default_upstream => {
             Err(rebase_no_upstream_error(&branch))
         }
         Err(other) => {
@@ -222,10 +217,7 @@ pub fn resolve_rebase_upstream_revision(
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
         LibError::RevisionNotFound(spec) => crate::json_error::revision_not_found(&spec),
-        LibError::Revision(RevisionError::NotFound { spec }) => {
-            crate::json_error::revision_not_found(&spec)
-        }
-        LibError::Ref(RefError::UnbornHead) => crate::unborn_errors::unborn_head_from_cwd()
+        LibError::UnbornHead => crate::unborn_errors::unborn_head_from_cwd()
             .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         other => {
             let wrapped = Error::new(other);
@@ -302,9 +294,7 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::ReflogDateUnparseable { .. }
     ) {
-        Error::msg(human_message_for_lib(&LibError::Revision(
-            RevisionError::RevParse(err),
-        )))
+        Error::msg(human_message_for_lib(&LibError::RevParse(err)))
     } else {
         Error::msg(format!("could not resolve ref '{spec}': {err}"))
     }
@@ -314,12 +304,6 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
 #[must_use]
 pub fn map_commit_spec_error(err: LibError) -> Error {
     match err {
-        LibError::Revision(RevisionError::RevParse(RevParseError::InvalidObjectName { name })) => {
-            crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
-        }
-        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousArgument { spec })) => {
-            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
-        }
         LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
         }
@@ -332,17 +316,9 @@ pub fn map_commit_spec_error(err: LibError) -> Error {
         LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
             Error::msg(format_ambiguous_change_id(&prefix, &candidates))
         }
-        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousChangeId {
-            prefix,
-            candidates,
-        })) => Error::msg(format_ambiguous_change_id(&prefix, &candidates)),
         LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
             Error::msg(format!("invalid reflog date '{date}'"))
         }
-        LibError::Revision(RevisionError::RevParse(RevParseError::ReflogDateUnparseable {
-            date,
-        })) => Error::msg(format!("invalid reflog date '{date}'")),
-        LibError::Ref(RefError::InvalidName { reason, .. }) => Error::msg(reason),
         LibError::InvalidRef(msg) => Error::msg(msg),
         other => map_lib_error(other),
     }
@@ -676,37 +652,29 @@ fn would_overwrite_classified_from_cause(
 }
 
 fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
-    fn from_revision_error(re: &RevisionError) -> Option<StructuredJsonError> {
-        match re {
-            RevisionError::RevParse(RevParseError::InvalidObjectName { name }) => {
-                Some(StructuredJsonError::new(
-                    format!("revision '{name}' not found"),
-                    ErrorKind::RevisionNotFound,
-                ))
-            }
-            RevisionError::RevParse(err @ RevParseError::AmbiguousArgument { .. }) => Some(
-                StructuredJsonError::new(err.to_string(), ErrorKind::RevisionNotFound),
-            ),
-            RevisionError::RevParse(
-                RevParseError::PathNotInRevision { .. }
-                | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-            ) => Some(StructuredJsonError::new(
-                re.to_string(),
-                ErrorKind::PathNotFound,
-            )),
-            _ => None,
+    let lib = cause.downcast_ref::<LibError>()?;
+    match lib {
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+            Some(StructuredJsonError::new(
+                format!("revision '{name}' not found"),
+                ErrorKind::RevisionNotFound,
+            ))
         }
-    }
-
-    if let Some(lib) = cause.downcast_ref::<LibError>() {
-        match lib {
-            LibError::Revision(re) => return from_revision_error(re),
-            _ => {}
+        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+            Some(StructuredJsonError::new(
+                format!("revision '{spec}' not found"),
+                ErrorKind::RevisionNotFound,
+            ))
         }
+        LibError::RevParse(
+            RevParseError::PathNotInRevision { .. }
+            | RevParseError::PathMissingFromWorktreeAndIndex { .. },
+        ) => Some(StructuredJsonError::new(
+            lib.to_string(),
+            ErrorKind::PathNotFound,
+        )),
+        _ => None,
     }
-    cause
-        .downcast_ref::<RevisionError>()
-        .and_then(from_revision_error)
 }
 
 fn cause_is_remote_unreadable(cause: &(dyn StdError + 'static)) -> bool {
@@ -768,6 +736,16 @@ pub fn map_branch_error(err: LibError) -> Error {
                     human.clone(),
                     ErrorKind::from_branch_error(&branch_err),
                 ),
+                human,
+            })
+        }
+        LibError::BranchCheckedOutInWorktree { worktree_path, .. } => {
+            let worktree = grit_lib::config::git_path::path_for_error_message(
+                std::path::Path::new(&worktree_path),
+            );
+            let human = format!("branch is checked out in '{worktree}'");
+            Error::new(StructuredCliError {
+                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
                 human,
             })
         }
@@ -989,10 +967,10 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
         LibError::StashNotFound { .. } => Some(stash_not_found(err)),
-        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
+        LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-        )) => Some(guided(
+        ) => Some(guided(
             ErrorKind::PathNotFound,
             err.to_string(),
             None,
@@ -1076,7 +1054,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 .or_else(|| Some(git_dir_path_io_hint(path))),
             Some(vec![path.clone()]),
         )),
-        LibError::Ref(grit_lib::refs::RefError::UnbornHead) => Some(
+        LibError::UnbornHead => Some(
             crate::unborn_errors::unborn_head_from_cwd()
                 .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         ),
@@ -1349,6 +1327,7 @@ mod tests {
 
     use super::*;
     use crate::json_error::structured_json_payload;
+    use grit_lib::error::LockHeldError;
 
     fn strings(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
@@ -1704,8 +1683,6 @@ mod tests {
     }
 
     fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
-        use grit_lib::error::LockHeldError;
-
         let path = PathBuf::from("/repo/.git/index.lock");
         let err = Error::new(WrappedLib(LibError::LockHeld(LockHeldError {
             path: path.clone(),

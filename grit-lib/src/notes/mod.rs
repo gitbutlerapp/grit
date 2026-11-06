@@ -12,9 +12,6 @@
 //! # Ok(())
 //! # }
 //! ```
-pub mod error;
-pub use error::NotesError;
-
 mod core;
 
 pub use core::*;

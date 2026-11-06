@@ -80,11 +80,11 @@ impl std::fmt::Display for OracleMismatch {
 
 fn grit_resolve(repo: &Repository, spec: &str, mode: ResolveMode) -> Result<ObjectId, Error> {
     match mode {
-        ResolveMode::Revision => resolve_revision(repo, spec).map_err(Error::from),
-        ResolveMode::Verify => resolve_revision_for_verify(repo, spec).map_err(Error::from),
-        ResolveMode::AsCommit => resolve_revision_as_commit(repo, spec).map_err(Error::from),
+        ResolveMode::Revision => resolve_revision(repo, spec),
+        ResolveMode::Verify => resolve_revision_for_verify(repo, spec),
+        ResolveMode::AsCommit => resolve_revision_as_commit(repo, spec),
         ResolveMode::PeelTree => {
-            let oid = resolve_revision_for_verify(repo, spec).map_err(Error::from)?;
+            let oid = resolve_revision_for_verify(repo, spec)?;
             peel_to_tree(repo, oid)
         }
         ResolveMode::TreeishBlobAtPath => Ok(resolve_treeish_blob_at_path(repo, spec)?.oid),
@@ -136,9 +136,7 @@ pub fn oracle_expect_rev_parse_error(
         });
     }
     match grit_resolve(repo, spec, mode) {
-        Err(Error::Revision(grit_lib::revision_error::RevisionError::RevParse(e))) if pred(&e) => {
-            Ok(())
-        }
+        Err(Error::RevParse(e)) if pred(&e) => Ok(()),
         Ok(oid) => Err(OracleMismatch::GitErrGritOk {
             spec: spec.to_owned(),
             grit: oid,

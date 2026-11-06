@@ -18,7 +18,6 @@ use grit_lib::objects::hash;
 use grit_lib::objects::odb::store::{LooseStore, ObjectStore, ObjectStream, WritableObjectStore};
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
-use grit_lib::refs::RefError;
 
 const MAGIC: &[u8; 8] = b"GRITPKV1";
 const HEADER_LEN: u64 = 16;
@@ -500,8 +499,7 @@ pub fn run_custom_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
         .write(ObjectKind::Commit, commit_body.as_bytes())?;
     // The commit lives in the custom store, which only the repository's own ref store checks.
     repo.references().update(
-        &RefName::try_from("refs/heads/main")
-            .map_err(|e| Error::Ref(RefError::invalid_reason(e.to_string())))?,
+        &RefName::try_from("refs/heads/main").map_err(|e| Error::InvalidRef(e.to_string()))?,
         &commit,
     )?;
 

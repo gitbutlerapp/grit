@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -103,7 +103,7 @@ fn grit_clone(tmp: &Path, remote_git: &Path, name: &str) -> PathBuf {
     let dest = tmp.join(name);
     clone_repo(
         CloneOptions::new(remote_git.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &NeverCancel,
         None,
     )

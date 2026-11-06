@@ -189,17 +189,15 @@ fn t1506_ambiguous_path_vs_rev_typed_errors() {
             "git --verify should reject ambiguous path {spec}"
         );
         match resolve_revision(&repo, spec) {
-            Err(Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
-                RevParseError::AmbiguousArgument { .. },
-            ))) => {}
+            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {}
             other => panic!("expected AmbiguousArgument for {spec}, got {other:?}"),
         }
     }
     assert!(git_rev_parse_verify(wt, "missing:path").is_none());
     match resolve_revision_for_verify(&repo, "missing:path") {
-        Err(Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+        Err(Error::RevParse(
             RevParseError::PathNotInRevision { .. } | RevParseError::InvalidObjectName { .. },
-        ))) => {}
+        )) => {}
         other => panic!("expected path/rev failure for missing:path, got {other:?}"),
     }
 }

@@ -688,7 +688,7 @@ pub fn pack_build_all_stdout(repo: &Repository, delta_threads: usize) -> Result<
     let mut stdout = io::stdout().lock();
     PackObjects::new(repo.odb(), opts)
         .wants(&wants)
-        .write_to(&mut stdout)
+        .write_to(&mut stdout, &mut grit_lib::progress::NullProgress)
         .context("pack-objects --all")?;
     Ok(())
 }

@@ -13,8 +13,8 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, ObjectStream, Writ
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::{Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
@@ -195,14 +195,14 @@ fn incremental_second_fetch_read_info(upstream: &tempfile::TempDir, with_tags: b
         fetch_heads_only()
     };
     repo.remotes()
-        .fetch(&remote, opts.clone(), &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, opts.clone(), &mut NullProgress, &NeverCancel, None)
         .expect("first fetch");
     let read_info_after_first = store.read_info.load(Ordering::Relaxed);
     fs::write(upstream.path().join("c.txt"), "three\n").expect("write");
     git(upstream.path(), &["add", "c.txt"]);
     git(upstream.path(), &["commit", "-q", "-m", "c3"]);
     repo.remotes()
-        .fetch(&remote, opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, opts, &mut NullProgress, &NeverCancel, None)
         .expect("second fetch");
     store.read_info.load(Ordering::Relaxed) - read_info_after_first
 }
@@ -217,7 +217,7 @@ fn fresh_fetch_read_info(upstream: &tempfile::TempDir, with_tags: bool) -> usize
         fetch_heads_only()
     };
     repo.remotes()
-        .fetch(&remote, opts, &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, opts, &mut NullProgress, &NeverCancel, None)
         .expect("fetch");
     store.read_info.load(Ordering::Relaxed)
 }
@@ -231,7 +231,7 @@ fn local_fetch_into_empty_custom_primary_skips_per_object_contains() {
     let url = format!("file://{}", upstream.path().display());
     let remote = Remote::from_url(&url).expect("remote");
     repo.remotes()
-        .fetch(&remote, fetch_all(), &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, fetch_all(), &mut NullProgress, &NeverCancel, None)
         .expect("fetch");
 
     let objects = store.count_objects();
@@ -261,7 +261,7 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
     let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
 
     repo.remotes()
-        .fetch(&remote, fetch_all(), &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, fetch_all(), &mut NullProgress, &NeverCancel, None)
         .expect("first fetch");
     let writes_after_first = store.writes.load(Ordering::Relaxed);
     let objects_after_first = store.count_objects();
@@ -272,7 +272,7 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
     git(upstream.path(), &["commit", "-q", "-m", "c3"]);
 
     repo.remotes()
-        .fetch(&remote, fetch_all(), &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, fetch_all(), &mut NullProgress, &NeverCancel, None)
         .expect("second fetch");
 
     assert_eq!(
@@ -329,7 +329,7 @@ fn local_fetch_propagates_contains_many_errors() {
     let remote = Remote::from_url(upstream.path().to_str().expect("utf8")).expect("remote");
     let err = repo
         .remotes()
-        .fetch(&remote, fetch_all(), &mut NoProgress, &NeverCancel, None)
+        .fetch(&remote, fetch_all(), &mut NullProgress, &NeverCancel, None)
         .expect_err("contains_many failure must abort fetch");
     assert!(
         matches!(err, RemoteError::Library(Error::Io(_))),

@@ -24,7 +24,6 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_with_graph, RangeWalkHide,
     ReachableWalkCommitterCutoffs,
 };
-use crate::revision_error::{ObjectFilterParseError, ObjectFilterProtocolError, RevisionError};
 
 /// Excluded commits for a rev walk: either an explicit set (promisor, first-parent frontier)
 /// or a painted range hide predicate.
@@ -68,7 +67,6 @@ fn cancel_watch_for_walk(cancel: &Option<CancelToken>) -> Option<Arc<AtomicBool>
 }
 use crate::reflog::{read_reflog_on_store, reflog_refs_on_store};
 use crate::refs;
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
@@ -144,43 +142,34 @@ pub enum ObjectFilter {
 
 impl ObjectFilter {
     /// Parse a `--filter=<spec>` value.
-    pub fn parse(spec: &str) -> std::result::Result<Self, ObjectFilterParseError> {
+    pub fn parse(spec: &str) -> std::result::Result<Self, String> {
         Self::parse_inner(spec.trim(), false)
     }
 
-    fn parse_inner(
-        spec: &str,
-        from_combine_subfilter: bool,
-    ) -> std::result::Result<Self, ObjectFilterParseError> {
+    fn parse_inner(spec: &str, from_combine_subfilter: bool) -> std::result::Result<Self, String> {
         if spec == "blob:none" {
             return Ok(ObjectFilter::BlobNone);
         }
         if let Some(rest) = spec.strip_prefix("blob:limit=") {
-            let bytes =
-                parse_size_suffix(rest).ok_or_else(|| ObjectFilterParseError::InvalidFragment {
-                    detail: format!("invalid blob:limit value: {rest}"),
-                })?;
+            let bytes = parse_size_suffix(rest)
+                .ok_or_else(|| format!("invalid blob:limit value: {rest}"))?;
             return Ok(ObjectFilter::BlobLimit(bytes));
         }
         if let Some(rest) = spec.strip_prefix("tree:") {
             if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-                return Err(ObjectFilterParseError::InvalidFragment {
-                    detail: if from_combine_subfilter {
-                        "expected 'tree:<depth>'.".to_owned()
-                    } else {
-                        format!("invalid tree depth: {rest}")
-                    },
+                return Err(if from_combine_subfilter {
+                    "expected 'tree:<depth>'.".to_owned()
+                } else {
+                    format!("invalid tree depth: {rest}")
                 });
             }
-            let depth: u64 = rest
-                .parse()
-                .map_err(|_| ObjectFilterParseError::InvalidFragment {
-                    detail: if from_combine_subfilter {
-                        "expected 'tree:<depth>'.".to_owned()
-                    } else {
-                        format!("invalid tree depth: {rest}")
-                    },
-                })?;
+            let depth: u64 = rest.parse().map_err(|_| {
+                if from_combine_subfilter {
+                    "expected 'tree:<depth>'.".to_owned()
+                } else {
+                    format!("invalid tree depth: {rest}")
+                }
+            })?;
             return Ok(ObjectFilter::TreeDepth(depth));
         }
         if let Some(rest) = spec.strip_prefix("object:type=") {
@@ -189,38 +178,24 @@ impl ObjectFilter {
                 "tree" => FilterObjectKind::Tree,
                 "commit" => FilterObjectKind::Commit,
                 "tag" => FilterObjectKind::Tag,
-                "" => {
-                    return Err(ObjectFilterParseError::InvalidFragment {
-                        detail: "invalid object type".to_owned(),
-                    });
-                }
-                _ => {
-                    return Err(ObjectFilterParseError::InvalidFragment {
-                        detail: format!("invalid object type: {rest}"),
-                    });
-                }
+                "" => return Err("invalid object type".to_owned()),
+                _ => return Err(format!("invalid object type: {rest}")),
             };
             return Ok(ObjectFilter::ObjectType(kind));
         }
         if let Some(rest) = spec.strip_prefix("sparse:oid=") {
             if rest.is_empty() {
-                return Err(ObjectFilterParseError::InvalidFragment {
-                    detail: "invalid sparse:oid value: ".to_owned(),
-                });
+                return Err("invalid sparse:oid value: ".to_owned());
             }
             return Ok(ObjectFilter::SparseOid(rest.to_owned()));
         }
         if let Some(rest) = spec.strip_prefix("combine:") {
             if rest.is_empty() {
-                return Err(ObjectFilterParseError::InvalidFragment {
-                    detail: "expected something after combine:".to_owned(),
-                });
+                return Err("expected something after combine:".to_owned());
             }
             let parts = split_combine_raw_parts(rest);
             if parts.is_empty() {
-                return Err(ObjectFilterParseError::InvalidFragment {
-                    detail: "expected something after combine:".to_owned(),
-                });
+                return Err("expected something after combine:".to_owned());
             }
             let mut filters = Vec::new();
             for part in parts {
@@ -228,18 +203,12 @@ impl ObjectFilter {
             }
             return Ok(ObjectFilter::Combine(filters));
         }
-        Err(ObjectFilterParseError::InvalidFilterSpec {
-            spec: spec.to_owned(),
-        })
+        Err(format!("invalid filter-spec '{spec}'"))
     }
 
-    fn parse_from_combine_subfilter(
-        encoded: &str,
-    ) -> std::result::Result<Self, ObjectFilterParseError> {
+    fn parse_from_combine_subfilter(encoded: &str) -> std::result::Result<Self, String> {
         if let Some(ch) = combine_subfilter_has_reserved(encoded) {
-            return Err(ObjectFilterParseError::InvalidFragment {
-                detail: format!("must escape char in sub-filter-spec: '{ch}'"),
-            });
+            return Err(format!("must escape char in sub-filter-spec: '{ch}'"));
         }
         let decoded = url_decode(encoded);
         Self::parse_inner(&decoded, true)
@@ -411,10 +380,8 @@ fn combine_subfilter_has_reserved(encoded: &str) -> Option<char> {
 }
 
 /// Expand a user filter for protocol lines (`blob:limit=1k` → `blob:limit=1024`).
-pub fn expand_object_filter_for_protocol(
-    spec: &str,
-) -> std::result::Result<String, ObjectFilterProtocolError> {
-    let f = ObjectFilter::parse(spec).map_err(ObjectFilterProtocolError::Parse)?;
+pub fn expand_object_filter_for_protocol(spec: &str) -> std::result::Result<String, String> {
+    let f = ObjectFilter::parse(spec)?;
     match f {
         ObjectFilter::BlobLimit(n) => Ok(format!("blob:limit={n}")),
         _ => Ok(spec.to_owned()),
@@ -1160,9 +1127,7 @@ pub fn rev_list(
                 commit_data: OidHashMap::default(),
             });
         }
-        return Err(Error::Ref(RefError::invalid_reason(
-            "no revisions specified".to_owned(),
-        )));
+        return Err(Error::InvalidRef("no revisions specified".to_owned()));
     }
 
     if let Some(result) = try_rev_list_accelerated(
@@ -1458,9 +1423,9 @@ pub fn rev_list(
             bottoms.extend(exclude.iter().copied());
         }
         if bottoms.is_empty() {
-            return Err(Error::Ref(RefError::invalid_reason(
+            return Err(Error::InvalidRef(
                 "--ancestry-path requires a range with excluded tips".to_owned(),
-            )));
+            ));
         }
         limit_to_ancestry(&mut graph, &mut included, &bottoms)?;
         effective_ancestry_path_bottoms = bottoms;
@@ -2399,29 +2364,6 @@ fn packed_object_set(repo: &Repository) -> HashSet<ObjectId> {
     out
 }
 
-fn revision_resolve_missing(err: &RevisionError) -> bool {
-    match err {
-        RevisionError::Nested(n) => matches!(
-            **n,
-            Error::ObjectNotFound(_)
-                | Error::Ref(RefError::InvalidName { .. })
-                | Error::InvalidRef(_)
-        ),
-        RevisionError::NotFound { .. } | RevisionError::RevParse(_) => true,
-        _ => false,
-    }
-}
-
-fn object_missing_or_bad_ref(err: &Error) -> bool {
-    match err {
-        Error::ObjectNotFound(_)
-        | Error::Ref(RefError::InvalidName { .. })
-        | Error::InvalidRef(_) => true,
-        Error::Revision(re) => revision_resolve_missing(re),
-        _ => false,
-    }
-}
-
 fn resolve_specs(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     resolve_specs_with_options(repo, specs, false)
 }
@@ -2435,8 +2377,8 @@ fn resolve_specs_with_options(
     for spec in specs {
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(err) if ignore_missing && revision_resolve_missing(&err) => continue,
-            Err(err) => return Err(err.into()),
+            Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => continue,
+            Err(err) => return Err(err),
         };
         match repo.odb().peel_to_commit(oid) {
             Ok(Some(commit_oid)) => out.push(commit_oid),
@@ -2447,7 +2389,7 @@ fn resolve_specs_with_options(
             // (e.g. submodule-change detection over a remote carrying a tag-of-blob, t5516
             // "refuse fetch to current branch of worktree") do not abort.
             Ok(None) => {}
-            Err(err) if ignore_missing && object_missing_or_bad_ref(&err) => {}
+            Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {}
             Err(err) => return Err(err),
         }
     }
@@ -2559,14 +2501,14 @@ fn resolve_specs_for_objects_with_options(
             if !path.is_empty() {
                 let treeish_oid = match resolve_revision_for_range_end(repo, treeish) {
                     Ok(oid) => oid,
-                    Err(err) if ignore_missing && revision_resolve_missing(&err) => continue,
-                    Err(err) => return Err(err.into()),
+                    Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {
+                        continue;
+                    }
+                    Err(err) => return Err(err),
                 };
                 let object_oid = match resolve_treeish_path(repo, treeish_oid, path) {
                     Ok(oid) => oid,
-                    Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. }))
-                        if ignore_missing =>
-                    {
+                    Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {
                         continue;
                     }
                     Err(err) => return Err(err),
@@ -2594,8 +2536,8 @@ fn resolve_specs_for_objects_with_options(
 
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(err) if ignore_missing && revision_resolve_missing(&err) => continue,
-            Err(err) => return Err(err.into()),
+            Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => continue,
+            Err(err) => return Err(err),
         };
         match repo.odb().peel_to_commit(oid) {
             Ok(Some(commit_oid)) => {
@@ -10373,17 +10315,13 @@ mod tests {
             .expect_err("no-walk");
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::RevList(
-                RevListError::InvalidNoWalkArgument,
-            ))
+            Error::RevList(RevListError::InvalidNoWalkArgument)
         ));
         let err = collect_revision_specs_from_stdin_lines(&repo, &[], &["--not-a-real-flag"])
             .expect_err("bad opt");
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::RevList(
-                RevListError::InvalidStdinOption { .. },
-            ))
+            Error::RevList(RevListError::InvalidStdinOption { .. })
         ));
     }
 
@@ -11628,11 +11566,10 @@ mod line_coverage_tests {
         .expect_err("raw symmetric range");
         assert!(matches!(
             err,
-            Error::Revision(crate::revision_error::RevisionError::RevList(
-                RevListError::UnexpandedSymmetricRange { ref spec },
-            )) if spec == "main...side"
+            Error::RevList(RevListError::UnexpandedSymmetricRange { ref spec }) if spec == "main...side"
         ));
-        let _ = expand_object_filter_for_protocol("blob:limit=1k").map_err(Error::from)?;
+        let _ = expand_object_filter_for_protocol("blob:limit=1k")
+            .map_err(|msg| Error::Message(msg))?;
         let _ = url_encode_object_filter_subspec("path:src/");
         let (pos, neg) = split_revision_token("main ^main~2 -- tracked.txt");
         assert!(!pos.is_empty());
@@ -12623,12 +12560,7 @@ mod line_coverage_tests {
         let blob = repo
             .odb()
             .write_loose_materialize(ObjectKind::Blob, b"not a commit")?;
-        assert!(matches!(
-            graph.commit_bytes(blob),
-            Err(Error::Revision(
-                crate::revision_error::RevisionError::RevList(_)
-            ))
-        ));
+        assert!(matches!(graph.commit_bytes(blob), Err(Error::RevList(_))));
         let unreleased = graph.unreleased_bytes.as_ref().expect("kept bytes");
         assert!(!unreleased.contains_key(&blob), "failed reads keep nothing");
         assert_eq!(graph.commit_bytes(tip)?, tip_bytes);

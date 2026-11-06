@@ -21,7 +21,6 @@ use grit_lib::refs::reflog::{
     ReflogSelector,
 };
 use grit_lib::refs::store::{RefName, RefStore, ReftableRefStore};
-use grit_lib::refs::RefError;
 use grit_lib::refs::{
     append_reflog, append_reflog_with_config, effective_log_refs_config, read_log_refs_config,
     reflog_file_path, write_ref, write_symbolic_ref,
@@ -1227,10 +1226,7 @@ fn delete_out_of_range_is_typed_error() {
             .reflogs()
             .delete(&name, &[9], false)
             .expect_err("out of range");
-        assert!(matches!(
-            err,
-            Error::Ref(RefError::ReflogIndexOutOfRange { .. })
-        ));
+        assert!(matches!(err, Error::ReflogIndexOutOfRange { .. }));
         let _ = backend;
     });
 }

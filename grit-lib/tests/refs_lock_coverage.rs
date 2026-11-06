@@ -9,7 +9,6 @@ use std::fs;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::RefStoreError;
-use grit_lib::refs::RefError;
 use grit_lib::refs::{
     delete_ref, delete_ref_cas, lock_path_for_ref, read_raw_ref, verify_ref_available_for_create,
     write_ref, RawRefLookup,
@@ -67,9 +66,7 @@ fn write_ref_fails_when_lock_file_exists() {
         {
             true
         }
-        Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) => {
-            name == "refs/heads/locked"
-        }
+        Error::RefStore(RefStoreError::LockHeld { name }) => name == "refs/heads/locked",
         _ => false,
     };
     let err = write_ref(&git_dir, "refs/heads/locked", &oid(2)).expect_err("lock held");

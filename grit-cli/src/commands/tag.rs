@@ -952,10 +952,10 @@ fn render_verify_markdown(w: &mut dyn Write, entry: &TagVerifyEntry) -> Result<(
 
 fn map_tag_error(err: Error) -> anyhow::Error {
     match err {
+        Error::TagVerifyNotTag { .. } => {
+            anyhow::anyhow!("tag is not an annotated tag object (use an annotated tag)")
+        }
         Error::Tag(tag_err) => match tag_err {
-            TagError::VerifyNotTag { .. } => {
-                anyhow::anyhow!("tag is not an annotated tag object (use an annotated tag)")
-            }
             TagError::AlreadyExists { name } => {
                 let human = format!("tag '{name}' already exists (use --force to replace)");
                 anyhow::Error::new(crate::json_error::StructuredCliError {

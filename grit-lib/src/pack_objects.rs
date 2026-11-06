@@ -233,9 +233,9 @@ pub struct PackStats {
     pub pack_ref_from_ofs_objects: u32,
 }
 
-/// Progress hook for long pack builds.
+/// Internal progress events while building a pack (forwarded to [`crate::progress::ProgressSink`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PackProgress {
+pub(crate) enum PackProgress {
     /// Enumeration finished (`total` objects selected).
     Enumerated {
         /// Number of objects selected for packing.
@@ -316,7 +316,6 @@ pub struct PackObjects<'a> {
     haves: Vec<ObjectId>,
     have_shallow: OidHashSet,
     source_shallow: OidHashSet,
-    progress: Option<Box<dyn FnMut(PackProgress)>>,
 }
 
 impl<'a> PackObjects<'a> {
@@ -331,7 +330,6 @@ impl<'a> PackObjects<'a> {
             haves: Vec::new(),
             have_shallow: oid_hash_set(),
             source_shallow: oid_hash_set(),
-            progress: None,
         }
     }
 
@@ -370,37 +368,27 @@ impl<'a> PackObjects<'a> {
         self
     }
 
-    /// Optional progress callback.
-    #[must_use]
-    pub fn progress<F>(mut self, f: F) -> Self
-    where
-        F: FnMut(PackProgress) + 'static,
-    {
-        self.progress = Some(Box::new(f));
-        self
-    }
-
-    fn fire(&mut self, ev: PackProgress) {
-        if let Some(ref mut f) = self.progress {
-            f(ev);
-        }
-    }
-
     /// Write a PACK v2 stream to `w` and return statistics.
     ///
     /// # Errors
     ///
     /// Missing wants, corrupt objects, or I/O failures while writing.
-    pub fn write_to(self, w: &mut dyn Write) -> Result<PackStats> {
-        self.write_to_with_cancel(w, &CancelSignal::never())
+    pub fn write_to(
+        self,
+        w: &mut dyn Write,
+        progress: &mut dyn crate::progress::ProgressSink,
+    ) -> Result<PackStats> {
+        self.write_to_with_cancel(w, progress, &CancelSignal::never())
     }
 
     /// [`Self::write_to`], stopping with [`Error::Cancelled`] once `stop` fires.
     pub(crate) fn write_to_with_cancel(
-        mut self,
+        self,
         w: &mut dyn Write,
+        progress: &mut dyn crate::progress::ProgressSink,
         stop: &CancelSignal<'_>,
     ) -> Result<PackStats> {
+        let mut reporter = PackBuildProgress::new(progress);
         let opts = self.opts.build;
         let have_shallow: HashSet<ObjectId> = self.have_shallow.iter().copied().collect();
         let source_shallow: HashSet<ObjectId> = self.source_shallow.iter().copied().collect();
@@ -423,11 +411,17 @@ impl<'a> PackObjects<'a> {
             stop,
         )?;
         let send = selection.send;
-        self.fire(PackProgress::Enumerated { total: send.len() });
+        reporter.report(PackProgress::Enumerated { total: send.len() });
         if !opts.delta {
             let bytes = serialize_pack(self.source_odb, &send, &opts)?;
             stop.poll()?;
             w.write_all(&bytes).map_err(Error::Io)?;
+            reporter.report(PackProgress::PlannedDeltas);
+            reporter.report(PackProgress::WroteObject {
+                written: send.len(),
+                total: send.len(),
+            });
+            reporter.finish_copying();
             let count = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
             return Ok(PackStats {
                 object_count: count,
@@ -445,8 +439,16 @@ impl<'a> PackObjects<'a> {
             self.opts.search_threads,
             stop,
         )?;
-        self.fire(PackProgress::PlannedDeltas);
-        crate::pack_delta::write_pack_with_deltas(
+        reporter.report(PackProgress::PlannedDeltas);
+        let total = send.len();
+        let mut on_objects = |batch: u64| {
+            reporter.written = reporter.written.saturating_add(batch as usize);
+            reporter.report(PackProgress::WroteObject {
+                written: reporter.written,
+                total,
+            });
+        };
+        let stats = crate::pack_delta::write_pack_with_deltas(
             self.source_odb,
             &plan.entries,
             &opts,
@@ -454,8 +456,10 @@ impl<'a> PackObjects<'a> {
             w,
             None,
             stop,
-            None,
-        )
+            Some(&mut on_objects),
+        )?;
+        reporter.finish_copying();
+        Ok(stats)
     }
 }
 
@@ -788,7 +792,7 @@ pub fn write_upload_pack_stream(
     have_shallow: &HashSet<ObjectId>,
     filter: Option<&ObjectFilter>,
     opts: &PackBuildOptions,
-    progress: &mut dyn FnMut(PackProgress),
+    progress: &mut dyn crate::progress::ProgressSink,
     w: &mut dyn Write,
 ) -> Result<PackStats> {
     write_upload_pack_stream_with_cancel(
@@ -819,7 +823,7 @@ pub(crate) fn write_upload_pack_stream_with_cancel(
     filter: Option<&ObjectFilter>,
     include_tags: &[TagCandidate],
     opts: &PackBuildOptions,
-    progress: &mut dyn FnMut(PackProgress),
+    progress: &mut dyn crate::progress::ProgressSink,
     w: &mut dyn Write,
     stop: &CancelSignal<'_>,
 ) -> Result<PackStats> {
@@ -850,7 +854,7 @@ fn write_upload_pack_stream_in_context(
     filter: Option<&ObjectFilter>,
     include_tags: &[TagCandidate],
     opts: &PackBuildOptions,
-    progress: &mut dyn FnMut(PackProgress),
+    progress: &mut dyn crate::progress::ProgressSink,
     w: &mut dyn Write,
     stop: &CancelSignal<'_>,
 ) -> Result<PackStats> {
@@ -885,7 +889,7 @@ fn write_upload_pack_stream_in_context(
         include_tags,
         w,
         stop,
-        None,
+        Some(progress),
     )
 }
 
@@ -1451,7 +1455,7 @@ pub(crate) fn write_pack_for_local_fetch(
         .haves(haves)
         .have_shallow_grafts(have_shallow)
         .source_shallow_grafts(source_shallow)
-        .write_to_with_cancel(w, stop)
+        .write_to_with_cancel(w, &mut crate::progress::NullProgress, stop)
 }
 
 fn collect_reachable_excluding(

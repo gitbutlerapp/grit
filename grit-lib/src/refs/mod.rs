@@ -37,9 +37,6 @@
 //! # }
 //! ```
 
-pub mod error;
-pub use error::{RefError, RefResult};
-
 pub(crate) mod handle;
 pub mod listing;
 pub mod query_reachability;
@@ -85,14 +82,15 @@ use crate::error::{Error, RefLockError, Result};
 use crate::lockfile::LockWait;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::pack;
+
 /// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
 pub const SYMREF_MAXDEPTH: usize = 5;
 
 fn map_public_ref_store_error(err: Error, refname: &str) -> Error {
     match err {
-        Error::Ref(RefError::Store(store::RefStoreError::SymrefLoop)) => Error::Ref(
-            RefError::invalid_reason(format!("ref symlink too deep: {refname}")),
-        ),
+        Error::RefStore(store::RefStoreError::SymrefLoop) => {
+            Error::InvalidRef(format!("ref symlink too deep: {refname}"))
+        }
         other => other,
     }
 }
@@ -111,15 +109,10 @@ fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
     {
         return Err(directory_in_the_way(git_dir, refname, &path));
     }
-    if path.is_file()
-        && matches!(
-            read_ref_file(&path),
-            Err(Error::Ref(RefError::InvalidName { .. }))
-        )
-    {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
+    if path.is_file() && matches!(read_ref_file(&path), Err(Error::InvalidRef(_))) {
+        return Err(Error::InvalidRef(format!(
             "cannot update ref '{refname}': reference broken"
-        ))));
+        )));
     }
     Ok(())
 }
@@ -132,9 +125,7 @@ fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
 /// [`RefLockError::DirectoryInTheWay`].
 fn directory_in_the_way(git_dir: &Path, refname: &str, path: &Path) -> Error {
     match verify_ref_available_for_create(git_dir, refname, &BTreeSet::new(), &HashSet::new()) {
-        Err(reason) => Error::Ref(RefError::Store(store::RefStoreError::NameUnavailable {
-            reason,
-        })),
+        Err(reason) => Error::RefStore(store::RefStoreError::NameUnavailable { reason }),
         Ok(()) => RefLockError::DirectoryInTheWay {
             refname: refname.to_owned(),
             path: ref_path_for_display(path),
@@ -789,10 +780,10 @@ pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
             let oid = ObjectId::from_bytes(PLACEHOLDER)?;
             Ok(Ref::Direct(oid))
         } else {
-            Err(Error::Ref(RefError::invalid_reason(content.to_owned())))
+            Err(Error::InvalidRef(content.to_owned()))
         }
     } else {
-        Err(Error::Ref(RefError::invalid_reason(content.to_owned())))
+        Err(Error::InvalidRef(content.to_owned()))
     }
 }
 
@@ -1309,17 +1300,17 @@ fn refname_is_strict_prefix(parent: &str, child: &str) -> bool {
 }
 
 fn packed_refs_unexpected_line(path: &Path, line: impl Into<String>) -> Error {
-    Error::Ref(RefError::PackedRefsUnexpectedLine {
+    Error::PackedRefsUnexpectedLine {
         path: path.display().to_string(),
         line: line.into(),
-    })
+    }
 }
 
 fn packed_refs_unterminated_line(path: &Path, line: impl Into<String>) -> Error {
-    Error::Ref(RefError::PackedRefsUnexpectedLine {
+    Error::PackedRefsUnexpectedLine {
         path: path.display().to_string(),
         line: line.into(),
-    })
+    }
 }
 
 /// Validate a `^<peeled-oid>` line and return the peeled id.
@@ -2395,7 +2386,7 @@ impl PackedRefPeels {
     /// # Errors
     ///
     /// Returns [`Error::Io`] when `packed-refs` exists but cannot be read, or
-    /// [`Error::Ref(RefError::PackedRefsUnexpectedLine`] when it is malformed.
+    /// [`Error::PackedRefsUnexpectedLine`] when it is malformed.
     pub fn load(git_dir: &Path, format: RefStorageFormat) -> Result<Self> {
         if format != RefStorageFormat::Files {
             return Ok(Self::from_view(None));
@@ -2607,18 +2598,18 @@ pub fn write_symbolic_ref(git_dir: &Path, refname: &str, target: &str) -> Result
 pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
     if let Some(rest) = refname.strip_prefix("refs/") {
         if rest.is_empty() || !crate::check_ref_format::is_valid_fetch_advertised_ref(refname) {
-            return Err(Error::Ref(RefError::invalid_reason(format!(
+            return Err(Error::InvalidRef(format!(
                 "refusing to update ref with bad name '{refname}'"
-            ))));
+            )));
         }
         return Ok(());
     }
     if crate::check_ref_format::refname_is_safe(refname) {
         Ok(())
     } else {
-        Err(Error::Ref(RefError::invalid_reason(format!(
+        Err(Error::InvalidRef(format!(
             "refusing to update ref with bad name '{refname}'"
-        ))))
+        )))
     }
 }
 
@@ -2715,15 +2706,10 @@ fn write_ref_at_storage(
     {
         return Err(directory_in_the_way(git_dir, refname, &path));
     }
-    if path.is_file()
-        && matches!(
-            read_ref_file(&path),
-            Err(Error::Ref(RefError::InvalidName { .. }))
-        )
-    {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
+    if path.is_file() && matches!(read_ref_file(&path), Err(Error::InvalidRef(_))) {
+        return Err(Error::InvalidRef(format!(
             "cannot update ref '{refname}': reference broken"
-        ))));
+        )));
     }
     if let Some(parent) = path.parent() {
         crate::git_dir::io_error::io_with_git_path(
@@ -2879,7 +2865,7 @@ impl PackedRefs {
     /// # Errors
     ///
     /// Returns [`Error::Io`] if `packed-refs` exists but cannot be read, or
-    /// [`Error::Ref(RefError::PackedRefsUnexpectedLine`] when the file contains lines Git would reject.
+    /// [`Error::PackedRefsUnexpectedLine`] when the file contains lines Git would reject.
     pub fn load(git_dir: &Path) -> Result<Self> {
         let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
         let map = read_packed_refs_map(&store)?;
@@ -2978,9 +2964,9 @@ pub fn write_ref_cached(
     }
     ensure_refname_safe_for_storage(refname)?;
     if packed.has_namespace_conflict(refname) {
-        return Err(Error::Ref(RefError::invalid_reason(format!(
+        return Err(Error::InvalidRef(format!(
             "cannot update ref '{refname}': reference namespace conflict"
-        ))));
+        )));
     }
     let storage_dir = ref_storage_dir(git_dir, refname);
     write_ref_at_storage(git_dir, &storage_dir, refname, oid)?;
@@ -4148,10 +4134,10 @@ impl BranchCommitRefLock {
         ensure_refname_safe_for_storage(branch_ref)?;
         let storage_dir = ref_storage_dir(git_dir, branch_ref);
         if packed_ref_namespace_conflict(&storage_dir, branch_ref)? {
-            return Err(Error::Ref(RefError::invalid_reason(format!(
+            return Err(Error::InvalidRef(format!(
                 "cannot update ref '{}': reference namespace conflict",
                 branch_ref
-            ))));
+            )));
         }
         let stor = crate::ref_namespace::storage_ref_name(branch_ref);
         let path = storage_dir.join(&stor);
@@ -5194,18 +5180,12 @@ pub fn resolve_at_n_branch(git_dir: &Path, spec: &str) -> Result<String> {
     let inner = spec
         .strip_prefix("@{-")
         .and_then(|s| s.strip_suffix('}'))
-        .ok_or_else(|| {
-            Error::Ref(RefError::invalid_reason(format!(
-                "not an @{{-N}} ref: {spec}"
-            )))
-        })?;
+        .ok_or_else(|| Error::InvalidRef(format!("not an @{{-N}} ref: {spec}")))?;
     let n: usize = inner
         .parse()
-        .map_err(|_| Error::Ref(RefError::invalid_reason(format!("invalid N in {spec}"))))?;
+        .map_err(|_| Error::InvalidRef(format!("invalid N in {spec}")))?;
     if n == 0 {
-        return Err(Error::Ref(RefError::invalid_reason(
-            "@{-0} is not valid".to_string(),
-        )));
+        return Err(Error::InvalidRef("@{-0} is not valid".to_string()));
     }
     let entries = crate::reflog::read_reflog(git_dir, "HEAD")?;
     let mut count = 0usize;
@@ -5220,9 +5200,9 @@ pub fn resolve_at_n_branch(git_dir: &Path, spec: &str) -> Result<String> {
             }
         }
     }
-    Err(Error::Ref(RefError::invalid_reason(format!(
+    Err(Error::InvalidRef(format!(
         "{spec}: only {count} checkout(s) in reflog"
-    ))))
+    )))
 }
 
 fn ref_name_matches_list_prefix(refname: &str, prefix: &str) -> bool {
@@ -5669,10 +5649,7 @@ mod ref_storage_traversal_guard_tests {
     }
 
     fn assert_invalid_ref_preserves_config(git_dir: &Path, result: Result<()>) {
-        assert!(matches!(
-            result,
-            Err(Error::Ref(RefError::InvalidName { .. }))
-        ));
+        assert!(matches!(result, Err(Error::InvalidRef(_))));
         assert!(
             git_dir.join("config").is_file(),
             "repository config must not be touched"
@@ -5983,7 +5960,7 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6000,7 +5977,7 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6034,7 +6011,7 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
 
         fs::write(
@@ -6046,7 +6023,7 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6133,7 +6110,7 @@ mod packed_refs_parse_tests {
         let view = PackedRefsFileView::from_bytes(&path, bad.into_bytes(), HashAlgo::Sha1).unwrap();
         assert!(matches!(
             view.map_for_prefix_filtered(&path, None, Some(&|_: &str, _: &ObjectId, _| false)),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6230,7 +6207,7 @@ mod packed_refs_parse_tests {
         .unwrap();
         assert!(matches!(
             bad_peel_on_branch.map_for_prefix(&path, Some("refs/heads")),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
         let tags = bad_peel_on_branch
             .map_for_prefix(&path, Some("refs/tags"))
@@ -6286,7 +6263,7 @@ mod packed_refs_parse_tests {
         assert_eq!(heads.keys().collect::<Vec<_>>(), ["refs/heads/main"]);
         assert!(matches!(
             view.map_for_prefix(&path, Some("refs/tags")),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
         assert!(view.map_for_prefix(&path, None).is_err());
 
@@ -6294,7 +6271,7 @@ mod packed_refs_parse_tests {
         bad_header.extend_from_slice(format!("{oid} refs/heads/main\n").as_bytes());
         assert!(matches!(
             PackedRefsFileView::from_bytes(&path, bad_header, HashAlgo::Sha1),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6313,7 +6290,7 @@ mod packed_refs_parse_tests {
         for prefix in [None, Some("refs/heads")] {
             assert!(matches!(
                 view.map_for_prefix(&path, prefix),
-                Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+                Err(Error::PackedRefsUnexpectedLine { .. })
             ));
         }
         let header_only = PackedRefsFileView::from_bytes(
@@ -6358,7 +6335,7 @@ mod packed_refs_parse_tests {
             assert!(
                 matches!(
                     view(body.clone(), algo),
-                    Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+                    Err(Error::PackedRefsUnexpectedLine { .. })
                 ),
                 "{algo:?}: {body:?}"
             );
@@ -6414,7 +6391,7 @@ mod packed_refs_parse_tests {
         ));
         assert!(matches!(
             garbage_after_first_branch.map_for_prefix(&path, Some("refs/heads")),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
         let tags = garbage_after_first_branch
             .map_for_prefix(&path, Some("refs/tags"))
@@ -6520,7 +6497,7 @@ mod packed_refs_parse_tests {
         .unwrap();
         assert!(matches!(
             list_refs(git_dir, "refs/"),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6643,7 +6620,7 @@ mod packed_refs_parse_tests {
         });
         assert!(matches!(
             result,
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
         assert_eq!(emitted, 0);
     }
@@ -6747,7 +6724,7 @@ mod packed_refs_parse_tests {
         .unwrap();
         assert!(matches!(
             corrupt.map_for_prefix(&path, Some("refs/heads")),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -6805,7 +6782,7 @@ mod packed_refs_parse_tests {
                 assert!(
                     matches!(
                         view.map_for_prefix(&path, Some("refs/heads/m")),
-                        Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+                        Err(Error::PackedRefsUnexpectedLine { .. })
                     ),
                     "{records}"
                 );
@@ -6867,7 +6844,7 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
 
         fs::write(
@@ -6879,7 +6856,7 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 }
@@ -7207,7 +7184,7 @@ mod pack_refs_tests {
         let orphan = format!("^{OID_B}\n{OID_C} refs/tags/b\n");
         assert!(matches!(
             packed_entries_with_peel(path, orphan.as_bytes()),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -7289,7 +7266,7 @@ mod pack_refs_tests {
         fs::write(&packed_path, format!("^{c1}\n")).expect("corrupt");
         assert!(matches!(
             pack_refs_files(&git_dir, repo.odb(), None, false, true),
-            Err(Error::Ref(RefError::PackedRefsUnexpectedLine { .. }))
+            Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
 
@@ -7321,7 +7298,7 @@ mod pack_refs_tests {
         assert!(
             matches!(
                 &err,
-                Error::Ref(RefError::RefLock(RefLockError::PackedRefsLockHeld { lock_path }))
+                Error::RefLock(RefLockError::PackedRefsLockHeld { lock_path })
                     if lock_path.ends_with("packed-refs.lock")
             ),
             "{err:?}"

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::progress::NeverCancel;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{
     load_push_plan_context, open_push_destination, resolve_push, PushPlanError, PushPlanKind,
     PushRequest,
@@ -80,7 +80,7 @@ fn delete_push_removes_every_named_ref_like_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &NeverCancel,
             None,
         )

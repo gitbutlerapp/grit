@@ -33,7 +33,6 @@ use crate::refs::store::RefUpdateFlags;
 use crate::refs::store::{
     Expected, RawRef, RefStoreError, RefTransaction, RefUpdate, ReflogUpdate,
 };
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
@@ -1619,10 +1618,8 @@ fn head_commit_after(
     }
     match head {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
-        HeadState::Branch { oid: None, .. } => {
-            Err(crate::error::Error::Ref(RefError::UnbornHead).into())
-        }
-        HeadState::Invalid => Err(crate::error::Error::Ref(RefError::InvalidHead).into()),
+        HeadState::Branch { oid: None, .. } => Err(crate::error::Error::UnbornHead.into()),
+        HeadState::Invalid => Err(crate::error::Error::InvalidHead.into()),
     }
 }
 
@@ -2266,8 +2263,6 @@ mod inject_and_apply_tests {
 
     #[test]
     fn apply_rewrite_invalid_notes_rewrite_mode_leaves_branch_tip() {
-        use crate::notes::NotesError;
-
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
@@ -2386,10 +2381,7 @@ mod inject_and_apply_tests {
             matches!(
                 &err,
                 HistoryError::Library(e)
-                    if matches!(
-                        e.as_ref(),
-                        crate::error::Error::Notes(NotesError::NotesRewriteMode { mode: _ })
-                    )
+                    if matches!(e.as_ref(), crate::error::Error::NotesRewriteMode(_))
             ),
             "unexpected error: {err:?}"
         );

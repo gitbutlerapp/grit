@@ -6,8 +6,9 @@ use grit_test_support::rev_parse;
 use std::path::{Path, PathBuf};
 
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::fetch::{fetch_remote, NoProgress};
+use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, FetchOutcome, TagMode, UpdateMode};
 use grit_lib::remote::transport::{ConnectOptions, Service, SshTransport, Transport};
 use grit_test_support::git;
@@ -195,7 +196,7 @@ fn ssh_fetch(
         &local.join(".git"),
         conn.as_mut(),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("ssh fetch")

@@ -83,7 +83,9 @@ impl Stage {
             ProgressPhase::ReceivingObjects
             | ProgressPhase::SendingObjects
             | ProgressPhase::EnumeratingObjects
-            | ProgressPhase::CopyingObjects => Some(Self::Transfer),
+            | ProgressPhase::CopyingObjects
+            | ProgressPhase::CompressingObjects
+            | ProgressPhase::WritingObjects => Some(Self::Transfer),
             ProgressPhase::IndexingObjects => Some(Self::Indexing),
             ProgressPhase::ResolvingDeltas => Some(Self::Resolving),
             ProgressPhase::CheckingOutFiles => Some(Self::Checkout),

@@ -16,9 +16,7 @@ use crate::config::ConfigSet;
 use crate::objects::pack_objects::PackStats;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::pack_object_select::{PackObjectSelection, TagCandidate};
-use crate::pack_objects::{
-    write_upload_pack_selection, write_upload_pack_stream_with_cancel, PackProgress,
-};
+use crate::pack_objects::{write_upload_pack_selection, write_upload_pack_stream_with_cancel};
 use crate::pkt_line::SidebandChannel1Writer;
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::promisor_remote::{parse_accepted_reply, PromisorAdvertisement};
@@ -1434,7 +1432,7 @@ fn write_prepared_pack(
     stop: &CancelSignal<'_>,
 ) -> Result<PackStats> {
     stop.poll().map_err(|_| ServeError::Cancelled)?;
-    let mut progress = |_ev: PackProgress| {};
+    let mut progress = crate::progress::NullProgress;
     let mut send = |out: &mut dyn Write| match &prepared.planned {
         Some(selection) => {
             write_upload_pack_selection(input.repo, selection, &prepared.pack_opts, out, stop)

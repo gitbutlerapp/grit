@@ -7,7 +7,6 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::index::Index;
-use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::attributes::{
     attribute_matching_ignore_case, builtin_objectmode_index, builtin_objectmode_worktree,
@@ -586,7 +585,7 @@ fn t0003_resolve_attr_treeish_and_tree_oid_errors() {
     let repo2 =
         Repository::open(&wt.join(".git"), &options.clone().with_work_tree(wt)).expect("open2");
     let err = load_gitattributes_for_diff(&repo2).unwrap_err();
-    assert!(matches!(err, Error::Ref(RefError::InvalidName { .. })));
+    assert!(matches!(err, Error::InvalidRef(_)));
 }
 
 fn null_dev() -> &'static str {

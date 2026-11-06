@@ -5,6 +5,8 @@
 
 #![allow(dead_code)]
 
+#[allow(unused_imports)]
+pub(crate) use crate::pack_index::parse_pack_index_bytes;
 pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
 
 #[cfg(test)]

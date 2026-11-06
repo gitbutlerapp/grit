@@ -14,7 +14,7 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 
 use grit_lib::error::Result as GritResult;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{http_fetch, HttpClient};
@@ -197,8 +197,14 @@ fn grit_fetch(
         opts.fetch_depth = fetch_depth;
         opts
     };
-    let outcome = http_fetch(client, &work.join(".git"), url, &mut opts, &mut NoProgress)
-        .unwrap_or_else(|e| panic!("protocol v{protocol} fetch: {e}"));
+    let outcome = http_fetch(
+        client,
+        &work.join(".git"),
+        url,
+        &mut opts,
+        &mut NullProgress,
+    )
+    .unwrap_or_else(|e| panic!("protocol v{protocol} fetch: {e}"));
     let bodies = recording.bodies.lock().unwrap().clone();
     (outcome, bodies)
 }

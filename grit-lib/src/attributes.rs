@@ -19,7 +19,6 @@ use crate::objects::parse_tree;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::odb::Odb;
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
@@ -1254,9 +1253,9 @@ pub(crate) fn load_gitattributes_for_diff(
             Ok(oid) => return load_gitattributes_from_tree(repo, &oid),
             Err(_) if ignore_bad_tree => {}
             Err(_) => {
-                return Err(crate::error::Error::Ref(RefError::invalid_reason(format!(
+                return Err(crate::error::Error::InvalidRef(format!(
                     "bad --attr-source or GIT_ATTR_SOURCE: {spec}"
-                ))));
+                )));
             }
         }
     }

@@ -2,7 +2,6 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::notes::NotesError;
 use grit_lib::notes::{read_notes_tree, resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -211,7 +210,7 @@ fn add_existing_without_force_is_typed_error() {
         )
         .expect_err("must reject duplicate note");
     assert!(
-        matches!(err, Error::Notes(NotesError::NoteAlreadyExists { .. })),
+        matches!(err, Error::NoteAlreadyExists { .. }),
         "expected typed NoteAlreadyExists, got {err:?}"
     );
 }
@@ -219,10 +218,7 @@ fn add_existing_without_force_is_typed_error() {
 #[test]
 fn padded_git_notes_ref_is_invalid() {
     let err = NotesRef::from_full(" refs/notes/spaced ").expect_err("padded ref");
-    assert!(matches!(
-        err,
-        Error::Notes(NotesError::InvalidNotesRef { name: _ })
-    ));
+    assert!(matches!(err, Error::InvalidNotesRef(_)));
 
     let dir = tempfile::tempdir().expect("tempdir");
     init_repo(dir.path());
@@ -242,10 +238,7 @@ fn padded_git_notes_ref_is_invalid() {
 #[test]
 fn trailing_space_notes_ref_is_invalid() {
     let err = NotesRef::from_full("refs/notes/spaced ").expect_err("trailing space");
-    assert!(matches!(
-        err,
-        Error::Notes(NotesError::InvalidNotesRef { name: _ })
-    ));
+    assert!(matches!(err, Error::InvalidNotesRef(_)));
 }
 
 #[test]
@@ -263,7 +256,7 @@ fn padded_core_notes_ref_is_invalid() {
     )
     .expect_err("padded core.notesRef");
     assert!(
-        matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })),
+        matches!(err, Error::InvalidNotesRef(_)),
         "expected InvalidNotesRef, got {err:?}"
     );
 }
@@ -280,7 +273,7 @@ fn empty_core_notes_ref_is_invalid() {
     )
     .expect_err("empty config ref");
     assert!(
-        matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })),
+        matches!(err, Error::InvalidNotesRef(_)),
         "expected InvalidNotesRef, got {err:?}"
     );
 }

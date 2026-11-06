@@ -6,7 +6,7 @@ updated = "2026-11-06"
 semver_baseline = "20719b39f09310afad3e6a7db3177b57b384d9fa"
 
 [counts]
-public_api_lines = 28233
+public_api_lines = 28352
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 116
 pub_fn_too_many_arguments_allow = 22
@@ -14,11 +14,11 @@ pub_fn_two_plus_bare_bool = 26
 pub_fn_result_string_err = 12
 pub_free_fn_repository_first = 387
 pub_free_fn_git_dir_path_first = 109
-pub_items_multiple_paths = 23
+pub_items_multiple_paths = 19
 pub_libc_types = 0
 pub_unsafe_fn = 0
 pub_cancel_types = 86
-pub_progress_interfaces = 6
+pub_progress_interfaces = 4
 pub_refname_validators = 0
 pub_fn_refname_str = 40
 pub_fn_pathspec_strings = 5

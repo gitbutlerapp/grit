@@ -22,7 +22,6 @@ use grit_lib::porcelain::replay_sequence::{
     SequencePrediction,
 };
 use grit_lib::porcelain::revert::commits_to_revert;
-use grit_lib::refs::RefError;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -393,9 +392,7 @@ fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Er
         Error::OperationInProgress(kind) => {
             crate::json_error::operation_in_progress_for_repo(repo, "revert", kind)
         }
-        Error::Ref(RefError::UnbornHead) => {
-            anyhow::anyhow!("no commits yet on this branch to revert onto")
-        }
+        Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to revert onto"),
         Error::MergeCommit { oid } => {
             let s = oid.to_short_hex();
             anyhow::anyhow!(

@@ -1906,23 +1906,15 @@ fn run_textconv_command(command: &str, input_data: &[u8]) -> Result<Vec<u8>> {
         CommandStdin::Null,
         CommandStdio::Inherit,
     )
-    .map_err(|e| {
-        LibError::Diff(crate::diff::error::DiffError::BlameTextconvFailed {
-            detail: format!("running textconv command '{command}': {e}"),
-        })
-    })?;
+    .map_err(|e| LibError::Message(format!("running textconv command '{command}': {e}")))?;
 
     let _ = std::fs::remove_file(&temp_path);
 
     if !output.status.success {
-        return Err(LibError::Diff(
-            crate::diff::error::DiffError::BlameTextconvFailed {
-                detail: format!(
-                    "textconv command exited with status {}",
-                    output.status.code.unwrap_or(-1)
-                ),
-            },
-        ));
+        return Err(LibError::Message(format!(
+            "textconv command exited with status {}",
+            output.status.code.unwrap_or(-1)
+        )));
     }
 
     Ok(output.stdout)
@@ -1943,10 +1935,8 @@ fn create_temp_textconv_file(data: &[u8]) -> Result<std::path::PathBuf> {
             Err(err) => return Err(err.into()),
         }
     }
-    Err(LibError::Diff(
-        crate::diff::error::DiffError::BlameTextconvFailed {
-            detail: "failed to create temporary textconv input file".to_string(),
-        },
+    Err(LibError::Message(
+        "failed to create temporary textconv input file".to_string(),
     ))
 }
 
@@ -1964,9 +1954,7 @@ fn read_blob_content_for_blame(
 ) -> Result<Vec<u8>> {
     let obj = read_object_for_blame(odb, oid, None)?;
     if obj.kind != ObjectKind::Blob {
-        return Err(LibError::Diff(
-            crate::diff::error::DiffError::BlameUnexpectedObjectKind { expected: "blob" },
-        ));
+        return Err(LibError::Message("expected blob object".to_string()));
     }
 
     if !use_textconv || !is_regular_mode(mode) {
@@ -2299,9 +2287,7 @@ impl<'a> BlameSession<'a> {
         // a first-parent walk from re-inflating every chain from its base.
         let obj = self.pack.read(self.odb, &tree_oid)?;
         if obj.kind != ObjectKind::Tree {
-            return Err(LibError::Diff(
-                crate::diff::error::DiffError::BlameUnexpectedObjectKind { expected: "tree" },
-            ));
+            return Err(LibError::Message("expected tree".to_string()));
         }
         let oid_len = self.odb.hash_algo().len();
         Ok(
@@ -3286,17 +3272,13 @@ fn compute_blame_with_session(
 
                 let mut next_remaining: Vec<TrackedLine> = Vec::new();
                 let Some(map) = maps[i].as_ref() else {
-                    return Err(LibError::Diff(
-                        crate::diff::error::DiffError::BlameInternal {
-                            detail: "missing merge parent line map".to_string(),
-                        },
+                    return Err(LibError::Message(
+                        "internal: missing merge parent line map".to_string(),
                     ));
                 };
                 let Some(par_lines) = par_lines_vec[i].as_ref() else {
-                    return Err(LibError::Diff(
-                        crate::diff::error::DiffError::BlameInternal {
-                            detail: "missing merge parent lines".to_string(),
-                        },
+                    return Err(LibError::Message(
+                        "internal: missing merge parent lines".to_string(),
                     ));
                 };
                 let parent_line_count = par_lines.len();
@@ -4349,9 +4331,7 @@ fn collect_tree_file_entries(
 ) -> Result<()> {
     let obj = read_object_for_blame(odb, tree_oid, None)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(LibError::Diff(
-            crate::diff::error::DiffError::BlameUnexpectedObjectKind { expected: "tree" },
-        ));
+        return Err(LibError::Message("expected tree".to_string()));
     }
     let entries = parse_tree(&obj.data)?;
     for entry in entries {
@@ -4677,7 +4657,7 @@ pub fn resolve_blame_line_range_with_options(
         .map_err(|e| invalid(e.to_string()))?;
     let matcher =
         matcher_for_path_parsed(&config, &parsed.rules, &parsed.macros, &file_path, false)
-            .map_err(|e| invalid(e.to_string()))?;
+            .map_err(invalid)?;
     resolve_line_range(spec, &content, &file_path, &config, matcher.as_ref(), 1)
 }
 
@@ -4714,16 +4694,15 @@ impl CopyDetection {
     ///
     /// # Errors
     ///
-    /// Returns [`LibError::Diff`] with [`crate::diff::error::DiffError::BlameCopyDetectionTooManyFlags`]
-    /// when `count` is greater than three.
+    /// Returns [`LibError::Message`] when `count` is greater than three.
     pub fn from_count(count: usize) -> Result<Self> {
         match count {
             0 => Ok(Self::Off),
             1 => Ok(Self::FromModifiedFiles),
             2 => Ok(Self::FromCreatingCommit),
             3 => Ok(Self::FromAnyCommit),
-            _ => Err(LibError::Diff(
-                crate::diff::error::DiffError::BlameCopyDetectionTooManyFlags,
+            _ => Err(LibError::Message(
+                "blame copy detection: at most three -C flags are supported".into(),
             )),
         }
     }
@@ -5120,7 +5099,7 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
 /// worktree file cannot be read or cleaned, when the path is in no parent and not in the
 /// index ([`crate::rev_parse_error::RevParseError::PathNotInRevision`]), and for
 /// [`BlameFinalSource::Worktree`] in a bare repository
-/// ([`crate::diff::error::DiffError::BlameWorktreeBareRepository`]).
+/// ([`LibError::BlameWorktreeBareRepository`]).
 pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Result<BlameResult> {
     let start_oid = resolve_blame_start(repo, options.start)?;
     let file_path = normalize_blame_path(repo, path);
@@ -5345,11 +5324,7 @@ fn load_blame_overlay(
                 None,
             )?
         }
-        (None, _, _) => {
-            return Err(LibError::Diff(
-                crate::diff::error::DiffError::BlameWorktreeBareRepository,
-            ))
-        }
+        (None, _, _) => return Err(LibError::BlameWorktreeBareRepository),
         (Some(bytes), _, Some(attrs)) => {
             crate::crlf::convert_to_git(bytes, rel_match.as_ref(), &conv, attrs)
                 .map_err(LibError::Filter)?
@@ -5420,15 +5395,14 @@ fn loaded_index<'a>(repo: &Repository, slot: &'a mut Option<Index>) -> Result<&'
 
 fn resolve_blame_start(repo: &Repository, start: Option<ObjectId>) -> Result<ObjectId> {
     if let Some(oid) = start {
-        return crate::revwalk::rev_parse::peel_to_commit_for_merge_base(repo, oid)
-            .map_err(Into::into);
+        return crate::revwalk::rev_parse::peel_to_commit_for_merge_base(repo, oid);
     }
     use crate::state::{resolve_head, HeadState};
     match resolve_head(repo.git_dir())? {
         HeadState::Detached { oid } => Ok(oid),
         HeadState::Branch { oid: Some(oid), .. } => Ok(oid),
-        HeadState::Branch { oid: None, .. } | HeadState::Invalid => Err(LibError::Diff(
-            crate::diff::error::DiffError::BlameHeadNotCommit,
+        HeadState::Branch { oid: None, .. } | HeadState::Invalid => Err(LibError::Message(
+            "cannot blame: HEAD does not point to a commit".to_string(),
         )),
     }
 }
