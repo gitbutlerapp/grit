@@ -10,6 +10,7 @@ use crate::index::{
     INDEX_EXT_FSMONITOR, INDEX_EXT_LINK, INDEX_EXT_RESOLVE_UNDO, INDEX_EXT_SPARSE_DIRECTORIES,
     INDEX_EXT_UNTRACKED,
 };
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::HashAlgo;
 use crate::objects::ObjectId;
 use crate::parallel::{run_ordered_pool, ThreadPolicy};
@@ -265,21 +266,21 @@ pub(crate) fn parse_index_extensions(
     let mut out = ParsedIndexExtensions::default();
     let hash_len = hash_algo.len();
     while pos + 8 <= end {
-        let sig = u32::from_be_bytes(
-            body[pos..pos + 4]
-                .try_into()
-                .map_err(|_| Error::IndexError("truncated extension sig".to_owned()))?,
-        );
-        let ext_sz = u32::from_be_bytes(
-            body[pos + 4..pos + 8]
-                .try_into()
-                .map_err(|_| Error::IndexError("truncated extension size".to_owned()))?,
-        ) as usize;
+        let sig = u32::from_be_bytes(body[pos..pos + 4].try_into().map_err(|_| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::ExtensionTruncatedSig,
+            )))
+        })?);
+        let ext_sz = u32::from_be_bytes(body[pos + 4..pos + 8].try_into().map_err(|_| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::ExtensionTruncatedSize,
+            )))
+        })?) as usize;
         pos += 8;
         if pos + ext_sz > end {
-            return Err(Error::IndexError(
-                "extension overruns index body".to_owned(),
-            ));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::ExtensionOverrunsBody,
+            ))));
         }
         match sig {
             INDEX_EXT_EOIE | INDEX_EXT_IEOT => {}
@@ -314,16 +315,18 @@ pub(crate) fn parse_index_extensions(
             other => {
                 let first = (other >> 24) as u8 as char;
                 if !first.is_ascii_uppercase() {
-                    return Err(Error::IndexError(format!(
-                        "index uses unsupported extension {other:#010x}"
-                    )));
+                    return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                        IndexCorruptReason::UnsupportedExtension { sig: other },
+                    ))));
                 }
             }
         }
         pos += ext_sz;
     }
     if pos != end {
-        return Err(Error::IndexError("junk after index extensions".to_owned()));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::JunkAfterExtensions,
+        ))));
     }
     if let (Some(entries), Some(dirty)) = (entries_for_fsmonitor, out.fsmonitor_dirty.as_ref()) {
         crate::index::apply_fsmonitor_dirty_to_entries(entries, dirty);
@@ -350,26 +353,30 @@ pub(crate) fn parse_entries_serial(
     start: usize,
 ) -> Result<(Vec<IndexEntry>, usize)> {
     if start > body.len() {
-        return Err(Error::IndexError(
-            "index entry region starts past end of file".to_owned(),
-        ));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::EntryRegionStartsPastEnd,
+        ))));
     }
     let remaining = body.len() - start;
     let min_entry = min_on_disk_index_entry_size(version, hash_len);
     let max_by_bytes = remaining / min_entry;
     if count as usize > max_by_bytes {
-        return Err(Error::IndexError(format!(
-            "index declares {count} entries but only {max_by_bytes} fit in {remaining} bytes"
-        )));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::EntryCountMismatch {
+                declared: count,
+                max_fit: max_by_bytes,
+                remaining,
+            },
+        ))));
     }
 
     let mut pos = start;
     let mut entries = Vec::with_capacity(count as usize);
     for _ in 0..count {
         let Some(tail) = body.get(pos..) else {
-            return Err(Error::IndexError(
-                "index entry overruns index body".to_owned(),
-            ));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::EntryOverrunsBody,
+            ))));
         };
         let prev_path: &[u8] = if version == 4 {
             entries.last().map_or(&[][..], |e: &IndexEntry| &e.path)
@@ -377,13 +384,15 @@ pub(crate) fn parse_entries_serial(
             &[]
         };
         let (entry, consumed) = crate::index::parse_entry(tail, version, prev_path, hash_len)?;
-        pos = pos
-            .checked_add(consumed)
-            .ok_or_else(|| Error::IndexError("index entry size overflow".to_owned()))?;
+        pos = pos.checked_add(consumed).ok_or_else(|| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::EntrySizeOverflow,
+            )))
+        })?;
         if pos > body.len() {
-            return Err(Error::IndexError(
-                "index entry overruns index body".to_owned(),
-            ));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::EntryOverrunsBody,
+            ))));
         }
         entries.push(entry);
     }
@@ -401,11 +410,18 @@ fn parse_ieot_block_range(
     let nr: usize = ieot
         .entries
         .get(block_start..block_end)
-        .ok_or_else(|| Error::IndexError("IEOT block range out of bounds".to_owned()))?
+        .ok_or_else(|| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::IeotBlockRangeOutOfBounds,
+            )))
+        })?
         .iter()
         .try_fold(0usize, |acc, b| {
-            acc.checked_add(b.nr as usize)
-                .ok_or_else(|| Error::IndexError("IEOT entry count overflow".to_owned()))
+            acc.checked_add(b.nr as usize).ok_or_else(|| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::IeotEntryCountOverflow,
+                )))
+            })
         })?;
     let min_entry = min_on_disk_index_entry_size(version, hash_len);
     let mut local = Vec::with_capacity(nr.min(body.len() / min_entry.max(1)));
@@ -413,31 +429,36 @@ fn parse_ieot_block_range(
         let block = &ieot.entries[i];
         let mut pos = block.offset as usize;
         if pos > body.len() {
-            return Err(Error::IndexError(format!(
-                "IEOT block {i} offset {pos} past index body"
-            )));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::IeotBlockOffsetPastBody {
+                    block: i,
+                    offset: pos,
+                },
+            ))));
         }
         let mut prev: Vec<u8> = Vec::new();
         for _ in 0..block.nr {
             if pos >= body.len() {
-                return Err(Error::IndexError(format!(
-                    "IEOT block {i} entry overruns index body at {pos}"
-                )));
+                return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::IeotBlockEntryOverruns { block: i, pos },
+                ))));
             }
             let prev_path: &[u8] = if version == 4 { &prev } else { &[] };
             let Some(tail) = body.get(pos..) else {
-                return Err(Error::IndexError(format!(
-                    "IEOT block {i} entry overruns index body at {pos}"
-                )));
+                return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::IeotBlockEntryOverruns { block: i, pos },
+                ))));
             };
             let (entry, consumed) = crate::index::parse_entry(tail, version, prev_path, hash_len)?;
-            pos = pos
-                .checked_add(consumed)
-                .ok_or_else(|| Error::IndexError("index entry size overflow".to_owned()))?;
+            pos = pos.checked_add(consumed).ok_or_else(|| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::EntrySizeOverflow,
+                )))
+            })?;
             if pos > body.len() {
-                return Err(Error::IndexError(format!(
-                    "IEOT block {i} entry overruns index body at {pos}"
-                )));
+                return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::IeotBlockEntryOverruns { block: i, pos },
+                ))));
             }
             if version == 4 {
                 prev.clear();
@@ -459,7 +480,9 @@ pub(crate) fn parse_entries_parallel(
 ) -> Result<Vec<IndexEntry>> {
     let n_blocks = ieot.entries.len();
     if n_blocks == 0 {
-        return Err(Error::IndexError("empty IEOT table".to_owned()));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::EmptyIeotTable,
+        ))));
     }
     let nr_threads = nr_threads.max(1).min(n_blocks);
     #[cfg(test)]
@@ -480,10 +503,13 @@ pub(crate) fn parse_entries_parallel(
         entries.extend(part);
     }
     if entries.len() != count as usize {
-        return Err(Error::IndexError(format!(
-            "IEOT entry count mismatch: expected {count}, got {}",
-            entries.len()
-        )));
+        return Err(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::IeotEntryCountMismatch {
+                expected: count,
+                got: entries.len(),
+            },
+        ))
+        .into());
     }
     Ok(entries)
 }

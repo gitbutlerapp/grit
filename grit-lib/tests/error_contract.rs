@@ -6,8 +6,14 @@
     clippy::assertions_on_constants
 )]
 
+use std::collections::HashSet;
+
 use grit_lib::error::Error;
 
+/// Slugs emitted by [`Error::kind_name`], in source order, with [`Index`] delegated kinds
+/// expanded (duplicates from delegation appear once at their first occurrence).
+///
+/// [`Index`]: grit_lib::index::IndexError
 const EXPECTED_KIND_NAMES: &[&str] = &[
     "not_a_repository",
     "forbidden_bare_repository",
@@ -47,13 +53,14 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "worktree_file_changed",
     "index_error",
     "index_unmerged",
-    "maintenance_running",
-    "unmerged_conflict_markers",
     "index_path_prefix_conflict",
     "index_fsmonitor_extension_truncated",
     "index_fsmonitor_extension_bad_version",
     "index_fsmonitor_extension_ewah_invalid",
     "cache_tree_corrupt",
+    "message",
+    "maintenance_running",
+    "unmerged_conflict_markers",
     "invalid_ref",
     "packed_refs_unexpected_line",
     "path_error",
@@ -105,7 +112,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "invalid_identity",
     "cancelled",
     "identity",
-    "message",
     "not_fast_forward",
     "nothing_to_commit",
     "unrelated_histories",
@@ -167,40 +173,100 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
 /// Size of [`Error`] when the error-contract step landed (area enums must stay ≤ this until step 12).
 const ERROR_SIZE_CEILING: usize = 112;
 
-/// Slugs from `Error::kind_name` match arms in `grit-lib/src/error.rs` (must stay in sync with the table).
-fn kind_name_slugs_from_source() -> Vec<String> {
-    let src = include_str!("../src/error.rs");
-    let anchor = "pub fn kind_name";
-    let start = src
-        .find(anchor)
-        .unwrap_or_else(|| panic!("{anchor} not found in error.rs"));
-    let match_start = src[start..]
-        .find("match self {")
-        .unwrap_or_else(|| panic!("kind_name match block not found"));
-    let block = &src[start + match_start..];
-    let mut slugs = Vec::new();
-    for line in block.lines().skip(1) {
-        let trimmed = line.trim();
-        if trimmed == "}" {
-            break;
+fn extract_kind_name_match_body<'a>(src: &'a str, impl_anchor: &str) -> &'a str {
+    let idx = src
+        .find(impl_anchor)
+        .unwrap_or_else(|| panic!("{impl_anchor} not found"));
+    let sub = &src[idx..];
+    let fn_start = sub
+        .find("pub fn kind_name")
+        .unwrap_or_else(|| panic!("pub fn kind_name not found after {impl_anchor}"));
+    let sub = &sub[fn_start..];
+    let match_kw = "match self {";
+    let m_start = sub
+        .find(match_kw)
+        .unwrap_or_else(|| panic!("{match_kw} not found in kind_name"));
+    let after_open = m_start + match_kw.len();
+    let mut brace = 1usize;
+    let mut i = after_open;
+    while i < sub.len() && brace > 0 {
+        match sub.as_bytes()[i] {
+            b'{' => brace += 1,
+            b'}' => brace -= 1,
+            _ => {}
         }
-        if let Some(pos) = line.find("=> \"") {
-            let after = &line[pos + 4..];
-            if let Some(end) = after.find('"') {
-                slugs.push(after[..end].to_owned());
+        i += 1;
+    }
+    assert_eq!(brace, 0, "unbalanced braces in kind_name match");
+    &sub[after_open..i - 1]
+}
+
+fn literal_slugs_from_kind_match(body: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in body.lines() {
+        if !line.contains("=>") {
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.contains("=>") && trimmed.contains("kind_name()") {
+            continue;
+        }
+        let Some(pos) = line.find("=> \"") else {
+            continue;
+        };
+        let after = &line[pos + 4..];
+        let Some(end) = after.find('"') else {
+            continue;
+        };
+        out.push(after[..end].to_owned());
+    }
+    out
+}
+
+fn expanded_kind_name_slugs() -> Vec<String> {
+    let umbrella = extract_kind_name_match_body(include_str!("../src/error.rs"), "impl Error {");
+    let index_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
+        include_str!("../src/index/error.rs"),
+        "impl IndexError {",
+    ));
+
+    let mut expanded: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for line in umbrella.lines() {
+        let trimmed = line.trim();
+        if !trimmed.contains("=>") {
+            continue;
+        }
+        if trimmed.contains("Self::Index(") && trimmed.contains("kind_name()") {
+            for s in &index_slugs {
+                if seen.insert(s.clone()) {
+                    expanded.push(s.clone());
+                }
             }
+            continue;
+        }
+        let Some(pos) = line.find("=> \"") else {
+            continue;
+        };
+        let after = &line[pos + 4..];
+        let Some(end) = after.find('"') else {
+            continue;
+        };
+        let slug = after[..end].to_owned();
+        if seen.insert(slug.clone()) {
+            expanded.push(slug);
         }
     }
-    slugs
+    expanded
 }
 
 #[test]
 fn error_kind_names_are_stable() {
-    let parsed = kind_name_slugs_from_source();
+    let parsed = expanded_kind_name_slugs();
     assert_eq!(
         parsed.len(),
         EXPECTED_KIND_NAMES.len(),
-        "update EXPECTED_KIND_NAMES when kind_name arms change"
+        "update EXPECTED_KIND_NAMES when kind_name arms or delegated kind_name tables change"
     );
     for (idx, (live, pinned)) in parsed.iter().zip(EXPECTED_KIND_NAMES.iter()).enumerate() {
         assert_eq!(live, pinned, "kind slug mismatch at index {idx}");

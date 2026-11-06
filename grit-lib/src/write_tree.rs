@@ -7,6 +7,7 @@ use crate::index::{
     CacheTreeNode, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
     MODE_TREE,
 };
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{
     oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind,
     OidHashSet, TreeEntry,
@@ -171,7 +172,9 @@ pub(crate) fn cache_tree_update(odb: &Odb, index: &mut Index, flags: WriteTreeFl
     let mut skipped = 0i32;
     let (consumed, _) = rebuild_directory_node(&ctx, &mut root, &rows, b"", 0, &mut skipped)?;
     if consumed < 0 {
-        return Err(Error::IndexError("cache-tree update failed".to_owned()));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::CacheTreeUpdateFailed,
+        ))));
     }
     index.cache_tree_root = root.oid.filter(|_| root.entry_count >= 0);
     index.cache_tree = Some(root);
@@ -199,19 +202,33 @@ pub fn write_tree_update_index(
 
     if prefix.is_empty() {
         let root = index.cache_tree.as_ref().ok_or_else(|| {
-            Error::IndexError("write-tree: missing cache-tree after update".to_owned())
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::WriteTreeMissingCacheTree,
+            )))
         })?;
         let oid = root.oid.ok_or_else(|| {
-            Error::IndexError("write-tree: cache-tree root has no oid".to_owned())
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::WriteTreeCacheTreeRootMissingOid,
+            )))
         })?;
         return Ok(oid);
     }
 
     let subtree = find_cache_tree_subtree(index.cache_tree.as_ref(), prefix.as_bytes())
-        .ok_or_else(|| Error::IndexError(format!("write-tree: invalid prefix '{prefix}'")))?;
-    let oid = subtree
-        .oid
-        .ok_or_else(|| Error::IndexError(format!("write-tree: invalid prefix '{prefix}'")))?;
+        .ok_or_else(|| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::WriteTreeInvalidPrefix {
+                    prefix: prefix.to_owned(),
+                },
+            )))
+        })?;
+    let oid = subtree.oid.ok_or_else(|| {
+        Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::WriteTreeInvalidPrefix {
+                prefix: prefix.to_owned(),
+            },
+        )))
+    })?;
     Ok(oid)
 }
 
@@ -235,7 +252,7 @@ fn cache_tree_index_rows(index: &Index) -> Vec<&IndexEntry> {
 
 fn verify_index_for_cache_tree(index: &Index, _silent: bool) -> Result<()> {
     if index.entries.iter().any(|e| e.stage() != 0) {
-        return Err(Error::IndexUnmerged);
+        return Err(IndexError::unmerged().into());
     }
     let rows = cache_tree_index_rows(index);
     for pair in rows.windows(2) {
@@ -245,10 +262,11 @@ fn verify_index_for_cache_tree(index: &Index, _silent: bool) -> Result<()> {
             && longer.get(shorter.len()) == Some(&b'/')
             && longer.starts_with(shorter.as_slice())
         {
-            return Err(Error::IndexPathPrefixConflict {
+            return Err(IndexError::PathPrefixConflict {
                 directory: path_buf_from_bytes(shorter),
                 file: path_buf_from_bytes(longer),
-            });
+            }
+            .into());
         }
     }
     Ok(())
@@ -360,10 +378,12 @@ fn rebuild_directory_node(
         };
         let child_name = &tail[..component_end];
         let child = find_or_create_child(node, child_name, true).ok_or_else(|| {
-            Error::IndexError(format!(
-                "failed to attach cache-tree child '{}'",
-                String::from_utf8_lossy(child_name)
-            ))
+            Error::from(IndexError::WriteTree {
+                detail: format!(
+                    "failed to attach cache-tree child '{}'",
+                    String::from_utf8_lossy(child_name)
+                ),
+            })
         })?;
         let nested_len = prefix_len + component_end + 1;
         let mut nested_extra = 0i32;
@@ -410,22 +430,28 @@ fn rebuild_directory_node(
         let (oid, mode, name_len, advance, known_present) = if let Some(off) = slash {
             let name = &tail[..off];
             let child = find_or_create_child(node, name, false).ok_or_else(|| {
-                Error::IndexError(format!(
-                    "cache-tree child '{}' missing for '{}'",
-                    String::from_utf8_lossy(name),
-                    String::from_utf8_lossy(path)
-                ))
+                Error::from(IndexError::WriteTree {
+                    detail: format!(
+                        "cache-tree child '{}' missing for '{}'",
+                        String::from_utf8_lossy(name),
+                        String::from_utf8_lossy(path)
+                    ),
+                })
             })?;
-            let (covered, known_present) = *nested_sizes
-                .get(name)
-                .ok_or_else(|| Error::IndexError("cache-tree nested size missing".to_owned()))?;
+            let (covered, known_present) = *nested_sizes.get(name).ok_or_else(|| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::WriteTreeCacheTreeChildMissing,
+                )))
+            })?;
             let pending = child.entry_count < 0;
             if pending {
                 stale = true;
             }
-            let oid = child
-                .oid
-                .ok_or_else(|| Error::IndexError("cache-tree child oid missing".to_owned()))?;
+            let oid = child.oid.ok_or_else(|| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::WriteTreeCacheTreeChildMissing,
+                )))
+            })?;
             if pending && is_empty_tree_oid(odb, &oid) {
                 pos += covered as usize;
                 continue;
@@ -612,11 +638,14 @@ fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> Result
     path.strip_prefix(dir_prefix)
         .and_then(|suffix| suffix.strip_prefix(b"/"))
         .ok_or_else(|| {
-            Error::IndexError(format!(
-                "index path {} is not under tree prefix {}",
-                String::from_utf8_lossy(path),
-                String::from_utf8_lossy(dir_prefix)
-            ))
+            IndexError::WriteTree {
+                detail: format!(
+                    "index path {} is not under tree prefix {}",
+                    String::from_utf8_lossy(path),
+                    String::from_utf8_lossy(dir_prefix)
+                ),
+            }
+            .into()
         })
 }
 
@@ -841,7 +870,7 @@ fn verify_cache_tree_one(
     };
 
     if (node.entry_count as usize).saturating_add(pos) > cache.len() {
-        return Err(crate::error::Error::CacheTreeCorrupt);
+        return Err(IndexError::CacheTreeCorrupt.into());
     }
     Ok(())
 }
@@ -951,7 +980,9 @@ fn build_cache_tree_node(
                 let child_node =
                     build_cache_tree_node(odb, &sub_prefix, child_name.clone(), &sub_entries)?;
                 let oid = child_node.oid.ok_or_else(|| {
-                    crate::error::Error::IndexError("cache-tree child missing oid".to_owned())
+                    Error::from(IndexError::corrupt(IndexCorrupt::new(
+                        IndexCorruptReason::WriteTreeCacheTreeChildMissing,
+                    )))
                 })?;
                 tree_entries.push(TreeEntry {
                     mode: MODE_TREE,
@@ -1289,7 +1320,7 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(conflict);
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
-        assert!(matches!(err, Error::IndexUnmerged));
+        assert!(matches!(err, Error::Index(IndexError::Unmerged { .. })));
     }
 
     #[test]
@@ -1302,7 +1333,10 @@ mod tests {
         index.add_or_replace(entry("dir", MODE_REGULAR, a));
         index.add_or_replace(entry("dir/file", MODE_REGULAR, b));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
-        assert!(matches!(err, Error::IndexPathPrefixConflict { .. }));
+        assert!(matches!(
+            err,
+            Error::Index(IndexError::PathPrefixConflict { .. })
+        ));
     }
 
     #[test]

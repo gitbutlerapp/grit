@@ -35,6 +35,25 @@ Every operation that updates the work tree from a tree consults it: `reset --har
 
 [`write_tree_from_index`](rustdoc:grit_lib::index::write_tree::write_tree_from_index) builds a tree object from stage-0 entries (respecting the optional path prefix). It returns the root [`ObjectId`](rustdoc:grit_lib::objects::ObjectId). When the index cache-tree extension is valid, grit reuses cached subtree oids for speed; otherwise it walks entries and writes new tree objects through [`Odb`](rustdoc:grit_lib::objects::odb::Odb).
 
+## Errors
+
+Index load, write, extension parsing, and write-tree failures return [`IndexError`](rustdoc:grit_lib::index::IndexError) (wrapped as [`Error::Index`](rustdoc:grit_lib::error::Error::Index) at the repository boundary). Match on the enum, not message text:
+
+| Variant | When |
+| --- | --- |
+| `Corrupt` | Bad header, unsupported version, truncated bytes, checksum mismatch, or malformed entries/extensions (`IndexCorruptReason` pinpoints the site). |
+| `Unmerged` | Conflict stages remain; commit or write-tree needs a clean stage-0 index. |
+| `PathPrefixConflict` | Two paths disagree on whether a prefix is a file or directory. |
+| `FsmonitorExtension*` | The `FSMN` extension is truncated, has an unknown version, or carries an invalid EWAH bitmap. |
+| `CacheTreeCorrupt` | Cache-tree metadata does not match index entries. |
+| `LockHeld` | Another process holds `index.lock` (also surfaced as top-level [`Error::LockHeld`](rustdoc:grit_lib::error::Error::LockHeld)). |
+| `PathIo` | Filesystem I/O on the index path. |
+| `SplitIndex` | Split-index link/read/write failed. |
+| `Chmod` | Mode change rejected (unmerged path, non-regular file, invalid mode). |
+| `WriteTree` | Structured write-tree / cache-tree rebuild failure. |
+
+Stable JSON `kind` slugs (`index_error`, `index_unmerged`, `cache_tree_corrupt`, …) come from [`IndexError::kind_name`](rustdoc:grit_lib::index::IndexError::kind_name). See the [errors](errors/) overview for the cross-area map.
+
 ## Example
 
 This program loads the index, stages new or changed paths, and prints the tree oid grit would commit:

@@ -36,6 +36,7 @@ use crate::diff_rename_parallel::{
 };
 use crate::error::{Error, Result, SubmoduleError};
 use crate::index::{CacheTreeNode, Index, IndexEntry, MODE_SYMLINK, MODE_TREE};
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{
     parse_commit, CommitData, FileMode, ObjectId, ObjectKind, TreeEntry, TreeEntryRef, TreeRefIter,
 };
@@ -4758,7 +4759,11 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
         dir_prefix,
         walk.ignore_submodules,
     )
-    .ok_or_else(|| Error::IndexError("missing index entry during tree walk".to_owned()))?;
+    .ok_or_else(|| {
+        Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::MissingIndexEntryDuringTreeWalk,
+        )))
+    })?;
     match ie_kind {
         IndexLevelKind::Blob { entry: ie, .. } => {
             let path = String::from_utf8_lossy(&ie.path).into_owned();
@@ -4960,9 +4965,10 @@ pub(crate) fn rebuild_hard_reset_cache_tree(
         index.set_cache_tree(root);
         Ok(())
     } else {
-        Err(Error::IndexError(
-            "hard reset cache-tree entry count does not match index".into(),
+        Err(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::HardResetCacheTreeEntryCountMismatch,
         ))
+        .into())
     }
 }
 
@@ -5005,9 +5011,10 @@ fn rebuild_hard_reset_cache_tree_at(
                 let t_is_tree = is_tree_mode(t_entry.mode);
                 let cmp = crate::objects::tree_entry_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 if cmp != std::cmp::Ordering::Equal {
-                    return Err(Error::IndexError(
-                        "hard reset cache-tree rebuild: index out of sync with target tree".into(),
-                    ));
+                    return Err(IndexError::corrupt(IndexCorrupt::new(
+                        IndexCorruptReason::HardResetCacheTreeOutOfSync,
+                    ))
+                    .into());
                 }
                 if t_is_tree && i_is_tree {
                     let full_path = join_index_path(dir_prefix, t_name);
@@ -5039,9 +5046,10 @@ fn rebuild_hard_reset_cache_tree_at(
                     entry_count = entry_count.saturating_add(child.entry_count.max(0));
                     children.push(child);
                 } else if t_is_tree != i_is_tree {
-                    return Err(Error::IndexError(
-                        "hard reset cache-tree rebuild: tree/index type mismatch".into(),
-                    ));
+                    return Err(IndexError::corrupt(IndexCorrupt::new(
+                        IndexCorruptReason::HardResetCacheTreeTypeMismatch,
+                    ))
+                    .into());
                 } else {
                     *idx_cursor += 1;
                     entry_count = entry_count.saturating_add(1);
@@ -5050,9 +5058,10 @@ fn rebuild_hard_reset_cache_tree_at(
             }
             (None, None) => break,
             _ => {
-                return Err(Error::IndexError(
-                    "hard reset cache-tree rebuild: index out of sync with target tree".into(),
-                ));
+                return Err(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::HardResetCacheTreeOutOfSync,
+                ))
+                .into());
             }
         }
     }
@@ -5224,7 +5233,11 @@ fn hard_reset_plan_index_only(
         dir_prefix,
         walk.ignore_submodules,
     )
-    .ok_or_else(|| Error::IndexError("missing index entry during hard reset align".into()))?;
+    .ok_or_else(|| {
+        Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::MissingIndexEntryDuringHardReset,
+        )))
+    })?;
     match ie_kind {
         IndexLevelKind::Blob { entry: ie, .. } => {
             walk.plan.remove_paths.push(ie.path.clone());

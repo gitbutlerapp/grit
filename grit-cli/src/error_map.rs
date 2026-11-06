@@ -3,6 +3,8 @@
 
 use std::error::Error as StdError;
 
+use grit_lib::index::IndexError;
+
 use anyhow::Error;
 use grit_lib::command_runner::hooks::HookError;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -979,7 +981,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             None,
             None,
         )),
-        LibError::IndexUnmerged => Some(guided(
+        LibError::Index(IndexError::Unmerged { .. }) => Some(guided(
             ErrorKind::UnmergedPaths,
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again".to_owned(),
             Some(

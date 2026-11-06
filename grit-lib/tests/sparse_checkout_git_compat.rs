@@ -113,7 +113,10 @@ fn git_written_sparse_index_sdir_load_or_typed_error() {
         }
         Err(e) => {
             assert!(
-                matches!(e, grit_lib::error::Error::IndexError(_)),
+                matches!(
+                    e,
+                    grit_lib::error::Error::Index(grit_lib::index::IndexError::Corrupt { .. })
+                ),
                 "unexpected error type: {e:?}"
             );
         }

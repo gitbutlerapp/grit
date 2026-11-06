@@ -35,6 +35,7 @@ use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_merge, PostOperationHooks};
 use crate::ident::{parse_signature_times, Signature};
 use crate::ident_resolve::{resolve_loose_committer_identity_with, IdentRole};
+use crate::index::IndexError;
 use crate::index::{Index, IndexEntry};
 use crate::merge_base::{
     is_ancestor, merge_bases_all, merge_bases_all_vs_union,
@@ -2020,7 +2021,7 @@ fn record_merge_in_progress(git_dir: &Path, other_oid: ObjectId, merge_msg: Stri
 ///
 /// # Errors
 ///
-/// [`Error::Hook`] when a hook refuses or cannot start, [`Error::IndexUnmerged`] when
+/// [`Error::Hook`] when a hook refuses or cannot start, [`IndexError::unmerged()`] when
 /// `pre-merge-commit` left conflict stages, and I/O errors. On any error the merge state
 /// (`MERGE_HEAD`, `ORIG_HEAD`, `MERGE_MSG` with `message`) is left recorded and the branch is
 /// unchanged, so the merge can be finished with a commit or abandoned with an abort.
@@ -2049,7 +2050,7 @@ fn run_merge_commit_hooks(
             {
                 let index = repo.load_index()?;
                 if index.has_unmerged_entries() {
-                    return Err(Error::IndexUnmerged);
+                    return Err(IndexError::unmerged().into());
                 }
                 tree = write_tree_from_index(repo.odb(), &index, "")?;
             }

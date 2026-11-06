@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{Index, MODE_GITLINK};
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::repo_relpath::{
@@ -1184,10 +1185,11 @@ pub(crate) fn refresh_untracked_cache_for_status(
     if uc.root.is_none() {
         uc.root = Some(UntrackedCacheDir::new(String::new()));
     }
-    let mut root = uc
-        .root
-        .take()
-        .ok_or_else(|| Error::IndexError("no uc root".into()))?;
+    let mut root = uc.root.take().ok_or_else(|| {
+        Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::UntrackedCacheNoRoot,
+        )))
+    })?;
 
     read_directory_recursive(
         repo,

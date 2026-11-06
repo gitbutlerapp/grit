@@ -3,6 +3,7 @@
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
+use crate::index::IndexError;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::index_from_tree::index_from_tree_with_owned_seed_worktree_stats;
@@ -336,7 +337,7 @@ fn ensure_reset_worktree_mode(repo: &Repository, mode: ResetMode) -> Result<()> 
 
 fn ensure_keep_index_merged(repo: &Repository, mode: ResetMode) -> Result<()> {
     if mode == ResetMode::Keep && repo.load_index()?.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged);
+        return Err(IndexError::unmerged().into());
     }
     Ok(())
 }
@@ -1473,7 +1474,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .expect_err("keep");
-        assert!(matches!(err, Error::IndexUnmerged));
+        assert!(matches!(err, Error::Index(IndexError::Unmerged { .. })));
     }
 
     #[test]

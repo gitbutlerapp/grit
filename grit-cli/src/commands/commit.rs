@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_line_arg};
+use grit_lib::index::IndexError;
 
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -659,7 +660,9 @@ fn map_commit_error(err: Error) -> anyhow::Error {
             ),
             human: "nothing to commit — working tree clean".to_owned(),
         }),
-        unmerged @ Error::IndexUnmerged => anyhow::Error::new(unmerged),
+        Error::Index(IndexError::Unmerged { .. }) => {
+            anyhow::Error::new(Error::Index(IndexError::unmerged()))
+        }
         Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
         Error::PartialCommitDuringMerge => {
             anyhow::anyhow!("cannot do a partial commit during a merge")

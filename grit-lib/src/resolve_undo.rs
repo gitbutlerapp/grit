@@ -6,7 +6,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
-use crate::index::IndexEntry;
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexEntry, IndexError};
 use crate::objects::ObjectId;
 
 /// Per-path undo data: up to three conflict stages (index 0 = stage 1).
@@ -33,20 +33,32 @@ pub fn parse_resolve_undo_payload(data: &[u8]) -> Result<BTreeMap<Vec<u8>, Resol
     let mut pos = 0usize;
     while pos < data.len() {
         let Some(nul) = data[pos..].iter().position(|&b| b == 0) else {
-            return Err(Error::IndexError("truncated resolve-undo path".to_owned()));
+            return Err(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::ResolveUndoTruncatedPath,
+            ))
+            .into());
         };
         let path = data[pos..pos + nul].to_vec();
         pos += nul + 1;
         let mut modes = [0u32; 3];
         for m in &mut modes {
             let Some(term) = data[pos..].iter().position(|&b| b == 0) else {
-                return Err(Error::IndexError("truncated resolve-undo mode".to_owned()));
+                return Err(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::ResolveUndoTruncatedMode,
+                ))
+                .into());
             };
             let slice = &data[pos..pos + term];
-            let s = std::str::from_utf8(slice)
-                .map_err(|_| Error::IndexError("invalid UTF-8 in resolve-undo mode".to_owned()))?;
-            *m = u32::from_str_radix(s, 8)
-                .map_err(|_| Error::IndexError(format!("invalid resolve-undo mode '{s}'")))?;
+            let s = std::str::from_utf8(slice).map_err(|_| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::ResolveUndoInvalidModeUtf8,
+                )))
+            })?;
+            *m = u32::from_str_radix(s, 8).map_err(|_| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::ResolveUndoInvalidMode { mode: s.to_owned() },
+                )))
+            })?;
             pos += term + 1;
         }
         let mut oids = [ObjectId::zero(); 3];
@@ -55,12 +67,16 @@ pub fn parse_resolve_undo_payload(data: &[u8]) -> Result<BTreeMap<Vec<u8>, Resol
                 continue;
             }
             if pos + 20 > data.len() {
-                return Err(Error::IndexError(
-                    "truncated resolve-undo object id".to_owned(),
-                ));
+                return Err(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::ResolveUndoTruncatedOid,
+                ))
+                .into());
             }
-            oids[i] = ObjectId::from_bytes(&data[pos..pos + 20])
-                .map_err(|e| Error::IndexError(e.to_string()))?;
+            oids[i] = ObjectId::from_bytes(&data[pos..pos + 20]).map_err(|_| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::ResolveUndoCorrupt,
+                )))
+            })?;
             pos += 20;
         }
         out.insert(path, ResolveUndoRecord { modes, oids });

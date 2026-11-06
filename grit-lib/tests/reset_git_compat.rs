@@ -6,6 +6,7 @@ use std::path::Path;
 
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
+use grit_lib::index::IndexError;
 use grit_lib::objects;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
@@ -408,7 +409,7 @@ fn reset_keep_rejects_unmerged_index_like_git() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit keep should refuse unmerged index");
-    assert!(matches!(err, Error::IndexUnmerged));
+    assert!(matches!(err, Error::Index(IndexError::Unmerged { .. })));
     let _ = tip;
 }
 

@@ -6,6 +6,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::index::IndexError;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
@@ -193,7 +194,7 @@ fn commit_auto_stage_rejects_custom_conflict_marker_size() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::IndexUnmerged),
+        matches!(err, Error::Index(IndexError::Unmerged { .. })),
         "auto-stage commit must refuse custom-width markers: {err}"
     );
     assert!(repo
@@ -232,7 +233,7 @@ fn commit_with_auto_stage_rejects_unresolved_conflict_markers() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::IndexUnmerged),
+        matches!(err, Error::Index(IndexError::Unmerged { .. })),
         "auto-stage commit must refuse while markers remain: {err}"
     );
 
@@ -279,7 +280,7 @@ fn create_commit_rejects_unmerged_index_like_git() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::IndexUnmerged),
+        matches!(err, Error::Index(IndexError::Unmerged { .. })),
         "grit should refuse unmerged commit: {err}"
     );
 

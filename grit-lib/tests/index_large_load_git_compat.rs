@@ -10,7 +10,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
-use grit_lib::index::{index_file_mtime, Index, IndexParseContext};
+use grit_lib::index::{index_file_mtime, Index, IndexCorruptReason, IndexError, IndexParseContext};
 use grit_lib::objects::HashAlgo;
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
@@ -36,11 +36,9 @@ fn init_large_repo(root: &Path, extra_config: &[(&str, &str)]) {
 
 fn assert_checksum_mismatch(result: grit_lib::error::Result<Index>) {
     match result {
-        Err(Error::IndexError(msg)) => assert!(
-            msg.contains("checksum mismatch"),
-            "expected a checksum mismatch, got {msg}"
-        ),
-        Err(other) => panic!("expected IndexError, got {other:?}"),
+        Err(Error::Index(IndexError::Corrupt { corrupt, .. }))
+            if matches!(corrupt.reason, IndexCorruptReason::ChecksumMismatch { .. }) => {}
+        Err(other) => panic!("expected checksum mismatch IndexError::Corrupt, got {other:?}"),
         Ok(_) => panic!("corrupt index loaded"),
     }
 }

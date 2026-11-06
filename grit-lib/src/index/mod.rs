@@ -13,10 +13,12 @@
 //! # }
 //! ```
 mod core;
+pub mod error;
 pub(crate) mod handle;
 mod mode_policy;
 
 pub use core::*;
+pub use error::{IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
 pub use handle::IndexHandle;
 pub use mode_policy::WorktreeModePolicy;
 

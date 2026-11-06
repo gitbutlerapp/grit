@@ -353,6 +353,11 @@ path = "tests/git_index_file_write_git_compat.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "index_error_variants"
+path = "tests/index_error_variants.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "hygiene"
 path = "tests/hygiene.rs"
 

@@ -17,6 +17,7 @@ use crate::config::ConfigSet;
 use crate::error::{Error, OverwriteReason};
 
 use crate::fetch_request::{configured_remote_for_pull, resolve_remote_argument};
+use crate::index::IndexError;
 use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor};
 use crate::objects::ObjectId;
 use crate::operation::Conflict;
@@ -1025,7 +1026,7 @@ fn move_landed_branch(
 ) -> std::result::Result<PullOutcome, PullError> {
     ensure_branch_tip(repo, refname, Some(head_oid))?;
     if repo.load_index()?.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged.into());
+        return Err(PullError::Repository(IndexError::unmerged().into()));
     }
     let from = repo.odb().commit_tree(&head_oid)?;
     let to = repo.odb().commit_tree(&upstream_oid)?;

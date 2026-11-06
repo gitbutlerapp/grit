@@ -11,6 +11,7 @@ use grit_lib::index::resolve_undo::{
     parse_resolve_undo_payload, write_resolve_undo_payload, ResolveUndoRecord,
 };
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{IndexCorruptReason, IndexError};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 
@@ -96,7 +97,13 @@ fn t1601_bogus_index_typed_errors() {
 
     fs::write(&path, b"XXXX").expect("write");
     let err = Index::load(&path).unwrap_err();
-    assert!(matches!(err, Error::IndexError(_)));
+    assert!(matches!(
+        err,
+        Error::Index(IndexError::Corrupt {
+            corrupt,
+            ..
+        }) if corrupt.reason == IndexCorruptReason::BadSignature
+    ));
 
     let mut good = Index::new();
     good.add_or_replace(IndexEntry {
@@ -124,11 +131,22 @@ fn t1601_bogus_index_typed_errors() {
     // Corrupt entry count in header.
     bytes[8..12].copy_from_slice(&9999u32.to_be_bytes());
     let err = Index::parse_with_algo(&bytes, grit_lib::objects::HashAlgo::Sha1).unwrap_err();
-    assert!(matches!(err, Error::IndexError(_)));
+    assert!(matches!(
+        err,
+        Error::Index(IndexError::Corrupt {
+            corrupt,
+            ..
+        }) if matches!(
+            corrupt.reason,
+            IndexCorruptReason::EntryCountMismatch { .. }
+                | IndexCorruptReason::Truncated
+                | IndexCorruptReason::BadEntry
+        )
+    ));
 
     let bad_ru = b"path\0not-octal\0\0\0";
     let err = parse_resolve_undo_payload(bad_ru).unwrap_err();
-    assert!(matches!(err, Error::IndexError(_)));
+    assert!(matches!(err, Error::Index(IndexError::Corrupt { .. })));
 }
 
 #[test]

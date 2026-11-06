@@ -74,6 +74,18 @@ fn preserve_io_error(source: &std::io::Error) -> std::io::Error {
     }
 }
 
+impl std::fmt::Display for PathIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
+    }
+}
+
+impl std::error::Error for PathIoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 impl PathIoError {
     /// Build a worktree-path failure (path is the index- or worktree-relative display path).
     #[must_use]
@@ -119,18 +131,6 @@ impl PathIoError {
                 crate::git_dir::io_error::format_git_dir_io_message(&path, op, &self.source)
             }
         }
-    }
-}
-
-impl std::fmt::Display for PathIoError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message())
-    }
-}
-
-impl std::error::Error for PathIoError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.source)
     }
 }
 
@@ -1531,13 +1531,9 @@ pub enum Error {
         path: String,
     },
 
-    /// The index file is missing, truncated, or has a bad header.
-    #[error("index error: {0}")]
-    IndexError(String),
-
-    /// Stage-1/2/3 entries are present; a stage-0 tree cannot be built.
-    #[error("index contains unmerged entries")]
-    IndexUnmerged,
+    /// Index read, write, extension, or write-tree failure.
+    #[error(transparent)]
+    Index(crate::index::IndexError),
 
     /// Another maintenance run holds the repository's `gc.pid` lock
     /// ([`crate::maintenance::GcLock`]); nothing was changed.
@@ -1557,37 +1553,6 @@ pub enum Error {
         /// Repository-relative paths that were not staged because markers remain.
         paths: Vec<String>,
     },
-
-    /// A file path is a prefix of another index path at the same tree level.
-    #[error(
-        "index path prefix conflict between '{}' and '{}'",
-        directory.display(),
-        file.display()
-    )]
-    IndexPathPrefixConflict {
-        /// Shorter path (treated as the ambiguous directory prefix).
-        directory: std::path::PathBuf,
-        /// Longer path that extends the prefix with an additional component.
-        file: std::path::PathBuf,
-    },
-
-    /// The `FSMN` index extension ends before its header, token, or EWAH payload.
-    #[error("index fsmonitor extension payload is truncated")]
-    IndexFsmonitorExtensionTruncated,
-
-    /// The `FSMN` extension header version is not supported.
-    #[error("index fsmonitor extension has unsupported header version {0}")]
-    IndexFsmonitorExtensionBadVersion(u32),
-
-    /// The EWAH bitmap embedded in `FSMN` could not be decoded.
-    #[error("index fsmonitor extension EWAH bitmap is invalid")]
-    IndexFsmonitorExtensionEwahInvalid,
-
-    /// The cache-tree extension references more entries than the index contains. Git emits this
-    /// (verbatim, prefixed with `error: `) when a tree with duplicate path entries is read into the
-    /// index (`t4058-diff-duplicates`).
-    #[error("corrupted cache-tree has entries not present in index")]
-    CacheTreeCorrupt,
 
     /// A reference name or value is invalid.
     #[error("invalid ref: {0}")]
@@ -2324,15 +2289,9 @@ impl Error {
             Self::GitDirPathIo { .. } => "git_dir_path_io",
             Self::ObjectStreamTruncated { .. } => "object_stream_truncated",
             Self::WorktreeFileChanged { .. } => "worktree_file_changed",
-            Self::IndexError(..) => "index_error",
-            Self::IndexUnmerged => "index_unmerged",
+            Self::Index(index) => index.kind_name(),
             Self::MaintenanceRunning { .. } => "maintenance_running",
             Self::UnmergedConflictMarkers { .. } => "unmerged_conflict_markers",
-            Self::IndexPathPrefixConflict { .. } => "index_path_prefix_conflict",
-            Self::IndexFsmonitorExtensionTruncated => "index_fsmonitor_extension_truncated",
-            Self::IndexFsmonitorExtensionBadVersion(..) => "index_fsmonitor_extension_bad_version",
-            Self::IndexFsmonitorExtensionEwahInvalid => "index_fsmonitor_extension_ewah_invalid",
-            Self::CacheTreeCorrupt => "cache_tree_corrupt",
             Self::InvalidRef(..) => "invalid_ref",
             Self::PackedRefsUnexpectedLine { .. } => "packed_refs_unexpected_line",
             Self::PathError(..) => "path_error",

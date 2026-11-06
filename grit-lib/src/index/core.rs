@@ -26,6 +26,7 @@ use crate::hash::verify_trailer;
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::index::error::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::lockfile::{grit_lockfile_pid_enabled, pid_path_for_lock};
 use crate::objects::{parse_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
@@ -761,23 +762,23 @@ pub(crate) fn parse_fsmonitor_extension(
     ext_data: &[u8],
 ) -> Result<(String, crate::ewah_bitmap::EwahBitmap)> {
     if ext_data.len() < 4 + 1 + 4 {
-        return Err(Error::IndexFsmonitorExtensionTruncated);
+        return Err(IndexError::FsmonitorExtensionTruncated.into());
     }
     let hdr_version = u32::from_be_bytes(
         ext_data[0..4]
             .try_into()
-            .map_err(|_| Error::IndexFsmonitorExtensionTruncated)?,
+            .map_err(|_| Error::from(IndexError::FsmonitorExtensionTruncated))?,
     );
     let mut pos = 4usize;
     let token = match hdr_version {
         FSMONITOR_EXT_VERSION1 => {
             if ext_data.len() < pos + 8 + 4 {
-                return Err(Error::IndexFsmonitorExtensionTruncated);
+                return Err(IndexError::FsmonitorExtensionTruncated.into());
             }
             let ts = u64::from_be_bytes(
                 ext_data[pos..pos + 8]
                     .try_into()
-                    .map_err(|_| Error::IndexFsmonitorExtensionTruncated)?,
+                    .map_err(|_| Error::from(IndexError::FsmonitorExtensionTruncated))?,
             );
             pos += 8;
             ts.to_string()
@@ -786,30 +787,30 @@ pub(crate) fn parse_fsmonitor_extension(
             let nul = ext_data[pos..]
                 .iter()
                 .position(|&b| b == 0)
-                .ok_or(Error::IndexFsmonitorExtensionTruncated)?;
+                .ok_or(Error::from(IndexError::FsmonitorExtensionTruncated))?;
             let token = String::from_utf8_lossy(&ext_data[pos..pos + nul]).into_owned();
             pos += nul + 1;
             token
         }
-        v => return Err(Error::IndexFsmonitorExtensionBadVersion(v)),
+        v => return Err(Error::from(IndexError::FsmonitorExtensionBadVersion(v))),
     };
     if ext_data.len() < pos + 4 {
-        return Err(Error::IndexFsmonitorExtensionTruncated);
+        return Err(IndexError::FsmonitorExtensionTruncated.into());
     }
     let ewah_size = u32::from_be_bytes(
         ext_data[pos..pos + 4]
             .try_into()
-            .map_err(|_| Error::IndexFsmonitorExtensionTruncated)?,
+            .map_err(|_| Error::from(IndexError::FsmonitorExtensionTruncated))?,
     ) as usize;
     pos += 4;
     if ext_data.len() < pos + ewah_size {
-        return Err(Error::IndexFsmonitorExtensionTruncated);
+        return Err(IndexError::FsmonitorExtensionTruncated.into());
     }
     let ewah_slice = &ext_data[pos..pos + ewah_size];
     let (dirty, consumed) = crate::ewah_bitmap::EwahBitmap::deserialize_prefix(ewah_slice)
-        .ok_or(Error::IndexFsmonitorExtensionEwahInvalid)?;
+        .ok_or(Error::from(IndexError::FsmonitorExtensionEwahInvalid))?;
     if consumed != ewah_size {
-        return Err(Error::IndexFsmonitorExtensionEwahInvalid);
+        return Err(IndexError::FsmonitorExtensionEwahInvalid.into());
     }
     Ok((token, dirty))
 }
@@ -937,7 +938,7 @@ impl Index {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::IndexError`] if the file is present but corrupt.
+    /// Returns [`Error::Index`](crate::error::Error::Index) with [`IndexError::Corrupt`](crate::index::IndexError::Corrupt) if the file is present but corrupt.
     pub fn load(path: &Path) -> Result<Self> {
         match read_index_file(path) {
             Ok((data, mtime)) => {
@@ -1248,7 +1249,7 @@ impl Index {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::IndexError`] on structural problems.
+    /// Returns [`Error::Index`](crate::error::Error::Index) on structural problems.
     pub fn parse(data: &[u8]) -> Result<Self> {
         // The index file does not record its hash width; it is fixed by the
         // repository. Detect it from the trailing checksum (callers with a
@@ -1274,21 +1275,22 @@ impl Index {
 
         let hash_len = hash_algo.len();
         if data.len() < INDEX_HEADER_LEN + hash_len {
-            return Err(Error::IndexError(
-                "file too short for index header and checksum".to_owned(),
-            ));
+            return Err(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::FileTooShortForHeader,
+            ))
+            .into());
         }
         let (body, checksum) = data.split_at(data.len() - hash_len);
         if body.len() < INDEX_HEADER_LEN {
-            return Err(Error::IndexError(
-                "file too short for index header and checksum".to_owned(),
-            ));
-        }
-        let trailer_error = |e: crate::hash::TrailerMismatch| {
-            Error::IndexError(format!(
-                "{} checksum mismatch: {e}",
-                hash_algo.name().to_uppercase()
+            return Err(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::FileTooShortForHeader,
             ))
+            .into());
+        }
+        let trailer_error = |_e: crate::hash::TrailerMismatch| {
+            IndexError::corrupt(IndexCorrupt::new(IndexCorruptReason::ChecksumMismatch {
+                algo: hash_algo,
+            }))
         };
         if checksum.iter().all(|&b| b == 0) {
             return Self::parse_body(body, hash_algo, config, parse_context);
@@ -1306,7 +1308,11 @@ impl Index {
             let parsed = Self::parse_body(body, hash_algo, config, parse_context);
             verifier
                 .join()
-                .map_err(|_| Error::Message("index checksum worker thread panicked".to_owned()))?
+                .map_err(|_| {
+                    Error::from(IndexError::corrupt(IndexCorrupt::new(
+                        IndexCorruptReason::ChecksumWorkerPanicked,
+                    )))
+                })?
                 .map_err(trailer_error)?;
             parsed
         })
@@ -1328,23 +1334,25 @@ impl Index {
         let hash_len = hash_algo.len();
         let magic = &body[..4];
         if magic != b"DIRC" {
-            return Err(Error::IndexError("bad magic: expected DIRC".to_owned()));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::BadSignature,
+            ))));
         }
-        let version = u32::from_be_bytes(
-            body[4..8]
-                .try_into()
-                .map_err(|_| Error::IndexError("cannot read version".to_owned()))?,
-        );
+        let version = u32::from_be_bytes(body[4..8].try_into().map_err(|_| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::CannotReadVersion,
+            )))
+        })?);
         if version != 2 && version != 3 && version != 4 {
-            return Err(Error::IndexError(format!(
-                "unsupported index version {version}"
-            )));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::UnsupportedVersion { version },
+            ))));
         }
-        let count = u32::from_be_bytes(
-            body[8..12]
-                .try_into()
-                .map_err(|_| Error::IndexError("cannot read entry count".to_owned()))?,
-        );
+        let count = u32::from_be_bytes(body[8..12].try_into().map_err(|_| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::CannotReadEntryCount,
+            )))
+        })?);
 
         let workers = index_load_worker_count(parse_context.thread_policy, config, count as usize);
         let extension_offset = if workers > 1 {
@@ -1367,9 +1375,10 @@ impl Index {
 
         let (entries, ext_fields): (Vec<IndexEntry>, ParsedIndexExtensions) = if try_parallel {
             let Some(ext_off) = extension_offset else {
-                return Err(Error::IndexError(
-                    "parallel index load missing EOIE offset".to_owned(),
-                ));
+                return Err(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::ParallelLoadMissingEoie,
+                ))
+                .into());
             };
             let ieot = read_ieot_extension(body, ext_off, extensions_end);
             let mut loaded_entries = if let Some(ref ieot) = ieot {
@@ -1521,9 +1530,16 @@ impl Index {
     ) -> Result<()> {
         if let Some(lock) = existing_lock {
             if lock.index_path != path {
-                return Err(Error::Message(
-                    "index lock path does not match write target".into(),
-                ));
+                use crate::error::{GitDirPathOperation, PathIoError, PathIoOperation};
+                return Err(IndexError::PathIo(PathIoError {
+                    operation: PathIoOperation::GitDir(GitDirPathOperation::WriteIndex),
+                    path: Some(path.to_path_buf()),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "index lock path does not match write target",
+                    ),
+                })
+                .into());
             }
             self.stream_index_file(&mut lock.file, skip_hash, config, policy)?;
             lock.reopen_after_write()?;
@@ -3880,7 +3896,9 @@ fn flatten_tree_blobs(
 ) -> Result<Vec<IndexEntry>> {
     let obj = odb.read(tree_oid)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::IndexError(format!("expected tree at {}", tree_oid)));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::WriteTreeExpectedTree { oid: *tree_oid },
+        ))));
     }
     let entries = parse_tree(&obj.data)?;
     let mut out = Vec::new();
@@ -4160,18 +4178,20 @@ pub(crate) fn parse_entry(
 ) -> Result<(IndexEntry, usize)> {
     // 40 bytes of stat fields + the OID + 2 flag bytes.
     if data.len() < 40 + hash_len + 2 {
-        return Err(Error::IndexError("entry too short".to_owned()));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::EntryTooShort,
+        ))));
     }
 
     let mut pos = 0;
 
     macro_rules! read_u32 {
         () => {{
-            let v = u32::from_be_bytes(
-                data[pos..pos + 4]
-                    .try_into()
-                    .map_err(|_| Error::IndexError("truncated u32".to_owned()))?,
-            );
+            let v = u32::from_be_bytes(data[pos..pos + 4].try_into().map_err(|_| {
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::TruncatedU32,
+                )))
+            })?);
             pos += 4;
             v
         }};
@@ -4191,22 +4211,24 @@ pub(crate) fn parse_entry(
     let oid = ObjectId::from_bytes(&data[pos..pos + hash_len])?;
     pos += hash_len;
 
-    let flags = u16::from_be_bytes(
-        data[pos..pos + 2]
-            .try_into()
-            .map_err(|_| Error::IndexError("truncated flags".to_owned()))?,
-    );
+    let flags = u16::from_be_bytes(data[pos..pos + 2].try_into().map_err(|_| {
+        Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::TruncatedFlags,
+        )))
+    })?);
     pos += 2;
 
     let flags_extended = if version >= 3 && flags & 0x4000 != 0 {
         if pos + 2 > data.len() {
-            return Err(Error::IndexError("truncated extended flags".to_owned()));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::TruncatedExtendedFlags,
+            ))));
         }
-        let fe = u16::from_be_bytes(
-            data[pos..pos + 2]
-                .try_into()
-                .map_err(|_| Error::IndexError("truncated extended flags".to_owned()))?,
-        );
+        let fe = u16::from_be_bytes(data[pos..pos + 2].try_into().map_err(|_| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::TruncatedExtendedFlags,
+            )))
+        })?);
         pos += 2;
         Some(fe)
     } else {
@@ -4218,10 +4240,11 @@ pub(crate) fn parse_entry(
         // V4: prefix-compressed path
         let (strip_len, varint_bytes) = read_varint(&data[pos..]);
         pos += varint_bytes;
-        let nul = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| Error::IndexError("v4 entry path missing NUL".to_owned()))?;
+        let nul = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::V4PathMissingNul,
+            )))
+        })?;
         let suffix = &data[pos..pos + nul];
         pos += nul + 1;
         let keep = prev_path.len().saturating_sub(strip_len);
@@ -4231,10 +4254,11 @@ pub(crate) fn parse_entry(
         path = full_path;
     } else {
         // V2/V3: NUL-terminated full path + padding
-        let nul = data[pos..]
-            .iter()
-            .position(|&b| b == 0)
-            .ok_or_else(|| Error::IndexError("entry path missing NUL terminator".to_owned()))?;
+        let nul = data[pos..].iter().position(|&b| b == 0).ok_or_else(|| {
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::PathMissingNulTerminator,
+            )))
+        })?;
         path = data[pos..pos + nul].to_vec();
         pos += nul + 1;
         let entry_start = 0usize;
@@ -4243,12 +4267,16 @@ pub(crate) fn parse_entry(
         let padding = padded.saturating_sub(entry_len);
         pos += padding;
         if pos > data.len() {
-            return Err(Error::IndexError("truncated index entry".to_owned()));
+            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::TruncatedIndexEntry,
+            ))));
         }
     }
 
     if pos > data.len() {
-        return Err(Error::IndexError("truncated index entry".to_owned()));
+        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            IndexCorruptReason::TruncatedIndexEntry,
+        ))));
     }
 
     Ok((
@@ -6346,13 +6374,15 @@ mod tests {
         let err = parse_fsmonitor_extension(&payload).unwrap_err();
         assert!(matches!(
             err,
-            Error::IndexFsmonitorExtensionTruncated | Error::IndexFsmonitorExtensionEwahInvalid
+            Error::Index(IndexError::FsmonitorExtensionTruncated)
+                | Error::Index(IndexError::FsmonitorExtensionEwahInvalid)
         ));
         payload[12..16].copy_from_slice(&2u32.to_be_bytes());
         let err2 = parse_fsmonitor_extension(&payload).unwrap_err();
         assert!(matches!(
             err2,
-            Error::IndexFsmonitorExtensionTruncated | Error::IndexFsmonitorExtensionEwahInvalid
+            Error::Index(IndexError::FsmonitorExtensionTruncated)
+                | Error::Index(IndexError::FsmonitorExtensionEwahInvalid)
         ));
     }
 
@@ -6726,7 +6756,7 @@ mod tests {
             assert!(
                 matches!(
                     Index::load_expand_sparse_optional(&path, &odb),
-                    Err(Error::IndexError(_))
+                    Err(Error::Index(_))
                 ),
                 "len={len}"
             );

@@ -31,6 +31,7 @@ use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
     prepare_commit_identity_line, replace_identity_date_suffix, Signature,
 };
+use crate::index::IndexError;
 use crate::index::{Index, IndexLock};
 use crate::notes::{
     apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
@@ -589,7 +590,9 @@ fn commit_patch_scope(
     let head = resolve_head_for_repository(repo).map_err(CommitPatchError::Commit)?;
     let mut index = repo.load_index().map_err(CommitPatchError::Commit)?;
     if index.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged.into());
+        return Err(CommitPatchError::Commit(
+            Error::from(IndexError::unmerged()),
+        ));
     }
 
     let dry_run = req.dry_run;
@@ -715,7 +718,7 @@ fn commit_paths_scope(
 
     let mut real_index = repo.load_index()?;
     if real_index.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged);
+        return Err(IndexError::unmerged().into());
     }
     let mut stage_opts = StageOptions {
         pathspecs: paths.specs.clone(),
@@ -992,7 +995,7 @@ impl CommitOutcome {
 ///   example [`commit_worktree`] and path-scoped commits).
 /// - [`Error::AmendUnborn`] when [`CommitRequest::amend`] is set but the branch has no commits yet.
 /// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
-/// - [`Error::IndexUnmerged`] when the index has conflict stages.
+/// - [`IndexError::unmerged()`] when the index has conflict stages.
 /// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
 /// - Ref/reflog failures from [`crate::refs::update_branch_for_commit_on_store`]; the branch tip is not left advanced without reflogs when logging is enabled.
 pub fn create_commit(
@@ -1053,7 +1056,7 @@ pub fn commit_worktree(
     let staged_count = staged.total();
     let stat_refreshed = staged.stat_refreshed;
     if index.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged);
+        return Err(IndexError::unmerged().into());
     }
     let mut req = req.clone();
     req.assume_worktree_synced = true;
@@ -1552,7 +1555,7 @@ pub(crate) fn create_commit_with_loaded_index(
     cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     if index.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged);
+        return Err(IndexError::unmerged().into());
     }
     let head = resolve_head_for_repository(repo)?;
     create_commit_with_index(repo, head, index, req, progress, cancel, None)
@@ -1623,7 +1626,7 @@ fn create_commit_with_index(
     }
 
     if index.has_unmerged_entries() {
-        return Err(Error::IndexUnmerged);
+        return Err(IndexError::unmerged().into());
     }
     let merge_heads = read_merge_heads(repo.git_dir())?;
     let concluding_merge = !merge_heads.is_empty();

@@ -9,6 +9,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::index::IndexError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
@@ -175,7 +176,10 @@ fn assert_conflict_survives(root: &Path, repo: &Repository) {
         &CancelToken::never(),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::IndexUnmerged), "{err:?}");
+    assert!(
+        matches!(err, Error::Index(IndexError::Unmerged { .. })),
+        "{err:?}"
+    );
     assert_eq!(git(root, &["rev-parse", "HEAD"]), head);
     assert_eq!(git(root, &["ls-files", "-u"]), unmerged);
     assert_eq!(state_snapshot(root), state);
