@@ -148,22 +148,32 @@ fn log_ref_set_flags_replace_default_head_issue_2552() -> TestResult {
     let _ = fs::remove_dir_all(&dir);
     seed_three_commits_tag_on_first(&dir);
 
-    let git_tags = git_oids(&dir, &["--oneline", "--tags"]);
-    let grit_tags = grit_log_oids(&dir, &["log", "--oneline", "--tags"]);
+    // Oracle uses full hashes (`git_oids` forces `--format=%H`); do not pass `--oneline` to
+    // git here — a later flag would override the format and break the comparison.
+    let mut git_tags = git_oids(&dir, &["--tags"]);
+    let mut grit_tags = grit_log_oids(&dir, &["log", "--oneline", "--tags"]);
+    git_tags.sort_unstable();
+    grit_tags.sort_unstable();
     assert_eq!(grit_tags, git_tags);
 
-    let git_rem = git_oids(&dir, &["--oneline", "--remotes"]);
-    let grit_rem = grit_log_oids(&dir, &["log", "--oneline", "--remotes"]);
+    let mut git_rem = git_oids(&dir, &["--remotes"]);
+    let mut grit_rem = grit_log_oids(&dir, &["log", "--oneline", "--remotes"]);
+    git_rem.sort_unstable();
+    grit_rem.sort_unstable();
     assert_eq!(grit_rem, git_rem);
     assert!(grit_rem.is_empty());
 
-    let git_br = git_oids(&dir, &["--oneline", "--branches=feat/*"]);
-    let grit_br = grit_log_oids(&dir, &["log", "--oneline", "--branches=feat/*"]);
+    let mut git_br = git_oids(&dir, &["--branches=feat/*"]);
+    let mut grit_br = grit_log_oids(&dir, &["log", "--oneline", "--branches=feat/*"]);
+    git_br.sort_unstable();
+    grit_br.sort_unstable();
     assert_eq!(grit_br, git_br);
     assert!(grit_br.is_empty());
 
-    let git_union = git_oids(&dir, &["--oneline", "HEAD", "--tags"]);
-    let grit_union = grit_log_oids(&dir, &["log", "--oneline", "HEAD", "--tags"]);
+    let mut git_union = git_oids(&dir, &["HEAD", "--tags"]);
+    let mut grit_union = grit_log_oids(&dir, &["log", "--oneline", "HEAD", "--tags"]);
+    git_union.sort_unstable();
+    grit_union.sort_unstable();
     assert_eq!(grit_union, git_union);
 
     let revs_out = grit_run(&dir, &["revs", "--remotes", "--count"]);

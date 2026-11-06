@@ -395,6 +395,9 @@ fn ref_walk_is_empty_ref_selection(
     tokens: &[&str],
     walk: &RevWalkListOptions,
 ) -> Result<bool> {
+    if walk.refs.is_empty() {
+        return Ok(false);
+    }
     let parsed = parse_rev_walk_tokens(repo, tokens)?;
     if !parsed.negative.is_empty() || !parsed.positive.is_empty() {
         return Ok(false);
@@ -825,6 +828,17 @@ mod tests {
         assert_eq!(
             merge_filter_to_parent_bounds(MergeFilter::NoMerges),
             (None, Some(1))
+        );
+    }
+
+    #[test]
+    fn count_with_empty_tokens_and_no_ref_selection_still_errors() {
+        let (_dir, repo) = repo_with_commits(1);
+        let walk = RevWalkListOptions::default();
+        let err = repo.rev_walk().count(&[], &walk).expect_err("no revisions");
+        assert!(
+            matches!(err, Error::InvalidRef(ref m) if m == "no revisions specified"),
+            "{err:?}"
         );
     }
 
