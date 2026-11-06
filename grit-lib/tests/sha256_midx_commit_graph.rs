@@ -14,9 +14,9 @@ use grit_lib::objects::midx::{
     WriteMultiPackIndexOptions,
 };
 use grit_lib::objects::odb::{hash_algo_for_git_dir, hash_algo_for_objects_dir, Odb};
-use grit_lib::objects::pack::read_idx_object_ids;
 use grit_lib::objects::pack_rev::hashfile_checksum_valid;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
+use grit_lib::test_support::objects_pack::read_idx_object_ids;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

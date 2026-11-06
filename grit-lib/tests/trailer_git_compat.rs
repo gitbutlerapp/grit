@@ -16,7 +16,6 @@ use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::midx::{
     verify_midx, write_multi_pack_index_with_options, WriteMultiPackIndexOptions,
 };
-use grit_lib::objects::pack::read_pack_index;
 use grit_lib::objects::pack_rev::{
     build_pack_rev_bytes_from_index_order_offsets_and_checksum, rev_path_for_index,
 };
@@ -24,6 +23,7 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::test_support::objects_pack::read_pack_index;
 use grit_test_support::git;
 use tempfile::TempDir;
 

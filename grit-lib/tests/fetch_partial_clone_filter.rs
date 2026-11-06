@@ -9,7 +9,6 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions, FsckReport};
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::repo_treats_promisor_packs;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
@@ -19,6 +18,7 @@ use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::Remote;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::git_cmd;
 
 fn git_in(dir: &Path, args: &[&str]) {

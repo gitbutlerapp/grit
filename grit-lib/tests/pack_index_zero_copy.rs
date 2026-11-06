@@ -2,8 +2,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use grit_lib::objects::pack::{parse_pack_index_bytes, read_pack_index, read_pack_index_no_verify};
 use grit_lib::objects::ObjectId;
+use grit_lib::test_support::objects_pack::{
+    parse_pack_index_bytes, read_pack_index, read_pack_index_no_verify,
+};
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};

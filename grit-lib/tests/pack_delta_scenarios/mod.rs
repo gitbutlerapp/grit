@@ -11,9 +11,9 @@ use std::time::Duration;
 
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::unpack_objects::{apply_delta, apply_delta_into};
 use grit_lib::objects::ObjectId;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::objects::{
     hash_loose_object, write_loose_object, write_pack_and_index, DeltaOps, HashAlgo,
     IndexPackOptions, ObjectKind as PackObjectKind, PackBuilder, PackBuilt, RepoFixture,

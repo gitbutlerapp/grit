@@ -33,9 +33,15 @@ pub mod commit_graph;
 pub mod index_pack;
 pub mod pack;
 pub mod pack_store;
+pub mod pathspec;
+
+/// Expanded pack re-exports for integration tests (see module docs).
+pub mod objects_pack;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod fuzz;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod knobs;
+
+pub mod git_date;

@@ -41,11 +41,6 @@ use grit_lib::objects::index_pack::{
 };
 use grit_lib::objects::midx::{midx_sidecar_path_for_midx_file, read_midx_btmp_ranges};
 use grit_lib::objects::odb::store::enumerate_loose_objects;
-use grit_lib::objects::pack::{
-    clear_pack_delta_base_cache, configure_delta_base_cache_from_config,
-    packed_ref_delta_reuse_slice, read_object_from_pack_at_offset, read_pack_index,
-    slice_one_pack_object,
-};
 use grit_lib::objects::pack_objects::{
     build_pack_from_send_list_with_write_threads, reachable_closure,
 };
@@ -72,6 +67,11 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::worktree_bytes_for_index_mode;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress};
+use grit_lib::test_support::objects_pack::{
+    clear_pack_delta_base_cache, configure_delta_base_cache_from_config,
+    packed_ref_delta_reuse_slice, read_object_from_pack_at_offset, read_pack_index,
+    slice_one_pack_object,
+};
 use tempfile::tempdir;
 
 fn init_repo(dir: &Path) -> Repository {

@@ -7,8 +7,8 @@ use crate::midx_support;
 use std::fs;
 
 use grit_lib::objects::midx::{try_read_object_via_midx, verify_midx, WriteMultiPackIndexOptions};
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::ObjectId;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::objects::HashAlgo;
 
 use grit_test_support::objects::RepoFixture;
@@ -423,7 +423,7 @@ fn read_with_corrupt_pack_index_still_resolves_other_objects() {
         fs::write(&victim, &idx_bytes).expect("write corrupt idx");
     }
     grit_lib::objects::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
-    grit_lib::objects::pack::clear_pack_cache();
+    grit_lib::test_support::objects_pack::clear_pack_cache();
     let _ = try_read_object_via_midx(&objects, &oid);
     assert_read_fallback_via_odb(&repo, &objects, &oid);
 }

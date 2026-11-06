@@ -8,7 +8,6 @@ use std::sync::Arc;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
@@ -18,6 +17,7 @@ use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 
 /// Only local remotes here, so no HTTP client is ever made.
 struct NoHttp;

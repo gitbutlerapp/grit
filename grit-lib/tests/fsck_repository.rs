@@ -12,9 +12,6 @@ use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::reachability_roots;
 use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOptions};
 use grit_lib::objects::odb::{store::MemoryStore, OdbBuilder};
-use grit_lib::objects::pack::{
-    read_pack_index, verify_pack_and_collect, write_v2_pack_index_with_trailer, PackedType,
-};
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -22,7 +19,10 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
 };
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::test_support::objects_pack::{
+    read_pack_index, verify_pack_and_collect, write_v2_pack_index_with_trailer, PackedType,
+};
 use grit_test_support::objects::{
     write_pack_and_index, DeltaOps, IndexPackOptions, ObjectKind as PackKind, PackBuilder,
     PackBuilt,

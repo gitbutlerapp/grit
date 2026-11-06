@@ -5,12 +5,12 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use grit_lib::objects::pack::verify_pack_and_collect;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::transfer::{fetch_local, CloneReflog, FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::objects_pack::verify_pack_and_collect;
 
 fn git_in(dir: &Path, args: &[&str]) -> bool {
     Command::new("git")

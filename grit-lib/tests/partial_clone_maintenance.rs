@@ -163,7 +163,7 @@ impl Fixture {
             {
                 continue;
             }
-            let ids: HashSet<_> = grit_lib::objects::pack::read_idx_object_ids(&idx)
+            let ids: HashSet<_> = grit_lib::test_support::objects_pack::read_idx_object_ids(&idx)
                 .expect("ids")
                 .into_iter()
                 .collect();

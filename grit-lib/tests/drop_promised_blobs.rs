@@ -18,7 +18,6 @@ use grit_lib::maintenance::{
     LOP_KEEP_MESSAGE,
 };
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
-use grit_lib::objects::pack::{clear_pack_cache, read_pack_index, read_packed_delta_dependency};
 use grit_lib::objects::pack_objects::{build_pack_from_send_list, PackBuildOptions};
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -30,6 +29,9 @@ use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::InProgressOperation;
+use grit_lib::test_support::objects_pack::{
+    clear_pack_cache, read_pack_index, read_packed_delta_dependency,
+};
 use time::OffsetDateTime;
 
 /// The fixed "current time" of every run: far after any file these tests write.

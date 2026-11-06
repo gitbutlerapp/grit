@@ -1,8 +1,8 @@
 //! Alternates ordering and missing-directory handling for composed ODB stores.
 
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::read_alternates_recursive;
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::test_support::objects_pack::read_alternates_recursive;
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;

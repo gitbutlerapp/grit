@@ -13,11 +13,11 @@ use grit_lib::objects::hash::{
 };
 use grit_lib::objects::index_pack::{install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::verify_pack_and_collect;
 use grit_lib::objects::unpack_objects::{unpack_objects, UnpackOptions};
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::objects_pack::verify_pack_and_collect;
 use grit_test_support::{
     git_fsck, HashAlgo as FixtureAlgo, ObjectKind as PackKind, PackBuilder, RepoFixture,
 };

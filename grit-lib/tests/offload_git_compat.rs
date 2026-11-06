@@ -13,9 +13,9 @@ use std::path::Path;
 
 use grit_lib::error::Error;
 use grit_lib::maintenance::{offload_blobs, OffloadError, OffloadOptions};
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::{git_cmd, Output};
 
 const NOW: i64 = 4_000_000_000;

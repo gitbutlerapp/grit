@@ -15,11 +15,11 @@ use grit_lib::maintenance::repository_fsck::{self as fsck, FsckIssue, FsckOption
 use grit_lib::maintenance::{
     gc, prune_loose_objects, repack_all, GcOptions, PruneOptions, RepackOptions,
 };
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_lib::test_support::pack::pack_cache_guard;
 use tempfile::TempDir;
 

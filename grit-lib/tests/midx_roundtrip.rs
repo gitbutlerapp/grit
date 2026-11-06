@@ -12,8 +12,8 @@ use grit_lib::objects::midx::{
     try_read_object_via_midx, validate_midx_referenced_packs, verify_midx, write_multi_pack_index,
     CompactError, WriteMultiPackIndexOptions,
 };
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::ObjectId;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::objects::HashAlgo;
 use std::collections::HashSet;
 

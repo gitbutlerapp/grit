@@ -14,12 +14,12 @@ use grit_lib::config::ConfigSet;
 use grit_lib::maintenance::{
     drop_promised_blobs, DropPromisedBlobsOptions, DropPromisedBlobsReport,
 };
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::{git_at_least, git_cmd, Output};
 use time::OffsetDateTime;
 

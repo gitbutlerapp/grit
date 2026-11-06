@@ -3,10 +3,11 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::objects::pack::read_pack_index_no_verify;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::{ProgressPhase, ProgressSink};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
+use grit_lib::remote::fetch::NoProgress;
+use grit_lib::test_support::objects_pack::read_pack_index_no_verify;
 
 fn git(dir: &Path, args: &[&str]) {
     let out = Command::new("git")

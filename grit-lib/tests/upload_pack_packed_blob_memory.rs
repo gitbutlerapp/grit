@@ -11,9 +11,9 @@ use upload_pack_blob_memory_support::{
 };
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::pack::packed_full_object_slice;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::packed_full_object_slice;
 use grit_test_support::{HashAlgo, RepoFixture};
 
 #[test]
@@ -50,7 +50,7 @@ fn upload_pack_packed_blob_peak_memory() {
         "blob must be a whole pack entry for reuse"
     );
     let opts = pack_options(true);
-    grit_lib::objects::pack::clear_pack_cache();
+    grit_lib::test_support::objects_pack::clear_pack_cache();
     reset_peak_rss();
     let before = anon_rss_kib();
     let stats = stream_blob_to_sink(&repo, want, &opts);

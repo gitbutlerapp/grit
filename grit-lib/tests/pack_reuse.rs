@@ -6,11 +6,13 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::pack::packed_full_object_slice;
-use grit_lib::objects::pack_objects::{write_upload_pack_stream, PackBuildOptions, PackStats};
+use grit_lib::objects::pack_objects::{
+    write_upload_pack_stream, PackBuildOptions, PackProgress, PackStats,
+};
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::packed_full_object_slice;
 use grit_test_support::{HashAlgo, RepoFixture};
 
 fn git_ok(repo: &RepoFixture, args: &[&str]) {
@@ -340,7 +342,8 @@ fn reuse_skips_when_have_shallow_grafts_present() {
         ..PackBuildOptions::default()
     };
     let mut buf = Vec::new();
-    let out = grit_lib::objects::pack::try_write_streaming_pack(
+    let mut progress = |_ev: PackProgress| {};
+    let out = grit_lib::test_support::objects_pack::try_write_streaming_pack(
         &repo,
         &[tip],
         &[parent],

@@ -11,7 +11,6 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::maintenance::{offload_blobs, OffloadOptions};
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -19,6 +18,7 @@ use grit_lib::remote::serve::{
     receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 
 fn git_cmd(dir: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new("git");

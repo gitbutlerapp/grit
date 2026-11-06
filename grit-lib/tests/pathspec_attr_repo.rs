@@ -7,9 +7,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{AttrPathspecError, Error};
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::{
-    pathspec_has_attr_magic, validate_attr_pathspecs, Pathspec, PathspecGlobalFlags,
-};
+use grit_lib::test_support::pathspec::pathspec_has_attr_magic;
+use grit_lib::worktree::pathspec::{validate_attr_pathspecs, Pathspec, PathspecGlobalFlags};
 use tempfile::TempDir;
 
 fn git(root: &Path, args: &[&str]) -> String {

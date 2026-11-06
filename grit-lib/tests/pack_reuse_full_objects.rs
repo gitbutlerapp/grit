@@ -6,12 +6,12 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{
+use grit_lib::objects::ObjectId;
+use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
+use grit_lib::test_support::objects_pack::{
     packed_full_object_slice, read_packed_delta_dependency, verify_pack_and_collect,
     PackedDeltaDependency, PackedType, VerifyObjectRecord,
 };
-use grit_lib::objects::ObjectId;
-use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -137,7 +137,7 @@ fn build_pack_reuses_full_objects_and_round_trips() {
     let (scratch, idx_path) = git_index_pack_dir(&pack);
     verify_pack_and_collect(&idx_path).expect("verify grit pack");
 
-    let pack_on_disk = grit_lib::objects::pack::read_pack_index(&idx_path)
+    let pack_on_disk = grit_lib::test_support::objects_pack::read_pack_index(&idx_path)
         .expect("read idx")
         .pack_path;
     let ip = Command::new("git")

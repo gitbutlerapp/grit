@@ -9,14 +9,14 @@ use grit_lib::objects::delta_encode::{
     encode_delta, encode_lcp_delta, encode_prefix_extension_delta,
 };
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::read_packed_delta_dependency;
-use grit_lib::objects::pack::{
+use grit_lib::objects::unpack_objects::apply_delta;
+use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::test_support::objects_pack::read_packed_delta_dependency;
+use grit_lib::test_support::objects_pack::{
     apply_delta_depth_limit, clear_pack_cache, max_verify_pack_delta_depth, packed_delta_base_oid,
     read_object_from_pack, read_object_from_packs, read_pack_index, verify_pack_and_collect,
     PackedDeltaDependency,
 };
-use grit_lib::objects::unpack_objects::apply_delta;
-use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_test_support::git_fsck;
 use grit_test_support::objects::{
     hash_loose_object, write_pack_and_index, HashAlgo, IndexPackOptions,
@@ -725,9 +725,9 @@ fn git_repacked_history_dependent_objects_round_trip_both_hashes_and_delta_kinds
                 );
                 let records = verify_pack_and_collect(&idx).expect("grit verify pack");
                 let expected_type = if ofs {
-                    grit_lib::objects::pack::PackedType::OfsDelta
+                    grit_lib::test_support::objects_pack::PackedType::OfsDelta
                 } else {
-                    grit_lib::objects::pack::PackedType::RefDelta
+                    grit_lib::test_support::objects_pack::PackedType::RefDelta
                 };
                 assert!(records
                     .iter()

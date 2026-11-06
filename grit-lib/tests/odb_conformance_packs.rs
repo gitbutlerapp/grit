@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use grit_lib::objects::hash;
 use grit_lib::objects::odb::store::{ObjectStore, ObjectStream, PackedObjects};
-use grit_lib::objects::pack::{clear_pack_cache, write_v2_pack_index};
 use grit_lib::objects::pack_store::PackStore;
 use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::test_support::objects_pack::{clear_pack_cache, write_v2_pack_index};
 use grit_test_support::git_supports_sha256;
 use grit_test_support::odb_conformance::run_read_suite;
 use tempfile::TempDir;

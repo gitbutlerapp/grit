@@ -10,9 +10,11 @@ use std::sync::Arc;
 
 use grit_lib::objects::odb::store::{ObjectStore, PackFilter, PackedObjects};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{clear_pack_cache, read_pack_index, verify_pack_and_collect};
 use grit_lib::objects::pack_store::PackStore;
 use grit_lib::objects::{Object, ObjectId, ObjectKind};
+use grit_lib::test_support::objects_pack::{
+    clear_pack_cache, read_pack_index, verify_pack_and_collect,
+};
 use tempfile::TempDir;
 
 fn git_in(dir: &Path, args: &[&str]) {

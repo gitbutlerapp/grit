@@ -13,10 +13,10 @@ use grit_lib::objects::midx::{
     read_midx_pack_idx_names, try_read_object_via_midx, write_multi_pack_index_with_options,
     WriteMultiPackIndexOptions,
 };
-use grit_lib::objects::pack::{
+use grit_lib::test_support::commit_graph::chain_from_layers;
+use grit_lib::test_support::objects_pack::{
     clear_pack_cache, read_object_from_pack_at_offset, read_pack_index_cached,
 };
-use grit_lib::test_support::commit_graph::chain_from_layers;
 /// One byte above PackData's 8 KiB owned-read threshold (8192).
 const MMAP_FILE_MIN_LEN: u64 = 8193;
 

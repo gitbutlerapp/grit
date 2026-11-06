@@ -8,11 +8,11 @@ use std::sync::{Arc, Barrier};
 use grit_lib::error::Error;
 use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{clear_pack_cache, read_pack_index};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::test_support::objects_pack::{clear_pack_cache, read_pack_index};
 use grit_lib::test_support::pack_store;
 use tempfile::TempDir;
 
@@ -323,7 +323,7 @@ fn pack_thread_local_warm_follows_active_store_on_one_thread() {
     .expect("pack b");
     install_pack(&objects_a, "a", &pack_a);
     install_pack(&objects_b, "b", &pack_b);
-    grit_lib::objects::pack::read_object_from_packs(&objects_a, &oid_a)
+    grit_lib::test_support::objects_pack::read_object_from_packs(&objects_a, &oid_a)
         .expect("prime legacy store a");
     let got_b = odb_b.read(&oid_b).expect("read via odb b store");
     assert_eq!(got_b.data, b"store-b\n");

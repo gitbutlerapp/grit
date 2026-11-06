@@ -18,7 +18,6 @@ use grit_lib::diff::{
     RenameDetection,
 };
 use grit_lib::error::Error;
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
@@ -27,6 +26,7 @@ use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::git_cmd;
 use tempfile::TempDir;
 

@@ -4,7 +4,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{
     promisor_expanded_object_ids, promisor_pack_and_tag_targets, promisor_pack_object_ids,
     promisor_pack_peeled_tag_targets, read_promisor_missing_oids, repo_treats_promisor_packs,
@@ -12,6 +11,7 @@ use grit_lib::objects::promisor::{
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::clear_pack_cache;
 use grit_test_support::git_cmd;
 use std::collections::HashSet;
 use std::fs;

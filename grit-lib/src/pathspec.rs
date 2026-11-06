@@ -1261,7 +1261,7 @@ pub fn pathspec_has_top(spec: &str) -> bool {
 /// [`crate::repo::Repository::pathspec_matcher`], which loads the repository's attributes and
 /// validates the clauses, or [`matches_pathspec_list_for_object`] with caller-supplied rules.
 #[must_use]
-pub fn pathspec_has_attr_magic(spec: &str) -> bool {
+pub(crate) fn pathspec_has_attr_magic(spec: &str) -> bool {
     // Attr magic only exists in long form; skip the allocating parse for every other spec.
     spec.starts_with(":(") && spec.contains("attr:") && !attr_clauses(spec).is_empty()
 }

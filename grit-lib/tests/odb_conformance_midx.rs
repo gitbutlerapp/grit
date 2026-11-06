@@ -19,9 +19,9 @@ use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPac
 use grit_lib::objects::odb::store::{
     MidxObjects, MidxObjectsStatus, ObjectStore, ObjectStream, PackedObjects,
 };
-use grit_lib::objects::pack::{clear_pack_cache, write_v2_pack_index};
 use grit_lib::objects::pack_store::PackStore;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectKind};
+use grit_lib::test_support::objects_pack::{clear_pack_cache, write_v2_pack_index};
 use grit_test_support::git_supports_sha256;
 use grit_test_support::objects::HashAlgo as FixtureHashAlgo;
 use grit_test_support::odb_conformance::run_read_suite;

@@ -6,7 +6,8 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{
+use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
+use grit_lib::test_support::objects_pack::{
     clear_pack_cache, collect_local_pack_info, compute_fanout_from_oid_slices,
     pack_index_entry_matches_sha1_oid, parse_pack_index_bytes, read_idx_object_ids,
     read_local_pack_indexes, read_local_pack_indexes_cached, read_object_from_pack,
@@ -14,7 +15,6 @@ use grit_lib::objects::pack::{
     reprepare_pack_directory_on_miss, revalidate_stale_pack_bytes, skip_one_pack_object,
     verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
 };
-use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::objects::{
     git_cat_file_batch_check, git_supports_sha256, write_pack_and_index, HashAlgo as FixtureAlgo,
@@ -116,7 +116,7 @@ fn large_fanout_lookup_roundtrips_git_and_grit_indexes() {
                     )
                 })
                 .collect();
-            grit_lib::objects::pack::write_v2_pack_index_with_trailer(
+            grit_lib::test_support::objects_pack::write_v2_pack_index_with_trailer(
                 &grit_index_path,
                 &entries,
                 trailer,

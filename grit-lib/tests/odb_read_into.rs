@@ -9,11 +9,11 @@ use std::sync::Arc;
 
 use grit_lib::objects::odb::store::{ObjectStore, PackFilter, PackedObjects};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{
-    clear_pack_cache, read_object_from_pack, read_object_from_pack_into, read_pack_index,
-};
 use grit_lib::objects::pack_store::PackStore;
 use grit_lib::objects::{ObjectId, ObjectKind, ObjectRef};
+use grit_lib::test_support::objects_pack::{
+    clear_pack_cache, read_object_from_pack, read_object_from_pack_into, read_pack_index,
+};
 use grit_test_support::objects::{git_supports_sha256, HashAlgo as FixtureAlgo, RepoFixture};
 
 const SENTINEL_CAPACITY: usize = 1024 * 1024;

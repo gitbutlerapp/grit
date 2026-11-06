@@ -6,13 +6,13 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::maintenance::{repack_all, RepackOptions};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{
+use grit_lib::objects::ObjectId;
+use grit_lib::repo::Repository;
+use grit_lib::test_support::objects_pack::{
     clear_pack_cache, parse_pack_index_bytes, read_object_from_pack, read_pack_index,
     read_pack_index_cached, read_pack_index_no_verify, verify_pack_and_collect,
     write_v2_pack_index_with_trailer,
 };
-use grit_lib::objects::ObjectId;
-use grit_lib::repo::Repository;
 use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::objects::{
     write_pack_and_index, IndexPackOptions, IndexVersion, ObjectKind as FixtureKind, PackBuilder,
@@ -125,7 +125,8 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_not_panic() {
     let mut body = Vec::new();
     body.extend_from_slice(b"\xfftOc");
     body.extend_from_slice(&2u32.to_be_bytes());
-    let fanout = grit_lib::objects::pack::compute_fanout_from_oid_slices(&[oid.as_bytes()]);
+    let fanout =
+        grit_lib::test_support::objects_pack::compute_fanout_from_oid_slices(&[oid.as_bytes()]);
     for f in fanout {
         body.extend_from_slice(&f.to_be_bytes());
     }
@@ -145,7 +146,8 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_on_lookup() {
     let mut body = Vec::new();
     body.extend_from_slice(b"\xfftOc");
     body.extend_from_slice(&2u32.to_be_bytes());
-    let fanout = grit_lib::objects::pack::compute_fanout_from_oid_slices(&[oid.as_bytes()]);
+    let fanout =
+        grit_lib::test_support::objects_pack::compute_fanout_from_oid_slices(&[oid.as_bytes()]);
     for f in fanout {
         body.extend_from_slice(&f.to_be_bytes());
     }

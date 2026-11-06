@@ -2,9 +2,8 @@
 
 use std::process::Command;
 
-use grit_lib::config::git_date::{
-    parse_date_at, parse_date_basic_at, parse_date_format, show_date, DateMode,
-};
+use grit_lib::config::git_date::{parse_date_format, show_date, DateMode};
+use grit_lib::test_support::git_date::{parse_date_at, parse_date_basic_at};
 
 const FIXED: u64 = 1_700_000_000;
 const NOW: i64 = 1_700_100_000;

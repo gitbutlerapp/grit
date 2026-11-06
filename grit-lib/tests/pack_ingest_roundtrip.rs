@@ -16,9 +16,6 @@ use grit_lib::index::MODE_REGULAR;
 use grit_lib::objects::hash::Parallelism;
 use grit_lib::objects::index_pack::{ingest_received_pack, install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack::{
-    read_pack_bytes_cached, read_pack_index, write_v2_pack_index, write_v2_pack_index_with_trailer,
-};
 use grit_lib::objects::pack_rev::{
     append_hashfile_checksum, build_pack_rev_bytes, build_pack_rev_bytes_from_index_order_offsets,
     build_pack_rev_bytes_from_index_order_offsets_and_checksum, hashfile_checksum_valid,
@@ -32,6 +29,9 @@ use grit_lib::objects::unpack_objects::{
 };
 use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::remote::transfer::{build_pack, PackBuildOptions};
+use grit_lib::test_support::objects_pack::{
+    read_pack_bytes_cached, read_pack_index, write_v2_pack_index, write_v2_pack_index_with_trailer,
+};
 use grit_test_support::git;
 
 const GIT_ENV: &[(&str, &str)] = &[
@@ -1583,7 +1583,7 @@ fn fix_thin_install_rewrites_pack_and_index_that_git_accepts() {
 #[test]
 #[ignore = "manual RSS harness (set GRIT_PACK_IDX)"]
 fn rss_harness_verify_pack_only() {
-    use grit_lib::objects::pack::verify_pack_and_collect;
+    use grit_lib::test_support::objects_pack::verify_pack_and_collect;
     use std::path::Path;
     let idx = std::env::var("GRIT_PACK_IDX").expect("GRIT_PACK_IDX");
     verify_pack_and_collect(Path::new(&idx)).expect("verify");
@@ -1594,8 +1594,8 @@ fn rss_harness_verify_pack_only() {
 #[ignore = "manual RSS harness (GRIT_CARGO_PACK + GRIT_PACK_IDX)"]
 fn rss_harness_index_then_verify() {
     use grit_lib::objects::hash::Parallelism;
-    use grit_lib::objects::pack::verify_pack_and_collect;
     use grit_lib::objects::unpack_objects::pack_index_records_with_threads;
+    use grit_lib::test_support::objects_pack::verify_pack_and_collect;
     use std::path::Path;
     let pack = std::env::var("GRIT_CARGO_PACK").expect("GRIT_CARGO_PACK");
     let idx = std::env::var("GRIT_PACK_IDX").expect("GRIT_PACK_IDX");
@@ -1766,5 +1766,5 @@ fn read_pack_bytes_cached_serves_installed_delta_pack() {
     let cached = read_pack_bytes_cached(&pack_path).expect("read_pack_bytes_cached");
     assert_eq!(&cached[..], fx.bytes.as_slice());
     assert_pack_contains_deltas(&cached, fx.algo, "cached installed delta pack");
-    grit_lib::objects::pack::clear_pack_cache();
+    grit_lib::test_support::objects_pack::clear_pack_cache();
 }
