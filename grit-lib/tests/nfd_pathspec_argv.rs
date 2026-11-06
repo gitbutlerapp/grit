@@ -3,8 +3,7 @@
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{
-    matches_pathspec_list_precompose, precompose_argv_pathspec,
-    resolve_pathspec_with_argv_precompose,
+    precompose_argv_pathspec, resolve_pathspec_with_argv_precompose, Pathspec, PathspecGlobalFlags,
 };
 use grit_lib::{config::environment::RepositoryOptions, index::Index};
 use grit_test_support::{grit_cmd, unique_tmp};
@@ -90,8 +89,12 @@ fn library_nfd_resolved_pathspec_stages_nfc_index_entry() {
 fn precompose_pathspec_matching_unit() {
     let nfc = "caf\u{00e9}.txt";
     let nfd = format!("cafe\u{0301}.txt");
-    assert!(matches_pathspec_list_precompose(nfc, &[nfd.clone()], true));
     assert_eq!(precompose_argv_pathspec(&nfd).as_ref(), nfc);
+    let ps = Pathspec::scoped(
+        [precompose_argv_pathspec(&nfd).as_ref()],
+        PathspecGlobalFlags::default(),
+    );
+    assert!(ps.matches_path(nfc));
 }
 
 #[test]

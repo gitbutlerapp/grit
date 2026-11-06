@@ -106,9 +106,10 @@ pub fn commit_diff_files(
     merges: DiffMerges,
     detail: DiffDetail,
     options: &DiffOptions,
-    pathspecs: &[String],
+    pathspec: &crate::pathspec::Pathspec,
     thread_policy: &ThreadPolicy,
 ) -> Result<DiffFilesOutput> {
+    let pathspecs = pathspec.specs();
     let config = repo.config().snapshot()?;
     let commit = repo.read_commit_with_replace(commit_oid)?;
     let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);

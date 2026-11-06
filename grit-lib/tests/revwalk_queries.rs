@@ -11,6 +11,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::{LeftRightCounts, MergeFilter, RefSelection, RevWalkListOptions};
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use support::{
     assert_rev_list_commits_match_git, build_commit_dag, git, git_commit_graph_write,
@@ -98,7 +99,7 @@ fn revs_matches_git_rev_list() {
         &repo,
         &["rw6012-l"],
         &RevWalkListOptions {
-            paths: vec!["content.txt".into()],
+            pathspec: Pathspec::scoped(["content.txt"], PathspecGlobalFlags::default()),
             ..RevWalkListOptions::default()
         },
     );

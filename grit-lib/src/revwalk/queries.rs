@@ -11,6 +11,7 @@ use crate::refs::{list_refs_for_repository, list_refs_glob_for_repository};
 use crate::repo::Repository;
 use std::sync::Arc;
 
+use crate::pathspec::{Pathspec, PathspecGlobalFlags};
 use crate::rev_list::{
     empty_rev_list_result, open_commit_stream, rev_list, split_revision_token, CommitExtent,
     CommitStream, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
@@ -86,9 +87,9 @@ pub struct RevWalkCommitIterOptions {
 /// This is the high-level, token-based API: pass these to [`RevWalk::commits`],
 /// [`RevWalk::rev_list_result`], or [`RevWalk::count`] together with revision tokens
 /// (`main`, `^v1.0`, `A..B`, `A...B`). Ref selections ([`Self::refs`]) and path limits
-/// ([`Self::paths`]) live here rather than in the tokens. The low-level engine options are
+/// ([`Self::pathspec`]) live here rather than in the tokens. The low-level engine options are
 /// [`RevListOptions`], used by [`rev_list`] and [`RevWalk::walk`] (one spec string).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RevWalkListOptions {
     /// Maximum number of commits to return (matches `rev-list --max-count` / `-n`).
     pub limit: Option<usize>,
@@ -108,7 +109,7 @@ pub struct RevWalkListOptions {
     /// (`^A`, the left side of `A..B`) still hide everything they reach through every parent.
     pub first_parent: bool,
     /// Limit history to commits that touch these paths (same rules as `rev-list --`).
-    pub paths: Vec<String>,
+    pub pathspec: Pathspec,
     /// Follow renames for a single literal file path (Git `log --follow`). History is still
     /// walked when the path is absent at the start commit (for example after a rename away).
     pub follow: bool,
@@ -134,6 +135,31 @@ pub struct RevWalkListOptions {
     /// [`RevListResult::left_right_map`], [`RevListResult::cherry_equivalent`] and
     /// [`RevListResult::cherry_matches`]. Requires exactly one `A...B` token.
     pub cherry_mark: bool,
+}
+
+impl Default for RevWalkListOptions {
+    fn default() -> Self {
+        Self {
+            limit: None,
+            skip: 0,
+            since: None,
+            until: None,
+            merges: MergeFilter::default(),
+            reverse: false,
+            refs: Vec::new(),
+            first_parent: false,
+            pathspec: Pathspec::entire_tree(PathspecGlobalFlags::default()),
+            follow: false,
+            full_history: false,
+            commit_filter: None,
+            pickaxe: None,
+            graph: false,
+            retain_commit_data: false,
+            retained_commit_extent: CommitExtent::Whole,
+            left_right: false,
+            cherry_mark: false,
+        }
+    }
 }
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
@@ -281,9 +307,9 @@ pub(crate) fn rev_list_options_from_walk(
     count: bool,
 ) -> Result<RevListOptions> {
     if walk.follow {
-        validate_follow_pathspecs(&walk.paths)?;
+        validate_follow_pathspecs(walk.pathspec.specs())?;
     }
-    let paths = repo.resolve_rev_walk_pathspecs(&walk.paths)?;
+    let paths = repo.resolve_rev_walk_pathspecs(&walk.pathspec)?;
     let (min_parents, max_parents) = merge_filter_to_parent_bounds(walk.merges);
     let graph = walk.graph;
     Ok(RevListOptions {
@@ -305,10 +331,10 @@ pub(crate) fn rev_list_options_from_walk(
         },
         preserve_simplify_merges_graph_merges: graph,
         path_graph_reorder: graph,
-        parent_rewrite: graph && !walk.paths.is_empty(),
+        parent_rewrite: graph && !walk.pathspec.is_entire_tree(),
         use_commit_graph: true,
-        use_commit_graph_bloom: !walk.paths.is_empty(),
-        paths_resolved_from_argv: !walk.paths.is_empty(),
+        use_commit_graph_bloom: !walk.pathspec.is_entire_tree(),
+        paths_resolved_from_argv: !walk.pathspec.is_entire_tree(),
         symmetric_left: parsed.symmetric_left,
         symmetric_right: parsed.symmetric_right,
         commit_filter: walk.commit_filter.clone(),
@@ -426,7 +452,7 @@ fn walk_list_is_single_positive_bounded_page(walk: &RevWalkListOptions) -> bool 
         && !walk.reverse
         && walk.merges == MergeFilter::Any
         && !walk.first_parent
-        && walk.paths.is_empty()
+        && walk.pathspec.is_entire_tree()
         && walk.refs.is_empty()
         && walk.since.is_none()
         && walk.until.is_none()
@@ -481,7 +507,7 @@ fn try_single_positive_bounded_page(
 #[must_use]
 pub fn rev_walk_list_supports_stream(walk: &RevWalkListOptions) -> bool {
     !walk.graph
-        && walk.paths.is_empty()
+        && walk.pathspec.is_entire_tree()
         && !walk.reverse
         && !walk.first_parent
         && walk.merges == MergeFilter::Any
@@ -574,7 +600,7 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// Each token is a plain tip, `^tip`, `A..B`, or `A...B` (see [`parse_rev_walk_tokens`]);
     /// put ref selections in [`RevWalkListOptions::refs`] and path limits in
-    /// [`RevWalkListOptions::paths`]. For a single spec with the full engine options, see
+    /// [`RevWalkListOptions::pathspec`]. For a single spec with the full engine options, see
     /// [`RevWalk::walk`].
     ///
     /// # Errors
@@ -636,7 +662,7 @@ impl<'repo> RevWalk<'repo> {
             && options.skip == 0
             && options.limit.is_some()
             && (options.since.is_some() || options.until.is_some())
-            && options.paths.is_empty()
+            && options.pathspec.is_entire_tree()
             && options.refs.is_empty()
             && !options.reverse
             && options.merges == MergeFilter::Any
@@ -662,7 +688,7 @@ impl<'repo> RevWalk<'repo> {
         }
         if !parsed.negative.is_empty()
             && parsed.symmetric_left.is_none()
-            && options.paths.is_empty()
+            && options.pathspec.is_entire_tree()
             && options.refs.is_empty()
             && options.skip == 0
             && options.limit.is_none()
@@ -727,7 +753,7 @@ impl<'repo> RevWalk<'repo> {
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let (left, right) = single_symmetric_range(tokens, &parsed)?;
 
-        if options.paths.is_empty()
+        if options.pathspec.is_entire_tree()
             && options.refs.is_empty()
             && options.skip == 0
             && options.limit.is_none()

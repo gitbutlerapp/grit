@@ -168,7 +168,7 @@ pub struct LogOutcome {
 
 struct LogPatchTextParams {
     oids: Vec<ObjectId>,
-    pathspecs: Vec<String>,
+    pathspec: grit_lib::worktree::pathspec::Pathspec,
 }
 
 /// The `--cursor` token for the next page, only when the listing is shown as a page (a
@@ -230,7 +230,7 @@ impl HumanRender for LogOutcome {
                 &repo,
                 &params.oids,
                 self.format,
-                &params.pathspecs,
+                &params.pathspec,
                 w,
             )?;
             return self.render_continuation(w);
@@ -437,7 +437,7 @@ impl MarkdownRender for LogOutcome {
 /// [`listing_stream_plan`] and consumed by [`stream_listing`].
 pub struct LogStreamPlan {
     repo: grit_lib::repo::Repository,
-    walk_paths: Vec<String>,
+    walk_pathspec: grit_lib::worktree::pathspec::Pathspec,
     default_tips: Vec<String>,
     walk_opts: grit_lib::revwalk::RevWalkListOptions,
 }
@@ -464,11 +464,11 @@ pub fn listing_stream_plan(
     let mut rev = rev.clone();
     let mut pathspecs = pathspecs.clone();
     promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
-    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let walk_pathspec = pathspecs.rev_walk_pathspec(&repo)?;
     let default_tips = default_tips(&repo, &rev)?;
     let tip_refs: Vec<&str> = default_tips.iter().map(String::as_str).collect();
     let walk_opts =
-        rev.to_rev_walk_options(&repo, repo.environment(), &tip_refs, walk_paths.as_slice())?;
+        rev.to_rev_walk_options(&repo, repo.environment(), &tip_refs, walk_pathspec.clone())?;
     if !crate::stream_commit_list::plain_walk_streamable(&walk_opts) {
         return Ok(None);
     }
@@ -478,7 +478,7 @@ pub fn listing_stream_plan(
     }
     Ok(Some(LogStreamPlan {
         repo,
-        walk_paths,
+        walk_pathspec,
         default_tips,
         walk_opts,
     }))
@@ -510,11 +510,11 @@ pub fn stream_listing(
     }
     let LogStreamPlan {
         repo,
-        walk_paths,
+        walk_pathspec,
         default_tips,
         walk_opts,
     } = plan;
-    let path_args = walk_paths.as_slice();
+    let path_args = walk_pathspec.specs().to_vec();
     let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
     let token_refs = rev.rev_tokens(&default_tips);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
@@ -565,7 +565,7 @@ pub fn stream_listing(
             &batch.oids,
             batch.walked,
             format,
-            path_args,
+            &path_args,
             None,
             batch_truncated && max.is_some(),
             display,
@@ -676,11 +676,11 @@ pub fn run(
     };
     let env = repo.environment();
     promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
-    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
-    let path_args = walk_paths.as_slice();
+    let walk_pathspec = pathspecs.rev_walk_pathspec(&repo)?;
+    let path_args = walk_pathspec.specs().to_vec();
     let default_tips = default_tips(&repo, &rev)?;
     let default_tips: Vec<&str> = default_tips.iter().map(String::as_str).collect();
-    let opts = rev.to_rev_walk_options(&repo, env, &default_tips, path_args)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &default_tips, walk_pathspec)?;
     let continuation = cursor.filter(|token| !token.is_empty());
     if display.group_by.is_some() && continuation.is_some() {
         bail!("`grit log` cannot combine `--cursor` with `--group-by`");
@@ -725,7 +725,7 @@ pub fn run(
             &walked.commits,
             walked.commit_data,
             format,
-            path_args,
+            &path_args,
             next,
             truncated,
             display,
@@ -782,7 +782,7 @@ pub fn run(
             &oids,
             parsed,
             format,
-            path_args,
+            &path_args,
             None,
             truncated,
             display,
@@ -810,7 +810,7 @@ pub fn run(
         &walked.commits,
         walked.commit_data,
         format,
-        path_args,
+        &path_args,
         next,
         truncated && resume.is_none(),
         display,
@@ -1236,7 +1236,7 @@ fn build_commit_outcome(
             commit_diffs: Vec::new(),
             patch_text: Some(LogPatchTextParams {
                 oids: oids.to_vec(),
-                pathspecs,
+                pathspec: pathspecs,
             }),
         });
     }

@@ -2460,29 +2460,35 @@ impl Error {
 
     /// Build [`Error::DirtyWorktree`], sorting and deduplicating `paths`.
     #[must_use]
-    pub fn dirty_worktree(operation: WorktreeOperation, mut paths: Vec<String>) -> Self {
-        paths.sort();
-        paths.dedup();
-        Self::DirtyWorktree { operation, paths }
+    pub fn dirty_worktree(operation: WorktreeOperation, mut affected_paths: Vec<String>) -> Self {
+        affected_paths.sort();
+        affected_paths.dedup();
+        Self::DirtyWorktree {
+            operation,
+            paths: affected_paths,
+        }
     }
 
     /// Build [`Error::WouldOverwrite`] for switch and similar tree transitions.
     #[must_use]
-    pub fn would_overwrite(reason: OverwriteReason, mut paths: Vec<String>) -> Self {
-        paths.sort();
-        paths.dedup();
+    pub fn would_overwrite(reason: OverwriteReason, mut affected_paths: Vec<String>) -> Self {
+        affected_paths.sort();
+        affected_paths.dedup();
         let message = match reason {
             OverwriteReason::LocalChanges => {
                 "you have uncommitted changes — commit them before switching".into()
             }
             OverwriteReason::Untracked => {
-                let first = paths.first().map(String::as_str).unwrap_or("<path>");
+                let first = affected_paths
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or("<path>");
                 format!("untracked file '{first}' would be overwritten — move or remove it first")
             }
         };
         Self::WouldOverwrite {
             reason,
-            paths,
+            paths: affected_paths,
             message,
         }
     }

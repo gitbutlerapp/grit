@@ -42,7 +42,7 @@ fn resolve_diff_default_target_is_worktree_vs_head() {
 
     let args = resolve_diff_arguments(&repo, None, false, false, None, &[], &[]).expect("resolve");
     assert_eq!(args.target, DiffTarget::WorktreeVsHead);
-    assert!(args.pathspecs.is_empty());
+    assert!(args.pathspec.is_empty());
 }
 
 #[test]
@@ -69,7 +69,7 @@ fn files_staged_matches_git_name_only() {
     let args = resolve_diff_arguments(&repo, None, true, false, None, &[], &[]).expect("resolve");
     let files = repo
         .diff()
-        .files(&args.target, &args.pathspecs, &opts)
+        .files(&args.target, &args.pathspec, &opts)
         .expect("files");
     let grit_paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
 

@@ -12,7 +12,7 @@ use grit_lib::porcelain::commit::{
 };
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::Pathspec;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Test <t@example.com> 1700000000 +0000";
@@ -125,11 +125,7 @@ fn paths_scope_with_other_paths_staged_reports_nothing_to_commit_not_false_unsta
     git_out(root, &["add", "b.txt"]);
 
     let repo = open_grit(root);
-    let paths = ResolvedPathspecs {
-        specs: vec!["a.txt".into()],
-        sources: vec!["a.txt".into()],
-        scoped: true,
-    };
+    let paths = Pathspec::scoped(["a.txt"], PathspecGlobalFlags::default());
     let err = commit_with_scope(
         &repo,
         &commit_req("nope"),

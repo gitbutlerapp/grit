@@ -21,6 +21,7 @@ use grit_lib::refs::write_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::{git, git_cmd, rev_parse};
 
 /// Memory store that counts how often a commit object is read, by either read method.
@@ -215,7 +216,7 @@ fn git_count(dir: &Path, range: &str) -> usize {
 fn path_log(repo: &Repository, path: &str) -> Vec<ObjectId> {
     let options = RevWalkListOptions {
         limit: Some(5),
-        paths: vec![path.to_owned()],
+        pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
         ..RevWalkListOptions::default()
     };
     repo.rev_walk()

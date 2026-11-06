@@ -211,7 +211,7 @@ pub fn run_hunks(
     let repo = context::discover()?;
     refuse_gitbutler_workspace(&repo)?;
     let resolved = paths.resolve(&repo)?;
-    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let pathspecs = resolved.specs().to_vec();
     let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_parse)?;
     selection.ranges = crate::commands::add::parse_line_range_list(lines)?;
     if selection.ids.is_empty() && selection.ranges.is_empty() {

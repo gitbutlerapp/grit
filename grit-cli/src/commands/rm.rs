@@ -4,7 +4,7 @@ use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
 use grit_lib::porcelain::paths::{remove_paths, RemoveOptions, RemoveOutcome};
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::Pathspec;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -105,7 +105,7 @@ pub fn run(
 #[allow(clippy::too_many_arguments)]
 fn rm(
     repo: &Repository,
-    resolved: ResolvedPathspecs,
+    resolved: Pathspec,
     cached: bool,
     force: bool,
     dry_run: bool,
@@ -113,9 +113,14 @@ fn rm(
     cancel: &grit_lib::progress::CancelToken,
     path_display: Option<&PathDisplayOptions>,
 ) -> Result<RemoveOutcome> {
+    let pathspec_sources: Vec<String> = resolved.iter().map(str::to_owned).collect();
     let opts = RemoveOptions {
-        pathspecs: resolved.specs,
-        pathspec_sources: resolved.sources,
+        pathspecs: resolved.specs().to_vec(),
+        pathspec_sources: if pathspec_sources.is_empty() {
+            resolved.specs().to_vec()
+        } else {
+            pathspec_sources
+        },
         cached,
         force,
         recursive: false,

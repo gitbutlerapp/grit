@@ -48,7 +48,7 @@ impl LogWalkQuery {
         walk: &RevWalkListOptions,
     ) -> Result<Option<Self>> {
         if walk.graph
-            || !walk.paths.is_empty()
+            || !walk.pathspec.is_entire_tree()
             || walk.reverse
             || walk.first_parent
             || walk.merges != MergeFilter::Any

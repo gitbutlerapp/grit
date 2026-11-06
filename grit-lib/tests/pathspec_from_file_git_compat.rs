@@ -58,7 +58,7 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::{InitOptions, Repository};
-    use grit_lib::worktree::pathspec::{PathspecInput, ResolvedPathspecs};
+    use grit_lib::worktree::pathspec::{PathspecFile, ResolvedPathspecs};
 
     let dir2 = tempfile::tempdir().expect("tempdir2");
     let (repo, _) = Repository::init(dir2.path(), &InitOptions::default()).expect("init");
@@ -69,13 +69,9 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     fs::write(dir2.path().join("other"), b"z\n").expect("write");
 
     let data = fs::read(&list).expect("read list");
-    let resolved = ResolvedPathspecs::resolve(
-        &repo,
-        dir2.path(),
-        &[],
-        Some(PathspecInput::new(data, true)),
-    )
-    .expect("resolve");
+    let resolved =
+        ResolvedPathspecs::resolve(&repo, dir2.path(), &[], Some(PathspecFile::new(data, true)))
+            .expect("resolve");
     let outcome = stage(
         &repo,
         &StageOptions {
@@ -116,7 +112,7 @@ fn empty_pathspec_record_matches_git_rejection() {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::repo::Repository;
-    use grit_lib::worktree::pathspec::{PathspecInput, PathspecResolveError, ResolvedPathspecs};
+    use grit_lib::worktree::pathspec::{PathspecFile, PathspecResolveError, ResolvedPathspecs};
 
     let git_dir = dir.path().join(".git");
     let repo = Repository::open(
@@ -128,7 +124,7 @@ fn empty_pathspec_record_matches_git_rejection() {
         &repo,
         dir.path(),
         &[],
-        Some(PathspecInput::new(b"\n".to_vec(), false)),
+        Some(PathspecFile::new(b"\n".to_vec(), false)),
     )
     .expect_err("empty line");
     assert_eq!(err, PathspecResolveError::EmptyPathspec);

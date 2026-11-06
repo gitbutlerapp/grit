@@ -4,9 +4,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::{
-    matches_pathspec_list, path_allowed_by_pathspec_list, pathspec_matches,
-};
+use grit_lib::worktree::pathspec::{path_allowed_by_pathspec_list, Pathspec, PathspecGlobalFlags};
 use tempfile::TempDir;
 
 fn git_ls_files(root: &std::path::Path, spec: &str) -> Vec<String> {
@@ -61,7 +59,8 @@ fn t6130_pathspec_glob_bracket_filename_matches_git() {
     let spec = ":(glob)f[o][o]";
     let git_paths = git_ls_files(dir.path(), spec);
     assert_eq!(git_paths, vec!["f[o][o]".to_string()]);
-    assert!(pathspec_matches(spec, "f[o][o]"));
+    let ps = Pathspec::scoped([spec], PathspecGlobalFlags::default());
+    assert!(ps.matches_path("f[o][o]"));
 }
 
 #[test]
@@ -79,6 +78,7 @@ fn t6132_pathspec_exclude_matches_git() {
         );
     }
     assert!(!path_allowed_by_pathspec_list(&specs, "sub2/keep.txt"));
-    assert!(!matches_pathspec_list("sub2/keep.txt", &specs));
+    let ps = Pathspec::scoped(["*", ":/!sub2"], PathspecGlobalFlags::default());
+    assert!(!ps.matches_path("sub2/keep.txt"));
     let _repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
 }

@@ -310,11 +310,10 @@ fn staged_and_path_commits_stop_on_cancel_argument() {
     let before = index_bytes(&repo);
     for scope in [
         CommitScope::Staged,
-        CommitScope::Paths(grit_lib::worktree::pathspec::ResolvedPathspecs {
-            specs: vec!["d".to_owned()],
-            sources: vec!["d".to_owned()],
-            scoped: true,
-        }),
+        CommitScope::Paths(grit_lib::worktree::pathspec::Pathspec::scoped(
+            ["d"],
+            grit_lib::worktree::pathspec::PathspecGlobalFlags::default(),
+        )),
     ] {
         assert_cancelled(commit_with_scope(
             &repo,

@@ -7,7 +7,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::Pathspec;
 
 fn ident() -> String {
     "Scope Compat <scope@example.com> 1700000000 +0000".to_owned()
@@ -136,11 +136,7 @@ fn paths_commit_matches_git_only() {
     }
 
     let repo = open_grit(grit_root);
-    let paths = ResolvedPathspecs {
-        specs: vec!["file".into()],
-        sources: vec!["file".into()],
-        scoped: true,
-    };
+    let paths = Pathspec::scoped(["file"], PathspecGlobalFlags::default());
     commit_with_scope(
         &repo,
         &commit_req("file only"),
@@ -175,11 +171,7 @@ fn paths_commit_force_added_ignored_file_matches_git() {
     }
 
     let repo = open_grit(grit_root);
-    let paths = ResolvedPathspecs {
-        specs: vec!["build/x.o".into()],
-        sources: vec!["build/x.o".into()],
-        scoped: true,
-    };
+    let paths = Pathspec::scoped(["build/x.o"], PathspecGlobalFlags::default());
     commit_with_scope(
         &repo,
         &commit_req("one"),
@@ -240,11 +232,7 @@ fn paths_commit_tracked_ignored_after_initial_commit_matches_git() {
     }
 
     let repo = open_grit(grit_root);
-    let paths = ResolvedPathspecs {
-        specs: vec!["build/x.o".into()],
-        sources: vec!["build/x.o".into()],
-        scoped: true,
-    };
+    let paths = Pathspec::scoped(["build/x.o"], PathspecGlobalFlags::default());
     commit_with_scope(
         &repo,
         &commit_req("path only"),
@@ -276,11 +264,7 @@ fn paths_commit_directory_pathspec_on_ignored_tree_matches_git() {
         git(root, &["add", "-f", "build/x.o"]);
     }
 
-    let paths = ResolvedPathspecs {
-        specs: vec!["build".into()],
-        sources: vec!["build".into()],
-        scoped: true,
-    };
+    let paths = Pathspec::scoped(["build"], PathspecGlobalFlags::default());
     let repo = open_grit(grit_root);
     commit_with_scope(
         &repo,
@@ -316,11 +300,10 @@ fn paths_commit_exclude_pathspec_matches_git() {
         git(root, &["add", "-f", "build/y.o"]);
     }
 
-    let paths = ResolvedPathspecs {
-        specs: vec![":(glob)build/*.o".into(), ":(exclude)build/y.o".into()],
-        sources: vec![":(glob)build/*.o".into(), ":(exclude)build/y.o".into()],
-        scoped: true,
-    };
+    let paths = Pathspec::scoped(
+        [":(glob)build/*.o", ":(exclude)build/y.o"],
+        PathspecGlobalFlags::default(),
+    );
 
     let repo = open_grit(grit_root);
     commit_with_scope(

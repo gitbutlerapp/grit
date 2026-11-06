@@ -464,10 +464,10 @@ pub fn compute_patch_id_for_paths(
     algo: HashAlgo,
     odb: &Odb,
     commit_oid: &ObjectId,
-    paths: &[String],
+    pathspec: &crate::pathspec::Pathspec,
     mode: PatchIdMode,
 ) -> Result<Option<ObjectId>> {
-    compute_patch_id_filtered(algo, odb, commit_oid, paths, mode)
+    compute_patch_id_filtered(algo, odb, commit_oid, pathspec.specs(), mode)
 }
 
 fn compute_patch_id_filtered(
@@ -1339,7 +1339,10 @@ mod tests {
             HashAlgo::Sha1,
             &repo.odb(),
             &add_h,
-            &[String::from("h.txt")],
+            &crate::pathspec::Pathspec::scoped(
+                ["h.txt"],
+                crate::pathspec::PathspecGlobalFlags::default(),
+            ),
             PatchIdMode::Stable,
         )
         .expect("filtered h.txt")
@@ -1358,7 +1361,10 @@ mod tests {
                 HashAlgo::Sha1,
                 &repo.odb(),
                 &add_h,
-                &[String::from("f.txt")],
+                &crate::pathspec::Pathspec::scoped(
+                    ["f.txt"],
+                    crate::pathspec::PathspecGlobalFlags::default()
+                ),
                 PatchIdMode::Stable,
             )
             .expect("filtered f.txt")

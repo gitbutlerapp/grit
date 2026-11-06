@@ -19,7 +19,7 @@ use grit_lib::revwalk::rev_list::{merge_bases, rev_list, OrderingMode, RevListOp
 use grit_lib::revwalk::rev_parse::{
     resolve_revision, resolve_revision_as_commit, resolve_revision_for_verify,
 };
-use grit_lib::worktree::pathspec::{matches_pathspec_list, parse_pathspecs_from_source};
+use grit_lib::worktree::pathspec::{parse_pathspecs_from_source, Pathspec, PathspecGlobalFlags};
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 use std::fs;
 use tempfile::tempdir;
@@ -209,7 +209,8 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
     let _ = parse_patch(patch, 1, "p", false, None)?;
     let specs = parse_pathspecs_from_source(b"*.txt\0dir/\0", true)?;
     for path in ["f.txt", "g.txt", "dir/b.txt", "missing"] {
-        let _ = matches_pathspec_list(path, &specs);
+        let ps = Pathspec::scoped(specs.clone(), PathspecGlobalFlags::default());
+        let _ = ps.matches_path(path);
     }
     Ok(())
 }

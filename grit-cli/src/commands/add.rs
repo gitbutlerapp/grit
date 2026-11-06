@@ -246,7 +246,7 @@ pub fn run_hunks(
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
-    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let pathspecs = resolved.specs().to_vec();
     let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
     selection.ranges = parse_line_range_list(lines)?;
     let mut diff_options = diff_options_for_hunk_select(&repo).map_err(anyhow::Error::new)?;
@@ -356,7 +356,7 @@ pub fn run(
 #[allow(clippy::too_many_arguments)]
 fn stage_with_hint(
     repo: &Repository,
-    resolved: grit_lib::worktree::pathspec::ResolvedPathspecs,
+    resolved: grit_lib::worktree::pathspec::Pathspec,
     mode: StageMode,
     dry_run: bool,
     intent_to_add: bool,
@@ -365,7 +365,13 @@ fn stage_with_hint(
     progress: &mut dyn ProgressSink,
     cancel: &grit_lib::progress::CancelToken,
 ) -> Result<StageOutcome> {
-    let (pathspecs, pathspec_sources) = resolved.into_pathspec_lists();
+    let pathspecs = resolved.specs().to_vec();
+    let pathspec_sources: Vec<String> = resolved.iter().map(str::to_owned).collect();
+    let pathspec_sources = if pathspec_sources.is_empty() {
+        pathspecs.clone()
+    } else {
+        pathspec_sources
+    };
     #[allow(clippy::field_reassign_with_default)]
     let opts = {
         let mut o = StageOptions::default();

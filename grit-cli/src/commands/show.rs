@@ -351,12 +351,14 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
         change_id_stored: commit_json.change_id_stored,
     };
 
-    let paths = resolve_commit_diff_pathspecs(&repo, &opts.pathspecs.pathspec_source_tokens(&[])?)?;
+    let pathspec =
+        resolve_commit_diff_pathspecs(&repo, &opts.pathspecs.pathspec_source_tokens(&[])?)?;
+    let path_tokens = pathspec.specs().to_vec();
     let patch_text = if opts.format.log_patch_text() {
         Some(ShowLogPatchTextParams {
             oid: commit_oid,
             format: opts.format,
-            pathspecs: paths.clone(),
+            pathspec: pathspec.clone(),
             diff_merges: opts.diff_merges,
         })
     } else {
@@ -366,7 +368,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
         crate::commands::diff::streamed_log_patch_text_outcome(opts.format)
     } else {
         let diff_opts = CommitDiffOptions {
-            paths: paths.clone(),
+            paths: path_tokens.clone(),
             format: opts.format,
             word_level_inline: opts.word_level_inline,
             diff_merges: opts.diff_merges,
@@ -379,7 +381,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
                 &repo,
                 &commit_oid,
                 CommitDiffOptions {
-                    paths: paths.clone(),
+                    paths: path_tokens.clone(),
                     format: {
                         let mut f = opts.format;
                         f.stat = true;

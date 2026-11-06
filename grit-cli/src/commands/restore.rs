@@ -148,7 +148,7 @@ pub fn run_hunks(
 ) -> Result<RestoreCliOutcome> {
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
-    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let pathspecs = resolved.specs().to_vec();
     let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
     selection.ranges = super::add::parse_line_range_list(lines)?;
     let outcome = restore_hunks(&repo, &selection, &pathspecs, staged, worktree, dry_run)
@@ -197,11 +197,13 @@ pub fn run(
         }
     };
 
-    let grit_lib::worktree::pathspec::ResolvedPathspecs {
-        specs: pathspecs,
-        sources: pathspec_sources,
-        scoped: _,
-    } = resolved;
+    let pathspecs = resolved.specs().to_vec();
+    let pathspec_sources: Vec<String> = resolved.iter().map(str::to_owned).collect();
+    let pathspec_sources = if pathspec_sources.is_empty() {
+        pathspecs.clone()
+    } else {
+        pathspec_sources
+    };
 
     let opts = RestoreOptions {
         pathspecs,
