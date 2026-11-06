@@ -341,7 +341,6 @@ pub(crate) fn rev_list_options_from_walk(
         commit_filter: walk.commit_filter.clone(),
         pickaxe: walk.pickaxe.clone(),
         retain_commit_data: walk.retain_commit_data,
-        retained_commit_extent: walk.retained_commit_extent,
         left_right: walk.left_right || walk.cherry_mark,
         cherry_mark: walk.cherry_mark,
         follow: walk.follow,
@@ -796,6 +795,7 @@ impl<'repo> RevWalk<'repo> {
         // left and right sets even when a list limit is also set.
         opts.max_count = None;
         opts.left_right = true;
+        let _extent = RevWalkRetainedCommitExtentGuard::push(options.retained_commit_extent);
         let left_count = {
             let mut left_opts = opts.clone();
             left_opts.left_only = true;

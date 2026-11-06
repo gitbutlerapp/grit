@@ -26129,7 +26129,6 @@ pub grit_lib::revwalk::rev_list::RevListOptions::pickaxe: core::option::Option<a
 pub grit_lib::revwalk::rev_list::RevListOptions::preserve_simplify_merges_graph_merges: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::quiet: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::retain_commit_data: bool
-pub grit_lib::revwalk::rev_list::RevListOptions::retained_commit_extent: grit_lib::revwalk::rev_list::CommitExtent
 pub grit_lib::revwalk::rev_list::RevListOptions::reverse: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::right_only: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::show_pulls: bool
