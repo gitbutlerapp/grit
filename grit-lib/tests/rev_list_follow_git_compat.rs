@@ -5,6 +5,7 @@ use crate::support;
 use std::path::Path;
 
 use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use support::{git, open_grit_repo, HistoryRepo};
 
@@ -19,7 +20,7 @@ fn grit_follow_commits_with(
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![path.to_owned()],
+                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
                 follow: true,
                 full_history,
                 limit,
@@ -195,7 +196,7 @@ fn follow_without_flag_stops_at_rename() {
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec!["new.txt".to_owned()],
+                pathspec: Pathspec::scoped(["new.txt"], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )

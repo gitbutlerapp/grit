@@ -1493,18 +1493,25 @@ impl Repository {
 
     /// Whether `path` is selected by the resolved pathspec list `specs`.
     ///
-    /// Shorthand for [`Self::pathspec_matcher`] followed by
+    /// Shorthand for [`Self::pathspec_matcher_for`] followed by
     /// [`crate::pathspec::PathspecMatcher::matches`]; build the matcher once instead when
     /// filtering many paths with specs that may carry `:(attr:...)` magic.
     ///
     /// # Errors
     ///
-    /// Same as [`Self::pathspec_matcher`].
-    pub fn paths_match_pathspecs(&self, path: &str, specs: &[String]) -> Result<bool> {
-        Ok(self.pathspec_matcher(specs)?.matches(path))
+    /// Same as [`Self::pathspec_matcher_for`].
+    pub fn paths_match_pathspecs(
+        &self,
+        path: &str,
+        pathspec: &crate::pathspec::Pathspec,
+    ) -> Result<bool> {
+        if pathspec.is_entire_tree() {
+            return Ok(true);
+        }
+        Ok(self.pathspec_matcher_for(pathspec)?.matches(path))
     }
 
-    /// Prepare `specs` (resolved pathspecs) for matching many paths in this repository.
+    /// Prepare `pathspec` for matching many paths in this repository.
     ///
     /// The matcher applies Git's list semantics and every pathspec magic word, including
     /// `:(attr:...)`, which is evaluated against this repository's attributes: the work-tree
@@ -1519,7 +1526,14 @@ impl Repository {
     /// Only when a spec carries attr magic: [`Error::InvalidAttrPathspec`] for a malformed or
     /// repeated `attr:` clause, or the error from loading config or the attribute files (for
     /// example an unreadable `core.attributesFile` setting or a poisoned cache lock).
-    pub fn pathspec_matcher<'s>(
+    pub(crate) fn pathspec_matcher_for<'s>(
+        &self,
+        pathspec: &'s crate::pathspec::Pathspec,
+    ) -> Result<crate::pathspec::PathspecMatcher<'s>> {
+        self.pathspec_matcher_with_globals(pathspec.specs(), pathspec.globals())
+    }
+
+    pub(crate) fn pathspec_matcher<'s>(
         &self,
         specs: &'s [String],
     ) -> Result<crate::pathspec::PathspecMatcher<'s>> {
@@ -1527,7 +1541,7 @@ impl Repository {
     }
 
     /// Like [`Self::pathspec_matcher`], with explicit Git global pathspec flags.
-    pub fn pathspec_matcher_with_globals<'s>(
+    pub(crate) fn pathspec_matcher_with_globals<'s>(
         &self,
         specs: &'s [String],
         globals: crate::pathspec::PathspecGlobalFlags,
@@ -1618,10 +1632,14 @@ impl Repository {
     /// # Errors
     ///
     /// Returns [`Error::PathError`] when a pathspec resolves outside the work tree.
-    pub fn resolve_rev_walk_pathspecs(&self, paths: &[String]) -> Result<Vec<String>> {
-        if paths.is_empty() {
+    pub fn resolve_rev_walk_pathspecs(
+        &self,
+        pathspec: &crate::pathspec::Pathspec,
+    ) -> Result<Vec<String>> {
+        if pathspec.is_entire_tree() {
             return Ok(Vec::new());
         }
+        let paths = pathspec.specs();
         let prefix = self.pathspec_cwd_prefix();
         let cwd_for_implicit = prefix.map(str::to_owned);
         let mut resolved = Vec::with_capacity(paths.len());

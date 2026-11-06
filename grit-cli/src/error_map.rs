@@ -1683,10 +1683,12 @@ mod tests {
 
     fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(WrappedLib(LibError::LockHeld {
-            path: path.clone(),
-            holder,
-        }))
+        let err = Error::new(WrappedLib(LibError::LockHeld(
+            grit_lib::error::LockHeldError {
+                path: path.clone(),
+                holder,
+            },
+        )))
         .context("staging files");
         (err, path)
     }

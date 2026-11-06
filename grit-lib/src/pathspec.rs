@@ -158,14 +158,14 @@ fn unquote_c_style_pathspec_line(s: &str) -> Result<String, PathspecFromFilePars
 
 /// Raw bytes for [`ResolvedPathspecs::resolve`] from `--pathspec-from-file` (read by the caller).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PathspecInput {
+pub struct PathspecFile {
     /// File or stdin contents.
     pub data: Vec<u8>,
     /// When true, entries are NUL-separated (`--pathspec-file-nul`).
     pub nul_terminated: bool,
 }
 
-impl PathspecInput {
+impl PathspecFile {
     /// Build input from bytes already read from a file or stdin.
     #[must_use]
     pub fn new(data: Vec<u8>, nul_terminated: bool) -> Self {
@@ -178,7 +178,7 @@ impl PathspecInput {
 
 /// Pathspec argv fragments resolved against a repository work tree.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ResolvedPathspecs {
+pub(crate) struct ResolvedPathspecs {
     /// Work-tree-relative pathspec strings for matching.
     pub specs: Vec<String>,
     /// User-facing spellings aligned with `specs` (argv or file lines).
@@ -196,7 +196,7 @@ impl ResolvedPathspecs {
     /// # Examples
     ///
     /// ```
-    /// use grit_lib::worktree::pathspec::{PathspecInput, ResolvedPathspecs};
+    /// use grit_lib::worktree::pathspec::{PathspecFile, ResolvedPathspecs};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// use std::fs;
     ///
@@ -211,7 +211,7 @@ impl ResolvedPathspecs {
     ///     None,
     /// )?;
     /// assert_eq!(resolved.specs, ["a.txt"]);
-    /// let from_file = PathspecInput::new(b"a.txt\n".to_vec(), false);
+    /// let from_file = PathspecFile::new(b"a.txt\n".to_vec(), false);
     /// let from_file = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(from_file))?;
     /// assert_eq!(from_file.specs, ["a.txt"]);
     /// # Ok(())
@@ -221,7 +221,7 @@ impl ResolvedPathspecs {
         repo: &Repository,
         cwd: &Path,
         raw: &[String],
-        from_file: Option<PathspecInput>,
+        from_file: Option<PathspecFile>,
     ) -> Result<Self, PathspecResolveError> {
         let work_tree = repo
             .work_tree()
@@ -340,7 +340,7 @@ pub struct PathspecOptions {
     /// When set, overrides `core.ignorecase` for attribute pathspec patterns.
     pub ignore_case: Option<bool>,
     /// Optional `--pathspec-from-file` payload merged with argv items.
-    pub from_file: Option<PathspecInput>,
+    pub from_file: Option<PathspecFile>,
 }
 
 impl PathspecOptions {
@@ -360,7 +360,7 @@ impl PathspecOptions {
 
     /// Set [`Self::from_file`].
     #[must_use]
-    pub fn with_from_file(mut self, input: PathspecInput) -> Self {
+    pub fn with_from_file(mut self, input: PathspecFile) -> Self {
         self.from_file = Some(input);
         self
     }
@@ -397,7 +397,11 @@ pub struct Pathspec {
 impl Pathspec {
     /// Build a scoped pathspec from already-resolved work-tree-relative strings.
     #[must_use]
-    pub fn scoped(specs: Vec<String>, globals: PathspecGlobalFlags) -> Self {
+    pub fn scoped(
+        items: impl IntoIterator<Item = impl AsRef<str>>,
+        globals: PathspecGlobalFlags,
+    ) -> Self {
+        let specs: Vec<String> = items.into_iter().map(|s| s.as_ref().to_owned()).collect();
         Self::from_resolved(
             ResolvedPathspecs {
                 sources: specs.clone(),
@@ -649,7 +653,7 @@ impl AttrRequirement {
 
 /// Whether `GIT_LITERAL_PATHSPECS` is enabled with default (unset) global flags.
 #[must_use]
-pub fn literal_pathspecs_enabled() -> bool {
+pub(crate) fn literal_pathspecs_enabled() -> bool {
     PathspecGlobalFlags::default().literal_pathspecs
 }
 
@@ -1083,7 +1087,7 @@ fn path_matches_pathspec_tail(raw_pattern: &str, path: &str, magic: PathspecMagi
 /// Same as [`matches_pathspec`] (default file context; exclude specs never match positively here).
 /// See [`matches_pathspec_list`].
 #[must_use]
-pub fn pathspec_matches(spec: &str, path: &str) -> bool {
+pub(crate) fn pathspec_matches(spec: &str, path: &str) -> bool {
     matches_pathspec(spec, path)
 }
 
@@ -1297,7 +1301,7 @@ mod pathspec_descent_tests {
 /// Like [`matches_pathspec_set_for_object`], but uses `matches_ls_tree_pathspec` for each
 /// element so `ls-files` / index filtering agrees with `ls-tree` on patterns such as `a[a]`.
 #[must_use]
-pub fn matches_pathspec_set_for_object_ls_tree(
+pub(crate) fn matches_pathspec_set_for_object_ls_tree(
     specs: &[String],
     path: &str,
     mode: u32,
@@ -1336,7 +1340,7 @@ pub fn matches_pathspec_set_for_object_ls_tree(
 /// True if `path` matches the combined pathspec list: any positive spec (or all paths when there
 /// are only excludes, matching Git `parse_pathspec`), and not matched by any exclude spec.
 #[must_use]
-pub fn matches_pathspec_set_for_object(
+pub(crate) fn matches_pathspec_set_for_object(
     specs: &[String],
     path: &str,
     mode: u32,
@@ -1400,7 +1404,7 @@ pub(crate) fn pathspec_has_attr_magic(spec: &str) -> bool {
 /// a path equal to its directory, and `builtin_objectmode` reads as `100644`. Use
 /// `matches_pathspec_list_for_object` when the entry mode matters.
 #[derive(Debug, Clone)]
-pub struct PathspecMatcher<'s> {
+pub(crate) struct PathspecMatcher<'s> {
     specs: Cow<'s, [String]>,
     precompose: bool,
     attrs: Option<std::sync::Arc<crate::attributes::ParsedGitAttributes>>,
@@ -1641,7 +1645,7 @@ pub fn pathspec_exclude_matches(spec: &str, path: &str) -> bool {
 /// repository (`PATHSPEC_PREFER_CWD` in `pathspec.c`). `cwd_from_repo_root` is that prefix
 /// without a trailing slash, or empty at the work tree root.
 #[must_use]
-pub fn extend_pathspec_list_implicit_cwd(
+pub(crate) fn extend_pathspec_list_implicit_cwd(
     specs: &[String],
     cwd_from_repo_root: Option<&str>,
 ) -> Vec<String> {
@@ -1678,7 +1682,7 @@ pub fn extend_pathspec_list_implicit_cwd(
 /// [`crate::repo::Repository::paths_match_pathspecs`] or [`matches_pathspec_list_for_object`]
 /// when specs may carry attr magic (see `pathspec_has_attr_magic`).
 #[must_use]
-pub fn matches_pathspec_list(path: &str, specs: &[String]) -> bool {
+pub(crate) fn matches_pathspec_list(path: &str, specs: &[String]) -> bool {
     matches_pathspec_list_with_context(path, specs, PathspecMatchContext::default())
 }
 
@@ -1687,7 +1691,7 @@ pub fn matches_pathspec_list(path: &str, specs: &[String]) -> bool {
 /// Like [`matches_pathspec_list`], this does not evaluate `:(attr:...)` magic: positive attr specs
 /// never match and attr excludes never exclude.
 #[must_use]
-pub fn matches_pathspec_list_with_context(
+pub(crate) fn matches_pathspec_list_with_context(
     path: &str,
     specs: &[String],
     ctx: PathspecMatchContext,
@@ -1904,7 +1908,7 @@ impl<'a> PathspecListMatcher<'a> {
 /// patterns; [`crate::repo::Repository::pathspec_matcher`] also honors macros and
 /// `core.ignorecase`.
 #[must_use]
-pub fn matches_pathspec_list_for_object(
+pub(crate) fn matches_pathspec_list_for_object(
     path: &str,
     mode: u32,
     attr_rules: &[AttrRule],
@@ -2127,7 +2131,7 @@ pub struct PathspecMatchContext {
 /// `matches_pathspec_for_object` or [`crate::repo::Repository::paths_match_pathspecs`] for
 /// specs where `pathspec_has_attr_magic` is true.
 #[must_use]
-pub fn matches_pathspec(spec: &str, path: &str) -> bool {
+pub(crate) fn matches_pathspec(spec: &str, path: &str) -> bool {
     matches_pathspec_with_context(spec, path, PathspecMatchContext::default())
 }
 
@@ -2135,7 +2139,11 @@ pub fn matches_pathspec(spec: &str, path: &str) -> bool {
 /// wildcard pathspecs where the pattern continues after a directory boundary (Git
 /// `matches_pathspec` + directory semantics).
 #[must_use]
-pub fn matches_pathspec_with_context(spec: &str, path: &str, ctx: PathspecMatchContext) -> bool {
+pub(crate) fn matches_pathspec_with_context(
+    spec: &str,
+    path: &str,
+    ctx: PathspecMatchContext,
+) -> bool {
     let spec_nfc: Cow<'_, str> = if ctx.precompose_paths {
         precompose_utf8_path(spec)
     } else {
@@ -2612,7 +2620,7 @@ pub(crate) fn pathspec_match_context_with_precompose(
 
 /// Like [`matches_pathspec_list`], with an explicit `precompose_paths` flag.
 #[must_use]
-pub fn matches_pathspec_list_precompose(
+pub(crate) fn matches_pathspec_list_precompose(
     path: &str,
     specs: &[String],
     precompose_paths: bool,
@@ -3368,7 +3376,7 @@ mod resolved_pathspecs_tests {
     #[test]
     fn resolved_pathspecs_from_file_lf_and_quoted() {
         let (dir, repo) = repo_with_tree();
-        let input = PathspecInput::new(b"top.txt\n\"sub/inner.txt\"\n".to_vec(), false);
+        let input = PathspecFile::new(b"top.txt\n\"sub/inner.txt\"\n".to_vec(), false);
         let resolved = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect("ok");
         assert_eq!(resolved.specs, ["top.txt", "sub/inner.txt"]);
     }
@@ -3376,7 +3384,7 @@ mod resolved_pathspecs_tests {
     #[test]
     fn resolved_pathspecs_from_file_nul() {
         let (dir, repo) = repo_with_tree();
-        let input = PathspecInput::new(b"top.txt\0sub/\0".to_vec(), true);
+        let input = PathspecFile::new(b"top.txt\0sub/\0".to_vec(), true);
         let resolved = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect("ok");
         assert_eq!(resolved.specs, ["top.txt", "sub/"]);
     }
@@ -3388,7 +3396,7 @@ mod resolved_pathspecs_tests {
         let quoted_dir = dir.path().join("\"double\"");
         std::fs::create_dir_all(&quoted_dir).expect("mkdir");
         std::fs::write(quoted_dir.join("f"), b"y").expect("write");
-        let input = PathspecInput::new(b"  spaced  \0\"double\"\0".to_vec(), true);
+        let input = PathspecFile::new(b"  spaced  \0\"double\"\0".to_vec(), true);
         let resolved = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect("ok");
         assert_eq!(resolved.sources, ["  spaced  ", "\"double\""]);
     }
@@ -3396,7 +3404,7 @@ mod resolved_pathspecs_tests {
     #[test]
     fn resolved_pathspecs_from_file_blank_line_errors() {
         let (dir, repo) = repo_with_tree();
-        let input = PathspecInput::new(b"\n".to_vec(), false);
+        let input = PathspecFile::new(b"\n".to_vec(), false);
         let err = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect_err("err");
         assert_eq!(err, PathspecResolveError::EmptyPathspec);
     }
@@ -3404,7 +3412,7 @@ mod resolved_pathspecs_tests {
     #[test]
     fn resolved_pathspecs_from_file_nul_empty_record_errors() {
         let (dir, repo) = repo_with_tree();
-        let input = PathspecInput::new(b"a\0\0b".to_vec(), true);
+        let input = PathspecFile::new(b"a\0\0b".to_vec(), true);
         let err = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect_err("err");
         assert_eq!(err, PathspecResolveError::EmptyPathspec);
     }
@@ -3412,7 +3420,7 @@ mod resolved_pathspecs_tests {
     #[test]
     fn resolved_pathspecs_from_file_invalid_quote() {
         let (dir, repo) = repo_with_tree();
-        let input = PathspecInput::new(b"\"bad\\z\"\n".to_vec(), false);
+        let input = PathspecFile::new(b"\"bad\\z\"\n".to_vec(), false);
         let err = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect_err("err");
         assert!(matches!(
             err,
@@ -3420,7 +3428,7 @@ mod resolved_pathspecs_tests {
                 PathspecFromFileParseError::InvalidEscapeSequence { .. }
             )
         ));
-        let input = PathspecInput::new(b"\"unterminated\n".to_vec(), false);
+        let input = PathspecFile::new(b"\"unterminated\n".to_vec(), false);
         let err = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(input)).expect_err("err");
         assert!(matches!(
             err,
@@ -3510,9 +3518,8 @@ mod rev_walk_pathspec_resolution_tests {
         std::fs::write(wt.join("sub/f.txt"), b"x").expect("write");
         Repository::init(wt, &InitOptions::default()).expect("init");
         let repo = repo_from_sub(wt, &wt.join("sub"));
-        let specs = repo
-            .resolve_rev_walk_pathspecs(&[":(glob)**/f.txt".to_owned()])
-            .expect("resolve");
+        let pathspec = Pathspec::scoped([":(glob)**/f.txt"], PathspecGlobalFlags::default());
+        let specs = repo.resolve_rev_walk_pathspecs(&pathspec).expect("resolve");
         assert_eq!(specs, [":(glob,prefix:sub/)**/f.txt"]);
         assert!(pathspec_matches(&specs[0], "sub/f.txt"));
         assert!(!pathspec_matches(&specs[0], "other/f.txt"));
@@ -3525,9 +3532,8 @@ mod rev_walk_pathspec_resolution_tests {
         std::fs::create_dir_all(wt.join("sub")).expect("mkdir");
         Repository::init(wt, &InitOptions::default()).expect("init");
         let repo = repo_from_sub(wt, &wt.join("sub"));
-        let specs = repo
-            .resolve_rev_walk_pathspecs(&[":!f.txt".to_owned()])
-            .expect("resolve");
+        let pathspec = Pathspec::scoped([":!f.txt"], PathspecGlobalFlags::default());
+        let specs = repo.resolve_rev_walk_pathspecs(&pathspec).expect("resolve");
         assert_eq!(specs, [".", ":(exclude,prefix:sub/)f.txt"]);
         assert!(matches_pathspec_list("other/g.txt", &specs));
         assert!(!matches_pathspec_list("sub/f.txt", &specs));
@@ -3551,9 +3557,8 @@ mod rev_walk_pathspec_resolution_tests {
         std::fs::create_dir_all(wt.join("a/b")).expect("mkdir");
         Repository::init(wt, &InitOptions::default()).expect("init");
         let repo = repo_from_sub(wt, &wt.join("a/b"));
-        let specs = repo
-            .resolve_rev_walk_pathspecs(&[":(top)a/g.c".to_owned()])
-            .expect("resolve");
+        let pathspec = Pathspec::scoped([":(top)a/g.c"], PathspecGlobalFlags::default());
+        let specs = repo.resolve_rev_walk_pathspecs(&pathspec).expect("resolve");
         assert_eq!(specs, [":(top)a/g.c"]);
         assert!(pathspec_matches(&specs[0], "a/g.c"));
         assert!(!pathspec_matches(&specs[0], "a/b/h.c"));

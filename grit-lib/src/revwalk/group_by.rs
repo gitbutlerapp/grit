@@ -439,7 +439,7 @@ fn commit_graph_available(repo: &Repository) -> bool {
 }
 
 fn shortlog_stack_walk_compatible(walk: &RevWalkListOptions, parsed: &RevWalkParsedSpecs) -> bool {
-    walk.paths.is_empty()
+    walk.pathspec.is_entire_tree()
         && walk.since.is_none()
         && walk.until.is_none()
         && walk.merges == MergeFilter::Any

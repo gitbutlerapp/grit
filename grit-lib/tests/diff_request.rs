@@ -12,6 +12,7 @@ use grit_lib::diff::{
 use grit_lib::error::{Error, PathspecResolveError};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::Pathspec;
 use grit_test_support::git;
 use tempfile::TempDir;
 
@@ -48,6 +49,10 @@ fn strings(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| (*s).to_owned()).collect()
 }
 
+fn pathspec_specs(pathspec: &Pathspec) -> Vec<String> {
+    pathspec.specs().to_vec()
+}
+
 fn positionals(items: &[&str]) -> DiffRequest {
     DiffRequest {
         positionals: strings(items),
@@ -68,7 +73,7 @@ fn no_operands_compare_worktree_with_head() {
     let (_dir, repo) = two_commit_repo();
     let args = resolve(&repo, &DiffRequest::default());
     assert_eq!(args.target, DiffTarget::WorktreeVsHead);
-    assert!(args.pathspecs.is_empty());
+    assert!(pathspec_specs(&args.pathspec).is_empty());
 }
 
 #[test]
@@ -76,7 +81,7 @@ fn lone_known_path_operand_limits_the_worktree_diff() {
     let (_dir, repo) = two_commit_repo();
     let args = resolve(&repo, &positionals(&["a.txt"]));
     assert_eq!(args.target, DiffTarget::WorktreeVsHead);
-    assert_eq!(args.pathspecs, strings(&["a.txt"]));
+    assert_eq!(pathspec_specs(&args.pathspec), strings(&["a.txt"]));
 }
 
 #[test]
@@ -84,14 +89,15 @@ fn revision_then_path_operand_limits_that_commit() {
     let (dir, repo) = two_commit_repo();
     let args = resolve(&repo, &positionals(&["HEAD~1", "a.txt"]));
     assert_eq!(args.target, DiffTarget::Commit(rev(dir.path(), "HEAD~1")));
-    assert_eq!(args.pathspecs, strings(&["a.txt"]));
+    assert_eq!(pathspec_specs(&args.pathspec), strings(&["a.txt"]));
 }
 
 #[test]
 fn trailing_path_operands_after_two_revisions_become_pathspecs() {
     let (dir, repo) = two_commit_repo();
-    let mut args = resolve(&repo, &positionals(&["HEAD~1", "HEAD", "a.txt", "b.txt"]));
-    args.pathspecs.sort();
+    let args = resolve(&repo, &positionals(&["HEAD~1", "HEAD", "a.txt", "b.txt"]));
+    let mut specs = pathspec_specs(&args.pathspec);
+    specs.sort();
     assert_eq!(
         args.target,
         DiffTarget::Trees {
@@ -99,7 +105,7 @@ fn trailing_path_operands_after_two_revisions_become_pathspecs() {
             new: rev(dir.path(), "HEAD"),
         }
     );
-    assert_eq!(args.pathspecs, strings(&["a.txt", "b.txt"]));
+    assert_eq!(specs, strings(&["a.txt", "b.txt"]));
 }
 
 #[test]
@@ -112,7 +118,7 @@ fn explicit_paths_are_never_reinterpreted() {
     };
     let args = resolve(&repo, &request);
     assert_eq!(args.target, DiffTarget::Commit(rev(dir.path(), "HEAD")));
-    assert_eq!(args.pathspecs, strings(&["b.txt"]));
+    assert_eq!(pathspec_specs(&args.pathspec), strings(&["b.txt"]));
 }
 
 #[test]
@@ -190,7 +196,10 @@ fn range_then_known_path_operand_limits_the_range() {
             new: rev(dir.path(), "HEAD"),
         }
     );
-    assert_eq!(args.pathspecs, strings(&["from-file.txt", "a.txt"]));
+    assert_eq!(
+        pathspec_specs(&args.pathspec),
+        strings(&["from-file.txt", "a.txt"])
+    );
 }
 
 #[test]
@@ -322,7 +331,7 @@ fn staged_and_unstaged_resolve_worktree_pathspecs() {
     };
     let args = resolve(&repo, &staged);
     assert_eq!(args.target, DiffTarget::IndexVsHead);
-    assert_eq!(args.pathspecs, strings(&["a.txt"]));
+    assert_eq!(pathspec_specs(&args.pathspec), strings(&["a.txt"]));
     let unstaged = DiffRequest {
         unstaged: true,
         ..DiffRequest::default()
@@ -342,7 +351,7 @@ fn pathspec_file_entries_come_first_and_must_not_be_empty() {
         ..DiffRequest::default()
     };
     assert_eq!(
-        resolve(&repo, &request).pathspecs,
+        pathspec_specs(&resolve(&repo, &request).pathspec),
         strings(&["b.txt", "a.txt"])
     );
 

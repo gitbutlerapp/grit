@@ -37,7 +37,7 @@ use crate::notes::{
 };
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
-use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
+use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, Pathspec};
 use crate::porcelain::add::{
     stage_on_index, validate_commit_staging_pathspecs, StageMode, StageOptions,
 };
@@ -325,7 +325,7 @@ pub enum CommitScope {
     /// Commit the index as-is (`git commit` without `-a`).
     Staged,
     /// Commit only matching paths from the worktree (`git commit --only --` paths).
-    Paths(ResolvedPathspecs),
+    Paths(crate::pathspec::Pathspec),
     /// Commit only hunks from a unified diff or stable hunk ids (`grit commit --hunks` / `--patch-file`).
     Patch {
         /// Hunk ids or pre-parsed file patches (exactly one is populated).
@@ -339,7 +339,9 @@ impl PartialEq for CommitScope {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::AutoStage, Self::AutoStage) | (Self::Staged, Self::Staged) => true,
-            (Self::Paths(a), Self::Paths(b)) => a == b,
+            (Self::Paths(a), Self::Paths(b)) => {
+                a.specs() == b.specs() && a.globals() == b.globals()
+            }
             (
                 Self::Patch {
                     input: a,
@@ -654,9 +656,9 @@ fn seed_commit_index_stage0_from_index(
     repo: &Repository,
     commit_index: &mut Index,
     source: &Index,
-    paths: &ResolvedPathspecs,
+    paths: &Pathspec,
 ) -> Result<()> {
-    if paths.specs.is_empty() {
+    if paths.is_entire_tree() {
         return Ok(());
     }
     let ctx = repo.pathspec_match_context();
@@ -672,7 +674,7 @@ fn seed_commit_index_stage0_from_index(
         if commit_index.get(path.as_bytes(), 0).is_some() {
             continue;
         }
-        if !matches_pathspec_list_with_context(path, &paths.specs, ctx) {
+        if !matches_pathspec_list_with_context(path, paths.specs(), ctx) {
             continue;
         }
         commit_index.stage_file(entry.clone());
@@ -687,11 +689,11 @@ fn seed_commit_index_stage0_from_index(
 fn commit_paths_scope(
     repo: &Repository,
     req: &CommitRequest,
-    paths: &ResolvedPathspecs,
+    paths: &Pathspec,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<CommitOutcome> {
-    if paths.specs.is_empty() {
+    if paths.is_entire_tree() {
         return Err(Error::CommitPathsRequired);
     }
     if !read_merge_heads(repo.git_dir())?.is_empty() {
@@ -717,12 +719,13 @@ fn commit_paths_scope(
     if real_index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
     }
+    let path_sources: Vec<String> = paths.iter().map(str::to_owned).collect();
     let mut stage_opts = StageOptions {
-        pathspecs: paths.specs.clone(),
-        pathspec_sources: if paths.sources.is_empty() {
-            paths.specs.clone()
+        pathspecs: paths.specs().to_vec(),
+        pathspec_sources: if path_sources.is_empty() {
+            paths.specs().to_vec()
         } else {
-            paths.sources.clone()
+            path_sources
         },
         mode: StageMode::All,
         dry_run: req.dry_run,
@@ -779,22 +782,18 @@ struct LockedIndex {
     lock: IndexLock,
 }
 
-fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Result<()> {
-    let pairs: Vec<(&str, &str)> =
-        if paths.sources.len() == paths.specs.len() && !paths.sources.is_empty() {
-            paths
-                .sources
-                .iter()
-                .zip(paths.specs.iter())
-                .map(|(a, b)| (a.as_str(), b.as_str()))
-                .collect()
-        } else {
-            paths
-                .specs
-                .iter()
-                .map(|s| (s.as_str(), s.as_str()))
-                .collect()
-        };
+fn validate_commit_pathspecs(repo: &Repository, paths: &Pathspec) -> Result<()> {
+    let specs = paths.specs();
+    let sources: Vec<&str> = paths.iter().collect();
+    let pairs: Vec<(&str, &str)> = if sources.len() == specs.len() && !sources.is_empty() {
+        sources
+            .into_iter()
+            .zip(specs.iter())
+            .map(|(a, b)| (a, b.as_str()))
+            .collect()
+    } else {
+        specs.iter().map(|s| (s.as_str(), s.as_str())).collect()
+    };
     let mut checker = KnownPathspecChecker::new(repo);
     for (source, resolved) in pairs {
         if pathspec_is_exclude(source) {
@@ -2156,7 +2155,7 @@ mod tests {
     use super::*;
     use crate::index::{entry_from_stat, Index, MODE_REGULAR};
     use crate::objects::ObjectKind;
-    use crate::pathspec::ResolvedPathspecs;
+    use crate::pathspec::{Pathspec, PathspecGlobalFlags};
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
     use crate::reflog::read_reflog;
@@ -3107,11 +3106,7 @@ mod tests {
         let result = commit_with_scope(
             &repo,
             &commit_req("selected path"),
-            CommitScope::Paths(ResolvedPathspecs {
-                specs: vec!["large".into()],
-                sources: vec!["large".into()],
-                scoped: true,
-            }),
+            CommitScope::Paths(Pathspec::scoped(["large"], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &crate::progress::NeverCancel,
         )
@@ -3160,11 +3155,7 @@ mod tests {
         )
         .unwrap();
 
-        let paths = ResolvedPathspecs {
-            specs: vec!["file".into()],
-            sources: vec!["file".into()],
-            scoped: true,
-        };
+        let paths = Pathspec::scoped(["file"], PathspecGlobalFlags::default());
         commit_with_scope(
             &repo,
             &commit_req("file only"),
@@ -3203,11 +3194,7 @@ mod tests {
         fs::write(root.join("new.txt"), b"new\n").unwrap();
         fs::remove_file(root.join("tracked.txt")).unwrap();
 
-        let paths = ResolvedPathspecs {
-            specs: vec!["new.txt".into(), "tracked.txt".into()],
-            sources: vec!["new.txt".into(), "tracked.txt".into()],
-            scoped: true,
-        };
+        let paths = Pathspec::scoped(["new.txt", "tracked.txt"], PathspecGlobalFlags::default());
         commit_with_scope(
             &repo,
             &commit_req("add and remove"),
@@ -3277,11 +3264,10 @@ mod tests {
         commit_with_scope(
             &repo,
             &commit_req("partial"),
-            CommitScope::Paths(ResolvedPathspecs {
-                specs: specs.clone(),
-                sources: specs,
-                scoped: true,
-            }),
+            CommitScope::Paths(Pathspec::scoped(
+                specs.clone(),
+                PathspecGlobalFlags::default(),
+            )),
             &mut NullProgress,
             &crate::progress::NeverCancel,
         )
@@ -3324,11 +3310,7 @@ mod tests {
         )
         .unwrap();
 
-        let paths = ResolvedPathspecs {
-            specs: vec!["missing.txt".into()],
-            sources: vec!["missing.txt".into()],
-            scoped: true,
-        };
+        let paths = Pathspec::scoped(["missing.txt"], PathspecGlobalFlags::default());
         let err = commit_with_scope(
             &repo,
             &commit_req("nope"),
@@ -3363,11 +3345,7 @@ mod tests {
         let tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
         fs::write(repo.git_dir().join("MERGE_HEAD"), format!("{tip}\n")).unwrap();
 
-        let paths = ResolvedPathspecs {
-            specs: vec!["a.txt".into()],
-            sources: vec!["a.txt".into()],
-            scoped: true,
-        };
+        let paths = Pathspec::scoped(["a.txt"], PathspecGlobalFlags::default());
         let err = commit_with_scope(
             &repo,
             &commit_req("partial"),
@@ -3618,12 +3596,8 @@ mod tests {
         assert!(resolve_ref(repo.git_dir(), "refs/heads/main").is_err());
     }
 
-    fn f1_paths() -> ResolvedPathspecs {
-        ResolvedPathspecs {
-            specs: vec!["f1.txt".into()],
-            sources: vec!["f1.txt".into()],
-            scoped: true,
-        }
+    fn f1_paths() -> Pathspec {
+        Pathspec::scoped(["f1.txt"], PathspecGlobalFlags::default())
     }
 
     /// Run `scope` while a foreign `index.lock` exists and check nothing became visible.
@@ -3833,11 +3807,10 @@ mod tests {
         commit_with_scope(
             &repo,
             &commit_req("partial"),
-            CommitScope::Paths(ResolvedPathspecs {
-                specs: specs.clone(),
-                sources: specs,
-                scoped: true,
-            }),
+            CommitScope::Paths(Pathspec::scoped(
+                specs.clone(),
+                PathspecGlobalFlags::default(),
+            )),
             &mut NullProgress,
             &crate::progress::NeverCancel,
         )
@@ -4880,11 +4853,7 @@ mod tests {
         )
         .unwrap();
         fs::write(root.join("new.txt"), b"new\n").unwrap();
-        let paths = ResolvedPathspecs {
-            specs: vec!["new.txt".into()],
-            sources: vec!["new.txt".into()],
-            scoped: true,
-        };
+        let paths = Pathspec::scoped(["new.txt"], PathspecGlobalFlags::default());
         let before = repo_snapshot(&repo);
         let plan = plan_commit(
             &repo,
@@ -5542,7 +5511,7 @@ mod tests {
         let err = commit_with_scope(
             &repo,
             &commit_req("x"),
-            CommitScope::Paths(ResolvedPathspecs::default()),
+            CommitScope::Paths(Pathspec::entire_tree(PathspecGlobalFlags::default())),
             &mut NullProgress,
             &crate::progress::NeverCancel,
         )

@@ -634,9 +634,10 @@ impl<'repo> UncommittedDiff<'repo> {
     pub fn entries(
         &mut self,
         target: &DiffTarget,
-        pathspecs: &[String],
+        pathspec: &crate::pathspec::Pathspec,
         options: &DiffOptions,
     ) -> Result<super::core::DiffEntriesResult> {
+        let pathspecs = pathspec.specs();
         let renames = options.renames;
         let result = match target {
             DiffTarget::IndexVsHead => {
@@ -719,7 +720,7 @@ impl<'repo> UncommittedDiff<'repo> {
     pub fn peer_changes<'a>(
         &mut self,
         side: DiffSide,
-        pathspecs: &[String],
+        pathspec: &crate::pathspec::Pathspec,
         renames: RenameDetection,
         primary_paths: impl IntoIterator<Item = &'a str>,
     ) -> Result<Vec<FileChange>> {
@@ -734,7 +735,7 @@ impl<'repo> UncommittedDiff<'repo> {
         }
         let options = DiffOptions::default().with_renames(renames);
         let entries: Vec<DiffEntry> = self
-            .entries(&peer_target, pathspecs, &options)?
+            .entries(&peer_target, pathspec, &options)?
             .entries
             .into_iter()
             .filter(|entry| {

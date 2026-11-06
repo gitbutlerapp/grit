@@ -2430,8 +2430,15 @@ mod tests {
         git(root, &["add", "f.txt"]);
         git(root, &["commit", "-qm", "init"]);
         std::fs::write(root.join("f.txt"), b"a\nB\n").unwrap();
-        let bundle = hunk_diff_bundle(&repo, &[":(glob)*.txt".into()], DiffOptions::default())
-            .expect("bundle");
+        let bundle = hunk_diff_bundle(
+            &repo,
+            &crate::pathspec::Pathspec::scoped(
+                [":(glob)*.txt"],
+                crate::pathspec::PathspecGlobalFlags::default(),
+            ),
+            DiffOptions::default(),
+        )
+        .expect("bundle");
         assert!(
             bundle.unstaged.iter().any(|f| f.path == "f.txt"),
             "expected f.txt in bundle, got {:?}",

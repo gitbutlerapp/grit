@@ -14,7 +14,7 @@ use grit_lib::error::Error;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::Pathspec;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Msg Source <msg@example.com> 1700000000 +0000".to_owned();
@@ -78,11 +78,10 @@ fn clobber_commit_editmsg(root: &Path) {
 }
 
 fn paths(spec: &str) -> CommitScope {
-    CommitScope::Paths(ResolvedPathspecs {
-        specs: vec![spec.to_owned()],
-        sources: vec![spec.to_owned()],
-        scoped: true,
-    })
+    CommitScope::Paths(Pathspec::scoped(
+        vec![spec.to_owned()],
+        PathspecGlobalFlags::default(),
+    ))
 }
 
 fn head_subject(root: &Path) -> String {

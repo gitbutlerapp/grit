@@ -10,6 +10,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::RevWalkListOptions;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use support::{git, git_rev_list, open_grit_repo, HistoryRepo};
 
@@ -76,7 +77,7 @@ fn grit_path_commits(
         .commits(
             tokens,
             &RevWalkListOptions {
-                paths: vec![path.to_owned()],
+                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
                 limit,
                 ..RevWalkListOptions::default()
             },
@@ -136,7 +137,7 @@ fn path_limited_count_and_limit_match_git() {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![path.to_owned()],
+                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -148,7 +149,7 @@ fn path_limited_count_and_limit_match_git() {
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![path.to_owned()],
+                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -161,7 +162,7 @@ fn path_limited_count_and_limit_match_git() {
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![path.to_owned()],
+                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
                 limit: Some(3),
                 ..RevWalkListOptions::default()
             },
@@ -288,7 +289,7 @@ fn path_limited_exclude_only_pathspec_matches_git() {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![spec.into()],
+                pathspec: Pathspec::scoped(vec![spec.into()], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -333,7 +334,7 @@ fn path_limited_root_gitlink_matches_git() {
         .count(
             &[orphan.as_str()],
             &RevWalkListOptions {
-                paths: vec!["sub".into()],
+                pathspec: Pathspec::scoped(["sub"], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -348,7 +349,7 @@ fn grit_path_count(wt: &std::path::Path, path: &str) -> usize {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![path.to_owned()],
+                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -633,7 +634,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec!["f.txt".to_owned()],
+                pathspec: Pathspec::scoped(["f.txt"], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -645,7 +646,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![".".to_owned()],
+                pathspec: Pathspec::scoped(["."], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -672,7 +673,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec!["f.txt".to_owned()],
+                pathspec: Pathspec::scoped(["f.txt"], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -705,7 +706,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                paths: vec![top_spec],
+                pathspec: Pathspec::scoped(vec![top_spec], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )
@@ -730,7 +731,10 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
             .count(
                 &["HEAD"],
                 &RevWalkListOptions {
-                    paths: vec![path_spec.to_owned()],
+                    pathspec: Pathspec::scoped(
+                        vec![path_spec.to_owned()],
+                        PathspecGlobalFlags::default(),
+                    ),
                     ..RevWalkListOptions::default()
                 },
             )

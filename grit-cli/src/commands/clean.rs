@@ -114,7 +114,7 @@ pub fn run(
     let repo = context::discover()?;
     let interrupt = crate::interrupt::InterruptCancel::install();
     let resolved = args.resolve(&repo)?;
-    let pathspecs = resolved.into_specs();
+    let pathspecs = resolved.specs().to_vec();
     let lib_outcome = clean_untracked_with_cancel(
         &repo,
         &CleanOptions {

@@ -13,6 +13,7 @@ use grit_lib::revwalk::{
     committer_cutoff_from_date, MergeFilter, RefSelection, RevWalkListOptions,
 };
 use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder, CommitFilterError};
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use crate::error_kind::ErrorKind;
 use crate::json_error::{
@@ -181,7 +182,7 @@ impl RevSelectArgs {
         repo: &Repository,
         env: &Environment,
         default_revs: &[&str],
-        walk_paths: &[String],
+        pathspec: Pathspec,
     ) -> Result<RevWalkListOptions> {
         if self.merges && self.no_merges {
             bail!("`--merges` and `--no-merges` cannot be used together");
@@ -225,7 +226,7 @@ impl RevSelectArgs {
             first_parent: self.first_parent,
             follow: self.follow,
             full_history: false,
-            paths: walk_paths.to_vec(),
+            pathspec,
             commit_filter,
             pickaxe,
             graph: false,

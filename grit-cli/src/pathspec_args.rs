@@ -7,8 +7,8 @@ use grit_lib::error::PathspecFromFileParseError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::is_long_magic_pathspec_token;
 use grit_lib::worktree::pathspec::{
-    parse_pathspecs_from_source, Pathspec, PathspecGlobalFlags, PathspecInput, PathspecOptions,
-    PathspecResolveError, ResolvedPathspecs,
+    parse_pathspecs_from_source, Pathspec, PathspecFile, PathspecGlobalFlags, PathspecOptions,
+    PathspecResolveError,
 };
 use std::io::Read;
 use std::sync::OnceLock;
@@ -52,7 +52,7 @@ pub struct TrailingPathspecArgs {
 
 fn pathspec_options_from_repo(
     repo: &Repository,
-    from_file: Option<PathspecInput>,
+    from_file: Option<PathspecFile>,
 ) -> PathspecOptions {
     let mut options = PathspecOptions::default();
     options.globals = PathspecGlobalFlags::from_environment(repo.environment());
@@ -70,7 +70,7 @@ fn resolve_typed_pathspec(
         None => None,
         Some(path) => {
             let data = read_pathspec_source(path)?;
-            Some(PathspecInput::new(data, pathspec_file_nul))
+            Some(PathspecFile::new(data, pathspec_file_nul))
         }
     };
     let options = pathspec_options_from_repo(repo, from_file);
@@ -79,13 +79,9 @@ fn resolve_typed_pathspec(
 
 impl PathspecArgs {
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
-    pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
-        resolve_pathspec_args(
-            repo,
-            &self.paths,
-            self.pathspec_from_file.as_deref(),
-            self.pathspec_file_nul,
-        )
+    /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
+    pub fn resolve(&self, repo: &Repository) -> Result<Pathspec> {
+        self.resolve_pathspec(repo)
     }
 
     /// Resolve into a [`Pathspec`] (preferred for porcelain options).
@@ -149,20 +145,24 @@ impl TrailingPathspecArgs {
             .map_err(map_pathspec_from_file_parse)
     }
 
-    /// Pathspec tokens for rev walks (`RevWalkListOptions::paths`): argv plus file lines.
-    ///
-    /// Returns unresolved tokens; [`Repository::resolve_rev_walk_pathspecs`] runs once when the
-    /// walk is built in `grit-lib`.
-    pub fn rev_walk_tokens(&self, _repo: &Repository) -> Result<Vec<String>> {
+    /// Path limit for rev walks ([`RevWalkListOptions::pathspec`]).
+    pub fn rev_walk_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
         if !self.has_any() {
-            return Ok(Vec::new());
+            return Ok(Pathspec::entire_tree(
+                PathspecGlobalFlags::from_environment(repo.environment()),
+            ));
         }
-        self.pathspec_source_tokens(&[])
+        self.resolve_pathspec(repo)
     }
 
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
-    pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
-        resolve_pathspec_args(
+    pub fn resolve(&self, repo: &Repository) -> Result<Pathspec> {
+        self.resolve_pathspec(repo)
+    }
+
+    /// Resolve into a [`Pathspec`].
+    pub fn resolve_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
+        resolve_typed_pathspec(
             repo,
             &self.paths,
             self.pathspec_from_file.as_deref(),
@@ -197,23 +197,6 @@ pub fn promote_long_magic_pathspecs_from_revs(
         }
     });
     pathspecs.paths.extend(moved);
-}
-
-fn resolve_pathspec_args(
-    repo: &Repository,
-    paths: &[String],
-    pathspec_from_file: Option<&str>,
-    pathspec_file_nul: bool,
-) -> Result<ResolvedPathspecs> {
-    let cwd = std::env::current_dir().context("could not read the current directory")?;
-    let from_file = match pathspec_from_file {
-        None => None,
-        Some(path) => {
-            let data = read_pathspec_source(path)?;
-            Some(PathspecInput::new(data, pathspec_file_nul))
-        }
-    };
-    ResolvedPathspecs::resolve(repo, &cwd, paths, from_file).map_err(map_pathspec_resolve)
 }
 
 fn read_pathspec_source(path: &str) -> Result<Vec<u8>> {

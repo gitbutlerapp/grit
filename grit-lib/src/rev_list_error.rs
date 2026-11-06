@@ -48,7 +48,7 @@ pub enum RevListError {
     /// option such as `--all`, the `--` separator, or several whitespace-separated tokens.
     ///
     /// Use [`crate::revwalk::RevWalk::commits`] with
-    /// [`crate::revwalk::RevWalkListOptions::refs`] / [`crate::revwalk::RevWalkListOptions::paths`]
+    /// [`crate::revwalk::RevWalkListOptions::refs`] / [`crate::revwalk::RevWalkListOptions::pathspec`]
     /// for ref selections, path limits, and multiple tokens.
     #[error("'{spec}' is not a single revision or range; list several tokens, refs or paths with RevWalk::commits")]
     UnsupportedWalkSpec {

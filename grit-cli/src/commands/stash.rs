@@ -440,7 +440,7 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
     };
     let mode = stash_mode_from_flags(staged, keep_index)?;
     let resolved = pathspec_args.resolve(&repo)?;
-    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let pathspecs = resolved.specs().to_vec();
     if !pathspecs.is_empty() && selection.is_some() {
         anyhow::bail!("path arguments cannot be used with --hunks or --lines");
     }

@@ -15,7 +15,7 @@ use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::Pathspec;
 
 fn enable_ignorecase(repo: &Repository, root: &Path) {
     fs::write(
@@ -297,11 +297,10 @@ fn collision_loser_path_commit_leaves_index_and_head_unchanged() {
     let err = commit_with_scope(
         &fx.repo,
         &commit_request("e"),
-        CommitScope::Paths(ResolvedPathspecs {
-            specs: vec!["File.txt".into()],
-            sources: vec!["File.txt".into()],
-            scoped: true,
-        }),
+        CommitScope::Paths(Pathspec::scoped(
+            ["File.txt"],
+            PathspecGlobalFlags::default(),
+        )),
         &mut NullProgress,
         &NeverCancel,
     )

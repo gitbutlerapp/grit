@@ -836,7 +836,7 @@ fn emit_patch_text_to_stdout(
 pub struct ShowLogPatchTextParams {
     pub oid: ObjectId,
     pub format: DiffFormatArgs,
-    pub pathspecs: Vec<String>,
+    pub pathspec: grit_lib::worktree::pathspec::Pathspec,
     pub diff_merges: DiffMerges,
 }
 
@@ -844,7 +844,7 @@ pub struct ShowLogPatchTextParams {
 pub fn log_patch_options_for_patch_text(
     repo: &grit_lib::repo::Repository,
     format: DiffFormatArgs,
-    pathspecs: &[String],
+    pathspec: &grit_lib::worktree::pathspec::Pathspec,
     diff_merges: DiffMerges,
 ) -> Result<LogPatchOptions> {
     let config = repo.config().snapshot().context("could not load config")?;
@@ -856,7 +856,7 @@ pub fn log_patch_options_for_patch_text(
         abbrev_len: 7,
         commit_header: LogPatchCommitHeader::Full,
         binary_format: grit_lib::diff::LogPatchBinaryFormat::GitApplyBinaryPatch,
-        pathspecs: pathspecs.to_vec(),
+        pathspec: pathspec.clone(),
         diff_merges,
     })
 }
@@ -888,7 +888,7 @@ pub fn emit_show_log_patch_text(
     let opts = log_patch_options_for_patch_text(
         repo,
         params.format,
-        &params.pathspecs,
+        &params.pathspec,
         params.diff_merges,
     )?;
     repo.odb()
@@ -901,13 +901,13 @@ pub fn emit_commits_log_patch_text(
     repo: &grit_lib::repo::Repository,
     oids: &[ObjectId],
     format: DiffFormatArgs,
-    pathspecs: &[String],
+    pathspec: &grit_lib::worktree::pathspec::Pathspec,
     mut out: &mut dyn Write,
 ) -> Result<()> {
     if oids.is_empty() {
         return Ok(());
     }
-    let opts = log_patch_options_for_patch_text(repo, format, pathspecs, DiffMerges::Combined)?;
+    let opts = log_patch_options_for_patch_text(repo, format, pathspec, DiffMerges::Combined)?;
     repo.odb()
         .with_pack_read_context(|| write_commits_log_patch(repo, &mut out, oids, &opts))
         .map_err(map_log_patch_error)
@@ -938,7 +938,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let quiet = opts.quiet;
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
-    let DiffArguments { target, pathspecs } = resolve_diff_target(&repo, &opts)?;
+    let DiffArguments { target, pathspec } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
@@ -949,7 +949,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
             let diff_result = uncommitted_entries(
                 &mut uncommitted_diff(&repo)?,
                 &target,
-                &pathspecs,
+                &pathspec,
                 &diff_options,
             )?;
             let changes = load_object_changes(&repo, &diff_result.entries)?;
@@ -960,12 +960,12 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
         | DiffTarget::WorktreeVsTree(_) => {
             let mut uncommitted = uncommitted_diff(&repo)?;
             let diff_result =
-                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
+                uncommitted_entries(&mut uncommitted, &target, &pathspec, &diff_options)?;
             let changes = uncommitted.load_worktree_changes(diff_result.entries.clone())?;
             (diff_result.entries, Some((changes, PatchSide::Worktree)))
         }
         _ => {
-            let diff_result = stored_entries(&repo, &target, &pathspecs, &diff_options)?;
+            let diff_result = stored_entries(&repo, &target, &pathspec, &diff_options)?;
             if let Some(skipped) = diff_result.inexact_rename_skipped {
                 emit_inexact_rename_notice(&skipped);
             }
@@ -988,7 +988,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
-    let DiffArguments { target, pathspecs } = resolve_diff_target(&repo, &opts)?;
+    let DiffArguments { target, pathspec } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
@@ -999,8 +999,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let outcome = match target {
         DiffTarget::IndexVsHead => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries =
-                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
+            let entries = uncommitted_entries(&mut uncommitted, &target, &pathspec, &diff_options)?;
             match detail {
                 DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
                     drop(uncommitted);
@@ -1012,7 +1011,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                         uncommitted
                             .peer_changes(
                                 DiffSide::Staged,
-                                &pathspecs,
+                                &pathspec,
                                 diff_options.renames,
                                 staged.iter().map(|fc| fc.path.as_str()),
                             )
@@ -1036,8 +1035,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         DiffTarget::WorktreeVsIndex => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries =
-                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
+            let entries = uncommitted_entries(&mut uncommitted, &target, &pathspec, &diff_options)?;
             match detail {
                 DiffDetail::Stat => {
                     let changes = uncommitted.load_worktree_changes(entries.entries)?;
@@ -1054,7 +1052,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                         uncommitted
                             .peer_changes(
                                 DiffSide::Unstaged,
-                                &pathspecs,
+                                &pathspec,
                                 diff_options.renames,
                                 unstaged.iter().map(|fc| fc.path.as_str()),
                             )
@@ -1078,8 +1076,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         DiffTarget::WorktreeVsHead | DiffTarget::WorktreeVsTree(_) => {
             let mut uncommitted = uncommitted_diff(&repo)?;
-            let entries =
-                uncommitted_entries(&mut uncommitted, &target, &pathspecs, &diff_options)?;
+            let entries = uncommitted_entries(&mut uncommitted, &target, &pathspec, &diff_options)?;
             let changes = uncommitted.load_worktree_changes(entries.entries)?;
             drop(uncommitted);
             match detail {
@@ -1101,7 +1098,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         }
         _ => tree_diff_outcome(
             &repo,
-            stored_entries(&repo, &target, &pathspecs, &diff_options)?,
+            stored_entries(&repo, &target, &pathspec, &diff_options)?,
             detail,
             diff_options,
             format,
@@ -1159,7 +1156,7 @@ pub fn diff_for_commit(
 ) -> Result<DiffOutcome> {
     let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
-    let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
+    let pathspec = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
@@ -1172,7 +1169,7 @@ pub fn diff_for_commit(
         opts.diff_merges,
         detail,
         &diff_options,
-        &pathspecs,
+        &pathspec,
         &thread_policy,
     )?;
     Ok(finish_outcome(
@@ -1377,11 +1374,11 @@ fn uncommitted_diff(repo: &grit_lib::repo::Repository) -> Result<UncommittedDiff
 fn uncommitted_entries(
     uncommitted: &mut UncommittedDiff<'_>,
     target: &DiffTarget,
-    pathspecs: &[String],
+    pathspec: &grit_lib::worktree::pathspec::Pathspec,
     diff_options: &DiffOptions,
 ) -> Result<grit_lib::diff::DiffEntriesResult> {
     uncommitted
-        .entries(target, pathspecs, diff_options)
+        .entries(target, pathspec, diff_options)
         .context("could not diff the index or working tree")
 }
 
@@ -1389,11 +1386,11 @@ fn uncommitted_entries(
 fn stored_entries(
     repo: &grit_lib::repo::Repository,
     target: &DiffTarget,
-    pathspecs: &[String],
+    pathspec: &grit_lib::worktree::pathspec::Pathspec,
     diff_options: &DiffOptions,
 ) -> Result<grit_lib::diff::DiffEntriesResult> {
     repo.diff()
-        .entries(target, pathspecs, diff_options)
+        .entries(target, pathspec, diff_options)
         .context("could not diff commits")
 }
 
@@ -1472,10 +1469,7 @@ fn pathspec_prefix_for_repo(repo: &grit_lib::repo::Repository) -> Result<Option<
 pub(crate) fn resolve_commit_diff_pathspecs(
     repo: &grit_lib::repo::Repository,
     raw_paths: &[String],
-) -> Result<Vec<String>> {
-    if raw_paths.is_empty() {
-        return Ok(Vec::new());
-    }
+) -> Result<grit_lib::worktree::pathspec::Pathspec> {
     let cwd_prefix = pathspec_prefix_for_repo(repo)?;
     grit_lib::diff::resolve_commit_diff_pathspecs(repo, cwd_prefix.as_deref(), raw_paths)
         .map_err(map_diff_arguments_error)

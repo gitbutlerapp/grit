@@ -5016,14 +5016,22 @@ fn compute_cherry_patch_id(
     paths: &[String],
 ) -> Result<Option<ObjectId>> {
     let algo = repo.odb().hash_algo();
-    if paths.is_empty() {
+    let pathspec = if paths.is_empty() {
+        crate::pathspec::Pathspec::entire_tree(crate::pathspec::PathspecGlobalFlags::default())
+    } else {
+        crate::pathspec::Pathspec::scoped(
+            paths.iter().cloned(),
+            crate::pathspec::PathspecGlobalFlags::default(),
+        )
+    };
+    if pathspec.is_entire_tree() {
         compute_patch_id(algo, repo.odb(), oid, crate::patch_ids::PatchIdMode::Stable)
     } else {
         compute_patch_id_for_paths(
             algo,
             repo.odb(),
             oid,
-            paths,
+            &pathspec,
             crate::patch_ids::PatchIdMode::Stable,
         )
     }

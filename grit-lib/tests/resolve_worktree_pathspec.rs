@@ -1,16 +1,29 @@
-//! `Repository::resolve_worktree_pathspec` and `ResolvedPathspecs::resolve` (issue #1682).
+//! `Repository::resolve_worktree_pathspec` and `Repository::pathspec` (issue #1682).
 //!
 //! Resolving argv pathspecs must cost no config reload or `.git` filesystem probe per path:
 //! `grit add <98 paths>` on macOS repeated both for every argument.
 
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::pathspec::{PathspecResolveError, ResolvedPathspecs};
+use grit_lib::worktree::pathspec::{PathspecOptions, PathspecResolveError};
 use std::fs;
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
     let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     (dir, repo)
+}
+
+fn resolve_batch(
+    repo: &Repository,
+    cwd_prefix: Option<&str>,
+    raw: &[String],
+) -> grit_lib::worktree::pathspec::Pathspec {
+    let mut opts = PathspecOptions::default();
+    if let Some(prefix) = cwd_prefix {
+        opts = opts.with_cwd_prefix(prefix);
+    }
+    repo.pathspec(raw.iter().map(String::as_str), &opts)
+        .expect("pathspec")
 }
 
 #[test]
@@ -67,8 +80,8 @@ fn top_magic_pathspecs_stay_repo_root_relative_from_prefix() {
     fs::write(dir.path().join("a/g.c"), b"1\n").expect("g.c");
     fs::write(sub.join("h.c"), b"1\n").expect("h.c");
     let raw = vec![":(top)a/g.c".to_string()];
-    let resolved = ResolvedPathspecs::resolve(&repo, &sub, &raw, None).expect("resolve batch");
-    assert_eq!(resolved.specs, raw);
+    let resolved = resolve_batch(&repo, Some("a/b"), &raw);
+    assert_eq!(resolved.specs(), raw.as_slice());
 }
 
 #[test]
@@ -104,16 +117,18 @@ fn bare_repository_needs_work_tree() {
 
 #[test]
 fn resolved_pathspecs_match_per_path_resolution() {
-    let (dir, repo) = init_repo();
+    let (_dir, repo) = init_repo();
     let raw: Vec<String> = (0..20).map(|i| format!("d{i}/f.txt")).collect();
-    let resolved =
-        ResolvedPathspecs::resolve(&repo, &dir.path().join("sub"), &raw, None).expect("resolve");
+    let resolved = resolve_batch(&repo, Some("sub"), &raw);
     let one_by_one: Vec<String> = raw
         .iter()
         .map(|p| repo.resolve_worktree_pathspec(p, Some("sub")).expect("one"))
         .collect();
-    assert_eq!(resolved.specs, one_by_one);
-    assert_eq!(resolved.sources, raw);
+    assert_eq!(resolved.specs(), one_by_one.as_slice());
+    assert_eq!(
+        resolved.iter().collect::<Vec<_>>(),
+        raw.iter().map(String::as_str).collect::<Vec<_>>()
+    );
 }
 
 /// On main, every argv pathspec in a `core.precomposeunicode=true` repository (the macOS default)
@@ -134,8 +149,8 @@ fn many_pathspecs_do_not_reprobe_git_dir_per_path() {
         .expect("set .git mtime");
 
     let raw: Vec<String> = (0..100).map(|i| format!("dir{i}/file.txt")).collect();
-    let resolved = ResolvedPathspecs::resolve(&repo, dir.path(), &raw, None).expect("resolve");
-    assert_eq!(resolved.specs, raw);
+    let resolved = resolve_batch(&repo, None, &raw);
+    assert_eq!(resolved.specs(), raw.as_slice());
     for p in &raw {
         repo.resolve_worktree_pathspec(p, None)
             .expect("resolve one");

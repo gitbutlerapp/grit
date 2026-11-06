@@ -61,8 +61,8 @@ pub struct LogPatchOptions {
     pub commit_header: LogPatchCommitHeader,
     /// How to encode binary file changes in the patch body.
     pub binary_format: LogPatchBinaryFormat,
-    /// Limit patches to these pathspecs (empty = all paths).
-    pub pathspecs: Vec<String>,
+    /// Limit patches to these paths (entire tree when unscoped).
+    pub pathspec: crate::pathspec::Pathspec,
     /// How to diff merge commits (`combined` omits apply-ready patch bodies).
     pub diff_merges: DiffMerges,
 }
@@ -76,7 +76,9 @@ impl LogPatchOptions {
             abbrev_len: 7,
             commit_header: LogPatchCommitHeader::Full,
             binary_format: LogPatchBinaryFormat::default(),
-            pathspecs: Vec::new(),
+            pathspec: crate::pathspec::Pathspec::entire_tree(
+                crate::pathspec::PathspecGlobalFlags::default(),
+            ),
             diff_merges: DiffMerges::Combined,
         }
     }
@@ -131,7 +133,9 @@ pub fn write_patch<W: Write>(
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
         binary_format: LogPatchBinaryFormat::GitApplyBinaryPatch,
-        pathspecs: Vec::new(),
+        pathspec: crate::pathspec::Pathspec::entire_tree(
+            crate::pathspec::PathspecGlobalFlags::default(),
+        ),
         diff_merges: DiffMerges::FirstParent,
     };
     let abbrev_len = opts.abbrev_len;
@@ -221,7 +225,9 @@ pub fn write_patch_structured<W: Write>(
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
         binary_format: LogPatchBinaryFormat::GitApplyBinaryPatch,
-        pathspecs: Vec::new(),
+        pathspec: crate::pathspec::Pathspec::entire_tree(
+            crate::pathspec::PathspecGlobalFlags::default(),
+        ),
         diff_merges: DiffMerges::FirstParent,
     };
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
@@ -637,7 +643,7 @@ fn write_parsed_commit_log_patch<W: Write>(
         repo,
         oid,
         commit,
-        &opts.pathspecs,
+        opts.pathspec.specs(),
         &config,
         &thread_policy,
     )?;
@@ -1095,7 +1101,9 @@ pub fn write_patch_resolved<W: Write>(
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
         binary_format: LogPatchBinaryFormat::GitApplyBinaryPatch,
-        pathspecs: Vec::new(),
+        pathspec: crate::pathspec::Pathspec::entire_tree(
+            crate::pathspec::PathspecGlobalFlags::default(),
+        ),
         diff_merges: DiffMerges::FirstParent,
     };
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);

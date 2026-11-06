@@ -217,14 +217,14 @@ fn parse_status_renames_config_value(raw: &str) -> Option<RenameDetection> {
 
 /// Whether a diff entry's primary path matches a pathspec list (pre-rename-detection filter).
 #[must_use]
-pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String]) -> bool {
+pub(crate) fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String]) -> bool {
     if pathspecs.is_empty() {
         return true;
     }
     status_path_matches(entry.path(), pathspecs)
 }
 
-/// Like [`status_diff_entry_matches_pathspec`], honoring [`Pathspec::globals`].
+/// Like [`status_diff_entry_matches_pathspec`], honoring [`crate::pathspec::Pathspec::globals`].
 pub fn status_diff_entry_matches_pathspec_typed(
     repo: &Repository,
     entry: &DiffEntry,
@@ -2126,7 +2126,7 @@ fn status_pathspec_match_context(
 }
 
 /// Pathspec match for status using git's exclude / OR-of-positives semantics.
-pub fn status_path_matches(path: &str, pathspecs: &[String]) -> bool {
+pub(crate) fn status_path_matches(path: &str, pathspecs: &[String]) -> bool {
     status_path_matches_with_globals(
         path,
         pathspecs,
@@ -2136,7 +2136,7 @@ pub fn status_path_matches(path: &str, pathspecs: &[String]) -> bool {
 
 /// Like [`status_path_matches`], with explicit Git global pathspec flags.
 #[must_use]
-pub fn status_path_matches_with_globals(
+pub(crate) fn status_path_matches_with_globals(
     path: &str,
     pathspecs: &[String],
     globals: crate::pathspec::PathspecGlobalFlags,
@@ -2176,7 +2176,7 @@ fn pathspecs_use_attr_magic(pathspecs: &[String]) -> bool {
 }
 
 /// Pathspec match that also honors `:(attr:...)` magic against worktree contents.
-pub fn status_path_matches_worktree(
+pub(crate) fn status_path_matches_worktree(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
@@ -2187,7 +2187,7 @@ pub fn status_path_matches_worktree(
 }
 
 /// Like [`status_path_matches_worktree`], reusing an existing [`crate::worktree_rules::WorktreeRules`] when provided.
-pub fn status_path_matches_worktree_with_rules(
+pub(crate) fn status_path_matches_worktree_with_rules(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
@@ -2207,7 +2207,7 @@ pub fn status_path_matches_worktree_with_rules(
 }
 
 /// Like [`status_path_matches_worktree_with_rules`], with explicit global pathspec flags.
-pub fn status_path_matches_worktree_with_rules_and_globals(
+pub(crate) fn status_path_matches_worktree_with_rules_and_globals(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
@@ -2272,7 +2272,7 @@ fn is_executable_file(_meta: &fs::Metadata) -> bool {
 }
 
 /// Whether `rel_dir` could contain a path matching any of `pathspecs` (directory prune).
-pub fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool {
+pub(crate) fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool {
     pathspec_may_match_directory_with_globals(
         rel_dir,
         pathspecs,
@@ -2282,7 +2282,7 @@ pub fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool
 
 /// Like [`pathspec_may_match_directory`], with explicit global pathspec flags.
 #[must_use]
-pub fn pathspec_may_match_directory_with_globals(
+pub(crate) fn pathspec_may_match_directory_with_globals(
     rel_dir: &str,
     pathspecs: &[String],
     globals: crate::pathspec::PathspecGlobalFlags,
@@ -4628,7 +4628,7 @@ mod status_op_tests {
         .unwrap();
         let opts = StatusOptions {
             pathspec: crate::pathspec::Pathspec::scoped(
-                vec!["scoped".into()],
+                ["scoped"],
                 crate::pathspec::PathspecGlobalFlags::default(),
             ),
             renames: Some(RenameDetection {
@@ -4818,7 +4818,7 @@ mod status_op_tests {
         for spec in ["old.txt", "new.txt"] {
             let opts = StatusOptions {
                 pathspec: crate::pathspec::Pathspec::scoped(
-                    vec![spec.into()],
+                    [spec],
                     crate::pathspec::PathspecGlobalFlags::default(),
                 ),
                 renames,
@@ -4835,7 +4835,7 @@ mod status_op_tests {
 
         let opts_both = StatusOptions {
             pathspec: crate::pathspec::Pathspec::scoped(
-                vec![".".into()],
+                ["."],
                 crate::pathspec::PathspecGlobalFlags::default(),
             ),
             renames,

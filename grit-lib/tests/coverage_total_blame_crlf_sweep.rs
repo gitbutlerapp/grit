@@ -11,9 +11,7 @@ use grit_lib::worktree::crlf::{
     has_crlf_in_index_blob, has_lone_lf, is_all_crlf, is_all_lf, is_binary, lf_to_crlf,
     load_gitattributes, ConversionConfig, FileAttrs,
 };
-use grit_lib::worktree::pathspec::{
-    matches_pathspec_list, parse_pathspecs_from_source, pathspec_matches,
-};
+use grit_lib::worktree::pathspec::{parse_pathspecs_from_source, Pathspec, PathspecGlobalFlags};
 use std::fs;
 use tempfile::tempdir;
 
@@ -117,9 +115,10 @@ fn blame_crlf_apply_and_pathspec_deep_sweep() -> grit_lib::error::Result<()> {
     assert!(files.len() >= 10);
 
     let specs = parse_pathspecs_from_source(b"*.txt\0:(exclude)skip/\0dir/\0", true)?;
+    let ps = Pathspec::scoped(specs.clone(), PathspecGlobalFlags::default());
     for path in ["f0.txt", "dir/x.txt", "skip/y.txt", "other.md"] {
-        let _ = matches_pathspec_list(path, &specs);
-        let _ = pathspec_matches("*.txt", path);
+        let _ = ps.matches_path(path);
+        let _ = Pathspec::scoped(["*.txt"], PathspecGlobalFlags::default()).matches_path(path);
     }
 
     Ok(())

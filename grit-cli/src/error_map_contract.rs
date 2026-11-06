@@ -5,7 +5,8 @@ use std::path::Path;
 use anyhow::Error;
 use grit_lib::command_runner::hooks::{HookError, HookOutput};
 use grit_lib::error::{
-    AuthFailure, ConfigError, Error as LibError, NotARepositoryReason, OverwriteReason,
+    AuthFailure, ConfigError, Error as LibError, LockHeldError, NotARepositoryReason,
+    OverwriteReason,
 };
 use grit_lib::error::{RemoteUnreadableReason, WorktreeOperation};
 use grit_lib::objects::ObjectId;
@@ -206,13 +207,13 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "lock_held",
         build: || {
-            Error::new(LibError::LockHeld {
+            Error::new(LibError::LockHeld(LockHeldError {
                 path: Path::new("/repo/.git/index.lock").into(),
                 holder: Some(LockHolder {
                     pid: 42,
                     running: false,
                 }),
-            })
+            }))
         },
         kind: Some(ErrorKind::LockHeld),
         exit: ExitStatus::Failure,
@@ -1121,6 +1122,14 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
     ControlFlowAllowance {
         file: "src/commands/history.rs",
         line_contains: "LibError::Hook(_)",
+    },
+    ControlFlowAllowance {
+        file: "src/cli_messages.rs",
+        line_contains: "LibError::LockHeld(LockHeldError",
+    },
+    ControlFlowAllowance {
+        file: "src/cli_messages.rs",
+        line_contains: "LibError::Config(ConfigError::",
     },
 ];
 

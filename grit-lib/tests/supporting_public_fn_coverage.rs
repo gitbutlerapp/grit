@@ -51,10 +51,7 @@ use grit_lib::worktree::crlf::{
     load_gitattributes_for_checkout, load_gitattributes_from_index, parse_gitattributes_content,
     ConversionConfig,
 };
-use grit_lib::worktree::pathspec::{
-    extend_pathspec_list_implicit_cwd, pathdiff, resolve_magic_pathspec,
-    resolve_pathspec_in_worktree,
-};
+use grit_lib::worktree::pathspec::{pathdiff, Pathspec, PathspecGlobalFlags};
 use tempfile::tempdir;
 
 fn init_repo(dir: &Path) -> Repository {
@@ -124,11 +121,13 @@ fn crlf_and_pathspec_helpers() {
     fs::write(dir.path().join(".gitattributes"), "* text=auto\n").expect("ga");
     let _ = load_gitattributes_for_checkout(dir.path(), "foo.txt", &index, &odb);
 
-    let _ = resolve_magic_pathspec(":(glob)*.rs", "");
-    let specs = vec![":(exclude)foo".to_owned()];
-    let _ = extend_pathspec_list_implicit_cwd(&specs, Some("src"));
+    let ps = Pathspec::scoped([":(glob)*.rs"], PathspecGlobalFlags::default());
+    let _ = ps.matches_path("src/main.rs");
+    let ps = Pathspec::scoped([":(exclude)foo"], PathspecGlobalFlags::default());
+    let _ = ps.matches_path("foo");
     let _ = pathdiff(dir.path(), dir.path());
-    let _ = resolve_pathspec_in_worktree("add", "README.md", dir.path(), None);
+    let ps = Pathspec::scoped(["README.md"], PathspecGlobalFlags::default());
+    let _ = ps.matches_path("README.md");
 }
 
 #[test]

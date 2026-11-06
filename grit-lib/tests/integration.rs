@@ -492,6 +492,7 @@ mod config_parameters_coverage;
 mod config_parse;
 #[path = "config_repo_load_coverage.rs"]
 mod config_repo_load_coverage;
+#[cfg(feature = "full-tests")]
 #[path = "config_roundtrip.rs"]
 mod config_roundtrip;
 #[path = "config_set_getters_coverage.rs"]
@@ -981,6 +982,9 @@ mod log_patch_index_abbrev_git;
 #[path = "log_patch_one_commit.rs"]
 mod log_patch_one_commit;
 #[cfg(feature = "full-tests")]
+#[path = "log_pathspec_git_compat.rs"]
+mod log_pathspec_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "loose_write_concurrent_issue_1875.rs"]
 mod loose_write_concurrent_issue_1875;
 #[cfg(feature = "full-tests")]
@@ -1323,8 +1327,6 @@ mod patch_text_roundtrip;
 #[cfg(feature = "full-tests")]
 #[path = "path_validate_fsck_parity.rs"]
 mod path_validate_fsck_parity;
-#[path = "pathspec_api_sweep.rs"]
-mod pathspec_api_sweep;
 #[path = "pathspec_attr_porcelain.rs"]
 mod pathspec_attr_porcelain;
 #[cfg(feature = "full-tests")]
@@ -1336,6 +1338,7 @@ mod pathspec_from_file_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_git_compat.rs"]
 mod pathspec_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "pathspec_type.rs"]
 mod pathspec_type;
 #[cfg(feature = "full-tests")]

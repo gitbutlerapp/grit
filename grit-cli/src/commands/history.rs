@@ -955,7 +955,7 @@ pub fn run_fixup(
     let repo = context::discover()?;
     let commit_oid = resolve_commit(&repo, commit, "commit")?;
     let resolved = pathspecs.resolve(&repo)?;
-    let (pathspec_list, _) = resolved.into_pathspec_lists();
+    let pathspec_list = resolved.specs().to_vec();
     let hunk_selection = hunk_selection_from_args(hunks, lines)?;
     let rewrite = Rewrite::new(repo, shared)?;
     let empty = rewrite.options.empty;
@@ -1087,7 +1087,7 @@ pub fn run_split(
     let plan = split(
         &rewrite.repo,
         commit_oid,
-        &resolved.specs,
+        resolved.specs(),
         split_message,
         &SplitOptions { rest_message },
         &rewrite.options,

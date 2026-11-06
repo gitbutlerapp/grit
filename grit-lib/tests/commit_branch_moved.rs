@@ -12,7 +12,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::Pathspec;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Moved Branch <moved@example.com> 1700000000 +0000".to_owned();
@@ -99,11 +99,7 @@ fn paths_commit_fails_when_branch_moves_after_head_was_read() {
     let err = commit_with_scope(
         &repo,
         &commit_req("mine"),
-        CommitScope::Paths(ResolvedPathspecs {
-            specs: vec!["a.txt".into()],
-            sources: vec!["a.txt".into()],
-            scoped: true,
-        }),
+        CommitScope::Paths(Pathspec::scoped(["a.txt"], PathspecGlobalFlags::default())),
         &mut NullProgress,
         &grit_lib::progress::NeverCancel,
     )

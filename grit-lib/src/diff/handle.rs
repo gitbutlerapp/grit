@@ -148,12 +148,13 @@ impl<'repo> Diff<'repo> {
     pub fn entries(
         &self,
         target: &DiffTarget,
-        pathspecs: &[String],
+        pathspec: &crate::pathspec::Pathspec,
         options: &DiffOptions,
     ) -> Result<crate::diff::DiffEntriesResult> {
-        match stored_target_entries(self.repo, target, pathspecs, options)? {
-            Some(result) => limit_target_entries(self.repo, result, pathspecs, options),
-            None => self.uncommitted()?.entries(target, pathspecs, options),
+        let specs = pathspec.specs();
+        match stored_target_entries(self.repo, target, specs, options)? {
+            Some(result) => limit_target_entries(self.repo, result, specs, options),
+            None => self.uncommitted()?.entries(target, pathspec, options),
         }
     }
 
@@ -165,9 +166,9 @@ impl<'repo> Diff<'repo> {
     pub fn files(
         &self,
         target: &DiffTarget,
-        pathspecs: &[String],
+        pathspec: &crate::pathspec::Pathspec,
         opts: &DiffOptions,
     ) -> Result<Vec<FileDiff>> {
-        collect_files_for_target(self.repo, target, pathspecs, opts.clone())
+        collect_files_for_target(self.repo, target, pathspec.specs(), opts.clone())
     }
 }

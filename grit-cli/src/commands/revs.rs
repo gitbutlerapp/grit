@@ -253,8 +253,8 @@ pub fn listing_can_stream(
     let mut rev = rev.clone();
     let mut pathspecs = pathspecs.clone();
     promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
-    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
-    let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
+    let walk_pathspec = pathspecs.rev_walk_pathspec(&repo)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], walk_pathspec)?;
     Ok(crate::stream_commit_list::plain_walk_streamable(&opts))
 }
 
@@ -276,8 +276,8 @@ pub fn stream_listing(
     let repo = context::discover()?;
     let env = repo.environment();
     promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
-    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
-    let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
+    let walk_pathspec = pathspecs.rev_walk_pathspec(&repo)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], walk_pathspec)?;
     let token_refs = rev.rev_tokens(&[]);
     let fetch_cap = fetch_limit_plus_one(rev.max_count());
     let extent = if output_mode == OutputMode::Json {
@@ -402,8 +402,8 @@ pub fn run(
     let repo = context::discover()?;
     let env = repo.environment();
     promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
-    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
-    let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
+    let walk_pathspec = pathspecs.rev_walk_pathspec(&repo)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], walk_pathspec)?;
     let walk = repo.rev_walk();
     let token_refs = rev.rev_tokens(&[]);
     if (left_right || mode.cherry_mark) && rev.max_count() == Some(0) {
