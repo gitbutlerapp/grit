@@ -15729,7 +15729,6 @@ pub fn grit_lib::progress::CancelToken::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::CancelToken::never() -> Self
 pub fn grit_lib::progress::CancelToken::new() -> Self
 pub fn grit_lib::progress::CancelToken::reset(&self)
-pub fn grit_lib::progress::CancelToken::watch_arc(&self) -> alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>
 impl core::clone::Clone for grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::clone(&self) -> Self
 impl core::default::Default for grit_lib::progress::CancelToken
@@ -15737,9 +15736,9 @@ pub fn grit_lib::progress::CancelToken::default() -> Self
 impl core::fmt::Debug for grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::progress::Cancel for grit_lib::progress::CancelToken
+pub fn grit_lib::progress::CancelToken::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::CancelToken::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::CancelToken::poll_before_wait(&self)
-pub fn grit_lib::progress::CancelToken::shared_watch(&self) -> core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 impl core::marker::Freeze for grit_lib::progress::CancelToken
 impl core::marker::Send for grit_lib::progress::CancelToken
 impl core::marker::Sync for grit_lib::progress::CancelToken
@@ -15773,9 +15772,9 @@ impl core::fmt::Debug for grit_lib::progress::NeverCancel
 pub fn grit_lib::progress::NeverCancel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for grit_lib::progress::NeverCancel
 impl grit_lib::progress::Cancel for grit_lib::progress::NeverCancel
+pub fn grit_lib::progress::NeverCancel::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::NeverCancel::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::NeverCancel::poll_before_wait(&self)
-pub fn grit_lib::progress::NeverCancel::shared_watch(&self) -> core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 impl core::marker::Freeze for grit_lib::progress::NeverCancel
 impl core::marker::Send for grit_lib::progress::NeverCancel
 impl core::marker::Sync for grit_lib::progress::NeverCancel
@@ -15886,18 +15885,18 @@ impl core::marker::Unpin for grit_lib::progress::ReceivedObjects
 impl core::marker::UnsafeUnpin for grit_lib::progress::ReceivedObjects
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::progress::ReceivedObjects
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::progress::ReceivedObjects
-pub trait grit_lib::progress::Cancel
+pub trait grit_lib::progress::Cancel: core::marker::Send + core::marker::Sync
+pub fn grit_lib::progress::Cancel::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::Cancel::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::Cancel::poll_before_wait(&self)
-pub fn grit_lib::progress::Cancel::shared_watch(&self) -> core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 impl grit_lib::progress::Cancel for grit_lib::progress::CancelToken
+pub fn grit_lib::progress::CancelToken::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::CancelToken::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::CancelToken::poll_before_wait(&self)
-pub fn grit_lib::progress::CancelToken::shared_watch(&self) -> core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 impl grit_lib::progress::Cancel for grit_lib::progress::NeverCancel
+pub fn grit_lib::progress::NeverCancel::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::NeverCancel::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::NeverCancel::poll_before_wait(&self)
-pub fn grit_lib::progress::NeverCancel::shared_watch(&self) -> core::option::Option<alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>>
 pub trait grit_lib::progress::ProgressSink
 pub fn grit_lib::progress::ProgressSink::finish(&mut self)
 pub fn grit_lib::progress::ProgressSink::inc(&mut self, u64)

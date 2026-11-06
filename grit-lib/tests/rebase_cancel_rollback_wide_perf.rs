@@ -151,7 +151,8 @@ fn run_rebase(
     let start = Instant::now();
     let result = if cancel_at_checkout {
         let mut sink = CancelAfterCheckoutUnits::new();
-        start_rebase(repo, &opts, &mut sink, &NeverCancel)
+        let cancel = sink.flag.clone();
+        start_rebase(repo, &opts, &mut sink, &cancel)
     } else {
         start_rebase(
             repo,

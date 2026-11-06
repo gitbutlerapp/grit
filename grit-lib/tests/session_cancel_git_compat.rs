@@ -115,12 +115,13 @@ fn cancelled_auto_stage_commit_leaves_git_view_unchanged() {
 
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
+    let cancel = sink.flag.clone();
     let err = commit_with_scope(
         &repo,
         &commit_req("change"),
         CommitScope::AutoStage,
         &mut sink,
-        &NeverCancel,
+        &cancel,
     )
     .expect_err("cancelled");
     assert!(matches!(err, Error::Cancelled), "got {err:?}");
@@ -159,9 +160,10 @@ fn cancelled_stash_push_leaves_no_entry_and_git_pops_a_finished_one() {
     };
 
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
+    let cancel = sink.flag.clone();
     let err = repo
         .stash()
-        .push(&opts, &mut sink, &NeverCancel)
+        .push(&opts, &mut sink, &cancel)
         .expect_err("cancelled");
     assert!(matches!(err, Error::Cancelled), "got {err:?}");
     assert_eq!(git(root, &["stash", "list"]), "");
@@ -193,6 +195,7 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
 
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
+    let cancel = sink.flag.clone();
     let err = integrate_branch(
         &repo,
         "refs/heads/main",
@@ -200,7 +203,7 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
         side,
         "side",
         &mut sink,
-        &NeverCancel,
+        &cancel,
     )
     .expect_err("cancelled");
     assert!(matches!(err, Error::Cancelled), "got {err:?}");
@@ -243,7 +246,8 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
     };
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
-    let err = start_rebase(&repo, &start, &mut sink, &NeverCancel).expect_err("cancelled");
+    let cancel = sink.flag.clone();
+    let err = start_rebase(&repo, &start, &mut sink, &cancel).expect_err("cancelled");
     assert!(err.is_cancelled(), "got {err:?}");
     assert_eq!(oid(root, "topic"), topic);
     assert_eq!(status(root), "", "rollback leaves a clean work tree");

@@ -170,13 +170,12 @@ impl ProgressSink for NullProgress {}
 
 /// A cancellation signal checked by long-running library operations at loop
 /// boundaries. Implementations must be cheap to query.
-pub trait Cancel {
+pub trait Cancel: Send + Sync {
     /// Returns `true` once the operation should stop as soon as possible.
     fn is_cancelled(&self) -> bool;
 
-    /// When cancellation is backed by a shared flag (for example [`CancelToken`]), returns it
-    /// so worker threads can observe the same signal.
-    fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    /// When this handle is a [`CancelToken`], returns it so worker threads share the same flag.
+    fn backing_token(&self) -> Option<&CancelToken> {
         None
     }
 
@@ -345,7 +344,7 @@ impl CancelToken {
     }
 
     /// Shared flag for worker threads; clones share cancellation with this handle.
-    pub fn watch_arc(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    pub(crate) fn watch_arc(&self) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
         std::sync::Arc::clone(&self.flag)
     }
 
@@ -376,8 +375,8 @@ impl Cancel for CancelToken {
         self.flag.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        Some(self.watch_arc())
+    fn backing_token(&self) -> Option<&CancelToken> {
+        Some(self)
     }
 }
 
@@ -396,9 +395,7 @@ pub(crate) struct HttpStackWatch(pub(crate) std::sync::Arc<std::sync::atomic::At
 impl HttpStackWatch {
     #[must_use]
     pub fn new(cancel: &dyn Cancel) -> Self {
-        Self(cancel.shared_watch().unwrap_or_else(|| {
-            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(cancel.is_cancelled()))
-        }))
+        Self(cancel_watch_arc(cancel))
     }
 }
 
@@ -427,12 +424,8 @@ pub(crate) fn connect_cancel_arc(
     stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> std::sync::Arc<dyn Cancel + Send + Sync> {
     mirror_stack_cancel(cancel, &stack_watch);
-    if let Some(flag) = cancel.shared_watch() {
-        return std::sync::Arc::new(CancelToken {
-            flag,
-            #[cfg(feature = "test-support")]
-            polls_until_cancel: None,
-        });
+    if let Some(token) = cancel.backing_token() {
+        return std::sync::Arc::new(token.clone());
     }
     std::sync::Arc::new(ConnectOperationCancel { watch: stack_watch })
 }
@@ -446,10 +439,6 @@ impl Cancel for ConnectOperationCancel {
     fn is_cancelled(&self) -> bool {
         self.watch.load(std::sync::atomic::Ordering::Relaxed)
     }
-
-    fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        Some(std::sync::Arc::clone(&self.watch))
-    }
 }
 
 /// Shared [`AtomicBool`](std::sync::atomic::AtomicBool) for cancellation visible across threads.
@@ -461,9 +450,10 @@ impl Cancel for ConnectOperationCancel {
 pub(crate) fn cancel_watch_arc(
     cancel: &dyn Cancel,
 ) -> std::sync::Arc<std::sync::atomic::AtomicBool> {
-    cancel.shared_watch().unwrap_or_else(|| {
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(cancel.is_cancelled()))
-    })
+    if let Some(token) = cancel.backing_token() {
+        return token.watch_arc();
+    }
+    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(cancel.is_cancelled()))
 }
 
 /// Returns [`crate::error::Error::Cancelled`] when `watch` was set.

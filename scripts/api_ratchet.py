@@ -60,6 +60,7 @@ UMBRELLA_ERROR_PATH = "grit_lib::error::Error"
 CANCEL_FAMILY_NAMES = frozenset(
     {
         "Cancel",
+        "CancelToken",
         "NeverCancel",
         "CancelProgress",
         "cancel_watch_arc",

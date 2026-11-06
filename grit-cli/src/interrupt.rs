@@ -148,10 +148,6 @@ impl Cancel for InterruptCancel {
     fn is_cancelled(&self) -> bool {
         PROCESS_CANCEL.is_cancelled()
     }
-
-    fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        Some(process_cancel_token().watch_arc())
-    }
 }
 
 impl Drop for InterruptCancel {
@@ -210,6 +206,7 @@ mod tests {
     fn process_cancel_token_shares_state_with_the_signal_handler() {
         #[cfg(unix)]
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        process_cancel_token().reset();
         let token = process_cancel_token();
         assert!(!token.is_cancelled());
         let _install = InterruptCancel::install();

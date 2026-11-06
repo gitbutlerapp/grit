@@ -1522,7 +1522,7 @@ mod tests {
     )]
     #[test]
     fn cancel_once_pack_published_never_strands_a_peer_install() {
-        use std::cell::Cell;
+        use std::sync::atomic::{AtomicBool, Ordering};
 
         /// Cancels the install as soon as its `.pack` is published, after running a
         /// complete peer install of the same pack that relies on that file.
@@ -1530,18 +1530,18 @@ mod tests {
             pack_dir: PathBuf,
             objects: PathBuf,
             pack: &'a [u8],
-            peer_ran: Cell<bool>,
+            peer_ran: AtomicBool,
         }
 
         impl Cancel for PeerThenCancel<'_> {
             fn is_cancelled(&self) -> bool {
-                if self.peer_ran.get() {
+                if self.peer_ran.load(Ordering::Relaxed) {
                     return true;
                 }
                 if published_files(&self.pack_dir, "pack") == 0 {
                     return false;
                 }
-                self.peer_ran.set(true);
+                self.peer_ran.store(true, Ordering::Relaxed);
                 let peer_odb = Odb::new(&self.objects);
                 install_pack_bytes(self.pack.to_vec(), &peer_odb, &IngestPackOptions::default())
                     .expect("peer install succeeds");
@@ -1558,7 +1558,7 @@ mod tests {
             pack_dir: pack_dir.clone(),
             objects: objects.clone(),
             pack: &pack,
-            peer_ran: Cell::new(false),
+            peer_ran: AtomicBool::new(false),
         };
         let odb = Odb::new(&objects);
         let result = install_pack_bytes_with_progress(
@@ -1570,7 +1570,7 @@ mod tests {
         );
         match result {
             Ok(_) => {}
-            Err(Error::Cancelled) => assert!(cancel.peer_ran.get()),
+            Err(Error::Cancelled) => assert!(cancel.peer_ran.load(Ordering::Relaxed)),
             Err(e) => panic!("unexpected install error: {e:?}"),
         }
         assert_eq!(published_files(&pack_dir, "pack"), 1);
