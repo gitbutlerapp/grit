@@ -15,7 +15,7 @@ use support::{git, seed_multidir_repo, HistoryRepo};
 fn load_git_index(worktree: &std::path::Path) -> (Repository, Index) {
     let grit = Repository::discover(Some(worktree), &RepositoryOptions::empty()).expect("open");
     let index =
-        Index::load_expand_sparse_optional(&grit.index_handle().path(), &grit.odb()).expect("load");
+        Index::load_expand_sparse_optional(&grit.index().path(), &grit.odb()).expect("load");
     (grit, index)
 }
 
@@ -32,7 +32,7 @@ fn exercise_index_public_api(repo: &Repository, index: &mut Index) {
     index.sync_fsmonitor_dirty_bitmap();
     let _ = index.has_stage0_descendant_under("a");
     let _ = write_tree_update_index(repo.odb(), index, "", WriteTreeFlags::default());
-    let _ = Index::load_expand_sparse(&repo.index_handle().path(), repo.odb());
+    let _ = Index::load_expand_sparse(&repo.index().path(), repo.odb());
     if let Ok(head) = grit_lib::revwalk::rev_parse::resolve_revision(repo, "HEAD") {
         let head_obj = repo.odb().read(&head).ok();
         if let Some(obj) = head_obj {
@@ -52,7 +52,7 @@ fn exercise_index_public_api(repo: &Repository, index: &mut Index) {
     index.remove_paths_and_insert(["gone.txt".as_bytes()], []);
     index.clear_resolve_undo();
     let cfg = grit_lib::config::ConfigSet::new();
-    let _ = index.write_with_config(&repo.index_handle().path(), &cfg);
+    let _ = index.write_with_config(&repo.index().path(), &cfg);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn git_unmerged_index_roundtrip() {
         .expect("merge");
     assert!(!merge.status.success() || String::from_utf8_lossy(&merge.stdout).contains("Merge"));
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let index = Index::load(&grit.index_handle().path()).expect("unmerged load");
+    let index = Index::load(&grit.index().path()).expect("unmerged load");
     if index.has_unmerged_entries() {
         assert!(index.entries().iter().any(|e| e.stage() != 0));
     }

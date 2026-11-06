@@ -94,7 +94,7 @@ pub fn group_commits_by_author_from_rev(
     if options.count_only {
         return count_authors_from_rev_walk(repo, tokens, walk_options, mailmap);
     }
-    let oids = repo.rev_walk().commits(tokens, walk_options)?;
+    let oids = repo.revwalk().commits(tokens, walk_options)?;
     group_commits_by_author(repo, &oids, mailmap, options)
 }
 

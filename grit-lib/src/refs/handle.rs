@@ -47,6 +47,25 @@ impl<'repo> References<'repo> {
         self.repo
     }
 
+    /// Low-level ref storage backend (same as [`Repository::ref_store`]).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// let dir = tempfile::tempdir()?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    /// let _ = repo.references().store().read_raw("HEAD")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn store(&self) -> &'repo dyn crate::refs::store::RefStore {
+        self.repo.ref_store()
+    }
+
     /// Resolve a ref name to an object id, following symbolic refs.
     ///
     /// # Errors
@@ -87,7 +106,7 @@ impl<'repo> References<'repo> {
     /// read once; only a symbolic ref is followed.
     pub(crate) fn read_existing(&self, name: &str) -> Result<Option<ExistingRef>> {
         let name = RefNameRef::from_trusted(name);
-        let Some(raw) = self.repo.refs().read_raw(name)? else {
+        let Some(raw) = self.repo.ref_store().read_raw(name)? else {
             return Ok(None);
         };
         let oid = match &raw {
@@ -118,7 +137,7 @@ impl<'repo> References<'repo> {
             ),
             RawRef::Direct(oid) => (Expected::Oid(*oid), false),
         };
-        let store = self.repo.refs();
+        let store = self.store();
         commit_ref_update_on_store(
             store,
             RefUpdate {
@@ -270,7 +289,7 @@ impl<'repo> References<'repo> {
     ) -> Result<()> {
         let refname = name.as_str();
         ensure_refname_safe_for_storage(refname)?;
-        let store = self.repo.refs();
+        let store = self.store();
         let config = self.repo.config().snapshot()?;
         let signature = match self
             .repo
@@ -374,7 +393,7 @@ impl<'repo> References<'repo> {
     pub fn reflog(&self, name: &RefName) -> Result<Vec<ReflogEntry>> {
         let mut entries = Vec::new();
         self.repo
-            .refs()
+            .ref_store()
             .for_each_reflog_entry(name.as_ref(), false, &mut |entry| {
                 entries.push(entry.clone());
                 ControlFlow::Continue(())

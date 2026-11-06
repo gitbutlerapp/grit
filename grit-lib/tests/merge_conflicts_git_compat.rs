@@ -114,7 +114,7 @@ fn grit_merge_leaves_conflict_markers_and_clean_side_files() {
     assert!(repo.git_dir().join("ORIG_HEAD").exists());
     assert!(repo.git_dir().join("MERGE_MSG").exists());
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(index.has_unmerged_entries());
 
     let a_body = fs::read_to_string(root.join("a.txt")).expect("a.txt");
@@ -287,7 +287,7 @@ fn grit_merge_keeps_identical_non_conflict_files() {
         "hi\n"
     );
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(
         index.get(b"b.txt", 0).is_some(),
         "b.txt must stay at stage 0 in the index"
@@ -454,7 +454,7 @@ fn merge_sibling_dirs_a_and_a0_reports_conflicts() {
     );
 
     assert!(repo.git_dir().join("MERGE_HEAD").exists());
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(index.get(b"a/f", 1).is_some());
     assert!(index.get(b"a/f", 2).is_some());
     assert!(index.get(b"a/f", 3).is_some());
@@ -561,7 +561,7 @@ fn merge_abort_restores_pre_merge_state() {
     assert_eq!(fs::read_to_string(root.join("a.txt")).expect("a"), a_before);
     assert_eq!(fs::read_to_string(root.join("b.txt")).expect("b"), b_before);
     assert!(!root.join("x.txt").exists());
-    let index = repo.index_handle().load().expect("index after abort");
+    let index = repo.index().load().expect("index after abort");
     let b_index = index.get(b"b.txt", 0).expect("b.txt tracked");
     assert!(
         !b_index.stat_cache_unset(),

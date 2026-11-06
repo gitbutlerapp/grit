@@ -739,10 +739,10 @@ fn advance_replay_tip(
             identity: committer,
             reflog_message,
         };
-        update_branch_for_commit_on_store(repo.refs(), &ref_update, config)
+        update_branch_for_commit_on_store(repo.ref_store(), &ref_update, config)
     } else {
         update_detached_head_for_commit_on_store(
-            repo.refs(),
+            repo.ref_store(),
             Some(head_oid),
             new_oid,
             committer,
@@ -1779,7 +1779,7 @@ fn parse_sequencer_todo(repo: &Repository, path: &Path) -> Result<Vec<TodoEntry>
             command: cmd.to_owned(),
         })?;
         let oid =
-            repo.rev_walk()
+            repo.revwalk()
                 .resolve(oid_token)
                 .map_err(|_| Error::SequencerUnknownCommand {
                     command: cmd.to_owned(),
@@ -1914,7 +1914,7 @@ fn resolve_continue_replay_message(git_dir: &Path) -> Result<String> {
 /// Pick and revert keep an `ORIG_HEAD` left by an earlier reset, merge or rebase.
 fn write_orig_head_if_absent(repo: &Repository, oid: ObjectId) -> Result<()> {
     if !matches!(
-        repo.refs().read_raw(RefNameRef::from_trusted("ORIG_HEAD")),
+        repo.ref_store().read_raw(RefNameRef::from_trusted("ORIG_HEAD")),
         Ok(None)
     ) {
         return Ok(());

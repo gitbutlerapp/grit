@@ -1,4 +1,4 @@
-//! `RepositoryRemotes::{add, configured}`, `resolve_remote_argument` and `fold_peeled_refs`
+//! `Remotes::{add, configured}`, `resolve_remote_argument` and `fold_peeled_refs`
 //! checked against the system `git` (config round-trip, worktrees, `git ls-remote`).
 
 use std::path::Path;

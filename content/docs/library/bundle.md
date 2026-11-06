@@ -3,7 +3,7 @@ title: Bundle
 summary: Offline pack bundles — create, verify, list heads, and unbundle.
 ---
 
-Git bundle files combine a header and thin pack for offline transfer. The [`bundle`](rustdoc:grit_lib::bundle) domain implements read/write/verify compatible with system `git bundle`. `Repository::bundles` returns `RepositoryBundles` scoped to one open repository.
+Git bundle files combine a header and thin pack for offline transfer. The [`bundle`](rustdoc:grit_lib::bundle) domain implements read/write/verify compatible with system `git bundle`. `Repository::bundles` returns `Bundles` scoped to one open repository.
 
 | Method | Role |
 | --- | --- |

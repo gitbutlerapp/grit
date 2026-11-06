@@ -52,7 +52,7 @@ fn seed_main_commit(repo: &Repository, dir: &TempDir) -> ObjectId {
     use grit_lib::refs;
 
     std::fs::write(dir.path().join("f"), "x\n").expect("write");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
     let commit = CommitData {
@@ -118,7 +118,8 @@ fn files_store_rejects_forged_reflog_identity_via_wrapper() {
     .expect("init");
     let commit_oid = seed_main_commit(&repo, &dir);
 
-    let err = commit_ref_update_on_store(repo.refs(), forged_head_update(commit_oid)).unwrap_err();
+    let err =
+        commit_ref_update_on_store(repo.ref_store(), forged_head_update(commit_oid)).unwrap_err();
     assert_invalid_reflog_signature(err);
 
     let log_path = repo.git_dir().join("logs/HEAD");
@@ -144,7 +145,7 @@ fn files_store_direct_prepare_rejects_forged_reflog_identity() {
     let txn = RefTransaction::new()
         .update(forged_head_update(commit_oid))
         .expect("txn");
-    let err = match repo.refs().prepare(txn) {
+    let err = match repo.ref_store().prepare(txn) {
         Err(e) => e,
         Ok(_) => panic!("prepare must reject forged reflog identity"),
     };
@@ -176,7 +177,7 @@ fn reftable_store_direct_prepare_rejects_forged_reflog_identity() {
     let txn = RefTransaction::new()
         .update(forged_head_update(commit_oid))
         .expect("txn");
-    let err = match repo.refs().prepare(txn) {
+    let err = match repo.ref_store().prepare(txn) {
         Err(e) => e,
         Ok(_) => panic!("prepare must reject forged reflog identity"),
     };

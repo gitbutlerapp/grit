@@ -197,11 +197,7 @@ fn commit_auto_stage_rejects_custom_conflict_marker_size() {
         matches!(err, Error::Index(IndexError::Unmerged { .. })),
         "auto-stage commit must refuse custom-width markers: {err}"
     );
-    assert!(repo
-        .index_handle()
-        .load()
-        .expect("index")
-        .has_unmerged_entries());
+    assert!(repo.index().load().expect("index").has_unmerged_entries());
     assert!(repo.git_dir().join("MERGE_HEAD").exists());
 }
 
@@ -212,10 +208,7 @@ fn commit_with_auto_stage_rejects_unresolved_conflict_markers() {
     let repo = init_grit_conflict_merge(root);
 
     assert!(
-        repo.index_handle()
-            .load()
-            .expect("index")
-            .has_unmerged_entries(),
+        repo.index().load().expect("index").has_unmerged_entries(),
         "grit merge should leave unmerged index entries"
     );
     let body = fs::read_to_string(root.join("f")).expect("conflicted worktree");
@@ -238,10 +231,7 @@ fn commit_with_auto_stage_rejects_unresolved_conflict_markers() {
     );
 
     assert!(
-        repo.index_handle()
-            .load()
-            .expect("index")
-            .has_unmerged_entries(),
+        repo.index().load().expect("index").has_unmerged_entries(),
         "refusal must not collapse unmerged stages"
     );
     assert!(
@@ -256,7 +246,7 @@ fn create_commit_rejects_unmerged_index_like_git() {
     let root = tmp.path();
     let repo = init_conflict_merge(root);
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(
         index.has_unmerged_entries(),
         "git merge should leave unmerged index entries"
@@ -284,7 +274,7 @@ fn create_commit_rejects_unmerged_index_like_git() {
         "grit should refuse unmerged commit: {err}"
     );
 
-    let index_after = repo.index_handle().load().expect("index");
+    let index_after = repo.index().load().expect("index");
     assert!(
         index_after.has_unmerged_entries(),
         "refusal must not clear unmerged stages"
@@ -309,11 +299,7 @@ fn stage_for_commit_then_create_commit_concludes_resolved_merge_without_prior_ad
     )
     .expect("stage resolved merge");
     assert!(
-        !repo
-            .index_handle()
-            .load()
-            .expect("index")
-            .has_unmerged_entries(),
+        !repo.index().load().expect("index").has_unmerged_entries(),
         "staging resolved worktree should collapse unmerged stages"
     );
 

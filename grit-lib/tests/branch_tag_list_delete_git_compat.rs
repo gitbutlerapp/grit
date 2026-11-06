@@ -108,9 +108,9 @@ fn assert_current_branch_deletion_refused(repo: &Repository, branch: &str) {
         .map(|name| {
             let name = RefName::try_from(name.as_str()).unwrap();
             (
-                repo.refs().read_raw(name.as_str()).unwrap(),
+                repo.ref_store().read_raw(name.as_str()).unwrap(),
                 repo.references().reflog(&name).unwrap(),
-                repo.refs().reflog_exists(name.as_str()).unwrap(),
+                repo.ref_store().reflog_exists(name.as_str()).unwrap(),
             )
         })
         .collect();
@@ -130,10 +130,10 @@ fn assert_current_branch_deletion_refused(repo: &Repository, branch: &str) {
             );
             for (name, (raw, reflog, reflog_exists)) in names.iter().zip(&before) {
                 let name = RefName::try_from(name.as_str()).unwrap();
-                assert_eq!(&repo.refs().read_raw(name.as_str()).unwrap(), raw);
+                assert_eq!(&repo.ref_store().read_raw(name.as_str()).unwrap(), raw);
                 assert_eq!(&repo.references().reflog(&name).unwrap(), reflog);
                 assert_eq!(
-                    &repo.refs().reflog_exists(name.as_str()).unwrap(),
+                    &repo.ref_store().reflog_exists(name.as_str()).unwrap(),
                     reflog_exists
                 );
             }
@@ -355,7 +355,7 @@ fn delete_current_branch_preserves_git_reftable_repository() {
     commit(dir, "initial");
     let repo = open(dir);
     assert_eq!(
-        repo.refs().format(),
+        repo.ref_store().format(),
         grit_lib::refs::store::RefStorageFormat::Reftable
     );
     let tip = oid(dir, "HEAD");

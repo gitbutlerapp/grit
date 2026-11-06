@@ -3,13 +3,13 @@ title: Index
 summary: Load the staging index, stage paths with porcelain add, and write a tree object from staged entries.
 ---
 
-The Git index (staging area) lives in `Index`. Open a `Repository`, then use `IndexHandle` via `Repository::index_handle` (`load` / `write`). Index extensions (sparse checkout, split index, untracked cache) live under the [`index`](rustdoc:grit_lib::index) domain; working-tree helpers are under [`worktree`](rustdoc:grit_lib::worktree). See [API layout](../api-layout/).
+The Git index (staging area) lives in `Index`. Open a `Repository`, then use `IndexFile` via `Repository::index` (`load` / `write`). Index extensions (sparse checkout, split index, untracked cache) live under the [`index`](rustdoc:grit_lib::index) domain; working-tree helpers are under [`worktree`](rustdoc:grit_lib::worktree). See [API layout](../api-layout/).
 
 See also the [Repository](../repository/) and [Objects](../objects/) pages for opening repos and writing objects. Other library topics: [Refs](../refs/), [Diff](../diff/).
 
 ## Reading the index
 
-`IndexHandle::load` reads `index` from disk and expands every sparse-directory placeholder (full in-memory materialization). Read-mostly porcelain such as `status` and `diff` use [`IndexHandle::load_preserving_sparse`](rustdoc:grit_lib::index::IndexHandle::load_preserving_sparse) instead so cone sparse-index repos stay on Git's compact index shape. Entries are `IndexEntry` values with path, mode, object id, and stage.
+`IndexFile::load` reads `index` from disk and expands every sparse-directory placeholder (full in-memory materialization). Read-mostly porcelain such as `status` and `diff` use [`IndexFile::load_preserving_sparse`](rustdoc:grit_lib::index::IndexFile::load_preserving_sparse) instead so cone sparse-index repos stay on Git's compact index shape. Entries are `IndexEntry` values with path, mode, object id, and stage.
 
 ## Staging paths
 

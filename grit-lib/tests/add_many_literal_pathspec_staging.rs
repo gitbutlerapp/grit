@@ -63,7 +63,7 @@ fn stage_hundred_literal_paths_only_updates_those_files() {
         !subset.contains(&untouched.to_owned()),
         "fixture must include a dirty path outside the pathspec list"
     );
-    let index_path = repo.index_handle().path();
+    let index_path = repo.index().path();
     let oid_before = index_oid(&Index::load(&index_path).expect("load index"), untouched);
 
     let opts = StageOptions {

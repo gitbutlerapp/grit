@@ -56,7 +56,7 @@ fn diff_index_to_tree_with_renames_reports_staged_mv() {
     let head = resolve_head(repo.git_dir()).expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
 
@@ -107,7 +107,7 @@ fn apply_rename_detection_matches_git_cached_name_status() {
     let head = resolve_head(repo.git_dir()).expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
     let raw = grit_lib::diff::diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false)
@@ -150,7 +150,7 @@ fn worktree_rename_detection_with_small_unstaged_edit() {
     let head = resolve_head(repo.git_dir()).expect("head");
     let head_commit = head.oid().expect("commit");
     let head_tree = tree_oid_of_commit(repo.odb(), head_commit).expect("tree");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
     let work_tree = repo.work_tree().expect("worktree");
@@ -222,7 +222,7 @@ fn plain_filesystem_mv_pairs_via_untracked_worktree_candidate() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let work_tree = repo.work_tree().expect("worktree");
     let rules = grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(&repo, &index)
         .expect("rules");
@@ -291,7 +291,7 @@ fn unrelated_untracked_not_listed_when_tracked_file_deleted() {
     );
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let work_tree = repo.work_tree().expect("worktree");
     let rules = grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(&repo, &index)
         .expect("rules");

@@ -39,7 +39,7 @@ fn bare_repo_common_failures_use_requires_work_tree() {
     );
     assert_requires_work_tree(stage_worktree_changes(&bare, &[]).map(|_| ()));
 
-    let mut idx = bare.index_handle().load().expect("index");
+    let mut idx = bare.index().load().expect("index");
     assert_requires_work_tree(
         bare.diff()
             .worktree_to_index(&mut idx, false, false)
@@ -117,7 +117,7 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     let req = grit_test_support::commit_request("m\n", "A <a@b> 0 +0000");
     create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
 
-    let err = repo.rev_walk().resolve("main~99").unwrap_err();
+    let err = repo.revwalk().resolve("main~99").unwrap_err();
     assert!(
         matches!(
             err,

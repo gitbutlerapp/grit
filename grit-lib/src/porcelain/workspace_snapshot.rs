@@ -99,7 +99,7 @@ pub fn pin_workspace_snapshot(
         reflog: None,
         flags: Default::default(),
     };
-    let store = repo.refs();
+    let store = repo.ref_store();
     let config = repo.config().snapshot().ok();
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let txn = RefTransaction::new().update(update).map_err(Error::from)?;
@@ -121,7 +121,7 @@ pub fn unpin_workspace_snapshot(repo: &Repository, caller_id: &str) -> Result<()
         reflog: None,
         flags: Default::default(),
     };
-    let store = repo.refs();
+    let store = repo.ref_store();
     let config = repo.config().snapshot().ok();
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let txn = RefTransaction::new().update(update).map_err(Error::from)?;
@@ -180,7 +180,7 @@ pub fn capture_workspace_snapshot(
     let head = resolve_head_for_repository(repo)?;
     let mut refs = BTreeMap::new();
     for name in &options.refs {
-        let raw = repo.refs().read_raw(RefNameRef::from_trusted(name))?;
+        let raw = repo.ref_store().read_raw(RefNameRef::from_trusted(name))?;
         refs.insert(name.clone(), raw);
     }
     let (index_bytes, index_mtime) = capture_index_bytes(repo)?;
@@ -532,7 +532,7 @@ fn commit_ref_restore(
     snapshot: &WorkspaceSnapshot,
     _options: &WorkspaceRestoreOptions,
 ) -> Result<()> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let config = repo.config().snapshot().ok();
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let mut txn = RefTransaction::new();
@@ -569,7 +569,7 @@ fn expected_from_raw(raw: &RawRef) -> Expected {
 }
 
 fn head_ref_update(repo: &Repository, snapshot: &WorkspaceSnapshot) -> Result<Option<RefUpdate>> {
-    let current = repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?;
+    let current = repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?;
     let new_value = match &snapshot.head {
         HeadState::Branch { refname, .. } => Some(RawRef::Symbolic(refname.clone())),
         HeadState::Detached { oid } => Some(RawRef::Direct(*oid)),

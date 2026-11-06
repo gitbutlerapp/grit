@@ -141,7 +141,7 @@ fn assert_all_modes(dir: &Path, path: &str, expected: DiffStatus) {
         "work tree vs HEAD"
     );
 
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let (entries, _) = diff_index_to_worktree_with_options(
         repo.odb(),
         &mut index,
@@ -181,7 +181,7 @@ fn assert_all_modes(dir: &Path, path: &str, expected: DiffStatus) {
         without_worktree_oid(git_raw(dir, &["HEAD"])),
         "staged: work tree vs HEAD"
     );
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let entries = diff_index_to_tree(repo.odb(), &index, Some(&base_tree), false).expect("i vs t");
     assert_eq!(statuses(&entries), single(path, expected));
     let entries =
@@ -293,7 +293,7 @@ fn assert_mixed_state(dir: &Path, path: &str, expected_vs_head: DiffStatus) {
         without_worktree_oid(git_raw(dir, &["HEAD"])),
         "work tree vs HEAD"
     );
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let base_tree = head_tree(dir, "HEAD");
     let entries =
         diff_tree_to_worktree(repo.odb(), Some(&base_tree), dir, &index).expect("tree vs wt");

@@ -1,4 +1,4 @@
-//! [`Repository::refs`] honors `GIT_NAMESPACE` from [`RepositoryOptions`].
+//! [`Repository::ref_store`] honors `GIT_NAMESPACE` from [`RepositoryOptions`].
 
 use crate::support;
 
@@ -32,7 +32,7 @@ fn git_available() -> bool {
 
 fn head_branch_names(repo: &Repository) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
-    repo.refs()
+    repo.ref_store()
         .for_each_ref("refs/heads/", &mut |entry| {
             names.insert(entry.name.clone());
             ControlFlow::Continue(())
@@ -64,7 +64,7 @@ fn repository_files_refstore_honors_git_namespace_option() {
     let repo = Repository::open(&git_dir, &opts).expect("open");
 
     let oid = support::stored_commit(&git_dir, 1);
-    repo.refs()
+    repo.ref_store()
         .prepare(
             RefTransaction::new()
                 .update(RefUpdate {

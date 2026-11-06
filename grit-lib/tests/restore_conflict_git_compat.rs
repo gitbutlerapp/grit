@@ -284,11 +284,11 @@ fn restore_conflict_diff3_byte_equal_git() {
 fn restore_ours_missing_stage_errors() {
     let (dir, repo) = init_repo();
     merge_conflict_repo(&dir);
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     index
         .entries_mut()
         .retain(|e| !(e.path == b"f.txt" && e.stage() == 2));
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let err = restore_paths(
         &repo,
         &conflict_opts(Some(ConflictSide::Ours), None),

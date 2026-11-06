@@ -31,11 +31,11 @@ fn t1092_cone_patterns_match_git_skip_worktree() {
 
     let oracle = git_ls_files_tag_map(wt);
     let grit = open_grit(wt);
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     clear_all_skip_worktree(&mut index);
     apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
     assert_git_fsck_strict(wt);
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
 }
@@ -58,7 +58,7 @@ fn t1091_non_cone_sparse_list_matches_git() {
     assert_eq!(list.trim(), file.trim());
 
     let oracle = git_ls_files_tag_map(wt);
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     clear_all_skip_worktree(&mut index);
     apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);
@@ -79,7 +79,7 @@ fn t1011_read_tree_sparse_checkout_applies_skip_worktree() {
     let oracle = git_ls_files_tag_map(wt);
     assert!(oracle.values().any(|c| *c == 'S'));
     let grit = open_grit(wt);
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     clear_all_skip_worktree(&mut index);
     apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
     assert_skip_worktree_matches_tag_oracle(&index, &oracle);

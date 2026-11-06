@@ -728,7 +728,7 @@ pub fn continue_rebase(
             write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
                 .map_err(RebaseSessionError::from)?;
         repo.odb().flush_for_publish().map_err(map_lib)?;
-        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &resolved)
+        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &resolved)
             .map_err(map_lib)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
         return advance_after_user_resolution_commit(
@@ -747,7 +747,7 @@ pub fn continue_rebase(
             write_rebase_staged_resolution(repo, &state.rewrite, current, new_tree, &parents)
                 .map_err(RebaseSessionError::from)?;
         repo.odb().flush_for_publish().map_err(map_lib)?;
-        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &resolved)
+        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &resolved)
             .map_err(map_lib)?;
         ensure_worktree_clean_for_rebase_exec(repo).map_err(map_lib)?;
         return advance_after_user_resolution_commit(
@@ -1393,7 +1393,7 @@ fn install_stopped_rebase(
 
     repo.odb().flush_for_publish().map_err(map_lib)?;
     refs::update_direct_ref_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         "HEAD",
         &conflict.replayed_parent,
@@ -1504,7 +1504,7 @@ fn advance_after_plan(
                     log_head_move(repo, branch, apply)?;
                 }
                 refs::write_symbolic_ref_on_store(
-                    repo.refs(),
+                    repo.ref_store(),
                     repo.git_dir(),
                     "HEAD",
                     &prev.head_ref,
@@ -1774,7 +1774,7 @@ fn hard_reset_branch(
         .references()
         .resolve_if_exists(refname)
         .map_err(map_lib)?;
-    refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname)
+    refs::write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", refname)
         .map_err(map_lib)?;
     hard_reset_head(repo, target, identity)?;
     let overwritten = (before != Some(target)).then(|| PlannedRefUpdate {

@@ -38,11 +38,11 @@ fn grit_rev_list_oids(
     tokens: &[&str],
     opts: &RevWalkListOptions,
 ) -> Vec<ObjectId> {
-    repo.rev_walk().commits(tokens, opts).expect("grit commits")
+    repo.revwalk().commits(tokens, opts).expect("grit commits")
 }
 
 fn grit_rev_list_count(repo: &Repository, tokens: &[&str], opts: &RevWalkListOptions) -> usize {
-    repo.rev_walk().count(tokens, opts).expect("grit count")
+    repo.revwalk().count(tokens, opts).expect("grit count")
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn merge_bases_match_git_merge_base_all() {
     let wt = hist.worktree();
     let oids = criss_cross_fixture(wt);
     let repo = open_grit(wt);
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
 
     let g = oids["G"];
     let h = oids["H"];
@@ -205,7 +205,7 @@ fn merge_bases_default_one_base_when_two_minimal_bases_exist() {
         &[("tip", "refs/heads/main")],
     );
     let repo = open_grit(wt);
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
 
     let m1 = oids["m1"].to_hex();
     let m2 = oids["m2"].to_hex();
@@ -235,7 +235,7 @@ fn merge_bases_criss_cross_side_exhaustion_matches_git() {
     let wt = hist.worktree();
     t6099_criss_cross(wt);
     let repo = open_grit(wt);
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     let git_all = git_merge_base(wt, &["--all", "A", "X"]);
     assert_eq!(
         walk.merge_bases("A", "X", true).expect("criss-cross"),
@@ -249,7 +249,7 @@ fn is_ancestor_matches_git() {
     let wt = hist.worktree();
     let oids = criss_cross_fixture(wt);
     let repo = open_grit(wt);
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     let b = oids["B"];
     let h = oids["H"];
     assert_eq!(
@@ -613,7 +613,7 @@ fn left_right_counts_no_merges_match_git() {
     let token = "left...right";
     let git_counts = git_rev_list_left_right_count(wt, &[token, "--no-merges"]);
     let grit_counts = repo
-        .rev_walk()
+        .revwalk()
         .left_right_counts(
             &[token],
             &RevWalkListOptions {
@@ -815,7 +815,7 @@ fn merge_heavy_range_counts_match_git_with_filters() {
             let mut args: Vec<&str> = flags.iter().map(String::as_str).collect();
             args.push("old...topic");
             assert_eq!(
-                repo.rev_walk()
+                repo.revwalk()
                     .left_right_counts(&["old...topic"], opts)
                     .expect("left/right counts"),
                 git_rev_list_left_right_count(wt, &args),
@@ -839,7 +839,7 @@ fn left_right_counts_match_git_rev_list_left_right_count() {
     build_commit_dag(wt, &[("s1", "b"), ("s2", "s1")], &[]);
     git(wt, &["checkout", "main"]);
     let repo = open_grit(wt);
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     let token = "main...side";
     let git_counts = git_rev_list_left_right_count(wt, &[token]);
     let grit_counts = walk
@@ -894,7 +894,7 @@ fn left_right_counts_first_parent_shapes_match_git() {
     }
 
     let repo = open_grit(wt);
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     for token in [
         "old...trunk",
         "trunk...old",
@@ -957,7 +957,7 @@ fn upstream_range_at_u_matches_git() {
     let token = "@{u}...HEAD";
     let git_counts = git_rev_list_left_right_count(wt, &[token]);
     let grit_counts = repo
-        .rev_walk()
+        .revwalk()
         .left_right_counts(&[token], &RevWalkListOptions::default())
         .expect("upstream symmetric counts");
     assert_eq!(grit_counts, git_counts);
@@ -1020,7 +1020,7 @@ fn grit_rev_list_sides(
         ..opts.clone()
     };
     let result = repo
-        .rev_walk()
+        .revwalk()
         .rev_list_result(&[token], &opts)
         .unwrap_or_else(|e| panic!("{token}: {e}"));
     result
@@ -1086,7 +1086,7 @@ fn exclude_first_parent_only_keeps_second_parent_ancestry_of_exclusions() {
         "--exclude-first-parent-only R..main",
     );
     let listed = repo
-        .rev_walk()
+        .revwalk()
         .walk("R..main", &opts)
         .expect("rev_list")
         .commits;

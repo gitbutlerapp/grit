@@ -56,7 +56,7 @@ fn large_git_index_loads_and_matches_ls_files() {
     assert_eq!(index.source_mtime, index_file_mtime(&index_path));
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let loaded = repo.index_handle().load().expect("repository load");
+    let loaded = repo.index().load().expect("repository load");
     assert_grit_index_matches_git_ls_files(root, &loaded);
     assert_eq!(loaded.source_mtime, index_file_mtime(&index_path));
 
@@ -78,7 +78,7 @@ fn large_index_with_corrupt_trailer_is_rejected() {
 
     assert_checksum_mismatch(Index::load(&index_path));
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    assert_checksum_mismatch(repo.index_handle().load());
+    assert_checksum_mismatch(repo.index().load());
     assert_checksum_mismatch(Index::parse(&bytes));
 }
 

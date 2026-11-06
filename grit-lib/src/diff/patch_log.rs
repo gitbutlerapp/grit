@@ -1168,7 +1168,7 @@ struct WorktreeSideReader<'r> {
 impl<'r> WorktreeSideReader<'r> {
     fn open(repo: &'r Repository) -> Result<Self> {
         let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-        let index = repo.index_handle().load()?;
+        let index = repo.index().load()?;
         let rules = WorktreeRules::from_repository(repo, &index)?;
         Ok(Self {
             work_tree,

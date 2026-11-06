@@ -47,7 +47,7 @@ fn is_lock_contention(err: &Error) -> bool {
 /// caller already holds `index.lock`: what a concurrent `grit add` / `git add` would leave behind.
 fn write_entry_under_lock(dir: &Path, path: &str, lock: &mut grit_lib::index::IndexLock) {
     let repo = open_grit_repo(dir);
-    let handle = repo.index_handle();
+    let handle = repo.index();
     let mut index = handle.load().expect("load index under lock");
     stage_on_index(
         &repo,
@@ -148,7 +148,7 @@ fn stage_reads_index_after_waiting_for_lock() {
     fs::write(dir.join("b.txt"), "b\n").expect("write b");
 
     let repo = open_grit_repo(dir);
-    let mut lock = repo.index_handle().begin_update().expect("hold index.lock");
+    let mut lock = repo.index().begin_update().expect("hold index.lock");
 
     let racer_dir = dir.to_path_buf();
     let racer = thread::spawn(move || {
@@ -185,7 +185,7 @@ fn remove_reads_index_after_waiting_for_lock() {
     fs::write(dir.join("a.txt"), "a\n").expect("write a");
 
     let repo = open_grit_repo(dir);
-    let mut lock = repo.index_handle().begin_update().expect("hold index.lock");
+    let mut lock = repo.index().begin_update().expect("hold index.lock");
 
     let racer_dir = dir.to_path_buf();
     let racer = thread::spawn(move || {
@@ -223,7 +223,7 @@ fn stage_tracked_reads_index_after_waiting_for_lock() {
     fs::write(dir.join("base"), "changed\n").expect("modify base");
 
     let repo = open_grit_repo(dir);
-    let mut lock = repo.index_handle().begin_update().expect("hold index.lock");
+    let mut lock = repo.index().begin_update().expect("hold index.lock");
 
     let racer_dir = dir.to_path_buf();
     let racer = thread::spawn(move || {
@@ -257,7 +257,7 @@ fn stage_fails_without_writing_when_lock_stays_held() {
     fs::write(dir.join("a.txt"), "a\n").expect("write a");
 
     let repo = open_grit_repo(dir);
-    let lock = repo.index_handle().begin_update().expect("hold index.lock");
+    let lock = repo.index().begin_update().expect("hold index.lock");
     let err = stage(
         &repo,
         &stage_paths(&["a.txt"]),

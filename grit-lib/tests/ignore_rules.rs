@@ -348,7 +348,7 @@ fn t0008_check_path_matches_git_check_ignore_verbose() {
     let fx = T0008Repo::setup();
     let repo = fx.open_grit();
     let mut matcher = IgnoreMatcher::from_repository(&repo).expect("matcher");
-    let index = repo.index_handle().load().ok();
+    let index = repo.index().load().ok();
 
     let paths: Vec<String> = t0008_corpus()
         .iter()
@@ -473,7 +473,7 @@ fn sparse_helpers_match_git_sparse_checkout_non_cone() {
 fn normalize_repo_relative_and_submodule_containing_path() {
     let fx = T0008Repo::setup();
     let repo = fx.open_grit();
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let sub = submodule_containing_path("a/submodule/x", &index);
     assert_eq!(sub.as_deref(), Some("a/submodule"));
 
@@ -955,7 +955,7 @@ const ISSUE_1912_PATHS: [&str; 7] = [
 
 fn assert_ignore_check_matches_git(home: &Path, root: &Path) {
     let repo = open_at(root);
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let paths: Vec<String> = ISSUE_1912_PATHS.iter().map(|p| (*p).to_owned()).collect();
     let checks = repo.ignore_check(&paths, &index).expect("ignore_check");
     let git_map = git_check_ignore_verbose(home, root, &ISSUE_1912_PATHS, false);
@@ -1167,7 +1167,7 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
     assert_clean_ignored_matches_git(&home, &root);
 
     // `git check-ignore` uses an exact-case tracked check; `ignore_check` matches it.
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let paths = ["foo.log".to_owned(), "build/t".to_owned()];
     let git_map = git_check_ignore_verbose(&home, &root, &["foo.log", "build/t"], false);
     for check in repo.ignore_check(&paths, &index).expect("ignore_check") {

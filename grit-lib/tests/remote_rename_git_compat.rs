@@ -1,4 +1,4 @@
-//! `RepositoryRemotes::rename` vs the system `git remote rename`.
+//! `Remotes::rename` vs the system `git remote rename`.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};

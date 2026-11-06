@@ -78,9 +78,12 @@ fn loose_rename_preserves_unrelated_packed_refs_and_roundtrips_through_git() {
     git(dir, &["fsck", "--strict", "--no-progress"]);
 
     git(dir, &["branch", "-m", "renamed", "returned"]);
-    assert_eq!(repo.refs().resolve("refs/heads/returned").unwrap(), tip);
+    assert_eq!(
+        repo.ref_store().resolve("refs/heads/returned").unwrap(),
+        tip
+    );
     assert!(repo
-        .refs()
+        .ref_store()
         .read_raw(RefNameRef::from_trusted("refs/heads/renamed"))
         .unwrap()
         .is_none());
@@ -114,7 +117,7 @@ fn rename_removes_shadowed_packed_source_and_keeps_peeled_tags() {
     );
     assert_eq!(git(dir, &["rev-parse", "renamed"]).trim(), tip.to_string());
     assert!(repo
-        .refs()
+        .ref_store()
         .read_raw(RefNameRef::from_trusted("refs/heads/b1000"))
         .unwrap()
         .is_none());
@@ -124,5 +127,5 @@ fn rename_removes_shadowed_packed_source_and_keeps_peeled_tags() {
     );
     git(dir, &["fsck", "--strict", "--no-progress"]);
     git(dir, &["pack-refs", "--all"]);
-    assert_eq!(repo.refs().resolve("refs/heads/renamed").unwrap(), tip);
+    assert_eq!(repo.ref_store().resolve("refs/heads/renamed").unwrap(), tip);
 }

@@ -133,10 +133,7 @@ pub fn run(paths: &[String], all: bool) -> Result<IgnoreCheckOutcome> {
     }
     let repo = context::discover()?;
     let cwd = std::env::current_dir().context("could not read the current directory")?;
-    let index = repo
-        .index_handle()
-        .load()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let index = repo.index().load().map_err(|e| anyhow::anyhow!("{e}"))?;
     let normalizer = RepoPathNormalizer::new(&repo, &cwd).map_err(|e| anyhow::anyhow!("{e}"))?;
     let repo_paths = paths
         .iter()

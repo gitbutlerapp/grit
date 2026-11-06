@@ -639,7 +639,7 @@ fn walk_reachable_commit_infos(
 /// `HEAD` and every ref under `refs/`, through the repository's ref store.
 fn ref_tips_for_repository(repo: &crate::repo::Repository) -> crate::error::Result<Vec<ObjectId>> {
     let mut stack: Vec<ObjectId> = Vec::new();
-    if let Ok(oid) = repo.refs().resolve(RefNameRef::from_trusted("HEAD")) {
+    if let Ok(oid) = repo.ref_store().resolve(RefNameRef::from_trusted("HEAD")) {
         stack.push(oid);
     }
     for (_, oid) in crate::refs::list_refs_for_repository(repo, "refs/")? {
@@ -650,7 +650,7 @@ fn ref_tips_for_repository(repo: &crate::repo::Repository) -> crate::error::Resu
 
 /// Collect reachable commit OIDs from ref tips via the repository [`RefStore`](crate::refs::store::RefStore).
 ///
-/// Resolves `HEAD` through [`Repository::refs`](crate::repo::Repository::refs), lists refs under
+/// Resolves `HEAD` through [`Repository::ref_store`](crate::repo::Repository::ref_store), lists refs under
 /// `refs/` (reftable, packed-refs, and linked-worktree rules),
 /// peels annotated tags while walking, and traverses commit parents. Missing targets
 /// are skipped without fetching from a promisor remote.

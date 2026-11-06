@@ -46,22 +46,22 @@ Core engine areas use thin handles on `Repository` (no duplicated logic):
 | [`objects`](rustdoc:grit_lib::repo::Repository) | [`Objects`](rustdoc:grit_lib::objects::Objects) | read/write/contains for the ODB |
 | [`references`](rustdoc:grit_lib::repo::Repository) | [`References`](rustdoc:grit_lib::refs::References) | resolve, list, update refs; read reflog |
 | [`reflogs`](rustdoc:grit_lib::repo::Repository) | [`RepositoryReflogs`](rustdoc:grit_lib::repo_handles::RepositoryReflogs) | list reflog refs, show/delete/expire entries |
-| [`index_handle`](rustdoc:grit_lib::repo::Repository) | [`IndexHandle`](rustdoc:grit_lib::index::IndexHandle) | load/write the index |
+| [`index`](rustdoc:grit_lib::repo::Repository) | [`IndexFile`](rustdoc:grit_lib::index::IndexFile) | load/write the index |
 | [`config`](rustdoc:grit_lib::repo::Repository::config) | [`Config`](rustdoc:grit_lib::config::Config) | merged get; local set + reload |
-| [`rev_walk`](rustdoc:grit_lib::repo::Repository) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) | rev-parse specs; rev-list walks |
+| [`revwalk`](rustdoc:grit_lib::repo::Repository) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) | rev-parse specs; rev-list walks |
 | [`diff`](rustdoc:grit_lib::repo::Repository) | [`Diff`](rustdoc:grit_lib::diff::Diff) | tree↔tree, index↔tree, worktree↔index |
 
-`Repository::refs` still returns the pluggable `RefStore` trait object for embedders and low-level ref backends.
+For the raw backend, use [`references().store()`](rustdoc:grit_lib::refs::References::store) (same as [`ref_store`](rustdoc:grit_lib::repo::Repository::ref_store)).
 
 Larger subsystems use [`repo_handles`](rustdoc:grit_lib::repo_handles):
 
 | Method | Handle | Role |
 | --- | --- | --- |
-| `Repository::remotes` | `RepositoryRemotes` | List/get remotes, `ls-remote`, fetch, push |
-| `Repository::worktrees` | `RepositoryWorktrees` | List/add/remove/lock/unlock linked worktrees |
+| `Repository::remotes` | `Remotes` | List/get remotes, `ls-remote`, fetch, push |
+| `Repository::worktrees` | `Worktrees` | List/add/remove/lock/unlock linked worktrees |
 | `Repository::stash` | `RepositoryStash` | Stash list/push/apply/pop/drop/branch/clear (the one stash API) |
 | `Repository::notes` | `RepositoryNotes` | Notes list/read/add/remove via `NotesRef` |
-| `Repository::bundles` | `RepositoryBundles` | Bundle create/verify/list-heads/unbundle |
+| `Repository::bundles` | `Bundles` | Bundle create/verify/list-heads/unbundle |
 
 Transport options, the stash identity, and notes authors and committers are passed in as arguments on those methods (no hidden wall-clock reads in the handle layer).
 

@@ -1443,7 +1443,7 @@ fn commit_planned_ref_updates(
     updates: &[PlannedRefUpdate],
     opts: &ApplyOptions,
 ) -> Result<(), HistoryError> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let git_dir = repo.git_dir();
     let config = repo.config().snapshot().ok();
     let head_target =
@@ -1542,7 +1542,7 @@ pub(super) fn log_head_move(
         .update(update)
         .map_err(|e| map_ref_store_error(e, "HEAD"))?;
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
-    prepare_with_lock_wait(repo.refs(), txn, wait)
+    prepare_with_lock_wait(repo.ref_store(), txn, wait)
         .and_then(|prepared| prepared.commit())
         .map_err(|e| map_ref_store_error(e, "HEAD"))?;
     Ok(())

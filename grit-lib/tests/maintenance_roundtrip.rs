@@ -680,7 +680,10 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
         .set_ref("HEAD", RawRef::Direct(tip))
         .expect("inject detached HEAD");
     let repo = repo.with_ref_store(store);
-    assert_eq!(repo.refs().resolve("HEAD").expect("injected HEAD"), tip);
+    assert_eq!(
+        repo.ref_store().resolve("HEAD").expect("injected HEAD"),
+        tip
+    );
 
     let report = write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(false))
         .expect("write graph");

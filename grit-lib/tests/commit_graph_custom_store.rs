@@ -219,7 +219,7 @@ fn path_log(repo: &Repository, path: &str) -> Vec<ObjectId> {
         pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
         ..RevWalkListOptions::default()
     };
-    repo.rev_walk()
+    repo.revwalk()
         .commits(&["main"], &options)
         .expect("log -- path")
 }
@@ -232,7 +232,7 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
     let files = files_repo(dir.path());
     assert_eq!(
         files
-            .rev_walk()
+            .revwalk()
             .count(&["main"], &RevWalkListOptions::default())
             .expect("files"),
         git_count(dir.path(), "main")
@@ -249,7 +249,7 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
     let custom = open_custom(dir.path(), Arc::clone(&store), None).expect("open");
 
     let counted = custom
-        .rev_walk()
+        .revwalk()
         .count(&["main"], &RevWalkListOptions::default());
     assert!(
         matches!(counted, Err(Error::ObjectNotFound(_))),
@@ -261,7 +261,7 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
     };
     assert_eq!(
         custom
-            .rev_walk()
+            .revwalk()
             .commits(&["main"], &bounded)
             .expect("bounded walk"),
         kept
@@ -293,11 +293,11 @@ fn attached_graph_answers_walks_like_the_files_backend_without_commit_reads() {
     for (range, endpoint_reads) in [("main", 0), ("main~40..main", 1), ("side..main", 0)] {
         let expected = git_count(dir.path(), range);
         assert_eq!(
-            files.rev_walk().count(&[range], &all).expect("files"),
+            files.revwalk().count(&[range], &all).expect("files"),
             expected
         );
         assert_eq!(
-            custom.rev_walk().count(&[range], &all).expect("custom"),
+            custom.revwalk().count(&[range], &all).expect("custom"),
             expected
         );
         assert_eq!(
@@ -364,7 +364,7 @@ fn commits_newer_than_the_attached_graph_are_still_walked() {
     store.take_commit_reads();
     assert_eq!(
         custom
-            .rev_walk()
+            .revwalk()
             .count(&["main"], &RevWalkListOptions::default())
             .expect("count"),
         expected
@@ -403,7 +403,7 @@ fn built_graph_is_byte_identical_to_the_files_writer_and_verified_by_git() {
         for range in ["main", "main~25..main", "side..main"] {
             assert_eq!(
                 reopened
-                    .rev_walk()
+                    .revwalk()
                     .count(&[range], &RevWalkListOptions::default())
                     .expect("grit count"),
                 git_count(dir.path(), range),
@@ -432,7 +432,7 @@ fn graph_written_by_git_attaches_to_a_custom_store() {
     store.take_commit_reads();
     assert_eq!(
         custom
-            .rev_walk()
+            .revwalk()
             .count(&["main"], &RevWalkListOptions::default())
             .expect("count"),
         git_count(dir.path(), "main")

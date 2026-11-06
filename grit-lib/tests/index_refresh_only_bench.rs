@@ -34,7 +34,7 @@ fn refresh_index_stat_only_timing() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let index_mtime = index.source_mtime;
     let config = grit_lib::config::ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),

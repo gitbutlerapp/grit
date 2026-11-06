@@ -416,7 +416,7 @@ fn move_head_tip(
         HeadState::Invalid => return Err(Error::InvalidHead),
     };
     refs::store_write_value_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         moved,
         Some(RawRef::Direct(opts.target)),
@@ -427,7 +427,7 @@ fn move_head_tip(
     let identity = opts.identity.header_line();
     for name in logged {
         refs::append_reflog_on_store(
-            repo.refs(),
+            repo.ref_store(),
             name,
             &previous,
             &opts.target,

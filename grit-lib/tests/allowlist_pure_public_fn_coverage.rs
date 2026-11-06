@@ -204,7 +204,7 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
 
     assert!(commits_to_revert(&repo, &[]).expect("no specs").is_empty());
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let _ = builtin_objectmode_index(&index, "README.md");
 }
 

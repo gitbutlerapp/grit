@@ -1746,9 +1746,9 @@ pub(crate) fn store_stash(
     let old_oid = repo
         .resolve_ref_oid(STASH_REF)
         .unwrap_or_else(|_| ObjectId::zero());
-    update_direct_ref_on_store(repo.refs(), repo.git_dir(), STASH_REF, &oid)?;
+    update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), STASH_REF, &oid)?;
     append_reflog_on_store(
-        repo.refs(),
+        repo.ref_store(),
         STASH_REF,
         &old_oid,
         &oid,
@@ -1946,7 +1946,7 @@ fn materialize_stash_blob_err(err: Error, index_relpath: &str) -> Error {
 ///
 /// Propagates reflog read failures.
 pub(crate) fn list_stashes(repo: &Repository) -> StashResult<Vec<StashEntry>> {
-    let entries = read_reflog_on_store(repo.refs(), STASH_REF)?;
+    let entries = read_reflog_on_store(repo.ref_store(), STASH_REF)?;
     Ok(entries
         .into_iter()
         .rev()
@@ -1977,7 +1977,7 @@ pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> StashResult<ObjectId>
 /// Returns [`StashError::NotFound`] when `n` is out of range.
 pub(crate) fn drop_stash(repo: &Repository, n: usize) -> StashResult<ObjectId> {
     let oid = stash_oid_at(repo, n)?;
-    let store = repo.refs();
+    let store = repo.ref_store();
     delete_reflog_entries_rechain_on_store(store, STASH_REF, &[n])?;
     let remaining = read_reflog_on_store(store, STASH_REF)?;
     if let Some(top_entry) = remaining.last() {
@@ -2287,7 +2287,7 @@ pub(crate) fn stash_branch_reference(
 ///
 /// Propagates ref store and reflog delete failures.
 pub(crate) fn clear_stashes(repo: &Repository) -> StashResult<usize> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let count = read_reflog_on_store(store, STASH_REF)?.len();
     let has_ref = repo.resolve_ref_oid(STASH_REF).is_ok();
     if count == 0 && !has_ref {
@@ -3400,7 +3400,7 @@ const STASH_REF: &str = "refs/stash";
 /// Propagates ref and reflog update failures.
 pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Result<bool> {
     const RETRIES: u32 = 128;
-    let store = repo.refs();
+    let store = repo.ref_store();
     let git_dir = repo.git_dir();
     for _ in 0..RETRIES {
         if store

@@ -277,7 +277,7 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
         .write(ObjectKind::Commit, commit_body.as_bytes())
         .expect("commit");
     grit_lib::refs::update_direct_ref_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         "refs/heads/main",
         &commit,
@@ -395,7 +395,7 @@ fn files_primary_gc_prunes_unreachable_loose() {
         .write(ObjectKind::Commit, commit_body.as_bytes())
         .expect("commit");
     grit_lib::refs::update_direct_ref_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         "refs/heads/main",
         &commit,

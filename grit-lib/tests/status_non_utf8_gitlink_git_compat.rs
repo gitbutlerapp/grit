@@ -74,7 +74,7 @@ fn non_utf8_gitlink_path_is_not_untracked() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("load index");
+    let index = repo.index().load().expect("load index");
     let entry = index
         .get(gitlink_path_bytes, 0)
         .expect("gitlink path bytes in index");

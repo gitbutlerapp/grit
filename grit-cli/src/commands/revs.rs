@@ -404,7 +404,7 @@ pub fn run(
     promote_long_magic_pathspecs_from_revs(&mut rev, &mut pathspecs);
     let walk_pathspec = pathspecs.rev_walk_pathspec(&repo)?;
     let opts = rev.to_rev_walk_options(&repo, env, &[], walk_pathspec)?;
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     let token_refs = rev.rev_tokens(&[]);
     if (left_right || mode.cherry_mark) && rev.max_count() == Some(0) {
         walk.symmetric_range_tips(&token_refs)?;

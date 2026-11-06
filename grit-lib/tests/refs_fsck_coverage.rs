@@ -59,7 +59,7 @@ fn refs_fsck_reports_bad_symref_and_formats_line() {
             },
         })
         .expect("txn");
-    repo.refs()
+    repo.ref_store()
         .prepare(dangling)
         .and_then(|prepared| prepared.commit())
         .expect("deliberately dangling ref");
@@ -235,7 +235,7 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
             },
         })
         .expect("txn");
-    repo.refs()
+    repo.ref_store()
         .prepare(dangling)
         .and_then(|prepared| prepared.commit())
         .expect("dangling ref");
@@ -324,7 +324,7 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
         })
         .expect("txn");
     wt_repo
-        .refs()
+        .ref_store()
         .prepare(wt_dangling)
         .and_then(|prepared| prepared.commit())
         .expect("worktree-local ref");
@@ -357,7 +357,7 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
             },
         })
         .expect("txn");
-    repo.refs()
+    repo.ref_store()
         .prepare(common_dangling)
         .and_then(|prepared| prepared.commit())
         .expect("common dangling");

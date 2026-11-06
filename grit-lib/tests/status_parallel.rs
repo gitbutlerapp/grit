@@ -35,11 +35,11 @@ fn assert_models_equal(a: &StatusModel, b: &StatusModel) {
 }
 
 fn baseline_index_bytes(repo: &Repository) -> Vec<u8> {
-    match fs::read(repo.index_handle().path()) {
+    match fs::read(repo.index().path()) {
         Ok(bytes) => bytes,
         Err(_) => {
             let mut empty = grit_lib::index::Index::new();
-            let index_path = repo.index_handle().path();
+            let index_path = repo.index().path();
             empty.write(&index_path).expect("write empty index");
             fs::read(index_path).expect("read empty index")
         }
@@ -51,14 +51,14 @@ fn run_status_pair(
     opts: &StatusOptions,
     baseline_index: &[u8],
 ) -> (StatusModel, StatusModel, Vec<u8>, Vec<u8>) {
-    fs::write(repo.index_handle().path(), baseline_index).expect("restore index");
+    fs::write(repo.index().path(), baseline_index).expect("restore index");
     let mut serial_opts = opts.clone();
     serial_opts.stat_parallel_threads = Some(1);
     let serial = status(repo, &serial_opts, &mut NullProgress, &CancelToken::never())
         .expect("serial status");
-    let serial_index = fs::read(repo.index_handle().path()).expect("serial index");
+    let serial_index = fs::read(repo.index().path()).expect("serial index");
 
-    fs::write(repo.index_handle().path(), baseline_index).expect("restore index");
+    fs::write(repo.index().path(), baseline_index).expect("restore index");
     let parallel_repo = Repository::open(
         repo.git_dir(),
         &RepositoryOptions::empty()
@@ -75,7 +75,7 @@ fn run_status_pair(
         &CancelToken::never(),
     )
     .expect("parallel status");
-    let parallel_index = fs::read(parallel_repo.index_handle().path()).expect("parallel index");
+    let parallel_index = fs::read(parallel_repo.index().path()).expect("parallel index");
 
     (serial, parallel, serial_index, parallel_index)
 }
@@ -203,7 +203,7 @@ fn racy_timestamp_refresh_matches_serial_and_git() {
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let baseline = fs::read(repo.index_handle().path()).expect("index");
+    let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, serial_index, parallel_index) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
     assert_eq!(serial_index, parallel_index, "index bytes must match");
@@ -236,7 +236,7 @@ fn skip_worktree_sparse_entry_status_matches_serial() {
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let baseline = fs::read(repo.index_handle().path()).expect("index");
+    let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, serial_index, parallel_index) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
     assert_eq!(serial_index, parallel_index);
@@ -272,7 +272,7 @@ fn gitlink_submodule_untracked_scan_matches_serial() {
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let baseline = fs::read(repo.index_handle().path()).expect("index");
+    let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
 }
@@ -299,12 +299,12 @@ fn untracked_cache_enabled_matches_serial() {
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let baseline = fs::read(repo.index_handle().path()).expect("index");
+    let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
 
     // Warm UNTR: second pair must still match.
-    let baseline2 = fs::read(repo.index_handle().path()).expect("index after first run");
+    let baseline2 = fs::read(repo.index().path()).expect("index after first run");
     let (serial2, parallel2, _, _) = run_status_pair(&repo, &opts, &baseline2);
     assert_models_equal(&serial2, &parallel2);
 }
@@ -364,7 +364,7 @@ fn large_index_stat_refresh_parallel_matches_serial() {
         ahead_behind: false,
         ..StatusOptions::default()
     };
-    let baseline = fs::read(repo.index_handle().path()).expect("index");
+    let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, serial_index, parallel_index) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
     assert_eq!(serial_index, parallel_index);
@@ -447,7 +447,7 @@ fn single_top_level_directory_split_walk_matches_serial_and_git() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let baseline = fs::read(repo.index_handle().path()).expect("index");
+    let baseline = fs::read(repo.index().path()).expect("index");
 
     for (untracked, git_mode) in [
         (UntrackedMode::Normal, "normal"),

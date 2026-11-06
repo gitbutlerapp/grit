@@ -12,9 +12,9 @@ pub enum LinkedWorktreeOperation {
     Remove,
     /// [`move_linked_worktree`](crate::worktree::move_linked_worktree).
     Move,
-    /// [`RepositoryWorktrees::lock`](crate::repo_handles::RepositoryWorktrees::lock).
+    /// [`Worktrees::lock`](crate::repo_handles::Worktrees::lock).
     Lock,
-    /// [`RepositoryWorktrees::unlock`](crate::repo_handles::RepositoryWorktrees::unlock).
+    /// [`Worktrees::unlock`](crate::repo_handles::Worktrees::unlock).
     Unlock,
 }
 

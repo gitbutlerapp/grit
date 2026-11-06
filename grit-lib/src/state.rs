@@ -475,10 +475,10 @@ pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
 ///
 /// Propagates ref store read and resolution failures.
 pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<HeadState> {
-    if repo.refs().format() == crate::refs::store::RefStorageFormat::Files {
+    if repo.ref_store().format() == crate::refs::store::RefStorageFormat::Files {
         return resolve_head_impl(repo.git_dir(), Some(repo));
     }
-    resolve_head_from_store(repo.refs())
+    resolve_head_from_store(repo.ref_store())
 }
 
 fn resolve_head_from_store(store: &dyn crate::refs::store::RefStore) -> Result<HeadState> {
@@ -1321,7 +1321,7 @@ pub fn read_orig_head_for_repository(repo: &Repository) -> Result<Option<ObjectI
 ///
 /// Propagates ref store write failures (for example a held lock).
 pub fn write_orig_head(repo: &Repository, oid: ObjectId) -> Result<()> {
-    crate::refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "ORIG_HEAD", &oid)
+    crate::refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "ORIG_HEAD", &oid)
 }
 
 /// Read a file that contains a single OID on its first line.

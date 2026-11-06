@@ -145,7 +145,7 @@ pub fn open_plain_stream<'repo>(
     stream_opts.limit = limit_plus_one;
     stream_opts.retain_commit_data = true;
     stream_opts.retained_commit_extent = extent;
-    repo.rev_walk()
+    repo.revwalk()
         .commits_stream(tokens, &stream_opts)?
         .context("plain walk should stream")
 }

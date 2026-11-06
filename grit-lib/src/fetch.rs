@@ -1766,7 +1766,7 @@ pub fn fetch_remote_into(
     // wanting the tag itself would drag down its (otherwise unreachable) target
     // and incorrectly keep the tag. They are pruned by `retain_following_tags`.
     let tags_present = if opts.tags == crate::transfer::TagMode::Following {
-        tags_already_local(local.refs(), &remote_refs)
+        tags_already_local(local.ref_store(), &remote_refs)
     } else {
         HashSet::new()
     };
@@ -2433,7 +2433,7 @@ pub(crate) fn ensure_remote_tracking_head_symref(
     if crate::refs::resolve_ref_in(local, &target).is_err() {
         return Ok(());
     }
-    crate::refs::write_symbolic_ref_on_store(local.refs(), local.git_dir(), &head_ref, &target)
+    crate::refs::write_symbolic_ref_on_store(local.ref_store(), local.git_dir(), &head_ref, &target)
 }
 
 /// Clone-only ref layout after the first fetch into `local`: pack the imported refs (files
@@ -2462,7 +2462,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
     let Ok(tip) = crate::refs::resolve_ref_in(local, &target) else {
         return Ok(());
     };
-    crate::refs::write_symbolic_ref_on_store(local.refs(), git_dir, &head_ref, &target)?;
+    crate::refs::write_symbolic_ref_on_store(local.ref_store(), git_dir, &head_ref, &target)?;
     let Some(ref log) = opts.clone_reflog else {
         return Ok(());
     };
@@ -2476,7 +2476,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
     );
     let config = local.config().snapshot()?;
     crate::refs::append_reflog_on_store(
-        local.refs(),
+        local.ref_store(),
         &head_ref,
         &null,
         &tip,

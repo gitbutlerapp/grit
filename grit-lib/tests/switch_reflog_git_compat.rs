@@ -47,7 +47,7 @@ fn grit_commit(
 ) -> ObjectId {
     let work_tree = repo.work_tree().expect("wt");
     std::fs::write(work_tree.join(path), contents).expect("write");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let oid = repo
         .odb()
         .write(ObjectKind::Blob, contents.as_bytes())
@@ -64,7 +64,7 @@ fn grit_commit(
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let commit = CommitData {
         tree,
         parents: parent.into_iter().collect(),
@@ -95,7 +95,7 @@ fn grit_commit_to_ref(
 ) -> ObjectId {
     let work_tree = repo.work_tree().expect("wt");
     std::fs::write(work_tree.join(path), contents).expect("write");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let oid = repo
         .odb()
         .write(ObjectKind::Blob, contents.as_bytes())
@@ -112,7 +112,7 @@ fn grit_commit_to_ref(
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let commit = CommitData {
         tree,
         parents: parent.into_iter().collect(),

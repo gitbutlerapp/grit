@@ -136,7 +136,7 @@ fn commit_into(repo: &Repository, content: &[u8]) -> ObjectId {
         .write(ObjectKind::Commit, body.as_bytes())
         .expect("commit");
     grit_lib::refs::update_direct_ref_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         "refs/heads/main",
         &commit,
@@ -351,7 +351,7 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
     ));
 
     grit_lib::refs::update_direct_ref_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         "refs/heads/main",
         &tip,

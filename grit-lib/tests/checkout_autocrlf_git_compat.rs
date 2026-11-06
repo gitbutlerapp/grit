@@ -50,10 +50,10 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let parent = refs::resolve_ref(repo.git_dir(), "HEAD").ok();
     let commit_data = CommitData {
         tree,

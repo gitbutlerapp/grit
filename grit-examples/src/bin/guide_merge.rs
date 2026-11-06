@@ -37,8 +37,8 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("missing repository path"))?;
     let repo = open_repo(&root)?;
 
-    let ours: ObjectId = repo.rev_walk().resolve("ours")?;
-    let theirs: ObjectId = repo.rev_walk().resolve("theirs")?;
+    let ours: ObjectId = repo.revwalk().resolve("ours")?;
+    let theirs: ObjectId = repo.revwalk().resolve("theirs")?;
 
     // Merges over the first merge base and stores the result, like `git merge-tree --write-tree`.
     let merged = write_merge_tree(&repo, ours, theirs, &MergePredictionOptions::default())?;

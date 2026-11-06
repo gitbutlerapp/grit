@@ -62,7 +62,7 @@ pub(crate) fn validate_ref_update(
         return Ok(Some(RefUpdateRefusal::HiddenRef));
     }
     let current = repo
-        .refs()
+        .ref_store()
         .resolve(RefNameRef::from_trusted(&cmd.refname))
         .ok();
     if current != cmd.old {

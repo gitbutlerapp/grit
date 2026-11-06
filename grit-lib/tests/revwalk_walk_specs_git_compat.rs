@@ -56,7 +56,7 @@ fn git_rev_list(wt: &Path, spec: &str) -> Vec<String> {
 }
 
 fn walk_hex(repo: &Repository, spec: &str) -> Vec<String> {
-    repo.rev_walk()
+    repo.revwalk()
         .walk(spec, &RevListOptions::default())
         .unwrap_or_else(|e| panic!("walk({spec}): {e}"))
         .commits
@@ -66,7 +66,7 @@ fn walk_hex(repo: &Repository, spec: &str) -> Vec<String> {
 }
 
 fn commits_hex(repo: &Repository, spec: &str) -> Vec<String> {
-    repo.rev_walk()
+    repo.revwalk()
         .commits(&[spec], &RevWalkListOptions::default())
         .unwrap_or_else(|e| panic!("commits([{spec}]): {e}"))
         .iter()
@@ -130,7 +130,7 @@ fn walk_symmetric_range_honours_max_count_and_left_right() {
     let wt = diverged_repo();
     let repo = open(&wt);
     let limited = repo
-        .rev_walk()
+        .revwalk()
         .walk(
             "main...topic",
             &RevListOptions {
@@ -147,7 +147,7 @@ fn walk_symmetric_range_honours_max_count_and_left_right() {
     assert_eq!(got, expected);
 
     let left_right = repo
-        .rev_walk()
+        .revwalk()
         .walk(
             "main...topic",
             &RevListOptions {
@@ -188,7 +188,7 @@ fn walk_rejects_specs_that_need_the_token_api() {
         "main\ttopic",
     ] {
         let err = repo
-            .rev_walk()
+            .revwalk()
             .walk(spec, &RevListOptions::default())
             .expect_err(spec);
         match err {
@@ -247,10 +247,7 @@ fn walk_keeps_literal_ellipses_in_selectors_and_paths() {
     assert_eq!(parsed.positive, vec![path_spec.to_owned()]);
     assert!(parsed.negative.is_empty() && parsed.symmetric_left.is_none());
     assert_eq!(
-        repo.rev_walk()
-            .resolve(path_spec)
-            .expect("resolve")
-            .to_hex(),
+        repo.revwalk().resolve(path_spec).expect("resolve").to_hex(),
         git(&wt, &["rev-parse", path_spec]).trim()
     );
 
@@ -414,7 +411,7 @@ fn assert_symmetric_ranges_match_git(wt: &Path) {
             .parse()
             .expect("git count");
         assert_eq!(
-            repo.rev_walk()
+            repo.revwalk()
                 .count(&[spec], &RevWalkListOptions::default())
                 .expect("count"),
             count,
@@ -424,7 +421,7 @@ fn assert_symmetric_ranges_match_git(wt: &Path) {
             let n = limit.to_string();
             let expected = git_lines(wt, &["rev-list", "-n", &n, spec]);
             let listed: Vec<String> = repo
-                .rev_walk()
+                .revwalk()
                 .commits(
                     &[spec],
                     &RevWalkListOptions {
@@ -497,7 +494,7 @@ fn symmetric_range_walk_stops_at_merge_base_frontier() {
             continue;
         }
         assert_eq!(
-            repo.rev_walk()
+            repo.revwalk()
                 .count(&[spec], &RevWalkListOptions::default())
                 .unwrap_or_else(|e| panic!("count([{spec}]): {e}")),
             expected.len(),
@@ -505,7 +502,7 @@ fn symmetric_range_walk_stops_at_merge_base_frontier() {
         );
     }
     let listed: Vec<String> = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["main...topic"],
             &RevWalkListOptions {
@@ -561,7 +558,7 @@ fn double_dot_range_under_committer_date_skew_matches_git_without_commit_graph()
     let hide_token = format!("^{hide}");
     let tokens = [positive.as_str(), hide_token.as_str()];
     let listed = repo
-        .rev_walk()
+        .revwalk()
         .commits(&tokens, &RevWalkListOptions::default())
         .expect("commits");
     assert_eq!(listed.len(), expected_count);
@@ -570,7 +567,7 @@ fn double_dot_range_under_committer_date_skew_matches_git_without_commit_graph()
         expected
     );
     assert_eq!(
-        repo.rev_walk()
+        repo.revwalk()
             .count(&tokens, &RevWalkListOptions::default())
             .expect("count"),
         expected_count

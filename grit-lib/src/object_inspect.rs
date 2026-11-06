@@ -225,7 +225,7 @@ impl Repository {
         }
 
         if self
-            .refs()
+            .ref_store()
             .resolve(RefNameRef::from_trusted(&format!("refs/heads/{spec}")))
             .is_ok()
         {
@@ -235,7 +235,7 @@ impl Repository {
         }
 
         let Ok(oid) = self
-            .refs()
+            .ref_store()
             .resolve(RefNameRef::from_trusted(&format!("refs/tags/{spec}")))
         else {
             return Ok(None);
@@ -422,7 +422,7 @@ impl Repository {
         if count == 0 {
             if spec == "HEAD" {
                 match self
-                    .refs()
+                    .ref_store()
                     .read_raw(RefNameRef::from_trusted("HEAD"))
                     .map_err(map_resolve_ref_error)?
                 {
@@ -820,7 +820,7 @@ mod tests {
                 },
             })
             .expect("txn");
-        repo.refs()
+        repo.ref_store()
             .prepare(dangling)
             .and_then(|prepared| prepared.commit())
             .expect("dangling tag ref");

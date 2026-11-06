@@ -327,22 +327,34 @@ impl CancelToken {
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         #[cfg(feature = "test-support")]
-        {
-            if let Some(remaining) = self.polls_until_cancel.as_ref() {
-                if remaining.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1 {
-                    self.cancel();
-                }
-            }
-            if let Some(counter) = self.check_counter.as_ref() {
-                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
+        if let Some(counter) = self.check_counter.as_ref() {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
         self.flag.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Like [`Self::poll`], but only applies the test [`Self::after_polls`] budget — avoids
+    /// double-counting when [`Self::poll`] also reads cancellation.
+    #[cfg(feature = "test-support")]
+    fn tick_poll_budget_only(&self) {
+        if let Some(remaining) = self.polls_until_cancel.as_ref() {
+            let prev = remaining.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            if prev == 0 {
+                // Undo wrap when the budget was already exhausted.
+                remaining.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return;
+            }
+            if prev == 1 {
+                self.cancel();
+            }
+        }
     }
 
     /// Poll hook before blocking waits (in tests, counts toward the poll budget from
     /// `CancelToken::after_polls`).
     pub fn poll_before_wait(&self) {
+        #[cfg(feature = "test-support")]
+        self.tick_poll_budget_only();
         let _ = self.is_cancelled();
     }
 
@@ -357,13 +369,11 @@ impl CancelToken {
 
     pub(crate) fn poll(&self) -> std::result::Result<(), Cancelled> {
         #[cfg(feature = "test-support")]
-        if let Some(remaining) = self.polls_until_cancel.as_ref() {
-            if remaining.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1 {
-                self.cancel();
-            }
-        }
-        // Read the flag directly: `is_cancelled()` also advances `after_polls` countdown and would
-        // double-count when both paths run (e.g. `poll` then status check).
+        self.tick_poll_budget_only();
+        #[cfg(not(feature = "test-support"))]
+        let _ = ();
+        // Read the flag directly: `is_cancelled()` counts toward the integration-test hook and would
+        // double-count `after_polls` when both paths run.
         if self.flag.load(std::sync::atomic::Ordering::Relaxed) {
             Err(Cancelled)
         } else {
@@ -503,11 +513,13 @@ pub(crate) fn poll_cancel_watch(
     cancel: &CancelToken,
     watch: &std::sync::atomic::AtomicBool,
 ) -> crate::error::Result<()> {
-    if cancel.is_cancelled() {
-        watch.store(true, std::sync::atomic::Ordering::Relaxed);
-        return Err(crate::error::Error::Cancelled);
+    match cancel.poll() {
+        Err(_) => {
+            watch.store(true, std::sync::atomic::Ordering::Relaxed);
+            Err(crate::error::Error::Cancelled)
+        }
+        Ok(()) => poll_watch(watch),
     }
-    poll_watch(watch)
 }
 
 /// A [`CancelToken`] polled on the calling thread, plus the flag its worker threads read.
@@ -529,10 +541,9 @@ impl<'a> CancelSignal<'a> {
     /// Returns [`crate::error::Error::Cancelled`] once the signal fired.
     #[inline]
     pub(crate) fn poll(&self) -> crate::error::Result<()> {
-        if self.cancel.is_cancelled() {
-            return Err(crate::error::Error::Cancelled);
-        }
-        Ok(())
+        self.cancel
+            .poll()
+            .map_err(|_| crate::error::Error::Cancelled)
     }
 
     /// The flag worker threads check; set once [`Self::poll`] observed a cancel.
@@ -615,11 +626,7 @@ pub fn poll_cancel(
     _progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> crate::error::Result<()> {
-    if cancel.is_cancelled() {
-        Err(crate::error::Error::Cancelled)
-    } else {
-        Ok(())
-    }
+    cancel.poll().map_err(|_| crate::error::Error::Cancelled)
 }
 
 /// [`ProgressSink`] that stops forwarding once the [`CancelToken`] fires.

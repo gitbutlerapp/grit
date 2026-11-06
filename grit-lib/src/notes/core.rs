@@ -145,11 +145,11 @@ fn collect_notes_tree_entries(
 
 /// Current target of `notes_ref` in the repository's ref store, or `None` when the ref is absent.
 fn notes_ref_tip(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>> {
-    match repo.refs().read_raw(RefNameRef::from_trusted(notes_ref))? {
+    match repo.ref_store().read_raw(RefNameRef::from_trusted(notes_ref))? {
         None => Ok(None),
         Some(RawRef::Direct(oid)) => Ok(Some(oid)),
         Some(RawRef::Symbolic(_)) => repo
-            .refs()
+            .ref_store()
             .resolve(RefNameRef::from_trusted(notes_ref))
             .map(Some),
     }
@@ -892,7 +892,7 @@ fn update_notes_ref(
     let config = repo.config().snapshot()?;
     let log = should_autocreate_reflog_with_config(config.as_ref(), repo.git_dir(), notes_ref)
         || repo
-            .refs()
+            .ref_store()
             .reflog_exists(RefNameRef::from_trusted(notes_ref))?;
     let reflog = log.then(|| ReflogUpdate {
         identity: commit.committer.to_owned(),
@@ -902,7 +902,7 @@ fn update_notes_ref(
         new_oid: None,
     });
     store_write_value_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         notes_ref,
         Some(RawRef::Direct(new)),
@@ -2429,12 +2429,12 @@ mod tests {
         upsert_note_entry(&mut entries, &"ab".repeat(20), blob);
         write_notes_commit(&repo, "refs/notes/commits", &entries, "first").unwrap();
         let first = repo
-            .refs()
+            .ref_store()
             .resolve(RefNameRef::from_trusted("refs/notes/commits"))
             .unwrap();
         write_notes_commit(&repo, "refs/notes/commits", &[], "second").unwrap();
         let second = repo
-            .refs()
+            .ref_store()
             .resolve(RefNameRef::from_trusted("refs/notes/commits"))
             .unwrap();
 

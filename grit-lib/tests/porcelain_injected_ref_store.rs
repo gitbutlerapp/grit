@@ -89,7 +89,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
 
 fn switch_to(repo: &Repository, branch: &str) {
     let oid = repo
-        .rev_walk()
+        .revwalk()
         .resolve(&format!("refs/heads/{branch}"))
         .expect("branch tip");
     switch_repository(
@@ -128,9 +128,9 @@ struct BatteryResult {
 fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     fs::write(wt.join("a.txt"), "hi\n").expect("write");
     let first = commit_all(repo, "first");
-    assert_eq!(repo.rev_walk().resolve("HEAD").expect("HEAD"), first);
+    assert_eq!(repo.revwalk().resolve("HEAD").expect("HEAD"), first);
     assert_eq!(
-        repo.rev_walk().resolve("refs/heads/main").expect("main"),
+        repo.revwalk().resolve("refs/heads/main").expect("main"),
         first
     );
 
@@ -148,11 +148,11 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     fs::write(wt.join("b.txt"), "topic\n").expect("write");
     let topic_tip = commit_all(repo, "on topic");
     assert_eq!(
-        repo.rev_walk().resolve("refs/heads/topic").expect("topic"),
+        repo.revwalk().resolve("refs/heads/topic").expect("topic"),
         topic_tip
     );
     assert_eq!(
-        repo.rev_walk().resolve("refs/heads/main").expect("main"),
+        repo.revwalk().resolve("refs/heads/main").expect("main"),
         first
     );
 
@@ -180,7 +180,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         IntegrateBranchOutcome::Merged { oid, .. } => oid,
         other => panic!("expected a merge commit, got {other:?}"),
     };
-    assert_eq!(repo.rev_walk().resolve("HEAD").expect("HEAD"), merged);
+    assert_eq!(repo.revwalk().resolve("HEAD").expect("HEAD"), merged);
     assert!(wt.join("b.txt").exists());
 
     create_tag(
@@ -214,7 +214,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     )
     .expect("reset");
     assert_eq!(reset.target, main_tip);
-    assert_eq!(repo.rev_walk().resolve("HEAD").expect("HEAD"), main_tip);
+    assert_eq!(repo.revwalk().resolve("HEAD").expect("HEAD"), main_tip);
     assert!(!wt.join("b.txt").exists());
 
     reset_to_commit(
@@ -250,7 +250,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         .expect("stash created")
         .oid;
     assert_eq!(fs::read_to_string(wt.join("a.txt")).expect("read"), "hi\n");
-    assert_eq!(repo.rev_walk().resolve("refs/stash").expect("stash"), stash);
+    assert_eq!(repo.revwalk().resolve("refs/stash").expect("stash"), stash);
     assert!(
         !repo
             .stash()
@@ -268,7 +268,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         fs::read_to_string(wt.join("a.txt")).expect("read"),
         "dirty\n"
     );
-    assert!(repo.rev_walk().resolve("refs/stash").is_err());
+    assert!(repo.revwalk().resolve("refs/stash").is_err());
     fs::write(wt.join("a.txt"), "hi\n").expect("write");
 
     switch_repository(
@@ -288,7 +288,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     assert!(head_branch(repo).is_none());
     fs::write(wt.join("d.txt"), "detached\n").expect("write");
     let detached = commit_all(repo, "detached");
-    assert_eq!(repo.rev_walk().resolve("HEAD").expect("HEAD"), detached);
+    assert_eq!(repo.revwalk().resolve("HEAD").expect("HEAD"), detached);
     fs::remove_file(wt.join("d.txt")).expect("rm");
     stage(
         repo,
@@ -508,7 +508,7 @@ fn porcelain_battery_on_reftable_repository_keeps_refs_and_reflogs_in_reftable()
     let repo = init_repo_with(dir.path(), RefStorageFormat::Reftable);
     let result = battery(&repo, dir.path());
 
-    let store = repo.refs();
+    let store = repo.ref_store();
     assert_eq!(
         store
             .read_raw(RefNameRef::from_trusted("HEAD"))

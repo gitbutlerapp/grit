@@ -1,4 +1,4 @@
-//! [`RepositoryRemotes::inspect`](crate::repo_handles::RepositoryRemotes::inspect) types and logic.
+//! [`Remotes::inspect`](crate::repo_handles::Remotes::inspect) types and logic.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -13,7 +13,7 @@ use crate::repo::Repository;
 use crate::repo_handles::has_remote_section;
 use crate::transfer::{match_positive, ref_excluded, tracking_refs_gone_in};
 
-/// Options for [`RepositoryRemotes::inspect`](crate::repo_handles::RepositoryRemotes::inspect).
+/// Options for [`Remotes::inspect`](crate::repo_handles::Remotes::inspect).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InspectOptions {
     /// When `true`, contact the remote (or read its git dir) to classify branch states.

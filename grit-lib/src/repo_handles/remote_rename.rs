@@ -131,7 +131,7 @@ fn rename_remote_ref(old: &str, new: &str, refname: &str) -> Option<String> {
 fn count_remote_tracking_refs(repo: &Repository, old: &str) -> Result<usize, RemoteError> {
     let prefix = remote_ref_prefix(old);
     let mut count = 0usize;
-    repo.refs()
+    repo.ref_store()
         .for_each_ref(&prefix, &mut |entry: &RefEntry| {
             if entry.name.as_str().starts_with(&prefix) {
                 count += 1;
@@ -145,7 +145,7 @@ fn count_remote_tracking_refs(repo: &Repository, old: &str) -> Result<usize, Rem
 fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Result<(), RemoteError> {
     let prefix = remote_ref_prefix(old);
     let mut entries = Vec::new();
-    repo.refs()
+    repo.ref_store()
         .for_each_ref(&prefix, &mut |entry: &RefEntry| {
             if entry.name.as_str().starts_with(&prefix) {
                 entries.push(entry.clone());
@@ -214,7 +214,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
         });
     }
 
-    commit_ref_batch_on_store(repo.refs(), &updates, &reflog_renames, &[])
+    commit_ref_batch_on_store(repo.ref_store(), &updates, &reflog_renames, &[])
         .map_err(RemoteError::from)
 }
 

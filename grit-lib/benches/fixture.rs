@@ -182,9 +182,9 @@ fn grit_record_commit(
     parent: Option<ObjectId>,
     message: &str,
 ) -> Result<ObjectId> {
-    let mut index = repo.index_handle().load()?;
+    let mut index = repo.index().load()?;
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())?;
-    repo.index_handle().write(&mut index)?;
+    repo.index().write(&mut index)?;
     let commit_data = CommitData {
         tree,
         parents: parent.into_iter().collect(),

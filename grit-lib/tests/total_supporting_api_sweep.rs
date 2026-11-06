@@ -111,7 +111,7 @@ fn rerere_and_repository_index_paths() -> grit_lib::error::Result<()> {
 
     let _ = repo.reload_config();
     let _ = Repository::open(dir.path(), &RepositoryOptions::empty().for_serving());
-    let mut index = repo.index_handle().load()?;
-    repo.index_handle().write(&mut index)?;
+    let mut index = repo.index().load()?;
+    repo.index().write(&mut index)?;
     Ok(())
 }

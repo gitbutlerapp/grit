@@ -34,7 +34,7 @@ fn populated_tree_checkout_matches_git_for_many_files() {
     let repo =
         Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open repo");
     let mut index = Index::new();
-    repo.index_handle().write(&mut index).expect("clear index");
+    repo.index().write(&mut index).expect("clear index");
     for i in 0..COUNT {
         let path = root
             .path()

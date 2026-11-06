@@ -67,7 +67,7 @@ fn index_apply_create_delete() {
          +hello\n",
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    let mut index = repo.index_handle().load().unwrap();
+    let mut index = repo.index().load().unwrap();
     apply_patch_to_index(&repo, &mut index, &add_patch, &IndexApplyOptions::default()).unwrap();
     assert!(index.get(b"new.txt", 0).is_some());
 
@@ -99,7 +99,7 @@ fn index_apply_mode_change() {
          +++ b/run.sh\n",
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    let mut index = repo.index_handle().load().unwrap();
+    let mut index = repo.index().load().unwrap();
     apply_patch_to_index(&repo, &mut index, &patch, &IndexApplyOptions::default()).unwrap();
     assert_eq!(index.get(b"run.sh", 0).unwrap().mode, 0o100755);
 }
@@ -119,7 +119,7 @@ fn index_apply_rename() {
          rename to new.txt\n",
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    let mut index = repo.index_handle().load().unwrap();
+    let mut index = repo.index().load().unwrap();
     apply_patch_to_index(&repo, &mut index, &patch, &IndexApplyOptions::default()).unwrap();
     assert!(index.get(b"old.txt", 0).is_none());
     assert!(index.get(b"new.txt", 0).is_some());
@@ -140,7 +140,7 @@ fn index_apply_binary() {
     let patch = parse(&patch_text);
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    let mut index = repo.index_handle().load().unwrap();
+    let mut index = repo.index().load().unwrap();
     apply_patch_to_index(&repo, &mut index, &patch, &IndexApplyOptions::default()).unwrap();
     let oid = index.get(b"b.bin", 0).unwrap().oid;
     assert_eq!(repo.odb().read(&oid).unwrap().data, new);
@@ -171,7 +171,7 @@ fn index_apply_atomic_on_failure() {
          +nope2\n",
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    let mut index = repo.index_handle().load().unwrap();
+    let mut index = repo.index().load().unwrap();
     let before = index.get(b"a.txt", 0).unwrap().oid;
     let mut batch = good.clone();
     batch.extend(bad);
@@ -256,7 +256,7 @@ fn index_apply_no_newline_preimage() {
         &CancelToken::never(),
     )
     .unwrap();
-    let entry = repo.index_handle().load().unwrap();
+    let entry = repo.index().load().unwrap();
     let e = entry.get(b"f.txt", 0).expect("indexed");
     assert_eq!(repo.odb().read(&e.oid).unwrap().data, b"new\n");
 }
@@ -277,7 +277,7 @@ fn index_apply_deletion_rejects_stale_preimage() {
          -expected\n",
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-    let mut index = repo.index_handle().load().unwrap();
+    let mut index = repo.index().load().unwrap();
     let before = index.get(b"f.txt", 0).is_some();
     assert!(before);
     let err = apply_patch_to_index(&repo, &mut index, &patch, &IndexApplyOptions::default())
@@ -322,7 +322,7 @@ fn index_apply_sha256_write_tree_roundtrip() {
         &CancelToken::never(),
     )
     .unwrap();
-    let grit_oid = grit_tree(&repo, &repo.index_handle().load().unwrap());
+    let grit_oid = grit_tree(&repo, &repo.index().load().unwrap());
     git(dir.path(), &["reset", "--hard", "HEAD"]);
     std::fs::write(dir.path().join("patch.diff"), &patch).unwrap();
     git(dir.path(), &["apply", "--cached", "patch.diff"]);
@@ -360,7 +360,7 @@ fn index_apply_git_diff_roundtrip_write_tree() {
         &CancelToken::never(),
     )
     .unwrap();
-    let grit_oid = grit_tree(&repo, &repo.index_handle().load().unwrap());
+    let grit_oid = grit_tree(&repo, &repo.index().load().unwrap());
 
     git(dir.path(), &["reset", "--hard", "HEAD"]);
     std::fs::write(dir.path().join("patch.diff"), &patch).unwrap();

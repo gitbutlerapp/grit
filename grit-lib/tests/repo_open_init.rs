@@ -179,7 +179,7 @@ fn open_discover_and_init_roundtrip_fsck() {
     .expect("builder open");
     assert_eq!(built.git_dir(), repo.git_dir());
     assert_eq!(
-        built.refs().format(),
+        built.ref_store().format(),
         grit_lib::refs::store::RefStorageFormat::Memory
     );
     let listed = list_refs_for_repository(&built, "refs/heads/").expect("list");

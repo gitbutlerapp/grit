@@ -175,7 +175,7 @@ fn grit_fsmn_index_round_trips_with_git() {
         &RepositoryOptions::empty().with_work_tree(&repo_root),
     )
     .expect("open grit repo");
-    let mut index = grit_repo.index_handle().load().expect("load index");
+    let mut index = grit_repo.index().load().expect("load index");
     assert_eq!(
         index.fsmonitor_last_update.as_deref(),
         Some(token_before.as_str())
@@ -195,10 +195,7 @@ fn grit_fsmn_index_round_trips_with_git() {
         index.add_or_replace(entry);
     }
     index.sort();
-    grit_repo
-        .index_handle()
-        .write(&mut index)
-        .expect("write index");
+    grit_repo.index().write(&mut index).expect("write index");
 
     let tracked = isolated_git(&repo_root, &["ls-files"]).lines().count();
     let flags = ls_files_fsmonitor_flags(&repo_root);
@@ -230,11 +227,8 @@ fn git_fsmn_index_rewritten_by_grit_preserves_token() {
         &RepositoryOptions::empty().with_work_tree(&repo_root),
     )
     .expect("open grit repo");
-    let mut index = grit_repo.index_handle().load().expect("load");
-    grit_repo
-        .index_handle()
-        .write(&mut index)
-        .expect("rewrite index");
+    let mut index = grit_repo.index().load().expect("load");
+    grit_repo.index().write(&mut index).expect("rewrite index");
 
     let token_after = fsmn_token(&repo_root);
     assert_eq!(token_after, token_before);

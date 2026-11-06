@@ -1,6 +1,6 @@
 //! Ref and reflog writes through a caller-selected [`RefStore`].
 //!
-//! Porcelain receives its store from [`crate::repo::Repository::refs`], which may be an
+//! Porcelain receives its store from [`crate::repo::Repository::ref_store`], which may be an
 //! injected backend such as [`crate::refs::store::MemoryRefStore`]. These helpers route every write through
 //! that store. The files backend keeps its lock-and-append implementation (the generic
 //! transaction rewrites whole reflog files); every other backend gets one atomic
@@ -83,7 +83,7 @@ pub(crate) fn verify_new_tip(store: &dyn RefStore, refname: &str, new_oid: Objec
 ///   longer has `update.expected_old`.
 /// - [`Error::RefStore`] with [`crate::refs::store::RefStoreError::MissingObject`] or
 ///   [`crate::refs::store::RefStoreError::NotACommit`] when `store` is the store of
-///   [`crate::repo::Repository::refs`] and `update.new_oid` is not a commit the repository
+///   [`crate::repo::Repository::ref_store`] and `update.new_oid` is not a commit the repository
 ///   stores (checked before any lock, on every backend).
 /// - Ref, reflog and I/O failures from the backend; the branch is not advanced when they occur.
 pub fn update_branch_for_commit_on_store(
@@ -529,7 +529,7 @@ mod tests {
             .expect("tree");
         crate::refs::write_ref(&git_dir, "refs/heads/main", &base).expect("main");
         assert!(
-            repo.refs().as_files().is_some(),
+            repo.ref_store().as_files().is_some(),
             "exercises the files fast path"
         );
 
@@ -540,14 +540,15 @@ mod tests {
             identity: IDENT,
             reflog_message: "commit: x",
         };
-        let err = update_branch_for_commit_on_store(repo.refs(), &branch(oid(9)), &config(None))
-            .expect_err("missing tip");
+        let err =
+            update_branch_for_commit_on_store(repo.ref_store(), &branch(oid(9)), &config(None))
+                .expect_err("missing tip");
         assert!(
             matches!(&err, Error::RefStore(RefStoreError::MissingObject { name, oid: o })
                 if name == "refs/heads/main" && *o == oid(9)),
             "{err:?}"
         );
-        let err = update_branch_for_commit_on_store(repo.refs(), &branch(tree), &config(None))
+        let err = update_branch_for_commit_on_store(repo.ref_store(), &branch(tree), &config(None))
             .expect_err("tree tip");
         assert!(
             matches!(&err, Error::RefStore(RefStoreError::NotACommit { name, .. })
@@ -563,7 +564,7 @@ mod tests {
         crate::refs::write_ref(&git_dir, "HEAD", &base).expect("detach");
         for (new_oid, missing) in [(oid(9), true), (tree, false)] {
             let err = update_detached_head_for_commit_on_store(
-                repo.refs(),
+                repo.ref_store(),
                 Some(base),
                 new_oid,
                 IDENT,
@@ -579,7 +580,7 @@ mod tests {
             assert!(expected, "{err:?}");
         }
         assert_eq!(
-            repo.refs()
+            repo.ref_store()
                 .read_raw(RefNameRef::from_trusted("HEAD"))
                 .expect("HEAD"),
             Some(RawRef::Direct(base))
@@ -587,7 +588,7 @@ mod tests {
 
         let next = crate::refs::test_commit(&git_dir, "next");
         update_detached_head_for_commit_on_store(
-            repo.refs(),
+            repo.ref_store(),
             Some(base),
             next,
             IDENT,

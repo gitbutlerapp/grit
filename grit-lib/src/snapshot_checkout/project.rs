@@ -446,7 +446,7 @@ pub fn project_branch(
     };
     known.record(&projection.made())?;
     crate::refs::update_direct_ref_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         in_ref(&checkout.id, name),
         &projection.tip,

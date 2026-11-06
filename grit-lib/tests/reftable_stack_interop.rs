@@ -765,7 +765,7 @@ fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
     )
     .expect("init");
     let git_dir = repo.git_dir().to_path_buf();
-    let store = repo.refs();
+    let store = repo.ref_store();
 
     const UPDATES: u32 = 100;
     for i in 0..UPDATES {
@@ -828,7 +828,7 @@ fn geometric_factor_two_compacts_more_than_large_factor() {
             format!("[reftable]\ngeometricFactor = {factor}\n"),
         )
         .expect("config");
-        let store = repo.refs();
+        let store = repo.ref_store();
         for i in 0..60u32 {
             let txn = RefTransaction::new()
                 .update(RefUpdate {

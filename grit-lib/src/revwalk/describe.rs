@@ -729,10 +729,10 @@ mod tests {
         let _c2 = empty_commit(&repo, "c2");
         let c3 = empty_commit(&repo, "c3");
         tag_light(&repo, "v1", c1);
-        let head = repo.rev_walk().resolve("HEAD")?;
+        let head = repo.revwalk().resolve("HEAD")?;
         assert_eq!(head, c3);
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -755,7 +755,7 @@ mod tests {
         tag_annotated(&repo, "inner", base, "inner");
         tag_annotated(&repo, "outer", inner_tag_oid(&repo, "inner"), "outer");
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert_eq!(d.peeled, base);
@@ -779,7 +779,7 @@ mod tests {
             .expect("blob");
         tag_light(&repo, "blob-tag", blob);
         tag_light(&repo, "v1", c1);
-        let d = repo.rev_walk().describe(
+        let d = repo.revwalk().describe(
             "HEAD",
             &DescribeOptions {
                 tags: true,
@@ -800,7 +800,7 @@ mod tests {
         tag_light(&repo, "near", c3);
         tag_light(&repo, "far", c1);
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -822,7 +822,7 @@ mod tests {
         tag_light(&repo, "light", c1);
         tag_annotated(&repo, "ann", c1, "m");
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert_eq!(d.tag_oid, inner_tag_oid(&repo, "ann"));
@@ -835,7 +835,7 @@ mod tests {
         let (_dir, repo) = init_repo();
         let _c = empty_commit(&repo, "only");
         assert!(repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .is_none());
         Ok(())
@@ -857,11 +857,11 @@ mod tests {
         tag_annotated(&repo, "a-far", c1, "far");
         tag_annotated(&repo, "z-near", c3, "near");
         let opts = DescribeOptions::default();
-        let before = repo.rev_walk().describe("HEAD", &opts)?.expect("before");
+        let before = repo.revwalk().describe("HEAD", &opts)?.expect("before");
         assert_eq!(tag_short_name(&before), "z-near");
         assert_eq!(before.distance, 1);
         repo.write_commit_graph(&CommitGraphOptions::default())?;
-        let after = repo.rev_walk().describe("HEAD", &opts)?.expect("after");
+        let after = repo.revwalk().describe("HEAD", &opts)?.expect("after");
         assert_eq!(tag_short_name(&after), "z-near");
         assert_eq!(after.distance, 1);
         Ok(())
@@ -881,7 +881,7 @@ mod tests {
         refs::write_ref(repo.git_dir(), "refs/heads/main", &merge)?;
         tag_annotated(&repo, "old", root, "old");
         tag_annotated(&repo, "side-tag", side, "side");
-        let all = repo.rev_walk().describe(
+        let all = repo.revwalk().describe(
             "HEAD",
             &DescribeOptions {
                 tags: true,
@@ -890,7 +890,7 @@ mod tests {
         )?;
         assert_eq!(all.as_ref().map(tag_short_name), Some("side-tag"));
         let fp = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -913,13 +913,13 @@ mod tests {
         tag_annotated(&repo, "ztag", c1, "z");
         tag_annotated(&repo, "atag", c1, "a");
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert_eq!(tag_short_name(&d), "atag");
         assert_eq!(d.distance, 1);
         assert_eq!(d.peeled, c1);
-        assert_eq!(c2, repo.rev_walk().resolve("HEAD")?);
+        assert_eq!(c2, repo.revwalk().resolve("HEAD")?);
         Ok(())
     }
 
@@ -930,7 +930,7 @@ mod tests {
         let _c2 = empty_commit(&repo, "c2");
         tag_light(&repo, "release-1", c1);
         tag_light(&repo, "other", c1);
-        let d = repo.rev_walk().describe(
+        let d = repo.revwalk().describe(
             "HEAD",
             &DescribeOptions {
                 tags: true,
@@ -964,7 +964,7 @@ mod tests {
         tag_annotated(&repo, "on-main", main_tip, "main tag");
         tag_annotated(&repo, "on-side", side, "side tag");
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -1011,7 +1011,7 @@ mod tests {
             .expect("git rev-list oracle");
 
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -1153,7 +1153,7 @@ mod tests {
             &RepositoryOptions::empty().with_work_tree(wt),
         )?;
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -1185,7 +1185,7 @@ mod tests {
         tag_annotated_with_tagger_time(&repo, "t-tagged", tagged, "near tag", 1_000);
 
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe(
                 "HEAD",
                 &DescribeOptions {
@@ -1260,7 +1260,7 @@ mod tests {
         )?;
 
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described without within-bit overflow");
         assert_eq!(tag_short_name(&d), "t20");
@@ -1295,7 +1295,7 @@ mod tests {
 
         reset_describe_distance_counts();
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert_eq!(d.distance, 1);
@@ -1367,7 +1367,7 @@ mod tests {
         reset_describe_distance_counts();
         reset_describe_heap_processed();
         let described = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert!(
@@ -1421,7 +1421,7 @@ mod tests {
 
         reset_commit_parent_lookups();
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert_eq!(d.distance, TAG_EVERY - 1);
@@ -1460,7 +1460,7 @@ mod tests {
 
         reset_commit_parent_lookups();
         let d = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .expect("described");
         assert_eq!(d.distance, 1);

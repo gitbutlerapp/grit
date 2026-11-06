@@ -94,7 +94,7 @@ impl HotPathsFixture {
         let n = ((self.file_paths.len() as f64) * fraction).round() as usize;
         let n = n.max(1);
         let work_tree = self.repo.work_tree().expect("work tree");
-        let mut index = self.repo.index_handle().load().expect("load index");
+        let mut index = self.repo.index().load().expect("load index");
         for path in self.file_paths.iter().take(n) {
             let abs = work_tree.join(path);
             std::fs::write(&abs, format!("changed-{path}\n")).expect("write");
@@ -159,7 +159,7 @@ impl HotPathsFixture {
     /// Clean tracked tree: index stat cache matches the worktree (for status/diff benches).
     pub fn ensure_clean_stat_cache(&self) {
         self.reset_worktree_to_head();
-        let mut index = self.repo.index_handle().load().expect("load index");
+        let mut index = self.repo.index().load().expect("load index");
         let work_tree = self.repo.work_tree().expect("work tree");
         let diff_index_mtime = grit_lib::diff::index_mtime_for_diff(&index, index.source_mtime);
         let _ = diff_index_to_worktree_with_options(
@@ -177,7 +177,7 @@ impl HotPathsFixture {
             },
         )
         .expect("refresh index stat cache");
-        let path = self.repo.index_handle().path();
+        let path = self.repo.index().path();
         index.write(&path).expect("write refreshed index");
     }
 
@@ -193,7 +193,7 @@ impl HotPathsFixture {
 
     pub fn bench_diff_worktree_clean(&self) {
         let work_tree = self.repo.work_tree().expect("work tree");
-        let mut index = self.repo.index_handle().load().expect("load index");
+        let mut index = self.repo.index().load().expect("load index");
         let index_mtime = grit_lib::diff::index_mtime_for_diff(&index, index.source_mtime);
         let _ = diff_index_to_worktree_with_options(
             self.repo.odb(),
@@ -244,7 +244,7 @@ impl HotPathsFixture {
     fn tree_with_path_count_changed(&self, path_count: usize) -> ObjectId {
         let n = path_count.min(self.file_paths.len()).max(1);
         let work_tree = self.repo.work_tree().expect("work tree");
-        let mut index = self.repo.index_handle().load().expect("load index");
+        let mut index = self.repo.index().load().expect("load index");
         for path in self.file_paths.iter().take(n) {
             let abs = work_tree.join(path);
             std::fs::write(&abs, format!("pick-{path}\n")).expect("write");
@@ -265,10 +265,7 @@ impl HotPathsFixture {
 
 fn build_index_mutate_plan(repo: &Repository) -> IndexMutatePlan {
     const REPLACEMENT: &[u8] = b"bench-index-replacement\n";
-    let baseline = repo
-        .index_handle()
-        .load()
-        .expect("load index for mutate plan");
+    let baseline = repo.index().load().expect("load index for mutate plan");
     let n = ((baseline.entries().len() as f64) * 0.10).round() as usize;
     let n = n.max(1);
     let replace_oid = repo
@@ -338,7 +335,7 @@ fn walk_txt(base: &Path, dir: &Path, out: &mut Vec<String>) {
 
 fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
     let work_tree = repo.work_tree().expect("work tree");
-    let mut index = repo.index_handle().load()?;
+    let mut index = repo.index().load()?;
     for rel in list_txt_paths(work_tree) {
         let abs = work_tree.join(&rel);
         let data = std::fs::read(&abs)?;
@@ -348,7 +345,7 @@ fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
     }
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())?;
-    repo.index_handle().write(&mut index)?;
+    repo.index().write(&mut index)?;
     let parent = refs::resolve_ref(repo.git_dir(), "HEAD").ok();
     let commit_data = CommitData {
         tree,
@@ -405,7 +402,7 @@ fn prepare_wide_switch_tip(
 fn wide_tree_from_fraction(repo: &Repository, file_paths: &[String], fraction: f64) -> ObjectId {
     let n = ((file_paths.len() as f64) * fraction).round() as usize;
     let n = n.max(1);
-    let mut index = repo.index_handle().load().expect("load index");
+    let mut index = repo.index().load().expect("load index");
     for path in file_paths.iter().take(n) {
         let data = format!("changed-{path}\n");
         let oid = repo
@@ -528,7 +525,7 @@ pub fn bench_pick_path(fx: &HotPathsFixture, path_count: usize) {
     )
     .expect("merge");
     let new_tree = merged.result_tree;
-    let index_handle = fx.repo.index_handle();
+    let index_handle = fx.repo.index();
     let mut index = index_handle.load().expect("index");
     grit_lib::diff::merge_trees::apply_tree_merge_output_to_index(&mut index, &merged);
     index_handle.write(&mut index).expect("write index");

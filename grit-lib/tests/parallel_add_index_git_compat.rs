@@ -73,7 +73,7 @@ fn stage_all(repo: &Repository) -> Vec<u8> {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
-    fs::read(repo.index_handle().path()).expect("read index")
+    fs::read(repo.index().path()).expect("read index")
 }
 
 fn git_fsck_ok(repo: &Path) -> bool {

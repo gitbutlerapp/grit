@@ -25,7 +25,7 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
     for i in 0..count {
         std::fs::write(work_tree.join(format!("f{i}.txt")), format!("body {i}\n")).expect("write");
     }
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     for i in 0..count {
         let rel = format!("f{i}.txt");
         let abs = work_tree.join(&rel);
@@ -37,7 +37,7 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let commit = CommitData {
         tree,
         parents: vec![],

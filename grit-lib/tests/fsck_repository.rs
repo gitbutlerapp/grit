@@ -1590,7 +1590,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
                     }),
                 })
                 .expect("txn");
-            repo.refs()
+            repo.ref_store()
                 .prepare(txn)
                 .expect("prepare")
                 .commit()
@@ -1613,7 +1613,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
                 }),
             })
             .expect("side txn");
-        repo.refs()
+        repo.ref_store()
             .prepare(side_txn)
             .expect("prepare side")
             .commit()
@@ -2093,7 +2093,7 @@ fn connectivity_only_dangling_excludes_reachable_blobs_in_bare_repo() {
     let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
     let identity = "T <t@example.com>";
     for (name, oid) in [("refs/heads/main", commit), ("refs/tags/v1.0", tag)] {
-        repo.refs()
+        repo.ref_store()
             .prepare(
                 RefTransaction::new()
                     .update(RefUpdate {
@@ -2254,7 +2254,7 @@ fn connectivity_only_does_not_inflate_reachable_blob_bodies() {
     .expect("open");
 
     let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
-    repo.refs()
+    repo.ref_store()
         .prepare(
             RefTransaction::new()
                 .update(RefUpdate {

@@ -277,7 +277,7 @@ fn non_utf8_untracked_directory_component_with_untr() {
     )
     .expect("stage must not fail on collapsed non-UTF-8 directory path");
 
-    let staged = repo.index_handle().load().expect("index after stage");
+    let staged = repo.index().load().expect("index after stage");
     assert!(
         staged.get(UNTRACKED_NON_UTF8_DIR_FILE, 0).is_some(),
         "index must record the file under raw bytes, not only a directory placeholder"
@@ -388,7 +388,7 @@ fn non_utf8_gitlink_added_by_checkout_between_trees() {
         "non-UTF-8 gitlink path must exist as directory: {:?}",
         gitlink_dir
     );
-    let loaded = repo.index_handle().load().expect("index");
+    let loaded = repo.index().load().expect("index");
     assert!(
         loaded.get(BAD_GITLINK, 0).is_some(),
         "index must record gitlink at raw byte path"
@@ -456,7 +456,7 @@ fn non_utf8_file_deleted_by_checkout_between_trees() {
         "deleted non-UTF-8 path must be removed from worktree"
     );
     assert!(
-        repo.index_handle()
+        repo.index()
             .load()
             .expect("index")
             .get(BAD_NAME, 0)
@@ -503,7 +503,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         "deleted ok.txt must appear: {unstaged_paths:?}"
     );
 
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let diff = diff_index_to_worktree(
         repo.odb(),
         &mut index,
@@ -597,7 +597,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
         porcelain.lines().count() >= 2,
         "both paths should be staged: {porcelain}"
     );
-    let staged = r1b_repo.index_handle().load().expect("index");
+    let staged = r1b_repo.index().load().expect("index");
     assert!(
         staged.get(BAD_NAME, 0).is_some(),
         "non-UTF-8 filename must stage under its raw bytes, not the hex-encoded spelling"
@@ -625,7 +625,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     .expect("stage file whose name looks like hex encoding");
     assert!(
         r1b_repo
-            .index_handle()
+            .index()
             .load()
             .expect("index")
             .get(RESERVED_LITERAL.as_bytes(), 0)

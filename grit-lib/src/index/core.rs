@@ -477,7 +477,7 @@ impl IndexEntry {
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let index = repo.index_handle().load()?;
+/// let index = repo.index().load()?;
 /// assert!(index.entries().is_empty());
 /// # Ok(())
 /// # }
@@ -4042,8 +4042,8 @@ fn flatten_tree_blobs(
 /// Exclusive `.git/index.lock` held for a mutating porcelain operation.
 ///
 /// Acquire with [`Self::acquire`] before changing the working tree; persist the index with
-/// [`IndexHandle::commit_update`](crate::index::IndexHandle::commit_update) or
-/// [`IndexHandle::write`](crate::index::IndexHandle::write), then release on drop when
+/// [`IndexFile::commit_update`](crate::index::IndexFile::commit_update) or
+/// [`IndexFile::write`](crate::index::IndexFile::write), then release on drop when
 /// uncommitted.
 pub struct IndexLock {
     pub(crate) index_path: PathBuf,

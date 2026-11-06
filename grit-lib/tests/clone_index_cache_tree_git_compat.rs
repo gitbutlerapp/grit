@@ -53,7 +53,7 @@ fn grit_clone_index_has_cache_tree_matching_head() {
         &RepositoryOptions::empty().with_work_tree(grit_dest.path()),
     )
     .expect("open grit clone");
-    let index = Index::load(&repo.index_handle().path()).expect("load index");
+    let index = Index::load(&repo.index().path()).expect("load index");
     let head_tree = head_tree_oid(grit_dest.path());
 
     assert!(
@@ -85,12 +85,12 @@ fn populated_checkout_writes_cache_tree() {
     .expect("open repo");
 
     let mut index = Index::new();
-    repo.index_handle().write(&mut index).expect("clear index");
+    repo.index().write(&mut index).expect("clear index");
 
     grit_lib::porcelain::checkout::checkout_between_trees(&repo, None, &tree)
         .expect("populated checkout");
 
-    let index = Index::load(&repo.index_handle().path()).expect("load index");
+    let index = Index::load(&repo.index().path()).expect("load index");
     assert!(
         index.cache_tree.is_some(),
         "populated checkout must write cache-tree"

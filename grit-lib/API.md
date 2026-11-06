@@ -211,20 +211,20 @@ Listed accessors match [`Repository` methods](https://docs.rs/grit-lib/latest/gr
 
 | Accessor | Handle type | Lines | External `.accessor()` files | Ratchet | Decision | Owner | Why |
 | --- | --- | ---: | ---: | --- | --- | --- | --- |
-| `bundles` | `RepositoryBundles` | 28 | 8 | — | merge into `objects`/`references`-style naming | One way to do each thing | Domain handle for bundles; `Repository*` prefix inconsistent with `objects` / `references`. |
+| `bundles` | `Bundles` | 28 | 8 | — | **done** | One way to do each thing | Handle type renamed to match domain naming (`Bundles`). |
 | `config_handle` | `ConfigHandle` | 43 | 6 | — | merge into `config()` accessor naming | One way to do each thing | Pairs with `Repository::config()` snapshot; `_handle` suffix inconsistent with `objects`/`references`. |
 | `diff` | `Diff` | 59 | 26 | — | keep | — | Focused diff handle; primary entry for tree/content diffs. |
 | `hooks` | `RepositoryHooks` | 18 | 6 | — | keep | — | Hook dispatch on the repository. |
-| `index_handle` | `IndexHandle` | 55 | 117 | — | merge into `index()` accessor naming | One way to do each thing | Heavy CLI use; rename to match `objects`/`references` without changing semantics. |
+| `index` | `IndexFile` | 55 | 117 | — | **done** | One way to do each thing | Accessor is `index()`; handle is `IndexFile` (distinct from `index::Index`). |
 | `notes` | `RepositoryNotes` | 26 | 10 | — | keep | — | Notes mutations and reads. |
 | `objects` | `Objects` | 55 | 23 | — | keep | Pluggable object store on Repository | Object read/write and ODB access. |
 | `references` | `References` | 49 | 29 | — | keep | — | Ref read/write listing. |
 | `reflogs` | `RepositoryReflogs` | 22 | 9 | — | keep | — | Reflog access. |
-| `remotes` | `RepositoryRemotes` | 34 | 19 | — | keep | Visibility sweep: remote | Remote configuration and transport entry. |
-| `rev_walk` | `RevWalk` | 84 | 29 | — | merge into `revwalk()` naming | One way to do each thing | Snake_case accessor vs domain module `revwalk`. |
+| `remotes` | `Remotes` | 34 | 19 | — | keep | Visibility sweep: remote | Remote configuration and transport entry. |
+| `revwalk` | `RevWalk` | 84 | 29 | — | **done** | One way to do each thing | Accessor is `revwalk()` to match the `revwalk` module name. |
 | `stash` | `RepositoryStash` | 34 | 24 | — | keep | — | Stash operations. |
 | `workspace_snapshot` | `RepositoryWorkspaceSnapshot` | 21 | 0 | — | keep | — | GitButler/workspace snapshot porcelain; CLI uses free functions today. |
-| `worktrees` | `RepositoryWorktrees` | 24 | 9 | — | keep | Visibility sweep: refs, config, worktree, index and small root modules | Linked worktree administration. |
+| `worktrees` | `Worktrees` | 24 | 9 | — | keep | Visibility sweep: refs, config, worktree, index and small root modules | Linked worktree administration. |
 
 ## Gates
 

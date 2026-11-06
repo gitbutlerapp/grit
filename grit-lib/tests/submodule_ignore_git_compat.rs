@@ -131,7 +131,7 @@ fn dirty_submodule_only_reported_without_ignore() {
         "grit status should match git with diff.ignoreSubmodules=all"
     );
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let diff = diff_tree_to_worktree(repo.odb(), model.head_tree.as_ref(), &main, &index)
         .expect("tree diff");
     assert!(
@@ -270,7 +270,7 @@ fn ignore_untracked_only_inside_submodule() {
     );
 
     let repo = grit_repo(&main);
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let (diff, _) = diff_index_to_worktree_with_options(
         repo.odb(),
         &mut index,
@@ -362,7 +362,7 @@ fn gitmodules_duplicate_ignore_last_value_wins() {
         "grit should list dirty gitlink when last .gitmodules ignore is none"
     );
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let diff = diff_tree_to_worktree(repo.odb(), model.head_tree.as_ref(), &main, &index)
         .expect("tree diff");
     assert!(

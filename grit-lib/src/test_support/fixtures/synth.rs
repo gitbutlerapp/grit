@@ -357,7 +357,12 @@ fn generate_into_repo(repo: &Repository, spec: TierSpec) -> Result<ObjectId> {
         .last()
         .ok_or_else(|| Error::CorruptObject("no commits generated".into()))?;
     write_refs(repo, &commits, spec, &mut rng)?;
-    crate::refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "refs/heads/main", &head)?;
+    crate::refs::update_direct_ref_on_store(
+        repo.ref_store(),
+        repo.git_dir(),
+        "refs/heads/main",
+        &head,
+    )?;
     Ok(head)
 }
 

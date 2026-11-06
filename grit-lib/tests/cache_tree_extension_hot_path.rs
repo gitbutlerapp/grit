@@ -31,7 +31,7 @@ fn git_committed_index_cache_tree_extension_valid() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open repo");
-    let index = Index::load(&grit_repo.index_handle().path()).expect("load git index");
+    let index = Index::load(&grit_repo.index().path()).expect("load git index");
     assert!(
         index.cache_tree.is_some(),
         "git commit must write a TREE extension"

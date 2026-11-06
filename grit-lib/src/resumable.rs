@@ -1272,7 +1272,7 @@ mod tests {
                     match cut {
                         Some(keep) => {
                             stored.extend_from_slice(&request.body[..keep]);
-                            return Err(RemoteError::Transport {
+                            return Err(crate::remote::RemoteError::Transport {
                                 url: None,
                                 detail: "reset".to_owned(),
                             });

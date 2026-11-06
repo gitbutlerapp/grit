@@ -71,8 +71,8 @@ fn main() -> grit_lib::error::Result<()> {
         };
         index.add_or_replace(entry);
     }
-    repo.index_handle().write(&mut index)?;
-    let index = repo.index_handle().load()?;
+    repo.index().write(&mut index)?;
+    let index = repo.index().load()?;
     let tree_oid = write_tree_from_index(repo.odb(), &index, "")?;
 
     let commit = CommitData {

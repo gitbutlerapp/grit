@@ -107,12 +107,12 @@ fn index_handle_load_write_matches_git_ls_files() {
     fs::write(wt.join("tracked.txt"), "index handle\n").expect("write file");
     git(wt, &["add", "tracked.txt"]);
 
-    let mut idx = repo.index_handle().load().expect("load index");
+    let mut idx = repo.index().load().expect("load index");
     assert!(idx
         .entries()
         .iter()
         .any(|e| e.path.as_slice() == b"tracked.txt"));
-    repo.index_handle().write(&mut idx).expect("write index");
+    repo.index().write(&mut idx).expect("write index");
 
     let git_stages = git(wt, &["ls-files", "-s"]);
     assert!(git_stages.contains("tracked.txt"));
@@ -144,7 +144,7 @@ fn rev_walk_resolve_and_list_match_git() {
     let repo = open_grit_repo(history.worktree());
     let wt = history.worktree();
 
-    let head = repo.rev_walk().resolve("HEAD").expect("resolve HEAD");
+    let head = repo.revwalk().resolve("HEAD").expect("resolve HEAD");
     let git_head = git(wt, &["rev-parse", "HEAD"]).trim().to_owned();
     assert_eq!(head.to_hex(), git_head);
 
@@ -152,7 +152,7 @@ fn rev_walk_resolve_and_list_match_git() {
         reverse: false,
         ..RevListOptions::default()
     };
-    let result = repo.rev_walk().walk("HEAD", &opts).expect("rev-list");
+    let result = repo.revwalk().walk("HEAD", &opts).expect("rev-list");
     let grit_hex: Vec<String> = result.commits.iter().map(|c| c.to_hex()).collect();
 
     let git_list = git(wt, &["rev-list", "HEAD"]);
@@ -171,8 +171,8 @@ fn diff_tree_to_tree_matches_git_diff_raw() {
     let repo = open_grit_repo(history.worktree());
     let wt = history.worktree();
 
-    let head = repo.rev_walk().resolve("HEAD").expect("head");
-    let parent = repo.rev_walk().resolve("HEAD~1").expect("parent");
+    let head = repo.revwalk().resolve("HEAD").expect("head");
+    let parent = repo.revwalk().resolve("HEAD~1").expect("parent");
 
     let head_tree = grit_lib::diff::tree_oid_of_commit(repo.odb(), &head).expect("head tree");
     let parent_tree = grit_lib::diff::tree_oid_of_commit(repo.odb(), &parent).expect("parent tree");
@@ -205,9 +205,9 @@ fn diff_index_to_tree_matches_git_diff_cached_raw() {
     fs::write(wt.join("staged.txt"), "cached\n").expect("write");
     git(wt, &["add", "staged.txt"]);
 
-    let idx = repo.index_handle().load().expect("load");
+    let idx = repo.index().load().expect("load");
     let head_tree = repo
-        .rev_walk()
+        .revwalk()
         .resolve("HEAD")
         .ok()
         .and_then(|oid| grit_lib::diff::tree_oid_of_commit(repo.odb(), &oid).ok());
@@ -241,7 +241,7 @@ fn diff_worktree_to_index_matches_git_diff_raw() {
     git(wt, &["add", "dirty.txt"]);
     fs::write(wt.join("dirty.txt"), "dirty\n").expect("modify");
 
-    let mut idx = repo.index_handle().load().expect("load");
+    let mut idx = repo.index().load().expect("load");
     let entries = repo
         .diff()
         .worktree_to_index(&mut idx, true, false)
@@ -284,7 +284,7 @@ fn references_update_uses_injected_ref_store() {
     repo.references().update(&name, &oid).expect("update");
     assert_eq!(repo.references().resolve(&name).expect("resolve"), oid);
     assert!(
-        repo.refs().format() == RefStorageFormat::Memory,
+        repo.ref_store().format() == RefStorageFormat::Memory,
         "update must not fall back to on-disk files store"
     );
     assert!(

@@ -59,7 +59,7 @@ impl Fixture {
 
     fn raw(&self, refname: &str) -> Option<RawRef> {
         self.repo
-            .refs()
+            .ref_store()
             .read_raw(RefNameRef::from_trusted(refname))
             .expect("read ref")
     }
@@ -170,7 +170,7 @@ fn transaction_refuses_missing_objects_on_every_kind_of_ref() {
             "refs/remotes/o/bogus",
         ] {
             assert_eq!(
-                commit_updates(fx.repo.refs(), vec![put(refname, bogus())]),
+                commit_updates(fx.repo.ref_store(), vec![put(refname, bogus())]),
                 Err(missing(refname, bogus())),
                 "{format:?} {refname}"
             );
@@ -180,7 +180,7 @@ fn transaction_refuses_missing_objects_on_every_kind_of_ref() {
         let mut detach = put("HEAD", bogus());
         detach.flags.no_deref = true;
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![detach]),
+            commit_updates(fx.repo.ref_store(), vec![detach]),
             Err(missing("HEAD", bogus())),
             "{format:?}"
         );
@@ -197,7 +197,7 @@ fn transaction_refuses_missing_objects_on_every_kind_of_ref() {
 fn branches_and_head_must_point_at_commits() {
     each_format(|format, fx| {
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![put("refs/heads/totree", fx.tree)]),
+            commit_updates(fx.repo.ref_store(), vec![put("refs/heads/totree", fx.tree)]),
             Err(not_a_commit("refs/heads/totree", fx.tree, ObjectKind::Tree)),
             "{format:?}"
         );
@@ -206,14 +206,14 @@ fn branches_and_head_must_point_at_commits() {
         let mut detach = put("HEAD", fx.tree);
         detach.flags.no_deref = true;
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![detach]),
+            commit_updates(fx.repo.ref_store(), vec![detach]),
             Err(not_a_commit("HEAD", fx.tree, ObjectKind::Tree)),
             "{format:?}"
         );
 
         // Through the symbolic HEAD the write would land on refs/heads/main.
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![put("HEAD", fx.tree)]),
+            commit_updates(fx.repo.ref_store(), vec![put("HEAD", fx.tree)]),
             Err(not_a_commit("HEAD", fx.tree, ObjectKind::Tree)),
             "{format:?}"
         );
@@ -229,7 +229,7 @@ fn branches_and_head_must_point_at_commits() {
 fn tags_and_remote_tracking_refs_may_point_at_any_object() {
     each_format(|format, fx| {
         commit_updates(
-            fx.repo.refs(),
+            fx.repo.ref_store(),
             vec![
                 put("refs/tags/tree", fx.tree),
                 put("refs/remotes/origin/tree", fx.tree),
@@ -250,7 +250,7 @@ fn tags_and_remote_tracking_refs_may_point_at_any_object() {
 #[test]
 fn deletes_and_well_formed_symbolic_updates_commit_without_object_lookup() {
     each_format(|format, fx| {
-        commit_updates(fx.repo.refs(), vec![put("refs/heads/gone", fx.commit)]).expect("seed");
+        commit_updates(fx.repo.ref_store(), vec![put("refs/heads/gone", fx.commit)]).expect("seed");
         let delete = RefUpdate {
             name: name("refs/heads/gone"),
             new_value: None,
@@ -268,7 +268,7 @@ fn deletes_and_well_formed_symbolic_updates_commit_without_object_lookup() {
                 ..RefUpdateFlags::default()
             },
         };
-        commit_updates(fx.repo.refs(), vec![delete, symbolic])
+        commit_updates(fx.repo.ref_store(), vec![delete, symbolic])
             .unwrap_or_else(|err| panic!("{format:?}: {err}"));
         assert_eq!(fx.raw("refs/heads/gone"), None, "{format:?}");
         assert_eq!(
@@ -292,7 +292,7 @@ fn log_only_updates_with_missing_reflog_objects_are_refused() {
             new_oid: Some(bogus()),
         });
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![log_only]),
+            commit_updates(fx.repo.ref_store(), vec![log_only]),
             Err(missing("refs/heads/main", bogus())),
             "{format:?}"
         );
@@ -326,7 +326,8 @@ fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
                 ..RefUpdateFlags::default()
             },
         };
-        let err = commit_ref_update_on_store(fx.repo.refs(), log_only).expect_err("{format:?}");
+        let err =
+            commit_ref_update_on_store(fx.repo.ref_store(), log_only).expect_err("{format:?}");
         assert!(
             matches!(&err, Error::RefStore(e) if *e == missing("refs/heads/main", bogus())),
             "{format:?}: {err:?}"
@@ -371,7 +372,7 @@ fn issue_2258_invalid_symref_targets_are_refused_and_store_is_unchanged() {
             ("refs/heads/loop", "refs/heads/loop"),
             ("HEAD", "refs/heads/a..b"),
         ] {
-            let err = commit_ref_update_on_store(fx.repo.refs(), symref_update(name, target))
+            let err = commit_ref_update_on_store(fx.repo.ref_store(), symref_update(name, target))
                 .expect_err("{format:?} {name} -> {target}");
             assert!(
                 matches!(&err, Error::RefStore(e) if *e == invalid_symref(name, target)),
@@ -390,7 +391,10 @@ fn issue_2258_invalid_symref_targets_are_refused_and_store_is_unchanged() {
 fn null_id_is_still_reported_as_null_oid() {
     each_format(|format, fx| {
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![put("refs/heads/z", ObjectId::zero())]),
+            commit_updates(
+                fx.repo.ref_store(),
+                vec![put("refs/heads/z", ObjectId::zero())]
+            ),
             Err(RefStoreError::NullOid {
                 name: "refs/heads/z".to_owned()
             }),
@@ -403,7 +407,7 @@ fn null_id_is_still_reported_as_null_oid() {
 fn one_bad_update_writes_nothing_from_the_batch() {
     each_format(|format, fx| {
         let err = commit_updates(
-            fx.repo.refs(),
+            fx.repo.ref_store(),
             vec![
                 put("refs/heads/a", fx.commit),
                 put("refs/tags/t", fx.tree),
@@ -431,7 +435,7 @@ fn skip_oid_verification_writes_a_dangling_ref_on_purpose() {
         dangling.flags.skip_oid_verification = true;
         let mut to_tree = put("refs/heads/to-tree", fx.tree);
         to_tree.flags.skip_oid_verification = true;
-        commit_updates(fx.repo.refs(), vec![dangling, to_tree])
+        commit_updates(fx.repo.ref_store(), vec![dangling, to_tree])
             .unwrap_or_else(|err| panic!("{format:?}: {err}"));
         assert_eq!(
             fx.raw("refs/heads/dangling"),
@@ -457,7 +461,7 @@ fn compare_and_swap_after_the_commit_was_pruned_is_refused() {
         let mut cas = put("refs/heads/main", next);
         cas.expected = Expected::Oid(fx.commit);
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![cas]),
+            commit_updates(fx.repo.ref_store(), vec![cas]),
             Err(missing("refs/heads/main", next)),
             "{format:?}"
         );
@@ -543,7 +547,7 @@ fn empty_tree_must_be_stored_to_be_a_ref_target() {
         let empty = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
         assert!(!loose_path(&fx.repo, &empty).exists(), "{format:?}");
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![put("refs/tags/empty", empty)]),
+            commit_updates(fx.repo.ref_store(), vec![put("refs/tags/empty", empty)]),
             Err(missing("refs/tags/empty", empty)),
             "{format:?}"
         );
@@ -553,10 +557,10 @@ fn empty_tree_must_be_stored_to_be_a_ref_target() {
             .write_literally(ObjectKind::Tree, b"")
             .expect("store the empty tree");
         assert!(loose_path(&fx.repo, &empty).is_file(), "{format:?}");
-        commit_updates(fx.repo.refs(), vec![put("refs/tags/empty", empty)])
+        commit_updates(fx.repo.ref_store(), vec![put("refs/tags/empty", empty)])
             .unwrap_or_else(|err| panic!("{format:?}: {err}"));
         assert_eq!(
-            commit_updates(fx.repo.refs(), vec![put("refs/heads/empty", empty)]),
+            commit_updates(fx.repo.ref_store(), vec![put("refs/heads/empty", empty)]),
             Err(not_a_commit("refs/heads/empty", empty, ObjectKind::Tree)),
             "{format:?}"
         );
@@ -575,7 +579,7 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
     )
     .expect("open with an injected store");
     assert_eq!(
-        commit_updates(repo.refs(), vec![put("refs/heads/bogus", bogus())]),
+        commit_updates(repo.ref_store(), vec![put("refs/heads/bogus", bogus())]),
         Err(missing("refs/heads/bogus", bogus()))
     );
     let err = repo
@@ -628,7 +632,7 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
     each_format(|format, fx| {
         let config = ConfigSet::new();
         let err = update_branch_for_commit_on_store(
-            fx.repo.refs(),
+            fx.repo.ref_store(),
             &branch_commit(fx.commit, bogus()),
             &config,
         )
@@ -638,7 +642,7 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
             "{format:?}: {err:?}"
         );
         let err = update_branch_for_commit_on_store(
-            fx.repo.refs(),
+            fx.repo.ref_store(),
             &branch_commit(fx.commit, fx.tree),
             &config,
         )
@@ -672,8 +676,12 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
         );
 
         let (next, _) = write_commit(&fx.repo, "next", b"next\n");
-        update_branch_for_commit_on_store(fx.repo.refs(), &branch_commit(fx.commit, next), &config)
-            .unwrap_or_else(|err| panic!("{format:?}: {err}"));
+        update_branch_for_commit_on_store(
+            fx.repo.ref_store(),
+            &branch_commit(fx.commit, next),
+            &config,
+        )
+        .unwrap_or_else(|err| panic!("{format:?}: {err}"));
         assert_eq!(
             fx.raw("refs/heads/main"),
             Some(RawRef::Direct(next)),
@@ -686,7 +694,7 @@ fn branch_commit_writer_refuses_missing_and_non_commit_tips() {
 fn allowing_failures_prepare_missing_object_commits_sibling() {
     each_format(|format, fx| {
         let prepared = prepare_allowing_failures(
-            fx.repo.refs(),
+            fx.repo.ref_store(),
             vec![
                 put("refs/heads/good", fx.commit),
                 put("refs/heads/bad", bogus()),
@@ -712,7 +720,7 @@ fn allowing_failures_prepare_missing_object_commits_sibling() {
 fn allowing_failures_prepare_not_a_commit_commits_sibling() {
     each_format(|format, fx| {
         let prepared = prepare_allowing_failures(
-            fx.repo.refs(),
+            fx.repo.ref_store(),
             vec![
                 put("refs/heads/good", fx.commit),
                 put("refs/heads/tree-branch", fx.tree),
@@ -740,7 +748,11 @@ fn allowing_failures_prepare_not_a_commit_commits_sibling() {
 #[test]
 fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
     let fx = Fixture::new(RefStorageFormat::Files);
-    commit_updates(fx.repo.refs(), vec![put("refs/heads/topic", fx.commit)]).expect("seed topic");
+    commit_updates(
+        fx.repo.ref_store(),
+        vec![put("refs/heads/topic", fx.commit)],
+    )
+    .expect("seed topic");
     assert_eq!(fx.raw("refs/heads/topic"), Some(RawRef::Direct(fx.commit)));
     let txn = RefTransaction::new()
         .with_case_only_rename(RefCaseOnlyRename {
@@ -750,7 +762,7 @@ fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
         .allowing_failures();
     let prepared = fx
         .repo
-        .refs()
+        .ref_store()
         .prepare(txn)
         .expect("prepare rename-only allowing_failures");
     assert!(prepared.rejected_updates().is_empty());

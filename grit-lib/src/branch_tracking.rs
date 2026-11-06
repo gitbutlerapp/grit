@@ -193,7 +193,7 @@ pub fn apply_push_remote_tracking_updates(
 
 /// [`apply_push_remote_tracking_updates`] for an open repository: the remote's refspecs come
 /// from `repo`'s config, and the tracking refs are read and written through
-/// [`Repository::refs`], so an injected ref store receives them.
+/// [`Repository::ref_store`], so an injected ref store receives them.
 ///
 /// # Errors
 ///
@@ -209,7 +209,7 @@ pub(crate) fn apply_push_remote_tracking_updates_in(
     let Ok(config) = repo.config().snapshot() else {
         return Ok(());
     };
-    commit_push_tracking_updates(repo.refs(), &config, remote_name, results)
+    commit_push_tracking_updates(repo.ref_store(), &config, remote_name, results)
 }
 
 /// Path-like remote names (a URL or path given as the push destination) have no tracking refs.
@@ -361,7 +361,7 @@ pub struct TargetComparison {
 /// Resolve `refname` through the repository's ref store; refs that are missing or cannot be
 /// resolved (dangling symrefs, unreadable files) count as absent.
 fn resolve_optional(repo: &Repository, refname: &str) -> Option<ObjectId> {
-    repo.refs().resolve(RefNameRef::from_trusted(refname)).ok()
+    repo.ref_store().resolve(RefNameRef::from_trusted(refname)).ok()
 }
 
 fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {

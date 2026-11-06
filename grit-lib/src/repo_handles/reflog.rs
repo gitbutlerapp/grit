@@ -84,7 +84,7 @@ pub struct ReflogPage {
 /// Reflog read/write helpers scoped to an open repository.
 ///
 /// Every operation reads and rewrites reflogs through the repository's ref store
-/// ([`Repository::refs`]), so a repository opened with an injected
+/// ([`Repository::ref_store`]), so a repository opened with an injected
 /// [`RefStore`](crate::refs::store::RefStore) lists, deletes and expires the reflog that
 /// store holds, exactly like the files and reftable backends.
 #[derive(Debug, Copy, Clone)]
@@ -108,15 +108,21 @@ impl<'repo> RepositoryReflogs<'repo> {
     /// # Errors
     ///
     /// Propagates ref-store and I/O errors while scanning logs.
-    pub fn refs(&self) -> Result<Vec<RefName>> {
+    pub fn list_reflog_refs(&self) -> Result<Vec<RefName>> {
         Ok(reflog_refs_on_store(self.store())?
             .iter()
             .map(RefName::from_trusted)
             .collect())
     }
 
+    /// Legacy alias for [`Self::list_reflog_refs`].
+    #[deprecated(note = "use `list_reflog_refs`")]
+    pub fn refs(&self) -> Result<Vec<RefName>> {
+        self.list_reflog_refs()
+    }
+
     fn store(&self) -> &'repo dyn RefStore {
-        self.repo.refs()
+        self.repo.ref_store()
     }
 
     /// Reflog entries for `ref_name`, newest first with indices starting at `0`.

@@ -1,5 +1,5 @@
 //! Rev-walk queries, `:/text` searches and linked worktree add/list/remove read and write
-//! refs through [`Repository::refs`] (issue #1889): an injected [`MemoryRefStore`] gives the
+//! refs through [`Repository::ref_store`] (issue #1889): an injected [`MemoryRefStore`] gives the
 //! same answers as a files repository with the same history, and the files variant agrees
 //! with the system `git`.
 
@@ -118,7 +118,7 @@ fn count(repo: &Repository, refs: Vec<RefSelection>) -> usize {
         refs,
         ..RevWalkListOptions::default()
     };
-    repo.rev_walk().count(&[], &options).expect("count")
+    repo.revwalk().count(&[], &options).expect("count")
 }
 
 fn sorted(mut v: Vec<String>) -> Vec<String> {
@@ -150,7 +150,7 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
     fs::write(wt.join("g"), "y\n").expect("write");
     let second = commit_all(repo, "second change");
 
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     let main = walk.resolve("main").expect("resolve main");
     let hello = walk.resolve(":/hello").expect("resolve :/hello");
     assert_eq!(hello, first);

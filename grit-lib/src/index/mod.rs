@@ -7,7 +7,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! let _ = _repo.index_handle().load()?;
+//! let _ = _repo.index().load()?;
 //!
 //! # Ok(())
 //! # }
@@ -19,7 +19,10 @@ mod mode_policy;
 
 pub use core::*;
 pub use error::{IndexChmodReason, IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
-pub use handle::IndexHandle;
+pub use handle::IndexFile;
+
+/// Legacy name for [`IndexFile`].
+pub type IndexHandle<'repo> = IndexFile<'repo>;
 pub use mode_policy::WorktreeModePolicy;
 
 pub mod sparse_checkout {

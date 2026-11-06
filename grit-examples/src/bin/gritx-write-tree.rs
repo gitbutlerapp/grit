@@ -22,7 +22,7 @@ fn main() {
 fn run() -> Result<()> {
     let _cli = Cli::parse();
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
-    let index = repo.index_handle().load()?;
+    let index = repo.index().load()?;
     let oid = write_tree_from_index(repo.odb(), &index, "")?;
     println!("{oid}");
     Ok(())

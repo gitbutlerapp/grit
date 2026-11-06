@@ -77,7 +77,7 @@ fn normalized_ignore_query_keeps_symlink_spelling_and_matches_git() {
             .expect("normalize missing descendant lexically"),
         "ignored-link/missing.txt"
     );
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let results = repo.ignore_check(&[path.clone()], &index).expect("check");
     let git = git_check_ignore_verbose_batch(&fx.home, root, &[&path]);
     assert_match_eq(&path, &git[&path], results[0].ignored, &results[0].matched);
@@ -106,7 +106,7 @@ fn normalize_ignore_query_accepts_macos_tmp_alias() {
 fn matches_git_check_ignore_verbose() {
     let fx = T0008Repo::setup();
     let repo = fx.open_grit();
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let corpus = t0008_corpus();
     let paths: Vec<String> = corpus.iter().map(|(p, _)| (*p).to_owned()).collect();
     let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
@@ -131,7 +131,7 @@ fn matches_git_check_ignore_verbose() {
 fn tracked_paths_never_ignored() {
     let fx = T0008Repo::setup();
     let repo = fx.open_grit();
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     for path in ["ignored-but-in-index", "a/ignored-but-in-index"] {
         let results = grit_ignore_check(&repo, &index, &[path.to_owned()]);
         assert_eq!(results.len(), 1);
@@ -180,7 +180,7 @@ fn trailing_slash_on_existing_file_matches_git() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
 
     for path in ["untracked.txt/", "tracked.txt/"] {
         let git_map = git_check_ignore_verbose_batch(&home, &root, &[path]);
@@ -219,7 +219,7 @@ fn root_anchored_star_suffix_matches_git_check_ignore() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
 
     for path in ["root.log", "sub/nested.log"] {
         let git_map = git_check_ignore_verbose_batch(&home, &root, &[path]);
@@ -255,7 +255,7 @@ fn trailing_slash_directory_hint_matches_git() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let path = "missing-dir/";
     let git_map = git_check_ignore_verbose_batch(&home, &root, &[path]);
     let git = git_map.get(path).expect("git result for missing-dir/");
@@ -274,7 +274,7 @@ fn trailing_slash_directory_hint_matches_git() {
 fn ignore_source_is_typed() {
     let fx = T0008Repo::setup();
     let repo = fx.open_grit();
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let results = grit_ignore_check(
         &repo,
         &index,
@@ -382,7 +382,7 @@ fn batch_over_many_nested_gitignores_matches_git_in_any_order() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
     let git_map = git_check_ignore_verbose_batch(&home, &root, &path_refs);
     let results = grit_ignore_check(&repo, &index, &interleaved);

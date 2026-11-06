@@ -317,7 +317,7 @@ fn git_ref_listing(root: &Path) -> Vec<String> {
 
 fn grit_reflog_refs(repo: &Repository) -> Vec<String> {
     let mut names = Vec::new();
-    repo.refs()
+    repo.ref_store()
         .for_each_reflog_ref(&mut |name| {
             names.push(name.to_owned());
             std::ops::ControlFlow::Continue(())

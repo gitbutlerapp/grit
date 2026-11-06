@@ -141,7 +141,7 @@ fn initial_branch_keeps_an_existing_head() {
     )
     .expect("open");
     assert_eq!(
-        repo.refs()
+        repo.ref_store()
             .read_raw(RefNameRef::from_trusted("HEAD"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/trunk".to_owned()))

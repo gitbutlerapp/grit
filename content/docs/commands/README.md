@@ -9,9 +9,9 @@ Each core library area from the [project direction](../../ROADMAP.md) has at lea
 | Library area | `grit` command(s) | Library handle |
 | --- | --- | --- |
 | Object database | [`cat`](cat.md), [`resolve`](resolve.md), [`repack`](repack.md), [`gc`](gc.md) | [`Repository`](rustdoc:grit_lib::repo::Repository), [`Objects`](rustdoc:grit_lib::objects::Objects) |
-| Network transport | [`fetch`](fetch.md), [`push`](push.md), [`remote refs`](remote.md), [`clone`](clone.md) | [`RepositoryRemotes`](rustdoc:grit_lib::repo_handles::RepositoryRemotes) |
+| Network transport | [`fetch`](fetch.md), [`push`](push.md), [`remote refs`](remote.md), [`clone`](clone.md) | [`Remotes`](rustdoc:grit_lib::repo_handles::Remotes) |
 | Refs | [`branch`](branch.md), [`tag`](tag.md), [`switch`](switch.md) | [`References`](rustdoc:grit_lib::refs::References) |
-| Index | [`add`](add.md), [`restore`](restore.md), [`status`](status.md) | [`IndexHandle`](rustdoc:grit_lib::index::IndexHandle) |
+| Index | [`add`](add.md), [`restore`](restore.md), [`status`](status.md) | [`IndexFile`](rustdoc:grit_lib::index::IndexFile) |
 | Stash | [`stash`](stash.md) | [`RepositoryStash`](rustdoc:grit_lib::repo_handles::RepositoryStash) |
 | Reflog | [`reflog`](reflog.md) | [`RepositoryReflogs`](rustdoc:grit_lib::repo_handles::RepositoryReflogs) |
 | Diffing | [`diff`](diff.md) | [`Diff`](rustdoc:grit_lib::diff::Diff) |
@@ -23,9 +23,9 @@ Each core library area from the [project direction](../../ROADMAP.md) has at lea
 | Hooks | [`hooks`](hooks.md) | [`Repository::hooks`](rustdoc:grit_lib::repo::Repository) (via hook runner) |
 | Patch IDs | [`patch-id`](patch-id.md) | [`compute_patch_id`](rustdoc:grit_lib::diff::patch_ids::compute_patch_id) |
 | Notes | [`notes`](notes.md) | [`RepositoryNotes`](rustdoc:grit_lib::repo_handles::RepositoryNotes) |
-| Bundles | [`bundle`](bundle.md) | [`RepositoryBundles`](rustdoc:grit_lib::repo_handles::RepositoryBundles) |
+| Bundles | [`bundle`](bundle.md) | [`Bundles`](rustdoc:grit_lib::repo_handles::Bundles) |
 | Fsck | [`fsck`](fsck.md) | [`repository_fsck`](rustdoc:grit_lib::maintenance::repository_fsck) |
-| Worktrees | [`worktree`](worktree.md) | [`RepositoryWorktrees`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees) |
+| Worktrees | [`worktree`](worktree.md) | [`Worktrees`](rustdoc:grit_lib::repo_handles::Worktrees) |
 
 Use this section order:
 

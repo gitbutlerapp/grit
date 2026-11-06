@@ -179,7 +179,7 @@ impl Fixture {
         let mut opts = CloneOptions::new(format!("file://{}", server_dir.display()), dest);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(LIMIT));
         opts.checkout = false;
-        let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+        let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
         let git_dir = outcome.repo.git_dir().to_path_buf();
         drop(outcome);
         clear_pack_cache();

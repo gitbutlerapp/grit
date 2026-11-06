@@ -116,7 +116,7 @@ fn crlf_and_pathspec_helpers() {
 
     let _ = parse_gitattributes_content("*.bin binary\n");
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let odb = repo.odb();
     let _ = load_gitattributes_from_index(&index, &odb);
     fs::write(dir.path().join(".gitattributes"), "* text=auto\n").expect("ga");

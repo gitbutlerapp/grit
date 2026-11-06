@@ -99,7 +99,7 @@ fn add_and_commit_report_new_embedded_gitlink() {
         vec!["vendor-hello".to_owned()]
     );
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let entry = index.get(b"vendor-hello", 0).expect("gitlink indexed");
     assert_eq!(entry.mode, MODE_GITLINK);
 
@@ -151,7 +151,7 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
     .expect("stage");
     assert!(stage_outcome.embedded_gitlinks.is_empty());
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let entry = index.get(b"loop", 0).expect("symlink indexed");
     assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
 
@@ -202,7 +202,7 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
     .expect("stage");
     assert!(stage_outcome.embedded_gitlinks.is_empty());
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let entry = index.get(b"ext", 0).expect("symlink indexed");
     assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
 }

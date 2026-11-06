@@ -1,4 +1,4 @@
-//! Repository-scoped index load/write via [`IndexHandle`].
+//! Repository-scoped index load/write via [`IndexFile`].
 use std::path::Path;
 
 use crate::error::Result;
@@ -16,18 +16,18 @@ use crate::split_index::WriteSplitIndexRequest;
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let handle = repo.index_handle();
+/// let handle = repo.index();
 /// let index = handle.load()?;
 /// assert!(index.entries().is_empty());
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Debug, Copy, Clone)]
-pub struct IndexHandle<'repo> {
+pub struct IndexFile<'repo> {
     repo: &'repo Repository,
 }
 
-impl<'repo> IndexHandle<'repo> {
+impl<'repo> IndexFile<'repo> {
     /// Bind index operations to `repo`.
     #[inline]
     #[must_use]

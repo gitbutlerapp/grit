@@ -174,7 +174,7 @@ fn default_order_unlimited_matches_bounded_and_git() {
     equal_date_merge_fanout_fixture(wt);
     let git_oids = git_rev_list(wt, &["HEAD"]);
     let grit = open_grit_repo(wt);
-    let walk = grit.rev_walk();
+    let walk = grit.revwalk();
 
     let unlimited = walk
         .commits(&["HEAD"], &RevWalkListOptions::default())
@@ -926,7 +926,7 @@ fn cherry_mark_walk(repo: &grit_lib::repo::Repository, token: &str) -> RevListRe
         cherry_mark: true,
         ..RevWalkListOptions::default()
     };
-    repo.rev_walk()
+    repo.revwalk()
         .rev_list_result(&[token], &opts)
         .expect("cherry-mark walk")
 }
@@ -1040,7 +1040,7 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
     let wt = repo.worktree();
     rewritten_branch_fixture(wt);
     let grit = open_grit_repo(wt);
-    let walk = grit.rev_walk();
+    let walk = grit.revwalk();
     for opts in [
         RevWalkListOptions {
             cherry_mark: true,

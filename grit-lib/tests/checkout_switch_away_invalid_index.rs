@@ -31,7 +31,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
 
     let blob = write_blob(git_dir, b"hostile");
     let blob_oid: ObjectId = blob.parse().expect("oid");
-    let mut index = Index::load(&repo.index_handle().path()).expect("index");
+    let mut index = Index::load(&repo.index().path()).expect("index");
     index.add_or_replace(IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -49,7 +49,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
         path: b".git".to_vec(),
         base_index_pos: 0,
     });
-    let index_path = repo.index_handle().path();
+    let index_path = repo.index().path();
     index.write(&index_path).expect("write index");
 
     let mode = resolve_switch_target(&repo, "feature").expect("resolve feature");
@@ -66,7 +66,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
     .expect("switch despite hostile index path");
 
     assert!(wt.join("feature.txt").exists());
-    let index = Index::load(&repo.index_handle().path()).expect("index after switch");
+    let index = Index::load(&repo.index().path()).expect("index after switch");
     assert!(
         index.get(b"feature.txt", 0).is_some(),
         "feature tree should be checked out"

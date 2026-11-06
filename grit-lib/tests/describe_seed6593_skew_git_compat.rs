@@ -137,7 +137,7 @@ fn describe_seed6593_skewed_merge_matches_git_rev_list_without_commit_graph() {
         }
         if !has_ancestor_tag {
             assert!(
-                repo.rev_walk()
+                repo.revwalk()
                     .describe(&head_hex, &opts)
                     .expect("describe")
                     .is_none(),
@@ -146,7 +146,7 @@ fn describe_seed6593_skewed_merge_matches_git_rev_list_without_commit_graph() {
             continue;
         }
         let described = repo
-            .rev_walk()
+            .revwalk()
             .describe(&head_hex, &opts)
             .expect("describe")
             .unwrap_or_else(|| panic!("describe None for sample {sample} head {head_hex}"));

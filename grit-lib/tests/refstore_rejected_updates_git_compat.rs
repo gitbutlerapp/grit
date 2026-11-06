@@ -34,7 +34,7 @@ fn rejected_updates_keep_repository_clean_for_git() {
         let git_dir = repo.worktree().join(".git");
         let store = Repository::open(&git_dir, &RepositoryOptions::empty())
             .expect("open ref store")
-            .refs();
+            .ref_store();
 
         assert_eq!(
             put(

@@ -193,7 +193,7 @@ fn main() -> Result<()> {
     if repo.git_dir().join("CHERRY_PICK_HEAD").exists()
         || repo.git_dir().join("REVERT_HEAD").exists()
     {
-        if repo.index_handle().load()?.has_unmerged_entries() {
+        if repo.index().load()?.has_unmerged_entries() {
             println!("unmerged index — resolve and stage before continue");
             return Ok(());
         }

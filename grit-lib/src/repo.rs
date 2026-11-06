@@ -303,7 +303,7 @@ pub struct Repository {
     /// Repository-scoped caches (config, attributes, filters, precompose, …).
     caches: Arc<RepoCaches>,
     /// Pluggable ref backend selected for this repository, checked against [`Self::odb`].
-    ref_store: crate::refs::store::ObjectCheckedRefStore,
+    refs_backend: crate::refs::store::ObjectCheckedRefStore,
     /// Discovery and configuration environment used to open this repository.
     environment: Arc<Environment>,
     /// Repository-relative path of [`Environment::cwd`] under [`Self::work_tree`] (Git `GIT_PREFIX`).
@@ -508,7 +508,7 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
-        let ref_store = checked_ref_store_with_hooks(
+        let refs_backend = checked_ref_store_with_hooks(
             open_or_install_ref_store(&caches, &git_dir, &environment, injected_refs)?,
             odb.clone(),
             &git_dir,
@@ -531,7 +531,7 @@ impl Repository {
             discovery_via_gitfile: false,
             config_session: Mutex::new(None),
             caches,
-            ref_store,
+            refs_backend,
             environment,
             git_prefix,
             command_runner,
@@ -762,12 +762,12 @@ impl Repository {
             let view: Arc<dyn crate::refs::store::RefStore> =
                 Arc::new(crate::refs::store::LinkedWorktreeRefStore::new(
                     git_dir.clone(),
-                    Arc::clone(self.ref_store.inner()),
+                    Arc::clone(self.refs_backend.inner()),
                 ));
             caches.install_ref_store(&git_dir, Arc::clone(&view));
             view
         };
-        let ref_store = checked_ref_store_with_hooks(
+        let refs_backend = checked_ref_store_with_hooks(
             ref_store,
             self.odb.clone(),
             &git_dir,
@@ -789,7 +789,7 @@ impl Repository {
             discovery_via_gitfile: true,
             config_session: Mutex::new(None),
             caches,
-            ref_store,
+            refs_backend,
             environment,
             command_runner: Arc::clone(&self.command_runner),
             change_id_generator: Arc::clone(&self.change_id_generator),
@@ -1034,7 +1034,7 @@ impl Repository {
         validate_repository_format_parsed(&parsed)
     }
 
-    /// Reference storage backend for this repository.
+    /// The pluggable ref backend for this repository (trait object).
     ///
     /// Unlike a backend opened on its own, this store checks every transaction against the
     /// repository's objects in [`RefStore::prepare`](crate::refs::store::RefStore::prepare):
@@ -1043,18 +1043,25 @@ impl Repository {
     /// and a branch or `HEAD` must name a commit
     /// ([`RefStoreError::NotACommit`](crate::refs::store::RefStoreError::NotACommit)).
     #[must_use]
-    pub fn refs(&self) -> &dyn crate::refs::store::RefStore {
-        &self.ref_store
+    pub fn ref_store(&self) -> &dyn crate::refs::store::RefStore {
+        &self.refs_backend
     }
 
-    /// Whether [`Self::refs`] is an on-disk files or reftable backend, so `HEAD` and refs can
+    /// Legacy alias for [`Self::ref_store`].
+    #[deprecated(note = "use `ref_store` (or `references().store()` for the same trait object)")]
+    #[must_use]
+    pub fn refs(&self) -> &dyn crate::refs::store::RefStore {
+        self.ref_store()
+    }
+
+    /// Whether [`Self::ref_store`] is an on-disk files or reftable backend, so `HEAD` and refs can
     /// also be read from the git directory. False for injected stores such as
     /// [`crate::refs::store::MemoryRefStore`].
     #[must_use]
     pub(crate) fn refs_on_disk(&self) -> bool {
         use crate::refs::store::RefStorageFormat;
         matches!(
-            self.refs().format(),
+            self.ref_store().format(),
             RefStorageFormat::Files | RefStorageFormat::Reftable
         )
     }
@@ -1076,15 +1083,31 @@ impl Repository {
     /// Index load/write handle.
     #[inline]
     #[must_use]
-    pub fn index_handle(&self) -> crate::index::IndexHandle<'_> {
-        crate::index::IndexHandle::new(self)
+    pub fn index(&self) -> crate::index::IndexFile<'_> {
+        crate::index::IndexFile::new(self)
+    }
+
+    /// Legacy alias for [`Self::index`].
+    #[deprecated(note = "use `index`")]
+    #[inline]
+    #[must_use]
+    pub fn index_handle(&self) -> crate::index::IndexFile<'_> {
+        self.index()
     }
 
     /// Revision parse and rev-list handle.
     #[inline]
     #[must_use]
-    pub fn rev_walk(&self) -> crate::revwalk::RevWalk<'_> {
+    pub fn revwalk(&self) -> crate::revwalk::RevWalk<'_> {
         crate::revwalk::RevWalk::new(self)
+    }
+
+    /// Legacy alias for [`Self::revwalk`].
+    #[deprecated(note = "use `revwalk`")]
+    #[inline]
+    #[must_use]
+    pub fn rev_walk(&self) -> crate::revwalk::RevWalk<'_> {
+        self.revwalk()
     }
 
     /// Tree, index, and worktree diff handle.
@@ -1221,7 +1244,7 @@ impl Repository {
         specs: &[&str],
         mode: crate::patch_ids::PatchIdMode,
     ) -> crate::error::Result<Vec<(crate::objects::ObjectId, crate::objects::ObjectId)>> {
-        let walk = self.rev_walk();
+        let walk = self.revwalk();
         let walk_options = crate::revwalk::RevWalkListOptions::default();
         let mut out = Vec::new();
         for spec in specs {
@@ -1273,7 +1296,7 @@ impl Repository {
     ///
     /// Propagates [`crate::refs::store::RefStoreError`] as [`Error::RefStore`].
     pub(crate) fn resolve_ref_oid(&self, refname: &str) -> Result<crate::objects::ObjectId> {
-        self.refs()
+        self.ref_store()
             .resolve(crate::refs::store::RefNameRef::from_trusted(refname))
     }
 
@@ -1286,7 +1309,7 @@ impl Repository {
         let store = linked_worktree_view(&self.git_dir, store);
         self.caches
             .install_ref_store(&self.git_dir, Arc::clone(&store));
-        self.ref_store = checked_ref_store_with_hooks(
+        self.refs_backend = checked_ref_store_with_hooks(
             store,
             self.odb.clone(),
             self.git_dir(),
@@ -1704,7 +1727,7 @@ impl Repository {
             Self::open_internal_with_refs(options, git_dir, injected_refs)?
         };
         if let Some(branch) = options.initial_branch.as_deref() {
-            seed_unborn_head(repo.refs(), branch)?;
+            seed_unborn_head(repo.ref_store(), branch)?;
         }
         Ok(repo)
     }
@@ -1824,7 +1847,7 @@ impl Repository {
             .as_ref()
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
-        let ref_store = checked_ref_store_with_hooks(
+        let refs_backend = checked_ref_store_with_hooks(
             open_or_install_ref_store(&caches, &git_dir, &environment, injected_refs)?,
             odb.clone(),
             &git_dir,
@@ -1847,7 +1870,7 @@ impl Repository {
             discovery_via_gitfile: false,
             config_session: Mutex::new(None),
             caches,
-            ref_store,
+            refs_backend,
             environment,
             git_prefix,
             command_runner,

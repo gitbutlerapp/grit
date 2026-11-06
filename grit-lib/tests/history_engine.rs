@@ -434,7 +434,7 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
             },
         })
         .expect("txn");
-    grit.refs()
+    grit.ref_store()
         .prepare(corrupt)
         .and_then(|prepared| prepared.commit())
         .expect("ref");

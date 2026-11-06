@@ -277,7 +277,7 @@ pub fn run_list_refs(limit: Option<usize>) -> Result<ReflogRefsListOutcome> {
     let repo = context::discover()?;
     let mut refs: Vec<ReflogRefRow> = repo
         .reflogs()
-        .refs()
+        .list_reflog_refs()
         .context("reflog list failed")?
         .into_iter()
         .map(|name| ReflogRefRow {

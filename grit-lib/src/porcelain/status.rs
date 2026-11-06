@@ -2613,7 +2613,7 @@ pub fn status(
         true if repo.refs_on_disk() => {
             crate::reflog::reflog_entry_count(repo.git_dir(), "refs/stash").unwrap_or(0)
         }
-        true => crate::reflog::read_reflog_on_store(repo.refs(), "refs/stash")
+        true => crate::reflog::read_reflog_on_store(repo.ref_store(), "refs/stash")
             .map_or(0, |entries| entries.len()),
     };
 

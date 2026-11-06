@@ -59,7 +59,7 @@ fn repo_with_stale_index_stat(file_count: usize) -> (tempfile::TempDir, Reposito
 #[test]
 fn status_write_index_false_leaves_index_bytes_and_mtime() {
     let (_tmp, grit_repo) = repo_with_stale_index_stat(50);
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let digest_before = index_digest(&index_path);
     let mtime_before = fs::metadata(&index_path)
         .expect("index metadata")
@@ -114,7 +114,7 @@ fn status_honors_git_optional_locks_zero_in_environment() {
     let grit_repo =
         Repository::discover(Some(repo_root), &RepositoryOptions::with_environment(env))
             .expect("discover");
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let digest_before = index_digest(&index_path);
 
     let _model = status(
@@ -132,7 +132,7 @@ fn status_honors_git_optional_locks_zero_in_environment() {
 fn grit_cli_no_optional_locks_leaves_index_unchanged() {
     let (_tmp, grit_repo) = repo_with_stale_index_stat(20);
     let repo_root = grit_repo.work_tree().expect("work tree");
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let digest_before = index_digest(&index_path);
 
     let grit_bin = std::env::var("CARGO_BIN_EXE_grit")

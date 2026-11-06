@@ -43,7 +43,7 @@ fn backslash_escaped_literal_matches_git_check_ignore_and_status() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let check = repo
         .ignore_check(&["foo bar".into()], &index)
         .expect("ignore_check");
@@ -100,7 +100,7 @@ fn slash_containing_prefix_glob_respects_pathname_boundaries() {
         &RepositoryOptions::empty().with_work_tree(&root),
     )
     .expect("open");
-    let mut index: Index = repo.index_handle().load().expect("index");
+    let mut index: Index = repo.index().load().expect("index");
     let work_tree = repo.work_tree().expect("work tree");
     let (untracked, _) =
         collect_untracked_and_ignored(&repo, &mut index, work_tree, IgnoredMode::No, true, &[])

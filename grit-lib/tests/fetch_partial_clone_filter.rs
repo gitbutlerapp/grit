@@ -370,7 +370,7 @@ fn fsck_accepts_promised_missing_blobs_in_index_after_reset() {
         &RepositoryOptions::empty().with_work_tree(dest.path()),
     )
     .expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(
         index
             .entries()

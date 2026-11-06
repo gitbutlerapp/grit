@@ -273,7 +273,7 @@ pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
             limit: Some(20),
             ..RevWalkListOptions::default()
         };
-        let n = repo.rev_walk().count(&["HEAD"], &opts)?;
+        let n = repo.revwalk().count(&["HEAD"], &opts)?;
         println!("{n}");
         Ok(())
     })
@@ -283,7 +283,7 @@ pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
 pub fn rev_walk_describe_head(repo: &Repository) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
         let described = repo
-            .rev_walk()
+            .revwalk()
             .describe("HEAD", &DescribeOptions::default())?
             .ok_or_else(|| anyhow::anyhow!("no reachable tag"))?;
         println!(
@@ -304,7 +304,7 @@ pub fn rev_walk_describe_head(repo: &Repository) -> Result<()> {
 pub fn rev_walk_left_right_count(repo: &Repository, range: &str) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
         let counts = repo
-            .rev_walk()
+            .revwalk()
             .left_right_counts(&[range], &RevWalkListOptions::default())?;
         println!("{} {}", counts.left, counts.right);
         Ok(())

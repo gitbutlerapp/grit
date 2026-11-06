@@ -350,9 +350,9 @@ fn worktree_vs_head_one_row_per_path_with_stale_cache_tree() {
     std::fs::write(dir.path().join("f.txt"), "worktree\n").expect("write");
 
     let repo = open_repo(dir.path());
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     index.invalidate_cache_tree_for_path(b"f.txt");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
 
     let files = grit_files(&repo, DiffTarget::WorktreeVsHead, &[]);
     let grit_paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();

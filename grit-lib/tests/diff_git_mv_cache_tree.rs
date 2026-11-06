@@ -44,7 +44,7 @@ fn grit_diff_stat_after_git_mv_does_not_read_stale_cache_tree() {
     let head = grit_lib::state::resolve_head(repo.git_dir()).expect("head");
     let head_tree =
         grit_lib::diff::tree_oid_of_commit(repo.odb(), head.oid().expect("oid")).expect("tree");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let work_tree = repo.work_tree().expect("worktree");
     let config = repo.config().snapshot().expect("config");
     let policy = repo.thread_policy();
@@ -69,7 +69,7 @@ fn grit_diff_stat_after_git_mv_does_not_read_stale_cache_tree() {
     .expect("stat diff");
 
     let head_tree2 = head_tree;
-    let index2 = repo.index_handle().load().expect("index");
+    let index2 = repo.index().load().expect("index");
     let staged = grit_lib::diff::diff_index_to_tree(repo.odb(), &index2, Some(&head_tree2), false)
         .expect("index to tree");
     assert!(

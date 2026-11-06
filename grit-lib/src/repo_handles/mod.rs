@@ -47,3 +47,10 @@ pub use remote_rename::RemoteRename;
 pub use stash::RepositoryStash;
 pub use workspace_snapshot::RepositoryWorkspaceSnapshot;
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};
+
+/// Short alias for [`RepositoryBundles`].
+pub type Bundles<'repo> = RepositoryBundles<'repo>;
+/// Short alias for [`RepositoryRemotes`].
+pub type Remotes<'repo> = RepositoryRemotes<'repo>;
+/// Short alias for [`RepositoryWorktrees`].
+pub type Worktrees<'repo> = RepositoryWorktrees<'repo>;

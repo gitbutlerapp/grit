@@ -179,7 +179,7 @@ pub struct MoveOutcome {
 ///
 /// Directory prefixes require `recursive`. Empty parent directories are removed after
 /// deleting files. Cache-tree entries for touched paths are invalidated before the index
-/// is written atomically after the index lock is acquired ([`IndexHandle::begin_update`](crate::index::IndexHandle::begin_update)).
+/// is written atomically after the index lock is acquired ([`IndexFile::begin_update`](crate::index::IndexFile::begin_update)).
 ///
 /// # Errors
 ///
@@ -394,7 +394,7 @@ pub fn move_paths(
 
     let mut completed_worktree_renames: Vec<(String, String)> = Vec::new();
     for plan in &planned {
-        if cancel.is_cancelled() {
+        if cancel.poll().is_err() {
             return Err(abort_failed_move_worktree(
                 work_tree,
                 &completed_worktree_renames,

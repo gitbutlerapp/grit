@@ -106,7 +106,7 @@ fn headers_only_commit_and_tag_match_git() {
     assert_eq!(from_odb.message, "");
 
     let oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(&["main"], &RevWalkListOptions::default())
         .expect("rev walk");
     assert_eq!(oids.len(), 2);

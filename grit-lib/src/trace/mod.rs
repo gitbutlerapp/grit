@@ -86,7 +86,7 @@ mod tests {
             )
             .unwrap();
             let _ = opened
-                .rev_walk()
+                .revwalk()
                 .walk("HEAD", &RevListOptions::default())
                 .unwrap();
         });

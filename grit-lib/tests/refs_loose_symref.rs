@@ -378,7 +378,7 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
         );
         let store = Repository::open(git_dir, &RepositoryOptions::empty())
             .expect("open")
-            .refs();
+            .ref_store();
         assert!(
             matches!(
                 store.resolve(RefNameRef::from_trusted("refs/heads/dangling")),

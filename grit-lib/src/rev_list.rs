@@ -2621,7 +2621,7 @@ fn reflog_commit_tips(repo: &Repository) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let mut peeled_raw = HashSet::new();
-    let store = repo.refs();
+    let store = repo.ref_store();
     for refname in reflog_refs_on_store(store)? {
         for e in read_reflog_on_store(store, &refname)? {
             for oid in [e.old_oid, e.new_oid] {
@@ -5840,7 +5840,7 @@ fn has_replace_refs(repo: &Repository) -> Result<bool> {
         return Ok(false);
     };
     let mut found = false;
-    repo.refs().for_each_ref(&prefix, &mut |_| {
+    repo.ref_store().for_each_ref(&prefix, &mut |_| {
         found = true;
         std::ops::ControlFlow::Break(())
     })?;
@@ -7631,7 +7631,7 @@ fn parse_revision_stdin_lines(repo: &Repository, lines: &[String]) -> Result<Std
 ///
 /// Returns `(positive_specs, negative_specs, stdin_saw_all, stdin_pathspecs)`. Stdin lines use
 /// their own `--not` toggle, independent of the command line. Ref pseudo-options (`--all`, `--branches[=<glob>]`, `--tags`, `--remotes`, `--glob`) list
-/// refs through [`Repository::refs`], so an injected ref store is honoured.
+/// refs through [`Repository::ref_store`], so an injected ref store is honoured.
 ///
 /// # Errors
 ///
@@ -7658,7 +7658,7 @@ pub fn collect_revision_specs_from_stdin_lines(
     Ok((positive, negative, stdin_all_refs, stdin_paths))
 }
 
-/// Object ids every tag under `refs/tags/` points at, read through [`Repository::refs`].
+/// Object ids every tag under `refs/tags/` points at, read through [`Repository::ref_store`].
 ///
 /// # Errors
 ///

@@ -111,10 +111,10 @@ fn injected_store_reflog_is_listed_and_read() {
 
     let names: Vec<String> = repo
         .reflogs()
-        .refs()
-        .expect("refs")
-        .iter()
-        .map(ToString::to_string)
+        .list_reflog_refs()
+        .expect("list reflog refs")
+        .into_iter()
+        .map(|r| r.to_string())
         .collect();
     assert_eq!(names, ["HEAD", "refs/heads/main"]);
 

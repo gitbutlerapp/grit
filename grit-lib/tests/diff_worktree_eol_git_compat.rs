@@ -85,7 +85,7 @@ fn diff_index_to_worktree_eol_crlf_single_line_change() {
     )
     .expect("open");
     let work_tree = grit_repo.work_tree().expect("wt");
-    let mut index = grit_repo.index_handle().load().expect("index");
+    let mut index = grit_repo.index().load().expect("index");
     let rules = WorktreeRules::from_repository(&grit_repo, &index).expect("rules");
     let cfg = ConfigSet::load(
         &Environment::empty(),
@@ -210,7 +210,7 @@ fn assert_eol_only_rewrite_is_clean(
     let case = format!("{attributes:?} {committed:?} -> {rewritten:?} threads={threads}");
 
     let grit_repo = open(&repo);
-    let mut index = grit_repo.index_handle().load().expect("index");
+    let mut index = grit_repo.index().load().expect("index");
     let (entries, _) = diff_index_to_worktree_with_options(
         grit_repo.odb(),
         &mut index,

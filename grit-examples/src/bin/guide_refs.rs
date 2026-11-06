@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         println!("tag {} {} {:?}", tag.name, tag.oid.to_hex(), tag.kind);
     }
 
-    println!("ref_storage={}", repo.refs().format());
+    println!("ref_storage={}", repo.ref_store().format());
 
     let target = head
         .oid()

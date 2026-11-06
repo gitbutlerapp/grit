@@ -61,10 +61,10 @@ fn branch_create_runs_prepared_and_committed() {
     let repo = Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open");
     install_reference_transaction_hook(&repo, &log, false);
 
-    let tip = repo.refs().resolve("HEAD").expect("head");
+    let tip = repo.ref_store().resolve("HEAD").expect("head");
     fs::write(&log, "").expect("clear log");
     commit_ref_update_on_store(
-        repo.refs(),
+        repo.ref_store(),
         RefUpdate {
             name: "refs/heads/topic".into(),
             new_value: Some(RawRef::Direct(tip)),
@@ -103,10 +103,10 @@ fn prepared_refusal_leaves_ref_unchanged_and_logs_aborted() {
     let repo = Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open");
     install_reference_transaction_hook(&repo, &log, true);
 
-    let tip = repo.refs().resolve("HEAD").expect("head");
+    let tip = repo.ref_store().resolve("HEAD").expect("head");
     fs::write(&log, "").expect("clear log");
     let err = commit_ref_update_on_store(
-        repo.refs(),
+        repo.ref_store(),
         RefUpdate {
             name: "refs/heads/blocked".into(),
             new_value: Some(RawRef::Direct(tip)),
@@ -118,7 +118,7 @@ fn prepared_refusal_leaves_ref_unchanged_and_logs_aborted() {
     .expect_err("hook blocks");
     assert!(matches!(err, Error::Hook(_)), "{err}");
     assert!(repo
-        .refs()
+        .ref_store()
         .read_raw(RefNameRef::from_trusted("refs/heads/blocked"))
         .expect("read")
         .is_none());
@@ -143,13 +143,13 @@ fn files_backend_commit_emits_head_and_branch_lines() {
     install_reference_transaction_hook(&repo, &log, false);
 
     git(tmp.path(), &["commit", "--allow-empty", "-qm", "c2"]);
-    let new_commit = repo.refs().resolve("HEAD").expect("new tip");
+    let new_commit = repo.ref_store().resolve("HEAD").expect("new tip");
     git(tmp.path(), &["reset", "--hard", "HEAD~1"]);
-    let old = repo.refs().resolve("HEAD").expect("old tip");
+    let old = repo.ref_store().resolve("HEAD").expect("old tip");
 
     fs::write(&log, "").expect("clear log");
     update_branch_for_commit_on_store(
-        repo.refs(),
+        repo.ref_store(),
         &BranchCommitRefUpdate {
             branch_ref: RefNameRef::from_trusted("refs/heads/main"),
             expected_old: Some(old),
@@ -263,7 +263,7 @@ fn branch_lock_held_during_prepared_blocks_nested_ref_update() {
 
     fs::write(&log, "").expect("clear log");
     update_branch_for_commit_on_store(
-        repo.refs(),
+        repo.ref_store(),
         &BranchCommitRefUpdate {
             branch_ref: RefNameRef::from_trusted("refs/heads/main"),
             expected_old: Some(old_oid),
@@ -276,7 +276,7 @@ fn branch_lock_held_during_prepared_blocks_nested_ref_update() {
     .expect("outer commit succeeds");
 
     assert_eq!(
-        repo.refs().resolve("refs/heads/main").expect("tip"),
+        repo.ref_store().resolve("refs/heads/main").expect("tip"),
         new_oid,
         "branch must stay at grit's new tip, not the hook's rewind"
     );
@@ -323,10 +323,10 @@ fn core_hooks_path_is_honored() {
     git(&work, &["commit", "-qm", "c1"]);
 
     let repo = Repository::discover(Some(&work), &RepositoryOptions::empty()).expect("open");
-    let tip = repo.refs().resolve("HEAD").expect("head");
+    let tip = repo.ref_store().resolve("HEAD").expect("head");
     fs::write(&log, "").expect("clear log");
     commit_ref_update_on_store(
-        repo.refs(),
+        repo.ref_store(),
         RefUpdate {
             name: "refs/heads/x".into(),
             new_value: Some(RawRef::Direct(tip)),

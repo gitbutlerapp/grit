@@ -1678,7 +1678,7 @@ pub fn materialize(
     crate::porcelain::checkout::checkout_between_trees_with_progress(
         &repo, None, &tree, progress, cancel,
     )?;
-    let files = u64::try_from(repo.index_handle().load()?.entries().len()).unwrap_or(u64::MAX);
+    let files = u64::try_from(repo.index().load()?.entries().len()).unwrap_or(u64::MAX);
     Ok(Materialized {
         repo,
         work: work.to_owned(),

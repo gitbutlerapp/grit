@@ -861,7 +861,7 @@ mod tests {
     fn count_with_empty_tokens_and_no_ref_selection_still_errors() {
         let (_dir, repo) = repo_with_commits(1);
         let walk = RevWalkListOptions::default();
-        let err = repo.rev_walk().count(&[], &walk).expect_err("no revisions");
+        let err = repo.revwalk().count(&[], &walk).expect_err("no revisions");
         assert!(
             matches!(err, Error::InvalidRef(ref m) if m == "no revisions specified"),
             "{err:?}"
@@ -896,12 +896,12 @@ mod tests {
         };
         let tokens = ["HEAD"];
         let listed = repo
-            .rev_walk()
+            .revwalk()
             .rev_list_result(&tokens, &walk)
             .expect("list")
             .commits;
         let streamed: Vec<_> = repo
-            .rev_walk()
+            .revwalk()
             .commits_stream(&tokens, &walk)
             .expect("stream")
             .expect("some")
@@ -934,7 +934,7 @@ mod tests {
                 retained_commit_extent: extent,
                 ..RevWalkListOptions::default()
             };
-            repo.rev_walk()
+            repo.revwalk()
                 .commits_stream(&["HEAD"], &walk)
                 .expect("stream")
                 .expect("some")
@@ -971,7 +971,7 @@ mod tests {
             ..RevWalkListOptions::default()
         };
         let mut stream = repo
-            .rev_walk()
+            .revwalk()
             .commits_stream(&["HEAD"], &walk)
             .expect("stream")
             .expect("some");
@@ -979,7 +979,7 @@ mod tests {
         assert_eq!(collected.len(), 2);
         drop(stream);
         let all = repo
-            .rev_walk()
+            .revwalk()
             .rev_list_result(&["HEAD"], &RevWalkListOptions::default())
             .expect("list")
             .commits;

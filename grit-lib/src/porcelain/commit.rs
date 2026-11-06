@@ -1920,7 +1920,7 @@ fn create_commit_with_index(
 
     if short_name.is_none() {
         update_detached_head_for_commit_on_store(
-            repo.refs(),
+            repo.ref_store(),
             expected_old,
             oid,
             &committer,
@@ -1929,7 +1929,7 @@ fn create_commit_with_index(
         )?;
     } else {
         update_branch_for_commit_on_store(
-            repo.refs(),
+            repo.ref_store(),
             &BranchCommitRefUpdate {
                 branch_ref: RefNameRef::from_trusted(refname.as_str()),
                 expected_old,

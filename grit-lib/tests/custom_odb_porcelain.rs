@@ -180,7 +180,7 @@ fn assert_merge_commit_in_store(repo: &Repository, store: &MemoryStore, merge_oi
 }
 
 fn index_oid(repo: &Repository, path: &str) -> ObjectId {
-    repo.index_handle()
+    repo.index()
         .load()
         .expect("index")
         .get(path.as_bytes(), 0)

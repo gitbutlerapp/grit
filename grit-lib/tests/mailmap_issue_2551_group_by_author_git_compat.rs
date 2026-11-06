@@ -63,7 +63,7 @@ fn group_by_author_mailmap_issue_2551_matches_git_shortlog_sne() -> grit_lib::er
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::default())?;
     let oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(&["HEAD"], &RevWalkListOptions::default())?;
     let table = mailmap_for_grouping(&repo, true)?;
     let groups = group_commits_by_author(

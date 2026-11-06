@@ -678,7 +678,7 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
         .odb()
         .write(ObjectKind::Blob, contents.as_bytes())
         .expect("blob");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     index.add_or_replace(
         grit_lib::index::entry_from_stat(&wt.join("f"), b"f", blob, grit_lib::index::MODE_REGULAR)
             .expect("entry"),
@@ -686,7 +686,7 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let commit = CommitData {
         tree,
         parents: parent.into_iter().collect(),
@@ -703,7 +703,7 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
         .expect("commit");
-    refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "refs/heads/main", &oid)
+    refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "refs/heads/main", &oid)
         .expect("branch");
     oid
 }

@@ -49,8 +49,8 @@ fn large_index_v2_v4_write_read_and_mutations() {
         if version == 4 {
             index.add_or_replace(make_entry("z/skip.txt", blob, 0));
         }
-        repo.index_handle().write(&mut index).expect("write");
-        let loaded = Index::load(&repo.index_handle().path()).expect("load");
+        repo.index().write(&mut index).expect("write");
+        let loaded = Index::load(&repo.index().path()).expect("load");
         assert_eq!(loaded.version, version);
         assert_eq!(loaded.entries().len(), index.entries().len());
 
@@ -60,6 +60,6 @@ fn large_index_v2_v4_write_read_and_mutations() {
             vec![make_entry("d0/f0000.txt", blob, 0)],
         );
         sorted.invalidate_cache_tree_for_path(b"d0");
-        repo.index_handle().write(&mut sorted).expect("rewrite");
+        repo.index().write(&mut sorted).expect("rewrite");
     }
 }

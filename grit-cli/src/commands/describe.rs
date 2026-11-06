@@ -99,6 +99,6 @@ pub fn run(args: &DescribeCliArgs) -> Result<Option<DescribeOutcome>> {
         first_parent: args.first_parent,
         abbrev: args.abbrev,
     };
-    let described = repo.rev_walk().describe(&args.rev, &opts)?;
+    let described = repo.revwalk().describe(&args.rev, &opts)?;
     Ok(described.map(DescribeOutcome::from))
 }

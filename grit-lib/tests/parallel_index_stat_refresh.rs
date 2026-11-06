@@ -109,7 +109,7 @@ fn run_status(
     opts.ahead_behind = false;
     opts.stat_parallel_threads = Some(threads);
     let model = status(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
-    let index_bytes = fs::read(repo.index_handle().path()).expect("index bytes");
+    let index_bytes = fs::read(repo.index().path()).expect("index bytes");
     (model, index_bytes)
 }
 
@@ -118,14 +118,14 @@ fn parallel_refresh_matches_serial() {
     assert!(PARALLEL_STAT_MIN_ENTRIES <= 5000);
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo = seed_repo(tmp.path(), true);
-    let baseline_index = fs::read(repo.index_handle().path()).expect("baseline index");
+    let baseline_index = fs::read(repo.index().path()).expect("baseline index");
 
     let (serial_model, serial_index) = {
-        fs::write(repo.index_handle().path(), &baseline_index).expect("restore index");
+        fs::write(repo.index().path(), &baseline_index).expect("restore index");
         run_status(&repo, 1)
     };
     let (parallel_model, parallel_index) = {
-        fs::write(repo.index_handle().path(), &baseline_index).expect("restore index");
+        fs::write(repo.index().path(), &baseline_index).expect("restore index");
         run_status(&repo, 4)
     };
 

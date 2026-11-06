@@ -1270,7 +1270,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
     for rule in RULES {
         let candidate = rule.replace("{0}", spec);
         // One raw read decides missing and direct candidates; only symrefs need resolving.
-        let resolved = match repo.refs().read_raw(RefNameRef::from_trusted(&candidate)) {
+        let resolved = match repo.ref_store().read_raw(RefNameRef::from_trusted(&candidate)) {
             Ok(None) => continue,
             Ok(Some(refs::store::RawRef::Direct(oid))) => Ok(oid),
             Ok(Some(refs::store::RawRef::Symbolic(target))) => {
@@ -2775,7 +2775,7 @@ fn resolve_base(
 
 fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEntry>> {
     let mut entries = Vec::new();
-    repo.refs().for_each_reflog_entry_str(
+    repo.ref_store().for_each_reflog_entry_str(
         RefNameRef::from_trusted(refname),
         false,
         &mut |entry| {
@@ -2978,7 +2978,7 @@ fn resolve_reflog_oid(
         if let ReflogSelector::Index(index) = index_or_date {
             if index >= entries.len() {
                 if let Ok(Some(RawRef::Symbolic(branch_ref))) =
-                    repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))
+                    repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))
                 {
                     if let Ok(branch_entries) = read_reflog_for_repo(repo, &branch_ref) {
                         if index < branch_entries.len() {
@@ -3001,7 +3001,7 @@ fn resolve_reflog_oid(
                     // back to the ref's current value (the `nth == co_cnt` case in
                     // object-name.c).
                     if !repo
-                        .refs()
+                        .ref_store()
                         .reflog_exists(RefNameRef::from_trusted(refname))
                         .unwrap_or(false)
                     {

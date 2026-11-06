@@ -230,7 +230,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
 
 fn switch_to(repo: &Repository, branch: &str) {
     let oid = repo
-        .rev_walk()
+        .revwalk()
         .resolve(&format!("refs/heads/{branch}"))
         .expect("branch tip");
     switch_repository(

@@ -103,7 +103,7 @@ fn grit_clone(tmp: &Path, remote_git: &Path, name: &str) -> PathBuf {
     let dest = tmp.join(name);
     clone_repo(
         CloneOptions::new(remote_git.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

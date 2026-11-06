@@ -48,7 +48,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     };
     let _keep = temp_guard;
 
-    let index = repo.index_handle().load()?;
+    let index = repo.index().load()?;
     println!("index_entries={}", index.entries().len());
 
     let outcome = stage(
@@ -64,7 +64,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         outcome.removed.len()
     );
 
-    let index = repo.index_handle().load()?;
+    let index = repo.index().load()?;
     let tree_oid = write_tree_from_index(repo.odb(), &index, "")?;
     println!("tree_oid={}", tree_oid.to_hex());
 

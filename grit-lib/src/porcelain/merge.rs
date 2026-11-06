@@ -1013,7 +1013,7 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
     }
     let canonical = format!("refs/heads/{into_ref}");
     if repo
-        .refs()
+        .ref_store()
         .resolve(RefNameRef::from_trusted(canonical.as_str()))
         .is_err()
     {
@@ -1770,7 +1770,7 @@ fn merge_abort_finalize_index_stats(
         return Ok(());
     };
     let changed = merge_abort_changed_paths(changes);
-    let mut index = repo.index_handle().load()?;
+    let mut index = repo.index().load()?;
     crate::porcelain::index_from_tree::reseed_stage0_stat_data_excluding_paths(
         &mut index, old_index, &changed,
     );
@@ -1788,7 +1788,7 @@ fn merge_abort_finalize_index_stats(
             repo, work_tree, &mut index, &unset,
         )?;
     }
-    repo.index_handle().write(&mut index)?;
+    repo.index().write(&mut index)?;
     Ok(())
 }
 
@@ -2117,7 +2117,7 @@ fn move_detached_head(repo: &Repository, old: ObjectId, new: ObjectId, reason: &
     let identity =
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     update_detached_head_for_commit_on_store(
-        repo.refs(),
+        repo.ref_store(),
         Some(old),
         new,
         &identity,
@@ -2128,7 +2128,7 @@ fn move_detached_head(repo: &Repository, old: ObjectId, new: ObjectId, reason: &
 
 /// Refuse to merge when detached `HEAD` no longer points at `expected`.
 fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()> {
-    let current = match repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))? {
+    let current = match repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))? {
         Some(RawRef::Direct(oid)) => Some(oid),
         Some(RawRef::Symbolic(_)) => {
             return Err(Error::Message(
@@ -2148,7 +2148,7 @@ pub(crate) fn ensure_branch_tip(
     expected: Option<ObjectId>,
 ) -> Result<()> {
     let current = repo
-        .refs()
+        .ref_store()
         .resolve(RefNameRef::from_trusted(branch_ref))
         .ok();
     refs::verify_branch_commit_cas(expected, current, branch_ref)
@@ -2173,7 +2173,7 @@ pub(crate) fn update_checked_out_branch(
     let identity =
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     update_branch_for_commit_on_store(
-        repo.refs(),
+        repo.ref_store(),
         &BranchCommitRefUpdate {
             branch_ref: RefNameRef::from_trusted(branch_ref),
             expected_old,
@@ -2628,7 +2628,7 @@ mod integrate_tests {
                 .expect("feature/foo tip");
         assert_eq!(stored, feature_merge);
         assert!(repo
-            .refs()
+            .ref_store()
             .resolve(RefNameRef::from_trusted("refs/feature/foo"))
             .is_err());
 

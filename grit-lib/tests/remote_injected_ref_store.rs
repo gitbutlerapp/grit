@@ -152,13 +152,13 @@ fn assert_origin_tracking_in_store(repo: &Repository, store: &MemoryRefStore, ti
         ]
     );
     assert_eq!(
-        repo.rev_walk()
+        repo.revwalk()
             .resolve("refs/remotes/origin/main")
             .expect("resolve through handle"),
         tip
     );
     assert_eq!(
-        repo.rev_walk()
+        repo.revwalk()
             .resolve("refs/remotes/origin/HEAD")
             .expect("resolve HEAD"),
         tip

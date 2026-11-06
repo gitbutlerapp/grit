@@ -16,7 +16,7 @@ fn grit_follow_commits_with(
     full_history: bool,
 ) -> Vec<String> {
     let repo = open_grit_repo(wt);
-    repo.rev_walk()
+    repo.revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -192,7 +192,7 @@ fn follow_without_flag_stops_at_rename() {
 
     let repo = open_grit_repo(wt);
     let oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {

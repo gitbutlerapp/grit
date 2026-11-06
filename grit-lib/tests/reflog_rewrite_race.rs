@@ -64,12 +64,12 @@ fn race_on_repo(repo: Arc<Repository>) {
     let lock_wait = long_ref_lock_wait(&repo);
     let tip = repo.head_commit().expect("head");
     let now = || time::OffsetDateTime::now_utc().unix_timestamp();
-    append(repo.refs(), tip, now(), lock_wait).expect("seed");
+    append(repo.ref_store(), tip, now(), lock_wait).expect("seed");
 
     let b_repo = repo.clone();
     let b = thread::spawn(move || -> grit_lib::error::Result<()> {
         for _ in 0..100 {
-            append(b_repo.refs(), tip, 1_500_000_000, lock_wait)?;
+            append(b_repo.ref_store(), tip, 1_500_000_000, lock_wait)?;
             expire(&b_repo)?;
         }
         Ok(())
@@ -77,14 +77,14 @@ fn race_on_repo(repo: Arc<Repository>) {
 
     let mut fresh = 1usize;
     while !b.is_finished() {
-        append(repo.refs(), tip, now(), lock_wait).expect("append fresh");
+        append(repo.ref_store(), tip, now(), lock_wait).expect("append fresh");
         fresh += 1;
     }
     b.join().expect("join").expect("background");
     expire(&repo).expect("final expire");
 
     let mut kept = 0usize;
-    repo.refs()
+    repo.ref_store()
         .for_each_reflog_entry(
             RefNameRef::from_trusted("refs/heads/race"),
             false,
@@ -117,7 +117,7 @@ fn reflog_expire_races_ref_updates_files_backend() {
         &["commit", "--allow-empty", "-q", "-m", "init"],
     );
     let repo = open_with_long_lock(test.worktree());
-    assert_eq!(repo.refs().format(), RefStorageFormat::Files);
+    assert_eq!(repo.ref_store().format(), RefStorageFormat::Files);
     race_on_repo(repo);
 }
 
@@ -132,6 +132,6 @@ fn reflog_expire_races_ref_updates_reftable_backend() {
         &["commit", "--allow-empty", "-q", "-m", "init"],
     );
     let repo = open_with_long_lock(root.path());
-    assert_eq!(repo.refs().format(), RefStorageFormat::Reftable);
+    assert_eq!(repo.ref_store().format(), RefStorageFormat::Reftable);
     race_on_repo(repo);
 }

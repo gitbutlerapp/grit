@@ -355,7 +355,7 @@ fn index_accessor_reuses_the_loaded_index() {
     let dir = tempfile::tempdir().expect("tempdir");
     fixture(dir.path());
     let repo = open(dir.path());
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let count = index.entries().len();
     let mut diff = UncommittedDiff::new(&repo, index);
     diff.unstaged_entries(RenameDetection::Off)

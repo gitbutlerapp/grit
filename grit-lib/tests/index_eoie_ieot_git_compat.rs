@@ -187,7 +187,7 @@ fn grit_write_git_accepts(version: u32) {
 
     let cfg = load_config(&repo);
     let policy = ThreadPolicy::with_threads_override(Some(4));
-    idx.write_with_config_and_policy(&repo.index_handle().path(), &cfg, policy)
+    idx.write_with_config_and_policy(&repo.index().path(), &cfg, policy)
         .expect("write");
 
     assert!(run_git(&["-C", root.to_str().expect("p"), "fsck"]).success());
@@ -251,7 +251,7 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
 
     let cfg = load_config(&repo);
     let policy = ThreadPolicy::with_threads_override(Some(4));
-    idx.write_with_config_and_policy(&repo.index_handle().path(), &cfg, policy)
+    idx.write_with_config_and_policy(&repo.index().path(), &cfg, policy)
         .expect("write v4 ieot index");
 
     let root_s = root.to_str().expect("path");
@@ -260,7 +260,7 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
         "git serial index reader must accept grit-written v4 IEOT block restarts"
     );
 
-    let bytes = fs::read(repo.index_handle().path()).expect("read index");
+    let bytes = fs::read(repo.index().path()).expect("read index");
     let algo = repo.odb().hash_algo();
     let parsed = grit_parse_serial(&bytes, algo);
     assert_eq!(parsed.entries().len(), 8);
@@ -319,10 +319,10 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
 
     let cfg = load_config(&repo);
     let policy = ThreadPolicy::with_threads_override(Some(4));
-    idx.write_with_config_and_policy(&repo.index_handle().path(), &cfg, policy)
+    idx.write_with_config_and_policy(&repo.index().path(), &cfg, policy)
         .expect("write ieot index");
 
-    let bytes = fs::read(repo.index_handle().path()).expect("read index");
+    let bytes = fs::read(repo.index().path()).expect("read index");
     let algo = repo.odb().hash_algo();
     let body = &bytes[..bytes.len() - algo.len()];
     assert!(body.windows(4).any(|w| w == b"EOIE"));

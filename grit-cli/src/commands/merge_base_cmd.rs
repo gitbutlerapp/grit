@@ -56,7 +56,7 @@ impl MarkdownRender for MergeBaseOutcome {
 
 pub fn run(a: &str, b: &str, all: bool, is_ancestor: bool) -> Result<MergeBaseOutcome> {
     let repo = context::discover()?;
-    let walk = repo.rev_walk();
+    let walk = repo.revwalk();
     if is_ancestor {
         let ok = walk.is_ancestor(a, b)?;
         return Ok(MergeBaseOutcome {

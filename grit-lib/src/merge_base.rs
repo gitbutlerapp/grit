@@ -3415,7 +3415,7 @@ impl<'r> CommitGraphCache<'r> {
         }
         let mut has_replacements = false;
         if let Some(prefix) = self.repo.replace_ref_base_if_enabled() {
-            self.repo.refs().for_each_ref(&prefix, &mut |_| {
+            self.repo.ref_store().for_each_ref(&prefix, &mut |_| {
                 has_replacements = true;
                 std::ops::ControlFlow::Break(())
             })?;
@@ -4910,7 +4910,7 @@ mod tests {
                 )?
                 .commit_count()
             } else {
-                repo.rev_walk().count(
+                repo.revwalk().count(
                     &["main~20..main"],
                     &crate::revwalk::RevWalkListOptions::default(),
                 )?
@@ -5789,11 +5789,11 @@ mod tests {
         }
         let token_refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
         let revwalk = repo
-            .rev_walk()
+            .revwalk()
             .commits(&token_refs, &RevWalkListOptions::default())
             .expect("revwalk commits");
         let revwalk_count = repo
-            .rev_walk()
+            .revwalk()
             .count(&token_refs, &RevWalkListOptions::default())
             .expect("revwalk count");
 

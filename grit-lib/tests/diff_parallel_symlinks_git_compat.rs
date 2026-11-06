@@ -103,7 +103,7 @@ enum Scan {
 fn check_scans(root: &Path) {
     let expected = git_statuses(root);
     let repo = open(root);
-    let original = repo.index_handle().load().expect("index");
+    let original = repo.index().load().expect("index");
     let index_bytes = fs::read(root.join(".git/index")).expect("disk index");
     for state in [StatState::Unset, StatState::Stale, StatState::Racy] {
         for refresh in [false, true] {

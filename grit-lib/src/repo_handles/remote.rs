@@ -463,7 +463,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                 flags: delete_flags,
             })
             .collect();
-        commit_ref_updates_on_store(self.repo.refs(), &updates, &[])?;
+        commit_ref_updates_on_store(self.repo.ref_store(), &updates, &[])?;
         Ok(refs)
     }
 
@@ -489,7 +489,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
         let head_ref = format!("refs/remotes/{name}/HEAD");
-        let store = self.repo.refs();
+        let store = self.repo.ref_store();
         let previous_target = crate::refs::read_symbolic_ref_for_repository(self.repo, &head_ref)
             .map_err(RemoteError::from)?;
 
@@ -638,7 +638,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                 flags: delete_flags,
             })
             .collect();
-        crate::refs::commit_owned_ref_updates_on_store(self.repo.refs(), updates)?;
+        crate::refs::commit_owned_ref_updates_on_store(self.repo.ref_store(), updates)?;
 
         if !file.remove_section(&format!("remote.{name}"))? {
             return Err(RemoteError::Nested(Box::new(Error::PathError(format!(

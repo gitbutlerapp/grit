@@ -340,7 +340,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
 
     if !req.dry_run {
         repo.odb().flush_for_publish()?;
-        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), &tag_ref, &ref_oid)?;
+        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), &tag_ref, &ref_oid)?;
     }
 
     Ok(CreateTagOutcome {
@@ -583,7 +583,7 @@ impl<'a> TagClassifier<'a> {
     fn new(repo: &'a Repository) -> Self {
         // A malformed `packed-refs` only loses the shortcut; classification falls back to
         // the objects.
-        let packed = PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
+        let packed = PackedRefPeels::for_store(repo.ref_store(), repo.git_dir()).ok();
         Self {
             repo,
             packed,

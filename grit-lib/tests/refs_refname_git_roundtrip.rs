@@ -30,7 +30,7 @@ fn grit_write_refs_via_references(repo: &Repository, tip: ObjectId) {
 }
 
 fn grit_ref_map(repo: &Repository) -> BTreeMap<String, ObjectId> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let mut map = BTreeMap::new();
     store
         .for_each_ref("refs/", &mut |entry| {

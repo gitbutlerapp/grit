@@ -205,7 +205,7 @@ fn legacy_tree_modes_worktree_diff_empty_after_git_checkout() {
 
     let head = repo.head_commit().expect("head commit");
     let head_tree = repo.odb().commit_tree(&head).expect("commit tree");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     // Force tree↔worktree diff (not index↔worktree fast path) so legacy tree modes are tested.
     index.cache_tree_root = None;
     index.cache_tree = None;

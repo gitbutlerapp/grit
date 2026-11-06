@@ -80,8 +80,8 @@ fn main() -> grit_lib::error::Result<()> {
         path: b"base.txt".to_vec(),
         base_index_pos: 0,
     });
-    repo.index_handle().write(&mut index)?;
-    let index = repo.index_handle().load()?;
+    repo.index().write(&mut index)?;
+    let index = repo.index().load()?;
     let tree_a = write_tree_from_index(repo.odb(), &index, "")?;
     let commit_a = commit_from_tree(&repo, tree_a, &[], "initial\n")?;
     refs::write_ref(repo.git_dir(), "refs/heads/main", &commit_a)?;
@@ -123,8 +123,8 @@ fn main() -> grit_lib::error::Result<()> {
         path: b"picked.txt".to_vec(),
         base_index_pos: 0,
     });
-    repo.index_handle().write(&mut index)?;
-    let index = repo.index_handle().load()?;
+    repo.index().write(&mut index)?;
+    let index = repo.index().load()?;
     let tree_b = write_tree_from_index(repo.odb(), &index, "")?;
     let commit_b = commit_from_tree(&repo, tree_b, &[commit_a], "add picked file\n")?;
     refs::write_ref(repo.git_dir(), "refs/heads/topic", &commit_b)?;

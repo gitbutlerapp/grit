@@ -7473,33 +7473,33 @@ impl core::marker::Unpin for grit_lib::index::IndexEntry
 impl core::marker::UnsafeUnpin for grit_lib::index::IndexEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::IndexEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::IndexEntry
-pub struct grit_lib::index::IndexHandle<'repo>
-impl<'repo> grit_lib::index::IndexHandle<'repo>
-pub fn grit_lib::index::IndexHandle<'repo>::begin_update(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::IndexLock>
-pub fn grit_lib::index::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::index::error::IndexResult<()>
-pub fn grit_lib::index::IndexHandle<'repo>::load(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
-pub fn grit_lib::index::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
-pub fn grit_lib::index::IndexHandle<'repo>::load_preserving_sparse(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
-pub fn grit_lib::index::IndexHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
-pub fn grit_lib::index::IndexHandle<'repo>::path(&self) -> std::path::PathBuf
-pub fn grit_lib::index::IndexHandle<'repo>::path_for_env(&self) -> grit_lib::error::Result<std::path::PathBuf>
-pub fn grit_lib::index::IndexHandle<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::index::IndexHandle<'repo>::try_write(&self, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<bool>
-pub fn grit_lib::index::IndexHandle<'repo>::write(&self, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<()>
-pub fn grit_lib::index::IndexHandle<'repo>::write_at(&self, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<()>
-pub fn grit_lib::index::IndexHandle<'repo>::write_at_with_split(&self, &std::path::Path, &mut grit_lib::index::Index, grit_lib::index::split_index::WriteSplitIndexRequest) -> grit_lib::index::error::IndexResult<()>
-impl<'repo> core::clone::Clone for grit_lib::index::IndexHandle<'repo>
-pub fn grit_lib::index::IndexHandle<'repo>::clone(&self) -> Self
-impl<'repo> core::fmt::Debug for grit_lib::index::IndexHandle<'repo>
-pub fn grit_lib::index::IndexHandle<'repo>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl<'repo> core::marker::Copy for grit_lib::index::IndexHandle<'repo>
-impl<'repo> core::marker::Freeze for grit_lib::index::IndexHandle<'repo>
-impl<'repo> core::marker::Send for grit_lib::index::IndexHandle<'repo>
-impl<'repo> core::marker::Sync for grit_lib::index::IndexHandle<'repo>
-impl<'repo> core::marker::Unpin for grit_lib::index::IndexHandle<'repo>
-impl<'repo> core::marker::UnsafeUnpin for grit_lib::index::IndexHandle<'repo>
-impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::IndexHandle<'repo>
-impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::index::IndexHandle<'repo>
+pub struct grit_lib::index::IndexFile<'repo>
+impl<'repo> grit_lib::index::IndexFile<'repo>
+pub fn grit_lib::index::IndexFile<'repo>::begin_update(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::IndexLock>
+pub fn grit_lib::index::IndexFile<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::IndexFile<'repo>::load(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
+pub fn grit_lib::index::IndexFile<'repo>::load_at(&self, &std::path::Path) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
+pub fn grit_lib::index::IndexFile<'repo>::load_preserving_sparse(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
+pub fn grit_lib::index::IndexFile<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
+pub fn grit_lib::index::IndexFile<'repo>::path(&self) -> std::path::PathBuf
+pub fn grit_lib::index::IndexFile<'repo>::path_for_env(&self) -> grit_lib::error::Result<std::path::PathBuf>
+pub fn grit_lib::index::IndexFile<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
+pub fn grit_lib::index::IndexFile<'repo>::try_write(&self, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<bool>
+pub fn grit_lib::index::IndexFile<'repo>::write(&self, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::IndexFile<'repo>::write_at(&self, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::IndexFile<'repo>::write_at_with_split(&self, &std::path::Path, &mut grit_lib::index::Index, grit_lib::index::split_index::WriteSplitIndexRequest) -> grit_lib::index::error::IndexResult<()>
+impl<'repo> core::clone::Clone for grit_lib::index::IndexFile<'repo>
+pub fn grit_lib::index::IndexFile<'repo>::clone(&self) -> Self
+impl<'repo> core::fmt::Debug for grit_lib::index::IndexFile<'repo>
+pub fn grit_lib::index::IndexFile<'repo>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'repo> core::marker::Copy for grit_lib::index::IndexFile<'repo>
+impl<'repo> core::marker::Freeze for grit_lib::index::IndexFile<'repo>
+impl<'repo> core::marker::Send for grit_lib::index::IndexFile<'repo>
+impl<'repo> core::marker::Sync for grit_lib::index::IndexFile<'repo>
+impl<'repo> core::marker::Unpin for grit_lib::index::IndexFile<'repo>
+impl<'repo> core::marker::UnsafeUnpin for grit_lib::index::IndexFile<'repo>
+impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::IndexFile<'repo>
+impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::index::IndexFile<'repo>
 pub struct grit_lib::index::IndexLoadOptions
 pub grit_lib::index::IndexLoadOptions::expand_sparse_directories: bool
 pub grit_lib::index::IndexLoadOptions::parse_context: grit_lib::index::IndexParseContext
@@ -7627,6 +7627,7 @@ pub fn grit_lib::index::index_file_mtime(&std::path::Path) -> core::option::Opti
 pub fn grit_lib::index::munge_index_size(u64) -> u32
 pub fn grit_lib::index::normalize_mode(u32) -> u32
 pub fn grit_lib::index::worktree_path_from_index_rel(&std::path::Path, &[u8]) -> std::path::PathBuf
+pub type grit_lib::index::IndexHandle<'repo> = grit_lib::index::IndexFile<'repo>
 pub type grit_lib::index::IndexResult<T> = core::result::Result<T, grit_lib::index::error::IndexError>
 pub mod grit_lib::line_range
 #[non_exhaustive] pub enum grit_lib::line_range::LineRangeError
@@ -15951,7 +15952,8 @@ pub fn grit_lib::repo::Repository::hook_stdio(&self) -> grit_lib::command_runner
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
 pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
-pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexHandle<'_>
+pub fn grit_lib::repo::Repository::index(&self) -> grit_lib::index::IndexFile<'_>
+pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexFile<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
@@ -15966,6 +15968,7 @@ pub fn grit_lib::repo::Repository::pathspec(&self, impl core::iter::traits::coll
 pub fn grit_lib::repo::Repository::pathspec_argv_prefix<'a>(&'a self, &str) -> core::option::Option<&'a str>
 pub fn grit_lib::repo::Repository::pathspec_cwd_prefix(&self) -> core::option::Option<&str>
 pub fn grit_lib::repo::Repository::prefetch_promised(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo::Repository::ref_store(&self) -> &dyn grit_lib::refs::store::RefStore
 pub fn grit_lib::repo::Repository::reference_unix_time(&self) -> i64
 pub fn grit_lib::repo::Repository::references(&self) -> grit_lib::refs::References<'_>
 pub fn grit_lib::repo::Repository::reflogs(&self) -> grit_lib::repo_handles::RepositoryReflogs<'_>
@@ -15976,6 +15979,7 @@ pub fn grit_lib::repo::Repository::repack(&self, &grit_lib::maintenance::RepackO
 pub fn grit_lib::repo::Repository::resolve_rev_walk_pathspecs(&self, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::repo::Repository::resolve_worktree_pathspec(&self, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::error::PathspecResolveError>
 pub fn grit_lib::repo::Repository::rev_walk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
+pub fn grit_lib::repo::Repository::revwalk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnostics::DiagnosticsHandle)
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
 pub fn grit_lib::repo::Repository::stash(&self) -> grit_lib::repo_handles::RepositoryStash<'_>
@@ -18404,6 +18408,7 @@ pub fn grit_lib::refs::References<'repo>::query(&self, &grit_lib::refs::listing:
 pub fn grit_lib::refs::References<'repo>::reflog(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
 pub fn grit_lib::refs::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::refs::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::References<'repo>::store(&self) -> &'repo dyn grit_lib::refs::store::RefStore
 pub fn grit_lib::refs::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::refs::References<'repo>
@@ -23332,7 +23337,8 @@ pub fn grit_lib::repo::Repository::hook_stdio(&self) -> grit_lib::command_runner
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
 pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
-pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexHandle<'_>
+pub fn grit_lib::repo::Repository::index(&self) -> grit_lib::index::IndexFile<'_>
+pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexFile<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
@@ -23347,6 +23353,7 @@ pub fn grit_lib::repo::Repository::pathspec(&self, impl core::iter::traits::coll
 pub fn grit_lib::repo::Repository::pathspec_argv_prefix<'a>(&'a self, &str) -> core::option::Option<&'a str>
 pub fn grit_lib::repo::Repository::pathspec_cwd_prefix(&self) -> core::option::Option<&str>
 pub fn grit_lib::repo::Repository::prefetch_promised(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo::Repository::ref_store(&self) -> &dyn grit_lib::refs::store::RefStore
 pub fn grit_lib::repo::Repository::reference_unix_time(&self) -> i64
 pub fn grit_lib::repo::Repository::references(&self) -> grit_lib::refs::References<'_>
 pub fn grit_lib::repo::Repository::reflogs(&self) -> grit_lib::repo_handles::RepositoryReflogs<'_>
@@ -23357,6 +23364,7 @@ pub fn grit_lib::repo::Repository::repack(&self, &grit_lib::maintenance::RepackO
 pub fn grit_lib::repo::Repository::resolve_rev_walk_pathspecs(&self, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::repo::Repository::resolve_worktree_pathspec(&self, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::error::PathspecResolveError>
 pub fn grit_lib::repo::Repository::rev_walk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
+pub fn grit_lib::repo::Repository::revwalk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnostics::DiagnosticsHandle)
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
 pub fn grit_lib::repo::Repository::stash(&self) -> grit_lib::repo_handles::RepositoryStash<'_>
@@ -23945,6 +23953,7 @@ impl<'repo> grit_lib::repo_handles::RepositoryReflogs<'repo>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::delete(&self, &grit_lib::refs::store::RefName, &[usize], bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::entries(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::repo_handles::IndexedReflogEntry>>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::expire(&self, &grit_lib::repo_handles::ExpireOptions) -> grit_lib::error::Result<grit_lib::repo_handles::ReflogExpireOutcome>
+pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::list_reflog_refs(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::store::RefName>>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::query(&self, &grit_lib::refs::store::RefName, &grit_lib::repo_handles::ReflogQuery) -> grit_lib::error::Result<grit_lib::repo_handles::ReflogPage>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::refs(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::store::RefName>>
 pub fn grit_lib::repo_handles::RepositoryReflogs<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
@@ -24107,6 +24116,9 @@ pub fn grit_lib::repo_handles::configured_remote_names_in_config_order(&grit_lib
 pub fn grit_lib::repo_handles::configured_remotes(&grit_lib::config::ConfigSet) -> alloc::vec::Vec<grit_lib::repo_handles::ConfiguredRemote>
 pub fn grit_lib::repo_handles::has_remote_section(&grit_lib::config::ConfigSet, &str) -> bool
 pub fn grit_lib::repo_handles::remote_skip_fetch_all(&grit_lib::config::ConfigSet, &str) -> bool
+pub type grit_lib::repo_handles::Bundles<'repo> = grit_lib::repo_handles::RepositoryBundles<'repo>
+pub type grit_lib::repo_handles::Remotes<'repo> = grit_lib::repo_handles::RepositoryRemotes<'repo>
+pub type grit_lib::repo_handles::Worktrees<'repo> = grit_lib::repo_handles::RepositoryWorktrees<'repo>
 pub mod grit_lib::revwalk
 pub mod grit_lib::revwalk::filter
 pub enum grit_lib::revwalk::filter::CommitFilterError

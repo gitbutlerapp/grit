@@ -91,7 +91,7 @@ fn parent_navigation_and_counts_match_git_across_storage() {
                 for expression in ["loose-tip~3", "loose-tip^1^2", "annotated~2"] {
                     let oid = repo
                         .odb()
-                        .with_pack_read_context(|| repo.rev_walk().resolve(expression))
+                        .with_pack_read_context(|| repo.revwalk().resolve(expression))
                         .unwrap();
                     assert_eq!(oid.to_hex(), git(wt, &["rev-parse", expression]).trim());
                 }
@@ -112,7 +112,7 @@ fn parent_navigation_and_counts_match_git_across_storage() {
             let repo = Repository::open(&wt.join(".git"), &RepositoryOptions::empty()).unwrap();
             let oid = repo
                 .odb()
-                .with_pack_read_context(|| repo.rev_walk().resolve(expression))
+                .with_pack_read_context(|| repo.revwalk().resolve(expression))
                 .unwrap();
             assert_eq!(
                 oid.to_hex(),
@@ -134,7 +134,7 @@ fn parent_navigation_and_counts_match_git_across_storage() {
             assert_eq!(
                 repo.odb()
                     .with_pack_read_context(|| {
-                        repo.rev_walk()
+                        repo.revwalk()
                             .left_right_counts(&[range], &RevWalkListOptions::default())
                     })
                     .unwrap(),

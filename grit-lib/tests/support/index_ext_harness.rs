@@ -88,7 +88,7 @@ pub fn fsck_strict(repo_dir: &Path) {
 }
 
 pub fn grit_index_stage_rows(repo: &Repository) -> Vec<(String, u32, String, ObjectId)> {
-    let idx = repo.index_handle().load().expect("load index");
+    let idx = repo.index().load().expect("load index");
     let mut rows: Vec<(String, u32, String, ObjectId)> = idx
         .entries()
         .iter()
@@ -206,5 +206,5 @@ pub fn entry_from_worktree_path(repo: &Repository, path: &str, payload: &[u8]) -
 }
 
 pub fn read_index_bytes(repo: &Repository) -> Vec<u8> {
-    fs::read(repo.index_handle().path()).expect("read index")
+    fs::read(repo.index().path()).expect("read index")
 }

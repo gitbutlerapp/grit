@@ -516,7 +516,7 @@ pub(crate) fn query_refs_peeling(
     peel: PeelTips,
 ) -> QueryResult<Vec<RefListing>> {
     let git_dir = repo.git_dir();
-    let store = repo.refs();
+    let store = repo.ref_store();
     let namespaces = effective_namespaces(query);
     let linked_worktree = crate::worktree_ref::is_linked_worktree_git_dir(git_dir);
     let early_limit = early_ref_collection_limit(query, options);
@@ -764,7 +764,7 @@ fn packed_peels_for(repo: &Repository, collected: &[CollectedRef]) -> Option<Pac
     if to_peel < PACKED_PEELS_MIN_REFS {
         return None;
     }
-    PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok()
+    PackedRefPeels::for_store(repo.ref_store(), repo.git_dir()).ok()
 }
 
 /// Set `entry.peeled` for annotated tags, preferring `packed-refs` peel lines over

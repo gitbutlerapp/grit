@@ -51,7 +51,7 @@ fn library_unstaged_paths(root: &std::path::Path) -> BTreeSet<String> {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let index_mtime = grit_lib::diff::index_mtime_for_diff(&index, None);
     let config = repo.config().snapshot().expect("config");
     let (entries, _) = diff_index_to_worktree_with_options(
@@ -112,7 +112,7 @@ fn grit_diff_index_worktree_empty_on_deep_clean_tree() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let index_mtime = grit_lib::diff::index_mtime_for_diff(&index, None);
     let config = repo.config().snapshot().expect("config");
     let (entries, _) = diff_index_to_worktree_with_options(

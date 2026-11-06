@@ -32,16 +32,14 @@ fn t1600_index_versions_roundtrip_with_git() {
         let wt = repo.worktree();
 
         let grit = open_grit(wt);
-        let mut index = grit.index_handle().load().expect("load");
+        let mut index = grit.index().load().expect("load");
         index.version = version;
         if version == 3 {
             if let Some(e) = index.entries_mut().first_mut() {
                 e.set_skip_worktree(true);
             }
         }
-        grit.index_handle()
-            .write(&mut index)
-            .expect("grit write index");
+        grit.index().write(&mut index).expect("grit write index");
         assert_git_fsck_strict(wt);
         assert_grit_index_matches_git_ls_files(wt, &index);
 
@@ -157,7 +155,7 @@ fn t1015_read_index_unmerged_stages_roundtrip() {
     let grit = open_grit(wt);
 
     let blob = grit.odb().write(ObjectKind::Blob, b"base\n").expect("blob");
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     for stage in 1u8..=3 {
         let mut e = IndexEntry {
             ctime_sec: 1,
@@ -179,13 +177,13 @@ fn t1015_read_index_unmerged_stages_roundtrip() {
         e.flags = (e.flags & 0x0FFF) | ((stage as u16) << 12);
         index.add_or_replace(e);
     }
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
     assert_git_fsck_strict(wt);
 
     let git_rows = git_ls_files_stage(wt);
     assert_eq!(git_rows.iter().filter(|p| p.0 == "conflict.txt").count(), 3);
 
-    let reloaded = Index::load(&grit.index_handle().path()).expect("reload");
+    let reloaded = Index::load(&grit.index().path()).expect("reload");
     assert!(reloaded.has_unmerged_entries());
 }
 
@@ -212,15 +210,15 @@ fn t2030_resolve_undo_roundtrip() {
     let parsed = parse_resolve_undo_payload(&payload).expect("parse REUC");
     assert_eq!(parsed, map);
 
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     index.resolve_undo = Some(parsed);
     index.version = 3;
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
     assert_git_fsck_strict(wt);
 
-    let bytes = fs::read(grit.index_handle().path()).expect("read index");
+    let bytes = fs::read(grit.index().path()).expect("read index");
     assert!(bytes.windows(4).any(|w| w == b"REUC"));
-    let loaded = Index::load(&grit.index_handle().path()).expect("reload");
+    let loaded = Index::load(&grit.index().path()).expect("reload");
     assert_eq!(loaded.resolve_undo, index.resolve_undo);
 }
 
@@ -230,7 +228,7 @@ fn t2107_intent_to_add_forces_index_version_three() {
     let wt = repo.worktree();
     fs::write(wt.join("new.txt"), "n\n").expect("write");
     let grit = open_grit(wt);
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     assert_eq!(index.version, 2);
     let blob = grit.odb().write(ObjectKind::Blob, b"n\n").expect("blob");
     let mut e = IndexEntry {
@@ -257,8 +255,8 @@ fn t2107_intent_to_add_forces_index_version_three() {
         index.version, 2,
         "intent-to-add must not bump version until write"
     );
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
     assert_git_fsck_strict(wt);
-    let header = fs::read(grit.index_handle().path()).expect("read")[4..8].to_vec();
+    let header = fs::read(grit.index().path()).expect("read")[4..8].to_vec();
     assert_eq!(header, 3u32.to_be_bytes());
 }

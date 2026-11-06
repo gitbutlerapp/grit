@@ -1057,7 +1057,7 @@ fn perform_clone_checkout(
     let checkout = crate::porcelain::checkout::checkout_between_trees_with_progress(
         repo, None, &tree, progress, cancel,
     )?;
-    let index = repo.index_handle().load()?;
+    let index = repo.index().load()?;
     let ignorecase = repo.config().snapshot()?.ignore_case();
     let (files, worktree_bytes) =
         crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);
@@ -1097,7 +1097,7 @@ fn resolve_clone_ref(repo: &Repository, refname: &str) -> ObjectId {
 }
 
 fn write_clone_head_symref(repo: &Repository, target: &str) -> std::result::Result<(), CloneError> {
-    refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", target)
+    refs::write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", target)
         .map_err(CloneError::from)
 }
 
@@ -1275,7 +1275,7 @@ fn append_clone_reflog_on_store(
         refs::store::format_reflog_identity(&identity.reflog_name_email(), identity.time);
     let config = repo.config().snapshot()?;
     refs::append_reflog_on_store(
-        repo.refs(),
+        repo.ref_store(),
         refname,
         old_oid,
         new_oid,
@@ -1298,7 +1298,7 @@ fn setup_clone_head(
     match requested {
         CloneRequestedRef::Tag { name, peel } => {
             if !peel.is_zero() {
-                refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", peel)
+                refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", peel)
                     .map_err(CloneError::from)?;
                 append_clone_reflog_on_store(repo, "HEAD", &zero, peel, identity, clone_message)
                     .map_err(CloneError::from)?;
@@ -1320,7 +1320,7 @@ fn setup_clone_head(
                 let oid = resolve_clone_ref(repo, &tracking);
                 if !oid.is_zero() {
                     refs::update_direct_ref_on_store(
-                        repo.refs(),
+                        repo.ref_store(),
                         repo.git_dir(),
                         &branch_ref,
                         &oid,
@@ -1374,7 +1374,7 @@ fn setup_clone_head(
                 let oid = resolve_clone_ref(repo, &tracking);
                 if !oid.is_zero() {
                     refs::update_direct_ref_on_store(
-                        repo.refs(),
+                        repo.ref_store(),
                         repo.git_dir(),
                         &branch_ref,
                         &oid,

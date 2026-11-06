@@ -80,7 +80,7 @@ fn expanded_index_collapses_to_the_rows_git_writes() {
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
     let mut index = Index::load_expand_sparse(&wt.join(".git/index"), &grit.odb()).expect("expand");
     assert!(!index.has_sparse_directory_placeholders());
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
 
     assert_eq!(raw_rows(wt), git_rows);
     assert_eq!(git(wt, &["status", "--porcelain"]), "");
@@ -108,7 +108,7 @@ fn changed_excluded_row_keeps_only_its_ancestors_expanded_for_git() {
         .clone();
     row.oid = edited;
     index.add_or_replace(row);
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
 
     let paths: Vec<String> = raw_rows(wt).into_iter().map(|(p, ..)| p).collect();
     assert_eq!(

@@ -256,7 +256,7 @@ fn stage_for_commit_ignorecase_tracked_scan_updates_case_only_spelling() {
         "case-only rename must refresh index spelling via tracked scan + icase update"
     );
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(
         index.get(b"b00/d00/F0.txt", 0).is_some(),
         "index must store on-disk spelling after case-only rename"

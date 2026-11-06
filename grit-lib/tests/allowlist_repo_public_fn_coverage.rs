@@ -235,7 +235,7 @@ fn write_bundle_header_and_pack(repo: &Repository, tip: ObjectId, w: &mut dyn Wr
 fn index_handle_begin_and_commit_update() {
     let dir = tempdir().expect("tempdir");
     let repo = init_repo(dir.path());
-    let handle = repo.index_handle();
+    let handle = repo.index();
     let mut lock = handle.begin_update().expect("lock");
     let mut index = handle.load().expect("index");
     handle
@@ -322,7 +322,7 @@ fn porcelain_stash_tag_status_and_worktree() {
     let dir = tempdir().expect("tempdir");
     fs::write(dir.path().join("tracked.txt"), b"hi\n").expect("file");
     let repo = init_repo(dir.path());
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let work_tree = dir.path();
     let _ = expand_untracked_for_staging(&repo, &mut index, work_tree, Vec::new(), &[]);
 
@@ -460,7 +460,7 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
     .ok();
     let _ = compute_default_submodule_gitdir(dir.path(), git_dir.as_path(), &cfg_file, "sub");
     let _ = ensure_submodule_gitdir_config(dir.path(), git_dir.as_path(), &mut cfg_file, "sub");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let _ = path_inside_indexed_submodule(&index, "sub/file");
     let _ = path_inside_registered_submodule(dir.path(), "sub/file");
     let _ = path_inside_registered_submodule_name(dir.path(), "sub/file");

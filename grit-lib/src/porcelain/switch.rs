@@ -717,9 +717,19 @@ fn switch_to_target(
             )?;
         }
         if detached {
-            refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &target_oid)?;
+            refs::update_direct_ref_on_store(
+                repo.ref_store(),
+                repo.git_dir(),
+                "HEAD",
+                &target_oid,
+            )?;
         } else {
-            refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", branch_ref)?;
+            refs::write_symbolic_ref_on_store(
+                repo.ref_store(),
+                repo.git_dir(),
+                "HEAD",
+                branch_ref,
+            )?;
         }
     }
 
@@ -2242,7 +2252,7 @@ mod tests {
     /// Commit on top of `parent` with `HEAD` detached at the new commit and no ref holding it.
     fn commit_on_detached_head(repo: &Repository, contents: &str, parent: ObjectId) -> ObjectId {
         let oid = commit_on_branch(repo, "scratch", "f", contents, Some(parent));
-        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &oid)
+        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &oid)
             .expect("detach");
         refs::delete_ref(repo.git_dir(), "refs/heads/scratch").expect("drop scratch");
         oid
@@ -2391,7 +2401,7 @@ mod tests {
             filler = commit_dated(&repo, tree, filler, 500 + i);
         }
         refs::write_ref(repo.git_dir(), "refs/heads/filler", &filler).expect("ref");
-        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &old_tip)
+        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &old_tip)
             .expect("detach");
 
         let outcome = switch_to(

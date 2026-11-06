@@ -762,7 +762,7 @@ pub fn run(
         if rev.max_count() == Some(0) {
             return empty_outcome(display);
         }
-        let walk = repo.rev_walk();
+        let walk = repo.revwalk();
         let mut fetch_opts = walk_opts.clone();
         let page_limit = rev.max_count().or(if display.graph {
             page.graph_limit()
@@ -965,7 +965,7 @@ fn run_log_group_by_author(
             let mut fetch_opts = walk_opts.clone();
             fetch_opts.limit = fetch_limit_plus_one(Some(limit));
             let oids = repo
-                .rev_walk()
+                .revwalk()
                 .commits(token_refs, &fetch_opts)
                 .context("could not list commits")?;
             let (oids, truncated) = truncate_oid_list(oids, Some(limit), reverse);
@@ -1010,7 +1010,7 @@ fn run_log_group_by_author(
     let mut fetch_opts = walk_opts.clone();
     fetch_opts.limit = fetch_limit_plus_one(max_count);
     let oids = repo
-        .rev_walk()
+        .revwalk()
         .commits(token_refs, &fetch_opts)
         .context("could not list commits")?;
     let (oids, truncated) = truncate_oid_list(oids, max_count, reverse);

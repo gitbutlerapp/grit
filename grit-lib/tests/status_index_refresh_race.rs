@@ -69,7 +69,7 @@ fn try_write_index_at_skips_when_disk_index_identity_changed() {
     init_repo(dir);
 
     let repo = open_grit_repo(dir);
-    let handle = repo.index_handle();
+    let handle = repo.index();
     let index_path = handle.path().to_path_buf();
     let mut index = grit_lib::index::Index::load(&index_path).expect("load index");
     fs::write(dir.join("file.txt"), "v2\n").expect("modify");

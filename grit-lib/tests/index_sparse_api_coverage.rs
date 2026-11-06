@@ -37,11 +37,11 @@ fn sparse_apply_and_clear_skip_worktree_on_disk() {
     git(wt, &["sparse-checkout", "set", "a"]);
 
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     let warnings =
         apply_sparse_checkout_skip_worktree(&grit.git_dir(), Some(wt), &mut index, false);
     assert!(warnings.is_empty() || warnings.iter().all(|w| !w.is_empty()));
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
     assert_git_fsck_strict(wt);
 
     fs::write(wt.join("a/f0.txt"), "touch\n").expect("write");
@@ -94,7 +94,7 @@ fn write_tree_and_cache_tree_after_sparse_apply() {
     seed_multidir_repo(&repo);
     let wt = repo.worktree();
     let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let mut index = grit.index_handle().load().expect("load");
+    let mut index = grit.index().load().expect("load");
     let blob = grit
         .odb()
         .write(ObjectKind::Blob, b"extra\n")
@@ -118,6 +118,6 @@ fn write_tree_and_cache_tree_after_sparse_apply() {
     });
     let _tree = write_tree_update_index(&grit.odb(), &mut index, "", WriteTreeFlags::default())
         .expect("write-tree");
-    grit.index_handle().write(&mut index).expect("write");
+    grit.index().write(&mut index).expect("write");
     assert_git_fsck_strict(wt);
 }

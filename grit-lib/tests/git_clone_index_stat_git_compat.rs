@@ -72,7 +72,7 @@ fn git_clone_index_stats_match_worktree_with_autocrlf() {
         &RepositoryOptions::empty().with_work_tree(&clone_root),
     )
     .expect("open grit repo");
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let index_mtime_before = fs::metadata(&index_path)
         .expect("index metadata")
         .modified()

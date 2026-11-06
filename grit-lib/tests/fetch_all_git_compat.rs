@@ -1,4 +1,4 @@
-//! `RepositoryRemotes::fetch_all` matches `git fetch --all` on the same remotes.
+//! `Remotes::fetch_all` matches `git fetch --all` on the same remotes.
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;

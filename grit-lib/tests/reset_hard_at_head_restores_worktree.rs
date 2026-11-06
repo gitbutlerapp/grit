@@ -20,7 +20,7 @@ fn init_repo() -> (TempDir, Repository) {
 fn commit_file(repo: &Repository, path: &str, contents: &str) -> grit_lib::objects::ObjectId {
     let work_tree = repo.work_tree().expect("wt");
     std::fs::write(work_tree.join(path), contents).expect("write");
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let oid = repo
         .odb()
         .write(ObjectKind::Blob, contents.as_bytes())
@@ -36,7 +36,7 @@ fn commit_file(repo: &Repository, path: &str, contents: &str) -> grit_lib::objec
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let commit = CommitData {
         tree,
         parents: vec![],
@@ -137,7 +137,7 @@ fn hard_reset_at_head_restores_chmod_only_change() {
     perms.set_mode(0o100755);
     std::fs::set_permissions(&path, perms).expect("chmod exec");
     let head = {
-        let mut index = repo.index_handle().load().expect("index");
+        let mut index = repo.index().load().expect("index");
         let oid = repo
             .odb()
             .write(ObjectKind::Blob, b"#!/bin/sh\n")
@@ -153,7 +153,7 @@ fn hard_reset_at_head_restores_chmod_only_change() {
         index.sort();
         let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
             .expect("tree");
-        repo.index_handle().write(&mut index).expect("write index");
+        repo.index().write(&mut index).expect("write index");
         let commit = CommitData {
             tree,
             parents: vec![],

@@ -232,7 +232,7 @@ fn patch_ids_and_cherry_mark_match_git_on_ranges_split_across_workers() {
         ..Default::default()
     };
     let result = repo
-        .rev_walk()
+        .revwalk()
         .rev_list_result(&["old-topic...topic"], &opts)
         .expect("cherry-mark");
     assert_eq!(result.cherry_matches.len(), 40);

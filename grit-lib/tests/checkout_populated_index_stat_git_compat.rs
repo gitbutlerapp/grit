@@ -36,7 +36,7 @@ fn tree_of_head(root: &Path) -> grit_lib::objects::ObjectId {
 }
 
 fn assert_index_stats_match_worktree(repo_root: &Path, repo: &Repository) {
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     for entry in index.entries() {
         if entry.stage() != 0 {
             continue;
@@ -65,7 +65,7 @@ fn populated_checkout_index_stat_matches_worktree_with_autocrlf() {
     .expect("open grit repo");
 
     let mut index = grit_lib::index::Index::new();
-    repo.index_handle().write(&mut index).expect("clear index");
+    repo.index().write(&mut index).expect("clear index");
     for i in 0..FILE_COUNT {
         let name = format!("file-{i:04}.txt");
         let _ = fs::remove_file(repo_root.join(&name));
@@ -100,7 +100,7 @@ fn first_status_after_populated_checkout_does_not_rewrite_warm_index() {
     .expect("open grit repo");
 
     let mut index = grit_lib::index::Index::new();
-    repo.index_handle().write(&mut index).expect("clear index");
+    repo.index().write(&mut index).expect("clear index");
     for i in 0..file_count {
         let name = format!("file-{i:04}.txt");
         let _ = fs::remove_file(repo_root.join(&name));
@@ -108,7 +108,7 @@ fn first_status_after_populated_checkout_does_not_rewrite_warm_index() {
     checkout_between_trees(&repo, None, &tree).expect("populated checkout");
     assert_index_stats_match_worktree(repo_root, &repo);
 
-    let index_path = repo.index_handle().path();
+    let index_path = repo.index().path();
     let opts = StatusOptions::default();
 
     let first_start = Instant::now();

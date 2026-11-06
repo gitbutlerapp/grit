@@ -32,7 +32,7 @@ fn describe_distance_matches_git_rev_list_count() {
     )
     .expect("open");
     let described = repo
-        .rev_walk()
+        .revwalk()
         .describe(
             "HEAD",
             &DescribeOptions {
@@ -71,7 +71,7 @@ fn describe_clock_skew_fixture_matches_git_rev_list_count() {
     tag_annotated(&repo, "t20", tagged, "m");
 
     let described = repo
-        .rev_walk()
+        .revwalk()
         .describe("main", &DescribeOptions::default())
         .expect("describe")
         .expect("tag");
@@ -126,7 +126,7 @@ fn assert_describe_matches_git_rev_list(
     opts: &DescribeOptions,
 ) {
     let described = repo
-        .rev_walk()
+        .revwalk()
         .describe(rev, opts)
         .expect("describe")
         .expect("tag expected");
@@ -172,7 +172,7 @@ fn describe_merge_ladder_matches_git() {
             .trim()
             .to_owned();
         let described = repo
-            .rev_walk()
+            .revwalk()
             .describe(rev, &opts)
             .expect("describe")
             .expect("tag expected");
@@ -199,7 +199,7 @@ fn describe_merge_ladder_matches_git() {
         );
     }
     assert_eq!(
-        repo.rev_walk()
+        repo.revwalk()
             .describe(
                 "main",
                 &DescribeOptions {
@@ -213,7 +213,7 @@ fn describe_merge_ladder_matches_git() {
         4
     );
     assert_eq!(
-        repo.rev_walk()
+        repo.revwalk()
             .describe(
                 "main~1",
                 &DescribeOptions {
@@ -227,7 +227,7 @@ fn describe_merge_ladder_matches_git() {
         2
     );
     assert_eq!(
-        repo.rev_walk()
+        repo.revwalk()
             .describe(
                 "feat_0",
                 &DescribeOptions {
@@ -308,7 +308,7 @@ fn describe_diamond_merge_matches_git() {
     )
     .expect("open");
     let described = repo
-        .rev_walk()
+        .revwalk()
         .describe("HEAD", &DescribeOptions::default())
         .expect("describe")
         .expect("some tag");

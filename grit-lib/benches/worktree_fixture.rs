@@ -375,7 +375,7 @@ impl WorktreeBenchFixtures {
             scan_100k_index.add_or_replace(entry);
         }
         scan_100k_index
-            .write(&scan_repo_100k.index_handle().path())
+            .write(&scan_repo_100k.index().path())
             .expect("write scan 100k index");
 
         let (status_nested_attr_repo, status_plain_l_repo) = build_status_nested_l_fixtures(base);

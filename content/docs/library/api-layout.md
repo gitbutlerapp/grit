@@ -23,6 +23,20 @@ For naming rules, semver policy on the path to **0.6.0**, and how to add a publi
 
 Cross-cutting entry points (`repo`, `error`, `porcelain`, `progress`, …) remain at the crate root.
 
+## `Repository` handles
+
+Each [`Repository`](rustdoc:grit_lib::repo::Repository) accessor returns a handle **named like the method** (mirrors [`objects`](rustdoc:grit_lib::objects::Objects) / [`references`](rustdoc:grit_lib::refs::References)):
+
+| Accessor | Handle type |
+| --- | --- |
+| [`index`](rustdoc:grit_lib::repo::Repository::index) | [`IndexFile`](rustdoc:grit_lib::index::IndexFile) |
+| [`revwalk`](rustdoc:grit_lib::repo::Repository::revwalk) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) |
+| [`remotes`](rustdoc:grit_lib::repo::Repository::remotes) | [`Remotes`](rustdoc:grit_lib::repo_handles::Remotes) |
+| [`worktrees`](rustdoc:grit_lib::repo::Repository::worktrees) | [`Worktrees`](rustdoc:grit_lib::repo_handles::Worktrees) |
+| [`bundles`](rustdoc:grit_lib::repo::Repository::bundles) | [`Bundles`](rustdoc:grit_lib::repo_handles::Bundles) |
+
+Use [`references`](rustdoc:grit_lib::repo::Repository::references) for resolve/list/update; the raw backend is [`references().store()`](rustdoc:grit_lib::refs::References::store) (same trait object as [`ref_store`](rustdoc:grit_lib::repo::Repository::ref_store)).
+
 ## Flat → canonical map
 
 The authoritative map lives in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml). CI checks that every `grit_lib::…` import in `grit-cli`, `grit-protocol`, `grit-examples`, `grit-utils`, `grit-test-support`, and `grit-lib/tests` appears in that file (`scripts/check_canonical_layout.py`, wired from `canonical_paths` integration test). Imports must use the **canonical domain path** (for example `grit_lib::objects::odb`, not the private flat `odb` module); `scripts/check_noncanonical_grit_lib_imports.py` enforces that (`no_noncanonical_grit_lib_imports` in the same integration test, and `scripts/tests/test_canonical_layout.py` in the docs CI job).

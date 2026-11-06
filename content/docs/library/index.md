@@ -12,15 +12,15 @@ These pages walk through every stable domain in `grit-lib`: repository discovery
 | [Config](config/) | `Repository::config()` / `Config` get/set |
 | [Objects](objects/) | `Objects` read/write |
 | [Refs](refs/) | `References`, reflog, backends |
-| [Index](staging/) | `IndexHandle`, stage, write tree |
+| [Index](staging/) | `IndexFile`, stage, write tree |
 | [Worktree](worktree/) | Linked worktrees, ignore, attributes |
 | [Diff](diff/) | `Diff` tree/index/worktree |
 | [Revwalk](revwalk/) | `RevWalk`, merge base |
 | [Merge](merge/) | Three-way tree merge, porcelain merge helpers |
-| [Network](network/) | `RepositoryRemotes` |
+| [Network](network/) | `Remotes` |
 | [Stash](stash/) | `RepositoryStash` |
 | [Notes](notes/) | `RepositoryNotes` |
-| [Bundle](bundle/) | `RepositoryBundles` |
+| [Bundle](bundle/) | `Bundles` |
 | [Maintenance](maintenance/) | Fsck object rules, hooks |
 | [API layout](api-layout/) | Flat → canonical module map |
 | [API map](api-map/) | Generated module and type index |

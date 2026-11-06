@@ -1183,7 +1183,7 @@ pub fn restore_hunks(
     if restore_worktree {
         // One index read serves the diff, the plan and the stat refresh; taking the lock first
         // keeps that read current for the (rare) refresh that has to be written.
-        let handle = repo.index_handle();
+        let handle = repo.index();
         let lock = if dry_run {
             None
         } else {
@@ -1374,8 +1374,7 @@ fn commit_worktree_reverse(
         .filter(|path| !still_different.contains(path))
         .collect();
     if refresh_stage0_index_stats_for_paths(repo, work_tree, &mut index, &touched)? {
-        repo.index_handle()
-            .commit_update(&mut lock, &mut index, false)?;
+        repo.index().commit_update(&mut lock, &mut index, false)?;
     }
     Ok(())
 }
@@ -1550,7 +1549,7 @@ pub fn stage_hunks(
 ) -> std::result::Result<StageHunksOutcome, HunkSelectError> {
     // Lock first so the selection is resolved against the index the patches are applied to. The
     // index is reloaded rather than kept across the diff, which would add it to the diff's peak.
-    let handle = repo.index_handle();
+    let handle = repo.index();
     let mut lock = if dry_run {
         None
     } else {
@@ -1731,7 +1730,7 @@ mod tests {
         )
         .unwrap();
         let grit_tree =
-            write_tree_from_index(repo.odb(), &repo.index_handle().load().unwrap(), "").unwrap();
+            write_tree_from_index(repo.odb(), &repo.index().load().unwrap(), "").unwrap();
 
         git(root, &["read-tree", "HEAD"]);
         let patch_path = root.join("partial.diff");
@@ -1949,7 +1948,7 @@ mod tests {
         git(root, &["add", "f.txt"]);
         git(root, &["commit", "-qm", "init"]);
         std::fs::write(root.join("f.txt"), b"two\n").unwrap();
-        let before = repo.index_handle().load().unwrap();
+        let before = repo.index().load().unwrap();
         let stale = HunkId::from_str("000000000001").unwrap();
         let err = stage_hunks(
             &repo,
@@ -1965,7 +1964,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, HunkSelectError::StaleId { .. }));
-        let after = repo.index_handle().load().unwrap();
+        let after = repo.index().load().unwrap();
         assert_eq!(before.entries.len(), after.entries.len());
     }
 
@@ -2183,12 +2182,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap();
-        assert!(repo
-            .index_handle()
-            .load()
-            .unwrap()
-            .get(b"new.txt", 0)
-            .is_some());
+        assert!(repo.index().load().unwrap().get(b"new.txt", 0).is_some());
         git(root, &["fsck"]);
     }
 
@@ -2227,7 +2221,7 @@ mod tests {
         )
         .unwrap();
         let grit_tree =
-            write_tree_from_index(repo.odb(), &repo.index_handle().load().unwrap(), "").unwrap();
+            write_tree_from_index(repo.odb(), &repo.index().load().unwrap(), "").unwrap();
         std::fs::write(&index_path, index_before).unwrap();
         let patch_path = root.join("partial.diff");
         std::fs::write(&patch_path, patch_text).unwrap();
@@ -2272,11 +2266,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            repo.index_handle()
-                .load()
-                .unwrap()
-                .get(b"gone.txt", 0)
-                .is_none(),
+            repo.index().load().unwrap().get(b"gone.txt", 0).is_none(),
             "index entry removed after staging delete hunk"
         );
     }
@@ -2704,7 +2694,7 @@ mod tests {
         .unwrap();
         assert_eq!(outcome.staged_lines["f.txt"], ["1-15"]);
         assert!(!root.join(".git/index.lock").exists());
-        let index = repo.index_handle().load().unwrap();
+        let index = repo.index().load().unwrap();
         let staged = repo
             .odb()
             .read(&index.get(b"f.txt", 0).unwrap().oid)
@@ -2873,7 +2863,7 @@ mod tests {
         )
         .unwrap();
         let grit_tree =
-            write_tree_from_index(repo.odb(), &repo.index_handle().load().unwrap(), "").unwrap();
+            write_tree_from_index(repo.odb(), &repo.index().load().unwrap(), "").unwrap();
         git(root, &["read-tree", "HEAD"]);
         let patch_path = root.join("partial.diff");
         std::fs::write(&patch_path, patch_text).unwrap();

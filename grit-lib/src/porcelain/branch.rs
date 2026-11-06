@@ -446,9 +446,9 @@ pub fn rename_branch(repo: &Repository, opts: &RenameBranchOptions) -> Result<Re
 
     if let Some(existing) = old_existing {
         let reflog_rename = branch_rename_reflog_update(repo, &old_ref, &new_ref, existing.oid);
-        if case_only_same_branch && repo.refs().format() == RefStorageFormat::Files {
+        if case_only_same_branch && repo.ref_store().format() == RefStorageFormat::Files {
             refs::commit_ref_batch_on_store(
-                repo.refs(),
+                repo.ref_store(),
                 &[],
                 &[reflog_rename],
                 &[RefCaseOnlyRename {
@@ -553,7 +553,7 @@ fn rename_existing_branch_ref(
         },
     });
 
-    refs::commit_ref_updates_on_store(repo.refs(), &updates, &[reflog_rename])?;
+    refs::commit_ref_updates_on_store(repo.ref_store(), &updates, &[reflog_rename])?;
     Ok(())
 }
 
@@ -593,14 +593,14 @@ fn retarget_branch_head_symrefs(repo: &Repository, old_short: &str, new_ref: &st
         refs::commit_ref_updates_on_store(store.as_ref(), std::slice::from_ref(&head_update), &[])?;
     }
     if repository_head_points_at(repo, &old_ref)? {
-        refs::commit_ref_updates_on_store(repo.refs(), &[head_update], &[])?;
+        refs::commit_ref_updates_on_store(repo.ref_store(), &[head_update], &[])?;
     }
     Ok(())
 }
 
 fn repository_head_points_at(repo: &Repository, refname: &str) -> Result<bool> {
     Ok(matches!(
-        repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?,
+        repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?,
         Some(RawRef::Symbolic(target)) if target == refname
     ))
 }

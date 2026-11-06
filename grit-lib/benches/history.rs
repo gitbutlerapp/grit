@@ -325,7 +325,7 @@ fn bench_describe_many_tags(c: &mut Criterion) {
                 b.iter(|| {
                     black_box(
                         fx.repo
-                            .rev_walk()
+                            .revwalk()
                             .describe(
                                 "HEAD",
                                 &DescribeOptions {

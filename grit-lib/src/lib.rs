@@ -45,7 +45,7 @@
 //!
 //! - [`Repository`](repo::Repository) exposes typed handles for objects, refs, the
 //!   index, config, revision walking, and diffs ([`objects::Objects`],
-//!   [`refs::References`], [`index::IndexHandle`],
+//!   [`refs::References`], [`index::IndexFile`],
 //!   [`config::Config`], [`revwalk::RevWalk`],
 //!   [`diff::Diff`]), plus [`repo_handles`] for remotes, worktrees, stash,
 //!   notes, reflogs, and bundles.
@@ -154,7 +154,7 @@ pub mod progress;
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 /// let _cfg = repo.config().snapshot()?;
-/// assert!(repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
+/// assert!(repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
 /// # Ok(())
 /// # }
 /// ```

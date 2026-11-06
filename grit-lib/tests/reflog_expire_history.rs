@@ -191,7 +191,7 @@ fn build_history(repo: &Repository) -> History {
         }
     }
     let feature_tip = repo
-        .refs()
+        .ref_store()
         .resolve("refs/heads/feature")
         .expect("resolve feature");
     let tip = b.commit(&[head], None);

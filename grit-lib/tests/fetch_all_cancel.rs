@@ -1,4 +1,4 @@
-//! `RepositoryRemotes::fetch_all` aborts when the cancel token fires.
+//! `Remotes::fetch_all` aborts when the cancel token fires.
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;

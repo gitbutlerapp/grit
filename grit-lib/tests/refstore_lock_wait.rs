@@ -324,7 +324,7 @@ fn repository_injected_store_uses_core_files_ref_lock_timeout_from_git_dir() {
             .with_work_tree(&work_tree)),
     )
     .expect("open");
-    match repo.refs().ref_lock_wait() {
+    match repo.ref_store().ref_lock_wait() {
         LockWait::Backoff { budget } => assert_eq!(budget, Duration::from_millis(7500)),
         other => panic!("expected Backoff from config, got {other:?}"),
     }

@@ -161,7 +161,9 @@ fn receive_pack_publishes_push_into_custom_primary() {
     assert!(outcome.updates[0].error.is_none());
 
     assert_eq!(
-        repo.refs().resolve("refs/heads/main").expect("resolve"),
+        repo.ref_store()
+            .resolve("refs/heads/main")
+            .expect("resolve"),
         tip
     );
     assert!(store.read(&tip).expect("read").is_some());

@@ -594,7 +594,7 @@ pub enum CommitGraphBuild {
 
 /// Build a reachable commit-graph in memory, for any object store.
 ///
-/// Reachable commits are discovered from [`Repository::refs`](crate::repo::Repository::refs)
+/// Reachable commits are discovered from [`Repository::ref_store`](crate::repo::Repository::ref_store)
 /// and read through [`Repository::odb`](crate::repo::Repository::odb), so this works for a
 /// custom primary ([`crate::odb::OdbBuilder::primary`]) as well as the files backend. Nothing is
 /// written: a custom store persists [`BuiltCommitGraph::bytes`] in its own storage and attaches
@@ -685,7 +685,7 @@ pub(crate) fn build_commit_graph_for_commits(
 
 /// Write a monolithic reachable commit-graph under `objects/info/commit-graph`.
 ///
-/// Reachable commits are discovered from [`Repository::refs`](crate::repo::Repository::refs)
+/// Reachable commits are discovered from [`Repository::ref_store`](crate::repo::Repository::ref_store)
 /// (reftable, packed-refs, and linked-worktree visibility), not by scanning `git_dir/refs` alone.
 ///
 /// When there are no reachable commits, nothing is written (matching `git commit-graph write`).
@@ -2126,7 +2126,7 @@ fn expire_reflogs_for_gc(repo: &Repository, dry_run: bool, now: i64) -> Result<u
     };
     let mut total = 0usize;
     let cache = ReflogExpiryCache::default();
-    for refname in reflog_refs_on_store(repo.refs())? {
+    for refname in reflog_refs_on_store(repo.ref_store())? {
         let result = expire_reflog_git_with_cache(
             repo,
             &refname,

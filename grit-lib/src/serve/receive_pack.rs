@@ -1364,7 +1364,7 @@ fn apply_commands_with_hooks(
         .map(|(idx, (cmd, _))| (idx, receive_command_store_update(cmd)))
         .collect();
 
-    let store = repo.refs();
+    let store = repo.ref_store();
     let ref_lock_wait = store.ref_lock_wait();
     if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();

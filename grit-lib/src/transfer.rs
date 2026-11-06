@@ -2169,7 +2169,7 @@ pub(crate) fn fetch_local_into(
     }
 
     let following_only = if opts.tags == TagMode::Following {
-        let tags_present = crate::fetch::tags_already_local(local.refs(), &remote_refs);
+        let tags_present = crate::fetch::tags_already_local(local.ref_store(), &remote_refs);
         apply_tag_mode(
             opts.tags,
             &remote_refs,
@@ -2871,7 +2871,8 @@ pub(crate) fn push_local_from(
     } else if !opts.dry_run && !non_atomic_batch.is_empty() {
         let indices: Vec<_> = non_atomic_batch.iter().map(|(idx, _)| *idx).collect();
         let updates: Vec<_> = non_atomic_batch.into_iter().map(|(_, u)| u).collect();
-        match crate::refs::commit_ref_updates_non_atomic_on_store(remote_repo.refs(), updates) {
+        match crate::refs::commit_ref_updates_non_atomic_on_store(remote_repo.ref_store(), updates)
+        {
             Ok(outcomes) => {
                 for (idx, outcome) in indices.into_iter().zip(outcomes) {
                     if let Err(err) = outcome.result {
@@ -4252,7 +4253,7 @@ pub(crate) fn apply_fetch_ref_updates(
     use crate::refs::store::{RawRef, ReflogUpdate};
     use std::collections::HashMap;
 
-    let store = local.refs();
+    let store = local.ref_store();
     let config = local.config().snapshot()?;
     let null_oid = store.reference_transaction_null_oid();
     let mode_by_local: HashMap<String, (UpdateMode, Option<ObjectId>, Option<ObjectId>)> = updates
@@ -4410,7 +4411,7 @@ pub(crate) fn prune_tracking_refs(
             note: Some("pruned (gone on remote)".to_owned()),
         });
     }
-    let store = local.refs();
+    let store = local.ref_store();
     crate::refs::commit_owned_ref_updates_on_store(store, batch)?;
     if !dry_run {
         for name in pruned_names {

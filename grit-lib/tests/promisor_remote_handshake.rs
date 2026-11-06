@@ -12,7 +12,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::promisor_remote::{PromisorField, PromisorRejection};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::CancelToken;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::fetch::NoProgress;
@@ -229,7 +229,7 @@ fn fetch_from(
         client,
         &mut conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch");
@@ -451,7 +451,7 @@ fn object_want_fetch_sends_no_reply() {
         client.path(),
         &mut conn,
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("object fetch");

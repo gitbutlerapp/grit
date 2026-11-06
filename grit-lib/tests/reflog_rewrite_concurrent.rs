@@ -52,7 +52,7 @@ fn expire_reflog_keeps_concurrent_append_files() {
     let repo = Repository::discover(Some(test.worktree()), &RepositoryOptions::from_process())
         .expect("open");
     let git_dir = repo.git_dir();
-    let store = repo.refs();
+    let store = repo.ref_store();
     let tip = repo.head_commit().expect("head");
     let wait = LockWait::files_ref_lock(repo.config().snapshot().ok().as_deref());
     append_on_store(store, "refs/heads/race", tip, 1_500_000_000, wait).expect("old");

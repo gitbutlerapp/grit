@@ -39,7 +39,7 @@ fn run() -> Result<()> {
     for entry in entries_from_tree(&repo, tree_oid)? {
         index.add_or_replace(entry);
     }
-    repo.index_handle().write(&mut index)?;
+    repo.index().write(&mut index)?;
     if cli.update_worktree {
         checkout_tree(&repo, tree_oid)?;
     }

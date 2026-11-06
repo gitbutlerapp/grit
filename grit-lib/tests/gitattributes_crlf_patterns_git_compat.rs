@@ -79,7 +79,7 @@ fn grit_add_honours_gitattributes_with_autocrlf_like_git() {
         ("d/x.q", 6),
         ("d/sub/y.q", 4),
     ];
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     for (path, size) in expected {
         let entry = index
             .get(path.as_bytes(), 0)

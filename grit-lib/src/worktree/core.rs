@@ -564,7 +564,7 @@ pub struct AddLinkedWorktreeOptions {
 }
 
 /// Options for locking during [`add_linked_worktree`] or
-/// [`RepositoryWorktrees::lock`](crate::repo_handles::RepositoryWorktrees::lock).
+/// [`Worktrees::lock`](crate::repo_handles::Worktrees::lock).
 #[derive(Debug, Clone, Default)]
 pub struct LockWorktreeOptions {
     /// Optional reason stored in the `locked` file (shown by `git worktree list`).
@@ -850,9 +850,9 @@ impl Drop for BranchRefRollback<'_> {
             return;
         }
         let _ = match self.previous_tip {
-            None => refs::delete_ref_on_store(self.repo.refs(), &self.branch_ref),
+            None => refs::delete_ref_on_store(self.repo.ref_store(), &self.branch_ref),
             Some(old) => refs::update_direct_ref_on_store(
-                self.repo.refs(),
+                self.repo.ref_store(),
                 self.repo.git_dir(),
                 &self.branch_ref,
                 &old,

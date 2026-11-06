@@ -95,7 +95,7 @@ fn staged_diff_on_wide_git_written_cache_tree_matches_git() {
     git(root, &["add", "-A"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let cache = index.cache_tree.as_ref().expect("git wrote a cache-tree");
     assert!(
         cache.children.len() > 100,

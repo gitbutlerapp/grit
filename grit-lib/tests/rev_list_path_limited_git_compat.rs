@@ -73,7 +73,7 @@ fn grit_path_commits(
     limit: Option<usize>,
 ) -> Vec<ObjectId> {
     let repo = open_grit_repo(wt);
-    repo.rev_walk()
+    repo.revwalk()
         .commits(
             tokens,
             &RevWalkListOptions {
@@ -133,7 +133,7 @@ fn path_limited_count_and_limit_match_git() {
         .parse::<usize>()
         .expect("git count");
     let grit_count = repo
-        .rev_walk()
+        .revwalk()
         .count(
             &["HEAD"],
             &RevWalkListOptions {
@@ -145,7 +145,7 @@ fn path_limited_count_and_limit_match_git() {
     assert_eq!(grit_count, git_count);
 
     let listed = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -158,7 +158,7 @@ fn path_limited_count_and_limit_match_git() {
 
     let git_limit = git(wt, &["rev-list", "-3", "HEAD", "--", path]);
     let grit_limit = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -285,7 +285,7 @@ fn path_limited_exclude_only_pathspec_matches_git() {
         .expect("git count");
     let repo = open_grit_repo(wt);
     let grit_count = repo
-        .rev_walk()
+        .revwalk()
         .count(
             &["HEAD"],
             &RevWalkListOptions {
@@ -330,7 +330,7 @@ fn path_limited_root_gitlink_matches_git() {
         .expect("git count");
     let repo = open_grit_repo(wt);
     let grit_count = repo
-        .rev_walk()
+        .revwalk()
         .count(
             &[orphan.as_str()],
             &RevWalkListOptions {
@@ -345,7 +345,7 @@ fn path_limited_root_gitlink_matches_git() {
 
 fn grit_path_count(wt: &std::path::Path, path: &str) -> usize {
     open_grit_repo(wt)
-        .rev_walk()
+        .revwalk()
         .count(
             &["HEAD"],
             &RevWalkListOptions {
@@ -630,7 +630,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
 
     let repo = open_grit_repo_from_cwd(wt, &sub);
     let grit_count_file = repo
-        .rev_walk()
+        .revwalk()
         .count(
             &["HEAD"],
             &RevWalkListOptions {
@@ -642,7 +642,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
     assert_eq!(grit_count_file, git_count_file);
 
     let grit_count_dot = repo
-        .rev_walk()
+        .revwalk()
         .count(
             &["HEAD"],
             &RevWalkListOptions {
@@ -669,7 +669,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .collect();
 
     let grit_commits = repo
-        .rev_walk()
+        .revwalk()
         .commits(
             &["HEAD"],
             &RevWalkListOptions {
@@ -702,7 +702,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
     assert_eq!(git_top_count, git_count_file);
 
     let grit_top_count = repo
-        .rev_walk()
+        .revwalk()
         .count(
             &["HEAD"],
             &RevWalkListOptions {
@@ -727,7 +727,7 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
             .parse()
             .expect("git count");
         let grit_count = repo
-            .rev_walk()
+            .revwalk()
             .count(
                 &["HEAD"],
                 &RevWalkListOptions {

@@ -536,7 +536,7 @@ fn rechain_reflog_after_delete(
 }
 
 /// [`delete_reflog_entries`] through an already-selected ref store (for example
-/// [`crate::repo::Repository::refs`], which may be an injected store).
+/// [`crate::repo::Repository::ref_store`], which may be an injected store).
 pub(crate) fn delete_reflog_entries_on_store(
     store: &dyn crate::refs::store::RefStore,
     refname: &str,
@@ -640,7 +640,7 @@ pub(crate) fn expire_reflog_unreachable(
         Err(_) => return Ok(0),
     };
 
-    let store = repo.refs();
+    let store = repo.ref_store();
     let snapshot = read_reflog_on_store(store, refname)?;
     if snapshot.is_empty() {
         return Ok(0);
@@ -1229,7 +1229,7 @@ fn is_head_ref(refname: &str) -> bool {
 /// Every ref tip that peels to a commit: the starting points for the reachability check of
 /// a `HEAD` reflog.
 fn head_reflog_tips(repo: &Repository, promised: &HashSet<ObjectId>) -> Vec<ObjectId> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let mut tips = Vec::new();
     if let Ok(oid) = store.resolve(RefNameRef::from_trusted("HEAD")) {
         tips.push(oid);
@@ -1440,7 +1440,7 @@ fn should_drop_reflog_entry(
 /// each entry are present, in one memoised walk. Neither check fetches missing objects:
 /// partial-clone promises count as present.
 ///
-/// The reflog is read from and rewritten through [`Repository::refs`], and ref tips for the
+/// The reflog is read from and rewritten through [`Repository::ref_store`], and ref tips for the
 /// reachability check are resolved there too, so an injected ref store is expired like the
 /// built-in backends. A dry run writes nothing. On the files backend a fully pruned log is
 /// kept as an empty file and gets `core.sharedRepository` permissions, as Git does.
@@ -1490,7 +1490,7 @@ pub(crate) fn expire_reflog_git_with_cache(
     now: i64,
     cache: &ReflogExpiryCache,
 ) -> Result<ReflogExpireResult> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let base_total = gc_global_total.unwrap_or_else(|| default_expire_total(now));
     let base_unreachable = gc_global_unreachable.unwrap_or_else(|| default_expire_unreachable(now));
     let (expire_total, expire_unreachable) = resolve_expire_for_ref(

@@ -81,7 +81,7 @@ pub fn append_head_checkout_reflog(
     let identity = checkout_reflog_identity(repo);
     let message = format!("checkout: moving from {from_label} to {to_label}");
     append_reflog_on_store(
-        repo.refs(),
+        repo.ref_store(),
         "HEAD",
         &old_oid,
         &new_oid,
@@ -104,7 +104,7 @@ pub fn create_branch_ref_with_reflog(
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     let message = format!("branch: Created from {source_label}");
     create_ref_with_reflog_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         &config,
         branch_ref,
@@ -133,7 +133,7 @@ pub(crate) fn reset_branch_ref_with_reflog(
     let reflog =
         if crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), branch_ref)
             || repo
-                .refs()
+                .ref_store()
                 .reflog_exists(RefNameRef::from_trusted(branch_ref))?
         {
             Some(ReflogUpdate {
@@ -154,7 +154,7 @@ pub(crate) fn reset_branch_ref_with_reflog(
         RawRef::Direct(oid) => (Expected::Oid(*oid), false),
     };
     commit_ref_update_on_store(
-        repo.refs(),
+        repo.ref_store(),
         RefUpdate {
             name: RefName::from_trusted(branch_ref.to_owned()),
             new_value: Some(RawRef::Direct(new_oid)),
@@ -171,9 +171,11 @@ pub(crate) fn reset_branch_ref_with_reflog(
 fn write_head(repo: &Repository, value: &RawRef) -> Result<()> {
     match value {
         RawRef::Symbolic(target) => {
-            write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", target)
+            write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", target)
         }
-        RawRef::Direct(oid) => update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", oid),
+        RawRef::Direct(oid) => {
+            update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", oid)
+        }
     }
 }
 
@@ -209,7 +211,7 @@ pub fn finish_switch_ref_updates(
     };
     if let Err(err) = write_head(repo, &head_after) {
         if let Some(refname) = created_branch {
-            let _ = delete_ref_on_store(repo.refs(), &refname);
+            let _ = delete_ref_on_store(repo.ref_store(), &refname);
         }
         return Err(err);
     }
@@ -222,7 +224,7 @@ pub fn finish_switch_ref_updates(
     if let Err(err) = append_head_checkout_reflog(repo, old_oid, target_oid, from_label, to_label) {
         let _ = restore_head(repo, head_before);
         if let Some(refname) = created_branch {
-            let _ = delete_ref_on_store(repo.refs(), &refname);
+            let _ = delete_ref_on_store(repo.ref_store(), &refname);
         }
         return Err(err);
     }

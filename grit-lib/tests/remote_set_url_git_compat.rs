@@ -1,4 +1,4 @@
-//! `RepositoryRemotes::set_url` and verbose remote metadata vs the system `git`.
+//! `Remotes::set_url` and verbose remote metadata vs the system `git`.
 
 use std::path::Path;
 use std::process::Command;

@@ -10,7 +10,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::CancelToken;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -105,7 +105,7 @@ fn omitted_blob_comes_from_the_lop_when_the_server_is_gone() {
         ("remote.lop.promisor".into(), "true".into()),
         ("promisor.acceptFromServer".into(), "knownUrl".into()),
     ];
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     assert_eq!(outcome.filter, Some(ObjectFilterSpec::BlobLimit(5 * 1024)));
     assert_eq!(
         outcome.promisor.as_ref().unwrap().decision.accepted_names(),
@@ -140,7 +140,7 @@ fn local_filtered_clone_is_served_in_process() {
     let mut opts = CloneOptions::new(format!("file://{}", server.display()), dest);
     opts.filter = Some(ObjectFilterSpec::BlobNone);
     opts.checkout = false;
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     assert!(outcome.transfer.objects >= 2);
     assert!(!outcome.repo.odb().contains(&big).unwrap());
 }
@@ -177,7 +177,7 @@ fn local_filtered_clone_sees_the_global_upload_pack_config() {
     opts.environment = env;
     opts.filter = Some(ObjectFilterSpec::BlobNone);
     opts.checkout = false;
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     assert!(!outcome.repo.odb().contains(&big).unwrap());
 }
 
@@ -192,7 +192,7 @@ fn filter_the_server_does_not_support_is_reported_as_ignored() {
     opts.environment = env;
     opts.filter = Some(ObjectFilterSpec::BlobNone);
     opts.checkout = false;
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     assert!(outcome.filter_ignored());
     assert!(!outcome.filter_sent);
     assert!(outcome.repo.odb().contains(&big).unwrap());
@@ -213,7 +213,7 @@ fn a_failing_local_server_reports_its_own_error() {
     opts.environment = env_with_global_config(&tmp.path().join("home"), "");
     opts.filter = Some(ObjectFilterSpec::BlobLimit(10 * 1024));
     opts.checkout = false;
-    let err = match clone(opts, &mut NoProgress, &CancelToken::never(), None) {
+    let err = match clone(opts, &mut NullProgress, &CancelToken::never(), None) {
         Ok(_) => panic!("clone of a broken server succeeded"),
         Err(err) => err,
     };
@@ -272,7 +272,7 @@ fn blobless_checkout_takes_each_blob_from_the_remote_that_has_it() {
     ];
     let fetcher: Arc<dyn PromisorFetcher> = Arc::new(DefaultPromisorFetcher::new(Arc::new(NoHttp)));
     opts.promisor_fetcher = Some(fetcher);
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     assert_eq!(outcome.files, 2);
     assert_eq!(std::fs::read(dest.join("small")).unwrap(), b"small\n");
     assert_eq!(std::fs::read(dest.join("big")).unwrap().len(), 20 * 1024);
@@ -316,7 +316,7 @@ fn a_checkout_whose_blobs_cannot_be_fetched_keeps_the_clone() {
     ];
     let fetcher: Arc<dyn PromisorFetcher> = Arc::new(DefaultPromisorFetcher::new(Arc::new(NoHttp)));
     opts.promisor_fetcher = Some(Arc::clone(&fetcher));
-    let err = match clone(opts, &mut NoProgress, &CancelToken::never(), None) {
+    let err = match clone(opts, &mut NullProgress, &CancelToken::never(), None) {
         Ok(_) => panic!("checkout of an unavailable blob succeeded"),
         Err(err) => err,
     };

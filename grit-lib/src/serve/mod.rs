@@ -413,7 +413,7 @@ pub(crate) fn for_each_advertised_ref(
     peel: Peel,
     mut f: impl FnMut(AdvertisedRefView<'_>) -> Result<ControlFlow<()>>,
 ) -> Result<()> {
-    let store = repo.refs();
+    let store = repo.ref_store();
     let git_dir = repo.git_dir();
     let linked_worktree = crate::worktree_ref::is_linked_worktree_git_dir(git_dir);
     let packed = (peel == Peel::Yes)

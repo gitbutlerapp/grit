@@ -605,7 +605,7 @@ struct RefTipPeeler<'a> {
 impl<'a> RefTipPeeler<'a> {
     fn new(repo: &'a Repository, targets: Option<&'a OidHashSet>) -> Self {
         // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
-        let packed = PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
+        let packed = PackedRefPeels::for_store(repo.ref_store(), repo.git_dir()).ok();
         Self {
             repo,
             packed,

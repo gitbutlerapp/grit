@@ -139,7 +139,7 @@ fn grit_index_batch_remove_replace_matches_git_ls_files_and_fsck() {
         .collect();
     index.remove_paths_and_insert(remove_paths.iter().map(|p| p.as_slice()), replacements);
 
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
 
     let git_lines = ls_files_stage_lines(tmp.path());
     let expected = expected_ls_files_lines(index.entries());

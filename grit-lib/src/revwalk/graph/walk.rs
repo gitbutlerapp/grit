@@ -17,5 +17,5 @@ pub fn list_commits_for_log_graph(
 ) -> Result<Vec<ObjectId>> {
     let mut opts = walk.clone();
     opts.graph = true;
-    repo.rev_walk().commits(tokens, &opts)
+    repo.revwalk().commits(tokens, &opts)
 }

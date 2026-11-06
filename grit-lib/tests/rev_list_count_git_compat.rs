@@ -113,7 +113,7 @@ fn assert_counts_match_git(wt: &Path, specs: &[&str]) {
     let repo = open(wt);
     let expected = git_count(wt, specs);
     let counted = repo
-        .rev_walk()
+        .revwalk()
         .count(specs, &RevWalkListOptions::default())
         .unwrap_or_else(|e| panic!("count({specs:?}): {e}"));
     assert_eq!(counted, expected, "RevWalk::count({specs:?}) vs git");
@@ -290,7 +290,7 @@ fn count_fails_like_git_on_a_bad_zlib_checksum_after_the_headers() {
     assert!(!git_status.ok(), "git must reject the corrupt commit");
     let repo = open(&wt);
     assert!(
-        repo.rev_walk()
+        repo.revwalk()
             .count(&["HEAD"], &RevWalkListOptions::default())
             .is_err(),
         "RevWalk::count must reject the corrupt commit"

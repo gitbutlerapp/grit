@@ -220,8 +220,8 @@ pub fn replay_commit(
                 identity: &committer_line,
                 reflog_message: &reflog_msg,
             };
-            if let Some(files) = repo.refs().as_files() {
-                crate::refs::verify_new_tip(repo.refs(), refname, new_oid)?;
+            if let Some(files) = repo.ref_store().as_files() {
+                crate::refs::verify_new_tip(repo.ref_store(), refname, new_oid)?;
                 let git_dir = files.git_dir();
                 let mut branch_ref_lock = BranchCommitRefLock::acquire(
                     git_dir,
@@ -276,7 +276,7 @@ pub fn replay_commit(
                 // Branch and reflog updates commit as one transaction here, so a failure leaves no
                 // reflog lines to undo.
                 if let Err(err) =
-                    update_branch_for_commit_on_store(repo.refs(), &ref_update, &config)
+                    update_branch_for_commit_on_store(repo.ref_store(), &ref_update, &config)
                 {
                     restore_worktree_after_failed_ref_commit(
                         repo,
@@ -303,7 +303,7 @@ pub fn replay_commit(
                 return Err(err);
             }
             if let Err(err) = update_detached_head_for_commit_on_store(
-                repo.refs(),
+                repo.ref_store(),
                 Some(head_oid),
                 new_oid,
                 &committer_line,

@@ -54,7 +54,7 @@ pub fn reachability_roots(repo: &Repository) -> Result<Vec<ObjectId>> {
         }
     }
 
-    roots.extend(reflog_oids_on_store(repo.refs())?);
+    roots.extend(reflog_oids_on_store(repo.ref_store())?);
     for wt in &worktrees {
         if wt.admin_dir != git_dir {
             roots.extend(all_reflog_oids(&wt.admin_dir)?);
@@ -531,7 +531,7 @@ mod tests {
                     }),
                 })
                 .unwrap();
-            repo.refs().prepare(txn).unwrap().commit().unwrap();
+            repo.ref_store().prepare(txn).unwrap().commit().unwrap();
         };
         update(c1, Expected::Missing, "branch: Created");
         update(c2, Expected::Oid(c1), "reset: moving to c2");

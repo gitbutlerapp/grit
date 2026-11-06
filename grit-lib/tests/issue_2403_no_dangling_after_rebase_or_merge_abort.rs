@@ -258,7 +258,7 @@ fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let auto_entry = index
         .entries()
         .iter()

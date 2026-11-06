@@ -83,7 +83,7 @@ fn repository_with_memory_ref_store() {
 
     let repo = repo.with_ref_store(store);
     assert_eq!(
-        repo.refs().format(),
+        repo.ref_store().format(),
         grit_lib::refs::store::RefStorageFormat::Memory
     );
 
@@ -177,7 +177,7 @@ fn injected_ref_updates_never_write_head_or_refs_directory() {
         "injected ref update must not create refs/ on disk"
     );
     assert_eq!(
-        repo.refs()
+        repo.ref_store()
             .read_raw(RefNameRef::from_trusted("HEAD"))
             .expect("HEAD")
             .and_then(|raw| match raw {
@@ -195,7 +195,7 @@ fn resolve_merge_source_uses_injected_branch_refs() {
     let git_dir = dir.path().join("merge-memory.git");
     let repo = open_memory_ref_repo(&git_dir);
     let tip = store_commit(&repo, "topic tip");
-    let store = repo.refs();
+    let store = repo.ref_store();
     store
         .prepare(
             RefTransaction::new()

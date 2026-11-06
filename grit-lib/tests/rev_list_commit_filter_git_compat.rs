@@ -581,7 +581,7 @@ fn mailmap_author_matches_git() {
         .commits;
         assert_eq!(grit_oids, git_oids, "mailmap (graph={use_graph})");
         let count = repo
-            .rev_walk()
+            .revwalk()
             .count(
                 &["main"],
                 &grit_lib::revwalk::RevWalkListOptions {
@@ -831,7 +831,7 @@ fn filtered_counts_across_shared_ancestry_and_exclusions_match_git() {
                 .expect("filter"),
         );
         let n = repo
-            .rev_walk()
+            .revwalk()
             .count(
                 &["main", "side"],
                 &grit_lib::revwalk::RevWalkListOptions {
@@ -1521,7 +1521,7 @@ fn left_right_count_with_author_filter_matches_git() {
     let git_left: usize = parts.next().unwrap().parse().unwrap();
     let git_right: usize = parts.next().unwrap().parse().unwrap();
     let grit = repo
-        .rev_walk()
+        .revwalk()
         .left_right_counts(
             &["left...right"],
             &RevWalkListOptions {

@@ -25,7 +25,7 @@ use super::undo_work::{read_undo_work, UndoWork};
 /// [`UndoOutcome::unrestored_edits`] then names the commit that holds the edits.
 ///
 /// Refs and `HEAD` are read and moved through the repository's ref store
-/// ([`Repository::refs`]); the undo record itself is a file under the git directory.
+/// ([`Repository::ref_store`]); the undo record itself is a file under the git directory.
 ///
 /// # Errors
 ///

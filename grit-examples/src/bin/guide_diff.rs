@@ -70,7 +70,7 @@ fn main() -> Result<()> {
     println!("tree_diff_end");
 
     if let Some(wt) = repo.work_tree() {
-        let mut index = repo.index_handle().load()?;
+        let mut index = repo.index().load()?;
         let wt_changes = diff_index_to_worktree(repo.odb(), &mut index, wt, false, false)?;
         println!("index_worktree_dirty={}", !wt_changes.is_empty());
     }

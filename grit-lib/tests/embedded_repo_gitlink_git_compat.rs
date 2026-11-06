@@ -63,7 +63,7 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
     )
     .expect("grit add all");
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let entry = index
         .get(b"inner", 0)
         .expect("index must contain inner gitlink, not inner/i blob");
@@ -150,7 +150,7 @@ fn add_does_not_treat_placeholder_dot_git_as_embedded_repo() {
     )
     .expect("grit add all");
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     assert!(
         index.get(b"inner", 0).is_none(),
         "placeholder inner/.git must not create a gitlink at inner"
@@ -223,7 +223,7 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
     )
     .expect("grit add all");
 
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let entry = index
         .get(b"inner", 0)
         .expect("linked nested worktree must stage as gitlink at inner");

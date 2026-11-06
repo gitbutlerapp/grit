@@ -804,7 +804,7 @@ impl DiffRepo {
     }
 
     pub fn load_index(&self) -> Index {
-        self.repo.index_handle().load().expect("index")
+        self.repo.index().load().expect("index")
     }
 }
 

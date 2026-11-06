@@ -37,7 +37,7 @@ fn repository_reflogs_public_methods() {
     )
     .expect("append");
 
-    let refs = handle.refs().expect("refs");
+    let refs = handle.list_reflog_refs().expect("refs");
     assert!(refs.iter().any(|r| r.as_str() == refname));
 
     let name = RefName::try_from(refname).expect("valid");

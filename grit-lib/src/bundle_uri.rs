@@ -408,7 +408,7 @@ fn seed_from(
         {
             continue;
         }
-        crate::refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), &name, &tip.oid)?;
+        crate::refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), &name, &tip.oid)?;
         refs.push((name, tip.oid));
     }
     discard_download(&dest)?;

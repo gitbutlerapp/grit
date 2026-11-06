@@ -3,7 +3,7 @@ title: Revwalk
 summary: Resolve revisions, walk history with rev-list, ranges (A..B), ordering, and merge bases.
 ---
 
-History walks start from one or more **tips** (resolved ref names or expressions), follow parent links, optionally subtract another set of tips, then sort the result. Prefer `Repository::rev_walk` (`RevWalk`) for resolve/list on an open handle; free functions live under `revwalk::rev_parse` and `revwalk::rev_list`.
+History walks start from one or more **tips** (resolved ref names or expressions), follow parent links, optionally subtract another set of tips, then sort the result. Prefer `Repository::revwalk` (`RevWalk`) for resolve/list on an open handle; free functions live under `revwalk::rev_parse` and `revwalk::rev_list`.
 
 ## Rev-parse
 

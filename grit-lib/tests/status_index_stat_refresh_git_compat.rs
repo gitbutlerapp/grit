@@ -49,7 +49,7 @@ fn status_trusts_git_refreshed_index_without_rehashing() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let index_mtime_before = fs::metadata(&index_path)
         .expect("index metadata")
         .modified()
@@ -178,7 +178,7 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let index_mtime_before = fs::metadata(&index_path)
         .expect("index metadata")
         .modified()
@@ -203,7 +203,7 @@ fn status_refreshes_index_stat_after_touch_and_second_run_is_faster() {
         "status must write refreshed stat data to the index"
     );
 
-    let reloaded = grit_repo.index_handle().load().expect("reload index");
+    let reloaded = grit_repo.index().load().expect("reload index");
     for entry in reloaded.entries() {
         if entry.stage() != 0 {
             continue;
@@ -281,7 +281,7 @@ fn status_succeeds_when_index_lock_held_after_touch() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let index_path = grit_repo.index_handle().path();
+    let index_path = grit_repo.index().path();
     let index_mtime_before = fs::metadata(&index_path)
         .expect("index metadata")
         .modified()
@@ -448,7 +448,7 @@ fn status_on_git_created_sparse_index_after_touch() {
         &RepositoryOptions::empty().with_work_tree(&repo_root),
     )
     .expect("open grit repo");
-    let index_before = Index::load(&grit_repo.index_handle().path()).expect("load sparse index");
+    let index_before = Index::load(&grit_repo.index().path()).expect("load sparse index");
     let placeholders_before = sparse_directory_placeholder_count(&index_before);
     assert!(
         placeholders_before > 0,
@@ -475,8 +475,7 @@ fn status_on_git_created_sparse_index_after_touch() {
         "mtime-only touches on materialized sparse paths must not appear unstaged"
     );
 
-    let index_after =
-        Index::load(&grit_repo.index_handle().path()).expect("reload index after status");
+    let index_after = Index::load(&grit_repo.index().path()).expect("reload index after status");
     assert_eq!(
         sparse_directory_placeholder_count(&index_after),
         placeholders_before,
@@ -526,7 +525,7 @@ fn status_deep_linear_tree_timing_oracle_once() {
     )
     .expect("open grit repo");
     let opts = StatusOptions::default();
-    let index_mtime_before = fs::metadata(grit_repo.index_handle().path())
+    let index_mtime_before = fs::metadata(grit_repo.index().path())
         .expect("index metadata")
         .modified()
         .expect("index mtime");
@@ -538,7 +537,7 @@ fn status_deep_linear_tree_timing_oracle_once() {
     assert!(first.unstaged.is_empty());
     assert!(first.untracked.is_empty());
 
-    let index_mtime_after_first = fs::metadata(grit_repo.index_handle().path())
+    let index_mtime_after_first = fs::metadata(grit_repo.index().path())
         .expect("index metadata")
         .modified()
         .expect("index mtime");
@@ -549,7 +548,7 @@ fn status_deep_linear_tree_timing_oracle_once() {
     let second_elapsed = second_start.elapsed();
     assert!(second.unstaged.is_empty());
 
-    let index_mtime_after_second = fs::metadata(grit_repo.index_handle().path())
+    let index_mtime_after_second = fs::metadata(grit_repo.index().path())
         .expect("index metadata")
         .modified()
         .expect("index mtime");

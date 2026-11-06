@@ -122,7 +122,7 @@ impl<'repo> Diff<'repo> {
     ///
     /// Returns index read errors.
     pub fn uncommitted(&self) -> Result<UncommittedDiff<'repo>> {
-        let index = self.repo.index_handle().load_preserving_sparse()?;
+        let index = self.repo.index().load_preserving_sparse()?;
         Ok(UncommittedDiff::new(self.repo, index))
     }
 

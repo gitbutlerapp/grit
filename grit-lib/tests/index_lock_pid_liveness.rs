@@ -235,7 +235,7 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
 
         fs::write(wt.join("n"), "written by git\n").expect("modify n");
         git(wt, &["add", "n"]);
-        let index = repo.index_handle().load().expect("read Git-written index");
+        let index = repo.index().load().expect("read Git-written index");
         let entry = index.get(b"n", 0).expect("Git-staged path");
         assert_eq!(entry.oid.to_hex(), git(wt, &["rev-parse", ":n"]).trim());
     }

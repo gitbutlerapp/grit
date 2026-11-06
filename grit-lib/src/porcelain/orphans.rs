@@ -128,9 +128,9 @@ fn orphan_hide_tips(
     // A `packed-refs` peel line already names the tag's target, so that tag is never read.
     // A malformed `packed-refs` only loses the shortcut.
     let listed = refs::list_refs_for_repository(repo, "refs/")?;
-    let peels = refs::PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
+    let peels = refs::PackedRefPeels::for_store(repo.ref_store(), repo.git_dir()).ok();
     let packed_written_at = repo
-        .refs()
+        .ref_store()
         .as_files()
         .and_then(|files| files.packed_refs_written_at())
         .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())

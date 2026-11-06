@@ -85,7 +85,7 @@ fn deep_range_count_with_git_and_grit_commit_graphs_matches_git() {
                 .expect("git count");
             assert_eq!(from_git, expected);
             assert_eq!(
-                repo.rev_walk()
+                repo.revwalk()
                     .count(&[range], &RevWalkListOptions::default())
                     .expect("count"),
                 from_git,
@@ -106,7 +106,7 @@ fn deep_range_count_with_git_and_grit_commit_graphs_matches_git() {
             assert_eq!(result.commit_count(), from_git);
         }
         assert_eq!(
-            repo.rev_walk()
+            repo.revwalk()
                 .count(&["HEAD"], &RevWalkListOptions::default())
                 .expect("full count"),
             1024
@@ -143,7 +143,7 @@ fn graph_range_counts_across_merges_and_skewed_dates_match_git() {
                 .parse()
                 .expect("git count");
             assert_eq!(
-                repo.rev_walk()
+                repo.revwalk()
                     .count(&tokens, &RevWalkListOptions::default())
                     .expect("count"),
                 expected,
@@ -418,7 +418,7 @@ fn unlimited_range_does_not_read_history_below_excluded_tip() {
 
     let spec = format!("{base_hex}..{tip_hex}");
     let walked = repo
-        .rev_walk()
+        .revwalk()
         .rev_list_result(&[spec.as_str()], &RevWalkListOptions::default())
         .expect("RevWalk::rev_list_result A..B");
     assert_eq!(walked.commits, range);
@@ -702,7 +702,7 @@ fn default_rev_list_options_max_count_matches_git_on_large_history() {
     );
 
     let walked = repo
-        .rev_walk()
+        .revwalk()
         .walk(&tip_hex, &opts)
         .expect("RevWalk::walk")
         .commits;
@@ -802,7 +802,7 @@ fn merge_tip_limit_two_uses_date_order_not_first_parent() {
     let merge_hex = merge.to_hex();
     let expected = support::git_rev_list(dir.path(), &["-n", "2", &merge_hex]);
     let result = repo
-        .rev_walk()
+        .revwalk()
         .rev_list_result(
             &[merge_hex.as_str()],
             &RevWalkListOptions {
@@ -833,7 +833,7 @@ fn non_commit_tip_skips_fast_path_and_matches_rev_list() {
         ..Default::default()
     };
     let general = rev_list(&repo, &["tree-tag".to_owned()], &[], &list_opts);
-    let walk = repo.rev_walk().rev_list_result(
+    let walk = repo.revwalk().rev_list_result(
         &["tree-tag"],
         &RevWalkListOptions {
             limit: Some(1),
@@ -857,7 +857,7 @@ fn rev_walk_single_positive_limit_one_matches_git() {
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
     let expected = support::git_rev_list(wt, &["-n", "1", "HEAD~20"]);
     let result = grit_repo
-        .rev_walk()
+        .revwalk()
         .rev_list_result(
             &["HEAD~20"],
             &RevWalkListOptions {
@@ -876,7 +876,7 @@ fn rev_walk_forwards_retain_commit_data() {
     let tip = write_tied_skewed_history(repo.odb(), 30);
     let tip_hex = tip.to_hex();
     let result = repo
-        .rev_walk()
+        .revwalk()
         .rev_list_result(
             &[tip_hex.as_str()],
             &RevWalkListOptions {
@@ -932,7 +932,7 @@ fn retained_page_from_git_pack_matches_git_order_and_commit_bodies() {
             support::git_rev_list(wt, &["-n", &limit.to_string(), "HEAD"])
         };
         let result = grit_repo
-            .rev_walk()
+            .revwalk()
             .rev_list_result(
                 &["HEAD"],
                 &RevWalkListOptions {
@@ -1087,7 +1087,7 @@ fn bounded_parent_filter_rev_walk_matches_git() {
             support::git_rev_list(wt, &["--no-merges", "-n", &n, "HEAD"])
         };
         let result = grit_repo
-            .rev_walk()
+            .revwalk()
             .rev_list_result(
                 &["HEAD"],
                 &RevWalkListOptions {

@@ -60,7 +60,7 @@ impl<'repo> RevWalk<'repo> {
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
     /// let _ = create_commit(&repo, &req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?;
-    /// let _ = repo.rev_walk().resolve("refs/heads/main")?;
+    /// let _ = repo.revwalk().resolve("refs/heads/main")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -232,7 +232,7 @@ mod commit_iter_tests {
             ..RevWalkCommitIterOptions::default()
         };
         let ids: Vec<_> = repo
-            .rev_walk()
+            .revwalk()
             .commits_iter("HEAD", &options)
             .expect("iter")
             .collect::<Result<Vec<_>>>()
@@ -243,7 +243,7 @@ mod commit_iter_tests {
     #[test]
     fn commits_iter_since_cutoff_filters_old_commits() {
         let (_dir, repo) = init_repo_with_commits(4);
-        let newest = repo.rev_walk().resolve("HEAD").expect("head");
+        let newest = repo.revwalk().resolve("HEAD").expect("head");
         let params = crate::rev_list::CommitStreamParams {
             limit: Some(10),
             ..Default::default()

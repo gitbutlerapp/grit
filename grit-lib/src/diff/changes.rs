@@ -889,10 +889,7 @@ mod tests {
     }
 
     fn unstaged(repo: &Repository) -> Vec<DiffEntry> {
-        let index = repo
-            .index_handle()
-            .load()
-            .unwrap_or_else(|e| panic!("index: {e}"));
+        let index = repo.index().load().unwrap_or_else(|e| panic!("index: {e}"));
         UncommittedDiff::new(repo, index)
             .unstaged_entries(RenameDetection::Off)
             .unwrap_or_else(|e| panic!("unstaged: {e}"))
@@ -921,10 +918,7 @@ mod tests {
         assert_eq!(same.path(), "same.txt");
         assert_eq!(same.status, DiffStatus::Modified);
 
-        let index = repo
-            .index_handle()
-            .load()
-            .unwrap_or_else(|e| panic!("index: {e}"));
+        let index = repo.index().load().unwrap_or_else(|e| panic!("index: {e}"));
         let changes = UncommittedDiff::new(&repo, index)
             .load_worktree_changes(entries)
             .unwrap_or_else(|e| panic!("load: {e}"));
@@ -946,10 +940,7 @@ mod tests {
         std::fs::write(dir.path().join("notes.txt"), b"a\nb\n").unwrap_or_else(|e| panic!("{e}"));
 
         let entries = unstaged(&repo);
-        let index = repo
-            .index_handle()
-            .load()
-            .unwrap_or_else(|e| panic!("index: {e}"));
+        let index = repo.index().load().unwrap_or_else(|e| panic!("index: {e}"));
         let mut diff = UncommittedDiff::new(&repo, index);
         let metrics = repo.odb().hot_path_metrics();
         metrics.set_blob_counting(true);

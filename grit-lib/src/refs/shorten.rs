@@ -39,7 +39,7 @@ fn expand_rule(rule_index: usize, short: &str) -> String {
 
 fn ref_exists(repo: &Repository, name: &str) -> Result<bool> {
     Ok(repo
-        .refs()
+        .ref_store()
         .read_raw(RefNameRef::from_trusted(name))?
         .is_some())
 }
@@ -49,7 +49,7 @@ pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<Str
     let refname_opts = RefFormatOptions::default();
     let mut name = start.to_owned();
     for _ in 0..SYMREF_MAXDEPTH {
-        let Some(raw) = repo.refs().read_raw(RefNameRef::from_trusted(&name))? else {
+        let Some(raw) = repo.ref_store().read_raw(RefNameRef::from_trusted(&name))? else {
             return Ok(name);
         };
         match raw {
@@ -94,7 +94,7 @@ pub fn expand_ref_dwim_full_name(repo: &Repository, spec: &str) -> Result<(usize
     let mut first = None;
     for rule in DWIM_RULES {
         let candidate = rule.replace("{0}", spec);
-        let Some(raw) = repo.refs().read_raw(RefNameRef::from_trusted(&candidate))? else {
+        let Some(raw) = repo.ref_store().read_raw(RefNameRef::from_trusted(&candidate))? else {
             continue;
         };
         let valid = match raw {

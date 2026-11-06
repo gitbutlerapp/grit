@@ -55,7 +55,7 @@ fn open_repo(root: &std::path::Path) -> Repository {
 }
 
 fn unstaged_name_status(repo: &Repository) -> Vec<String> {
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let mut lines: Vec<String> = diff_index_to_worktree(
         repo.odb(),
         &mut index,

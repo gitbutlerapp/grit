@@ -13,11 +13,11 @@
 //! When `extensions.refStorage = reftable`, the reftable backend is used
 //! instead.  The public API is the same; dispatch is handled internally.
 //!
-//! ## On-disk ref helpers vs `Repository::refs`
+//! ## On-disk ref helpers vs `Repository::ref_store`
 //!
 //! Many public functions take `git_dir: &Path` and open a fresh files or reftable backend via
 //! `store::open_ref_store` (writes also use an internal object-checked open). They bypass
-//! [`crate::repo::Repository::refs`] and any injected [`store::RefStore`]. Use them for bare git
+//! [`crate::repo::Repository::ref_store`] and any injected [`store::RefStore`]. Use them for bare git
 //! directories (alternates, receive-pack physical listings, tests). When you hold a
 //! [`crate::repo::Repository`], prefer [`crate::refs::References`] (`resolve`, `list`,
 //! `update`), [`list_refs_for_repository`], [`read_symbolic_ref_for_repository`],
@@ -32,7 +32,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! assert!(_repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
+//! assert!(_repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
 //!
 //! # Ok(())
 //! # }
@@ -340,13 +340,13 @@ pub(crate) fn store_write_value_on_store(
 /// Apply several ref updates in one [`RefStore::prepare`] / commit (all-or-nothing).
 ///
 /// Opens a fresh on-disk ref store for `git_dir` (object-checked open used internally)
-/// and bypasses [`crate::repo::Repository::refs`] and any injected
+/// and bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer `commit_ref_updates_on_store` with
-/// [`crate::repo::Repository::refs`] when you already have a
+/// [`crate::repo::Repository::ref_store`] when you already have a
 /// [`crate::repo::Repository`].
 ///
 /// Used by batch ref paths (`fetch`, `push`, `receive-pack`, [`crate::gc::update_refs`]).
-/// Like [`crate::repo::Repository::refs`], the batch is checked against `git_dir`'s objects
+/// Like [`crate::repo::Repository::ref_store`], the batch is checked against `git_dir`'s objects
 /// first.
 ///
 /// # Errors
@@ -377,7 +377,7 @@ pub fn commit_ref_updates_non_atomic(
 
 /// Apply several ref updates atomically through an existing [`crate::refs::store::RefStore`].
 ///
-/// Object checks are those of `store`: the store from [`crate::repo::Repository::refs`]
+/// Object checks are those of `store`: the store from [`crate::repo::Repository::ref_store`]
 /// verifies direct values against the repository's objects, a bare backend does not.
 ///
 /// # Errors
@@ -801,7 +801,7 @@ pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
 /// Resolve a reference to its target [`ObjectId`], following symbolic refs.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`crate::refs::References::resolve`]
 /// when you already have a [`crate::repo::Repository`].
 ///
@@ -863,9 +863,9 @@ pub enum RawRefLookup {
 /// Return whether `refname` exists as a ref in the repository's ref storage.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`crate::refs::store::RefStore::read_raw`]
-/// on [`crate::repo::Repository::refs`] when you already have a
+/// on [`crate::repo::Repository::ref_store`] when you already have a
 /// [`crate::repo::Repository`].
 ///
 /// This matches `git refs exists` / `git show-ref --exists`: no DWIM, no
@@ -969,7 +969,7 @@ fn packed_ref_namespace_conflict(git_dir: &Path, refname: &str) -> Result<bool> 
 /// Returns true if `packed-refs` in the ref storage directory for `refname` contains that name.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`].
 ///
 /// Used to mirror Git's `is_packed_transaction_needed` behaviour: deleting a ref may open a nested
@@ -2589,9 +2589,9 @@ pub(crate) fn test_commit(git_dir: &Path, message: &str) -> ObjectId {
 /// Write a symbolic ref (e.g. `NOTES_MERGE_REF` → `refs/notes/m`).
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`commit_ref_update_on_store`] with a
-/// symbolic [`crate::refs::store::RawRef`] on [`crate::repo::Repository::refs`]
+/// symbolic [`crate::refs::store::RawRef`] on [`crate::repo::Repository::ref_store`]
 /// when you already have a [`crate::repo::Repository`].
 ///
 /// For reftable-backed repositories this dispatches to the reftable writer.
@@ -2636,7 +2636,7 @@ pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
 /// Write a ref, creating parent directories as needed.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`crate::refs::References::update`]
 /// or [`update_direct_ref_on_store`] when you already have a [`crate::repo::Repository`].
 ///
@@ -2778,9 +2778,9 @@ fn write_ref_at_storage(
 /// while the loose-ref lock is held (atomic CAS for concurrent updaters).
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`commit_ref_update_on_store`] with
-/// [`crate::refs::store::Expected::Oid`] on [`crate::repo::Repository::refs`]
+/// [`crate::refs::store::Expected::Oid`] on [`crate::repo::Repository::ref_store`]
 /// when you already have a [`crate::repo::Repository`].
 ///
 /// # Errors
@@ -2806,9 +2806,9 @@ pub fn write_ref_cas(
 /// Like [`delete_ref`], but requires `expected_old` to match under the ref lock.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`commit_ref_update_on_store`] with
-/// [`crate::refs::store::Expected::Oid`] on [`crate::repo::Repository::refs`]
+/// [`crate::refs::store::Expected::Oid`] on [`crate::repo::Repository::ref_store`]
 /// when you already have a [`crate::repo::Repository`].
 ///
 /// # Errors
@@ -3112,9 +3112,9 @@ fn remove_dir_tree(dir: &Path) -> io::Result<()> {
 /// Delete a ref.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`commit_ref_update_on_store`] with
-/// `new_value: None` on [`crate::repo::Repository::refs`] when you already have a
+/// `new_value: None` on [`crate::repo::Repository::ref_store`] when you already have a
 /// [`crate::repo::Repository`].
 ///
 /// Dispatches to the reftable backend when `extensions.refStorage = reftable`.
@@ -3443,7 +3443,7 @@ fn write_packed_refs_tmp_and_rename(packed_path: &Path, body: &str) -> Result<()
 /// Read the symbolic ref target of `HEAD`.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`read_symbolic_ref_for_repository`] with `refname` `"HEAD"`
 /// when you already have a [`crate::repo::Repository`].
 ///
@@ -3459,7 +3459,7 @@ pub fn read_head(git_dir: &Path) -> Result<Option<String>> {
 /// Read symbolic target of any ref.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`read_symbolic_ref_for_repository`]
 /// when you already have a [`crate::repo::Repository`].
 ///
@@ -3484,7 +3484,7 @@ pub fn read_symbolic_ref_for_repository(
     refname: impl AsRef<RefNameRef>,
 ) -> Result<Option<String>> {
     let refname = refname.as_ref().as_str();
-    match repo.refs().read_raw(RefNameRef::from_trusted(refname))? {
+    match repo.ref_store().read_raw(RefNameRef::from_trusted(refname))? {
         Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
         Some(StoreRawRef::Direct(_)) | None => Ok(None),
     }
@@ -4558,9 +4558,9 @@ pub(crate) fn update_detached_head_for_commit_files_with_reference_transaction_h
 /// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
 ///
 /// Opens a fresh on-disk ref store for `git_dir` (object-checked open used internally)
-/// and bypasses [`crate::repo::Repository::refs`] and any injected
+/// and bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`update_branch_for_commit_on_store`] with
-/// [`crate::repo::Repository::refs`] when you already have a
+/// [`crate::repo::Repository::ref_store`] when you already have a
 /// [`crate::repo::Repository`].
 pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'_>) -> Result<()> {
     let config = ConfigSet::load(
@@ -4578,9 +4578,9 @@ pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'
 /// Like [`update_branch_for_commit`], using a repository config snapshot for reflog policy.
 ///
 /// Opens a fresh on-disk ref store for `git_dir` (object-checked open used internally)
-/// and bypasses [`crate::repo::Repository::refs`] and any injected
+/// and bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`update_branch_for_commit_on_store`] with
-/// [`crate::repo::Repository::refs`] when you already have a
+/// [`crate::repo::Repository::ref_store`] when you already have a
 /// [`crate::repo::Repository`]. Checked against that repository's objects like
 /// [`write_ref`]; see [`update_branch_for_commit_on_store`].
 pub(crate) fn update_branch_for_commit_with_config(
@@ -4803,7 +4803,7 @@ fn list_store_refs_with_name_prefix(
     prefix: &str,
 ) -> Result<Vec<(String, ObjectId)>> {
     let git_dir = repo.git_dir();
-    let mut results = collect_resolved_refs(repo.refs(), prefix)?;
+    let mut results = collect_resolved_refs(repo.ref_store(), prefix)?;
     if crate::worktree_ref::is_linked_worktree_git_dir(git_dir) {
         results.retain(|(name, _)| crate::worktree_ref::ref_visible_from_worktree(git_dir, name));
     }
@@ -4866,7 +4866,7 @@ pub(crate) fn list_refs_glob_in(
 /// List resolved refs under `git_dir` whose full names start with `prefix`.
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`list_refs_for_repository`] or
 /// [`crate::refs::References::list`] when you already have a
 /// [`crate::repo::Repository`].
@@ -4930,9 +4930,9 @@ pub(crate) fn list_refs_filtering_packed(
 /// Resolve a ref using Git DWIM rules (`expand_ref` / `repo_dwim_ref`).
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer [`crate::worktree_ref::resolve_ref_dwim`]
-/// with a closure over [`crate::repo::Repository::refs`] when you already have a
+/// with a closure over [`crate::repo::Repository::ref_store`] when you already have a
 /// [`crate::repo::Repository`].
 pub fn resolve_ref_dwim(git_dir: &Path, spec: &str) -> (usize, Option<ObjectId>) {
     crate::worktree_ref::resolve_ref_dwim(|candidate| resolve_ref(git_dir, candidate).ok(), spec)
@@ -4941,7 +4941,7 @@ pub fn resolve_ref_dwim(git_dir: &Path, spec: &str) -> (usize, Option<ObjectId>)
 /// List refs under `prefix` using **literal** on-disk paths (ignores `GIT_NAMESPACE`).
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. There is no injected-store equivalent; use
 /// [`list_refs_for_repository`] when you need the repository's ref backend.
 ///
@@ -5069,7 +5069,7 @@ pub fn list_refs_glob_for_repository(
 /// List refs matching a glob pattern (e.g. `refs/heads/topic/*`).
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer `list_refs_glob_for_repository` when you
 /// already have a [`crate::repo::Repository`].
 pub fn list_refs_glob(git_dir: &Path, pattern: &str) -> Result<Vec<(String, ObjectId)>> {
@@ -5219,7 +5219,7 @@ fn collect_loose_refs_into_map(
 /// Resolve `@{-N}` syntax to the branch name (not an OID).
 ///
 /// Opens a fresh on-disk ref store via [`crate::refs::store::open_ref_store`] and
-/// bypasses [`crate::repo::Repository::refs`] and any injected
+/// bypasses [`crate::repo::Repository::ref_store`] and any injected
 /// [`crate::refs::store::RefStore`]. Prefer resolving through a [`crate::repo::Repository`]
 /// and its ref store when the checkout stack lives there.
 ///

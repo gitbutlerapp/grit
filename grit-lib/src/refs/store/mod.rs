@@ -210,7 +210,7 @@ pub trait RefStore: Send + Sync + Debug {
     /// including appended reflog lines and removing a deleted ref's reflog.
     ///
     /// A backend does not look at objects. The store
-    /// [`Repository::refs`](crate::repo::Repository::refs) returns (whatever backend it
+    /// [`Repository::ref_store`](crate::repo::Repository::ref_store) returns (whatever backend it
     /// wraps, including one injected with
     /// [`RepositoryOptions::with_ref_store`](crate::environment::RepositoryOptions::with_ref_store)) adds one
     /// more check before calling the backend. Each direct value must name an object the
@@ -242,7 +242,7 @@ pub trait RefStore: Send + Sync + Debug {
     /// Check the objects `updates` would point refs at, without taking any lock or writing.
     ///
     /// This is the object check [`Self::prepare`] makes on the store
-    /// [`Repository::refs`](crate::repo::Repository::refs) returns. Writers that update a ref
+    /// [`Repository::ref_store`](crate::repo::Repository::ref_store) returns. Writers that update a ref
     /// without a transaction (the files-backend fast path behind
     /// [`update_branch_for_commit_on_store`](crate::refs::update_branch_for_commit_on_store))
     /// call it before locking. Backends do not look at objects, so the default accepts
@@ -369,7 +369,7 @@ pub trait RefStore: Send + Sync + Debug {
     ///
     /// The files backend reads `core.filesRefLockTimeout` from its git directory. Injected
     /// backends return Git's 100 ms default unless a wrapper (such as the store returned by
-    /// [`crate::repo::Repository::refs`]) overrides this from the repository git directory.
+    /// [`crate::repo::Repository::ref_store`]) overrides this from the repository git directory.
     fn ref_lock_wait(&self) -> LockWait {
         self.as_files()
             .map(|files| LockWait::files_ref_lock_for_git_dir(files.git_dir()))

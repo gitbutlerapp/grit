@@ -96,7 +96,7 @@ fn git_diff_files_quiet(worktree: &Path) -> bool {
 /// Issue #1001 on Windows: index OID matches the worktree but cached stat size is stale
 /// after write-tree commit persistence. Force the same shape on every platform.
 fn apply_stale_index_stat_size_mismatch(repo: &Repository, rel_path: &str, wrong_size: u32) {
-    let mut index = repo.index_handle().load().expect("load index");
+    let mut index = repo.index().load().expect("load index");
     let path_bytes = rel_path.as_bytes();
     let mut found = false;
     for entry in index.entries_mut() {
@@ -108,14 +108,12 @@ fn apply_stale_index_stat_size_mismatch(repo: &Repository, rel_path: &str, wrong
         }
     }
     assert!(found, "missing index entry for {rel_path}");
-    repo.index_handle()
-        .write(&mut index)
-        .expect("write stale index");
+    repo.index().write(&mut index).expect("write stale index");
 }
 
 fn refresh_index_stat_on_disk(repo: &Repository) {
     let work_tree = repo.work_tree().expect("work tree");
-    let mut index = repo.index_handle().load().expect("load index");
+    let mut index = repo.index().load().expect("load index");
     let rules = WorktreeRules::from_repository(repo, &index).ok();
     let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
     let config = repo.config().snapshot().ok();
@@ -130,7 +128,7 @@ fn refresh_index_stat_on_disk(repo: &Repository) {
         rules_arc.as_ref(),
     )
     .expect("refresh index stat");
-    repo.index_handle()
+    repo.index()
         .write(&mut index)
         .expect("write refreshed index");
 }
@@ -149,7 +147,7 @@ fn commit_staged_without_index_stat_refresh(
         } => (refname, short_name, oid),
         _ => panic!("expected branch head"),
     };
-    let mut index = repo.index_handle().load().expect("index");
+    let mut index = repo.index().load().expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("write tree");
     let commit_data = CommitData {
@@ -169,7 +167,7 @@ fn commit_staged_without_index_stat_refresh(
         .odb()
         .write(ObjectKind::Commit, &bytes)
         .expect("write commit");
-    repo.index_handle().write(&mut index).expect("write index");
+    repo.index().write(&mut index).expect("write index");
     let config = repo.config().snapshot().expect("config");
     update_branch_for_commit_with_config(
         repo.git_dir(),
@@ -187,7 +185,7 @@ fn commit_staged_without_index_stat_refresh(
 }
 
 fn index_entry(repo: &Repository, rel_path: &str) -> IndexEntry {
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let path_bytes = rel_path.as_bytes();
     index
         .entries()

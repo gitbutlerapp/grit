@@ -17,7 +17,7 @@ fn load_commits_attaches_branch_and_parents() -> grit_lib::error::Result<()> {
     commit_file(wt, "a.txt", "a\n", "root");
     commit_file(wt, "a.txt", "b\n", "tip");
     let repo = open_grit_repo(wt);
-    let head: ObjectId = repo.refs().resolve("HEAD")?;
+    let head: ObjectId = repo.ref_store().resolve("HEAD")?;
 
     let decorations = collect_decorations(&repo, false)?;
     let loaded = load_commits_with_decorations(&repo, std::slice::from_ref(&head), &decorations)?;
@@ -37,7 +37,7 @@ fn loaded_commit_reports_stored_and_derived_change_id() -> grit_lib::error::Resu
     let wt = hist.worktree();
     commit_file(wt, "a.txt", "a\n", "root");
     let repo = open_grit_repo(wt);
-    let head: ObjectId = repo.refs().resolve("HEAD")?;
+    let head: ObjectId = repo.ref_store().resolve("HEAD")?;
     let obj = repo.odb().read(&head)?;
     let data = parse_commit(&obj.data)?;
     let derived = load_commits_with_decorations(
@@ -70,7 +70,7 @@ fn reusing_parsed_commits_matches_reading_them() -> grit_lib::error::Result<()> 
     commit_file(wt, "a.txt", "b\n", "middle");
     commit_file(wt, "a.txt", "c\n", "tip");
     let repo = open_grit_repo(wt);
-    let tip: ObjectId = repo.refs().resolve("HEAD")?;
+    let tip: ObjectId = repo.ref_store().resolve("HEAD")?;
     let middle = parse_commit(&repo.odb().read(&tip)?.data)?.parents[0];
     let root = parse_commit(&repo.odb().read(&middle)?.data)?.parents[0];
     let oids = [tip, middle, root];

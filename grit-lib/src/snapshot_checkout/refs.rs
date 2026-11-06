@@ -74,13 +74,13 @@ pub(crate) fn log_head_move_as(
     let config = repo.config().snapshot()?;
     if !crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD")
         && !repo
-            .refs()
+            .ref_store()
             .reflog_exists(RefNameRef::from_trusted("HEAD"))?
     {
         return Ok(());
     }
     crate::refs::append_reflog_on_store(
-        repo.refs(),
+        repo.ref_store(),
         "HEAD",
         &old,
         &new,
@@ -110,7 +110,7 @@ pub(crate) fn swap_ref_as(
     let logged =
         crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), refname)
             || repo
-                .refs()
+                .ref_store()
                 .reflog_exists(RefNameRef::from_trusted(refname))?;
     let reflog = logged.then(|| ReflogUpdate {
         identity: identity.to_owned(),
@@ -121,7 +121,7 @@ pub(crate) fn swap_ref_as(
         new_oid: None,
     });
     match crate::refs::store_write_value_on_store(
-        repo.refs(),
+        repo.ref_store(),
         repo.git_dir(),
         refname,
         Some(RawRef::Direct(new)),

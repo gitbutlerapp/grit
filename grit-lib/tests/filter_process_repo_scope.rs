@@ -71,7 +71,7 @@ fn filter_process_reused_and_disable_persists_on_repository() {
     fs::write(wt.join("b.txt"), b"world\n").expect("b");
 
     let repo = Repository::open(&git_dir, &filter_options(wt, &state_file)).expect("open");
-    let index = repo.index_handle().load().expect("index");
+    let index = repo.index().load().expect("index");
     let rules = WorktreeRules::from_repository(&repo, &index).expect("rules");
     let filter_fp = Some(rules.filter_process());
     let conv = rules.conversion().clone();

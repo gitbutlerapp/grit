@@ -311,7 +311,7 @@ fn remote_fetch_cancels_during_stalled_discovery_without_shared_watch() {
                 .fetch(
                     &repo,
                     FetchOptions::default(),
-                    &mut NullProgress,
+                    &mut NoProgress,
                     &cancel,
                     Some(&DefaultHttpClientFactory::new()),
                 )
@@ -443,7 +443,7 @@ fn remote_fetch_cancels_during_stalled_upload_pack_post_without_shared_watch() {
                         http_protocol_version: Some(0),
                         ..FetchOptions::default()
                     },
-                    &mut NullProgress,
+                    &mut NoProgress,
                     &cancel,
                     Some(&DefaultHttpClientFactory::new()),
                 )
@@ -574,7 +574,7 @@ fn clone_cancels_during_stalled_bundle_uri_probe() {
                 checkout: false,
                 ..CloneOptions::new(url.clone(), dest)
             },
-            &mut NullProgress,
+            &mut NoProgress,
             &cancel,
             Some(&DefaultHttpClientFactory::new()),
         )

@@ -35,7 +35,7 @@ fn seed(path: &Path) -> ObjectId {
 fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
     assert_eq!(git(path, &["rev-parse", "HEAD"]).trim(), oid.to_hex());
     let repo = open(path);
-    assert_eq!(repo.refs().resolve("HEAD").unwrap(), oid);
+    assert_eq!(repo.ref_store().resolve("HEAD").unwrap(), oid);
     let expected = branch.map_or(HeadState::Detached { oid }, |name| HeadState::Branch {
         refname: format!("refs/heads/{name}"),
         short_name: name.into(),
@@ -54,7 +54,7 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
         let target = format!("refs/heads/{branch}");
         assert_eq!(git(path, &["symbolic-ref", "HEAD"]).trim(), target);
         assert_eq!(
-            repo.refs()
+            repo.ref_store()
                 .read_raw(RefNameRef::from_trusted("HEAD"))
                 .unwrap(),
             Some(RawRef::Symbolic(target.clone()))
@@ -62,7 +62,7 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
         assert!(row.contains(&format!("branch {target}")), "{row}");
     } else {
         assert_eq!(
-            repo.refs()
+            repo.ref_store()
                 .read_raw(RefNameRef::from_trusted("HEAD"))
                 .unwrap(),
             Some(RawRef::Direct(oid))

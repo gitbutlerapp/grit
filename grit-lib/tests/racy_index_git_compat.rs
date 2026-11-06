@@ -46,7 +46,7 @@ fn racy_same_size_change_matches_git_diff() {
         &RepositoryOptions::empty().with_work_tree(repo),
     )
     .expect("open");
-    let index = grit_repo.index_handle().load().expect("load index");
+    let index = grit_repo.index().load().expect("load index");
     let index_mtime = index.source_mtime.expect("index source mtime from disk");
     let entry = index
         .entries()
@@ -65,7 +65,7 @@ fn racy_same_size_change_matches_git_diff() {
         "system git must detect same-size racy modification"
     );
 
-    let mut grit_index = grit_repo.index_handle().load().expect("reload index");
+    let mut grit_index = grit_repo.index().load().expect("reload index");
     assert_eq!(
         grit_index.source_mtime,
         Some(index_mtime),
@@ -95,7 +95,7 @@ fn racy_unchanged_content_matches_git_clean_diff() {
         &RepositoryOptions::empty().with_work_tree(repo),
     )
     .expect("open");
-    let index = grit_repo.index_handle().load().expect("load index");
+    let index = grit_repo.index().load().expect("load index");
     let entry = index
         .entries()
         .iter()
@@ -111,7 +111,7 @@ fn racy_unchanged_content_matches_git_clean_diff() {
         "system git must treat racy clean file as unmodified: {git_names:?}"
     );
 
-    let mut grit_index = grit_repo.index_handle().load().expect("reload index");
+    let mut grit_index = grit_repo.index().load().expect("reload index");
     let diff = diff_index_to_worktree(grit_repo.odb(), &mut grit_index, repo, false, false)
         .expect("diff_index_to_worktree");
     assert!(

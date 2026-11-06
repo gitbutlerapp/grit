@@ -14,7 +14,7 @@ fn init_repo() -> (tempfile::TempDir, Repository) {
 }
 
 fn load_repo_index(repo: &Repository) -> Index {
-    Index::load(&repo.index_handle().path()).expect("load index")
+    Index::load(&repo.index().path()).expect("load index")
 }
 
 fn stage_paths(repo: &Repository, pathspecs: &[&str]) -> grit_lib::error::Result<()> {
