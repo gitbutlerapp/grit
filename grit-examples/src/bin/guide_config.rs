@@ -1,4 +1,5 @@
-//! Read and write repository-local config through [`ConfigHandle`](grit_lib::config::ConfigHandle).
+//! Read and write repository-local config through [`Repository::config`](grit_lib::repo::Repository::config)
+//! ([`grit_lib::config::Config`]).
 //!
 //! Source for the library guide "Config" page (included in the docs site).
 

@@ -38,10 +38,13 @@ mod tests {
 
     fn wrapped_lock_held(holder: Option<LockHolder>) -> (Error, PathBuf) {
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(Wrapper(LibError::LockHeld(LockHeldError {
-            path: path.clone(),
-            holder,
-        })))
+        let err = Error::new(Wrapper(
+            LockHeldError {
+                path: path.clone(),
+                holder,
+            }
+            .into(),
+        ))
         .context("staging files");
         (err, path)
     }
@@ -64,12 +67,13 @@ mod tests {
 
     #[test]
     fn context_wrapped_config_error_keeps_config_message() {
-        use grit_lib::error::{ConfigError, Error as LibError};
-        let err = Error::new(LibError::Config(ConfigError::BadConfigLineInFile {
+        use grit_lib::error::ConfigError;
+        let config_err = ConfigError::BadConfigLineInFile {
             file: ".git/config".into(),
             line: 6,
-        }))
-        .context("not in a repository");
+        };
+        let lib_err: LibError = config_err.into();
+        let err = Error::new(lib_err).context("not in a repository");
         let human = human_error_message(&err);
         assert!(human.contains("bad config line"), "{human}");
         assert!(!human.contains("not in a repository"), "{human}");
