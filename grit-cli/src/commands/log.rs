@@ -14,6 +14,7 @@ use grit_lib::revwalk::group_by::{
     GroupByAuthorOptions,
 };
 use grit_lib::revwalk::log_walk::{LogWalkCursor, LogWalkQuery};
+use grit_lib::revwalk::object_inspect::OidAbbrevBatch;
 use grit_lib::revwalk::CommitExtent;
 use grit_lib::revwalk::{
     display_parents_for_graph, log_graph_materialize, GraphCharset, GraphCommitInput, GraphLayout,
@@ -22,6 +23,7 @@ use grit_lib::revwalk::{
 use grit_lib::state::{resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -136,6 +138,9 @@ pub struct LogOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     graph_lines: Vec<String>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    graph_oneline_stream: Option<RefCell<GraphOnelineStream>>,
     #[serde(skip)]
     #[schemars(skip)]
     graph_note: Option<&'static str>,
@@ -259,7 +264,7 @@ impl HumanRender for LogOutcome {
         let color = use_color();
         let head_branch = self.head_branch.as_deref();
         if self.display.graph {
-            if self.graph_lines.is_empty() {
+            if self.graph_lines.is_empty() && self.graph_oneline_stream.is_none() {
                 if self.display.no_commits_in_repo {
                     outln!(w, "No commits yet.");
                 }
@@ -771,7 +776,7 @@ pub fn run(
             .rev_list_result(&token_refs, &fetch_opts)
             .context("could not list commits")?;
         let parsed = std::mem::take(&mut list_result.commit_data);
-        let graph_linkage = list_result.log_graph_linkage.clone();
+        let graph_linkage = list_result.log_graph_linkage.take();
         let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit, rev.reverse);
         return build_commit_outcome(
             &repo,
@@ -841,6 +846,61 @@ struct LogGraphBuild {
     linkage: Option<grit_lib::revwalk::rev_list::LogGraphLinkage>,
 }
 
+struct GraphOnelineStream {
+    oids: Vec<ObjectId>,
+    parent_map: HashMap<ObjectId, Vec<ObjectId>>,
+    subjects: HashMap<ObjectId, String>,
+    layout: GraphLayout,
+    next_commit: usize,
+    pending_block: Option<(Vec<GraphRenderedLine>, usize, ObjectId)>,
+}
+
+impl GraphOnelineStream {
+    fn fill_pending(&mut self, oid: ObjectId) {
+        let parents = self.parent_map.get(&oid).cloned().unwrap_or_default();
+        let block = self
+            .layout
+            .render_commit(&GraphCommitInput { id: oid, parents });
+        self.pending_block = Some((block, 0, oid));
+    }
+
+    /// Returns the next complete line to print, or `None` when finished.
+    fn next_line(
+        &mut self,
+        repo: &grit_lib::repo::Repository,
+        abbrev: &mut OidAbbrevBatch,
+    ) -> Result<Option<String>> {
+        let term_width = ui::terminal_width();
+        loop {
+            if let Some((block, line_idx, oid)) = self.pending_block.as_mut() {
+                if *line_idx < block.len() {
+                    let line = &block[*line_idx];
+                    *line_idx += 1;
+                    if line.kind == GraphLineKind::Padding {
+                        return Ok(Some(line.prefix.trim_end().to_owned()));
+                    }
+                    let lead = ui::display_width(&line.prefix);
+                    let subject = self
+                        .subjects
+                        .get(oid)
+                        .map(String::as_str)
+                        .unwrap_or("(no subject)");
+                    let text = render_oneline_oid_subject(repo, *oid, subject, abbrev)?;
+                    let text = ui::fit_width(&text, term_width.map(|w| w.saturating_sub(lead)));
+                    return Ok(Some(format!("{}{text}", line.prefix)));
+                }
+                self.pending_block = None;
+            }
+            if self.next_commit >= self.oids.len() {
+                return Ok(None);
+            }
+            let oid = self.oids[self.next_commit];
+            self.next_commit += 1;
+            self.fill_pending(oid);
+        }
+    }
+}
+
 fn graph_needs_parent_rewrite(
     has_pathspecs: bool,
     walk: &grit_lib::revwalk::RevWalkListOptions,
@@ -873,6 +933,7 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
         head_branch: None,
         oneline_lines: Vec::new(),
         graph_lines: Vec::new(),
+        graph_oneline_stream: None,
         graph_note: None,
         continuation_args: None,
         line_counts: Vec::new(),
@@ -1004,6 +1065,7 @@ fn build_author_group_outcome_from_groups(
         head_branch: None,
         oneline_lines: Vec::new(),
         graph_lines: Vec::new(),
+        graph_oneline_stream: None,
         graph_note: None,
         continuation_args: None,
         line_counts: Vec::new(),
@@ -1166,6 +1228,7 @@ fn build_commit_outcome(
             head_branch: None,
             oneline_lines: Vec::new(),
             graph_lines: Vec::new(),
+            graph_oneline_stream: None,
             graph_note: None,
             continuation_args,
             line_counts: Vec::new(),
@@ -1215,6 +1278,7 @@ fn build_commit_outcome(
             head_branch,
             oneline_lines,
             graph_lines: Vec::new(),
+            graph_oneline_stream: None,
             graph_note,
             continuation_args,
             line_counts: Vec::new(),
@@ -1226,7 +1290,9 @@ fn build_commit_outcome(
     }
 
     if graph_human_oneline {
-        let graph_lines = build_graph_oneline_lines(repo, oids, display, &graph)?;
+        let graph_oneline_stream = Some(RefCell::new(build_graph_oneline_stream(
+            repo, oids, display, graph,
+        )?));
         return Ok(LogOutcome {
             commits: Vec::new(),
             groups: None,
@@ -1237,7 +1303,8 @@ fn build_commit_outcome(
             display,
             head_branch: None,
             oneline_lines: Vec::new(),
-            graph_lines,
+            graph_lines: Vec::new(),
+            graph_oneline_stream,
             graph_note: None,
             continuation_args,
             line_counts: Vec::new(),
@@ -1280,6 +1347,7 @@ fn build_commit_outcome(
         Vec::new()
     };
 
+    let mut graph_for_text = graph;
     let graph_lines = if display.graph && output_mode == OutputMode::Human {
         build_graph_text_lines(
             repo,
@@ -1290,7 +1358,7 @@ fn build_commit_outcome(
             display,
             head_branch_ref,
             now,
-            &graph,
+            &mut graph_for_text,
         )?
     } else {
         Vec::new()
@@ -1307,6 +1375,7 @@ fn build_commit_outcome(
         head_branch,
         oneline_lines,
         graph_lines,
+        graph_oneline_stream: None,
         graph_note,
         continuation_args,
         line_counts,
@@ -1467,6 +1536,15 @@ impl LogStream {
 
 impl LogOutcome {
     fn render_graph_human(&self, w: &mut dyn Write) -> Result<()> {
+        if let Some(stream_cell) = &self.graph_oneline_stream {
+            let repo = context::discover()?;
+            let mut abbrev = crate::log_display::display_abbrev_batch(&repo)?;
+            let mut stream = stream_cell.borrow_mut();
+            while let Some(line) = stream.next_line(&repo, &mut abbrev)? {
+                outln!(w, "{line}");
+            }
+            return Ok(());
+        }
         let mut buf = String::new();
         for line in &self.graph_lines {
             buf.push_str(line);
@@ -1495,7 +1573,7 @@ fn graph_blocks(
             parents: parent_map.get(&id).cloned().unwrap_or_default(),
         })
         .collect();
-    GraphLayout::new(charset).render(&inputs)
+    GraphLayout::new_without_topology_recording(charset).render(&inputs)
 }
 
 /// Columns the commit line's graph prefix takes in each block.
@@ -1526,36 +1604,30 @@ fn join_graph_blocks(blocks: Vec<Vec<GraphRenderedLine>>, texts: Vec<String>) ->
     out
 }
 
-fn build_graph_oneline_lines(
+fn build_graph_oneline_stream(
     repo: &grit_lib::repo::Repository,
     oids: &[ObjectId],
     display: LogDisplayOptions,
-    graph: &LogGraphBuild,
-) -> Result<Vec<String>> {
-    let (parent_map, subjects) = if let Some(linkage) = graph.linkage.clone() {
+    mut graph: LogGraphBuild,
+) -> Result<GraphOnelineStream> {
+    let (parent_map, subjects) = if let Some(linkage) = graph.linkage.take() {
         (linkage.parents, linkage.subjects)
     } else {
         log_graph_materialize(repo, oids, graph.parent_rewrite)?
     };
-    let blocks = graph_blocks(oids, &parent_map, display);
-    let term_width = ui::terminal_width();
-    let mut abbrev_batch = crate::log_display::display_abbrev_batch(repo)?;
-    let texts = oids
-        .iter()
-        .zip(commit_prefix_widths(&blocks))
-        .map(|(&oid, lead)| {
-            let subject = subjects
-                .get(&oid)
-                .map(String::as_str)
-                .unwrap_or("(no subject)");
-            let text = render_oneline_oid_subject(repo, oid, subject, &mut abbrev_batch)?;
-            Ok(ui::fit_width(
-                &text,
-                term_width.map(|w| w.saturating_sub(lead)),
-            ))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(join_graph_blocks(blocks, texts))
+    let charset = if display.graph_ascii {
+        GraphCharset::ASCII
+    } else {
+        GraphCharset::UNICODE
+    };
+    Ok(GraphOnelineStream {
+        oids: oids.to_vec(),
+        parent_map,
+        subjects,
+        layout: GraphLayout::new_without_topology_recording(charset),
+        next_commit: 0,
+        pending_block: None,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1568,11 +1640,11 @@ fn build_graph_text_lines(
     display: LogDisplayOptions,
     head_branch: Option<&str>,
     now: i64,
-    graph: &LogGraphBuild,
+    graph: &mut LogGraphBuild,
 ) -> Result<Vec<String>> {
     let visible: HashSet<ObjectId> = oids.iter().copied().collect();
-    let parent_map = if let Some(linkage) = graph.linkage.as_ref() {
-        linkage.parents.clone()
+    let parent_map = if let Some(linkage) = graph.linkage.take() {
+        linkage.parents
     } else {
         display_parents_for_graph(repo, &visible, graph.parent_rewrite)?
     };

@@ -85,6 +85,7 @@ pub struct GraphLayout {
     lanes: Vec<Option<ObjectId>>,
     width: usize,
     topologies: Vec<GraphRowTopology>,
+    record_topology: bool,
 }
 
 impl Default for GraphLayout {
@@ -102,6 +103,20 @@ impl GraphLayout {
             lanes: Vec::new(),
             width: 0,
             topologies: Vec::new(),
+            record_topology: true,
+        }
+    }
+
+    /// Like [`Self::new`], but skips per-row [`GraphRowTopology`] bookkeeping (used by `log
+    /// --graph` production rendering; tests keep topology via [`Self::new`]).
+    #[must_use]
+    pub fn new_without_topology_recording(charset: GraphCharset) -> Self {
+        Self {
+            charset,
+            lanes: Vec::new(),
+            width: 0,
+            topologies: Vec::new(),
+            record_topology: false,
         }
     }
 
@@ -122,9 +137,15 @@ impl GraphLayout {
     pub fn render(&mut self, commits: &[GraphCommitInput]) -> Vec<Vec<GraphRenderedLine>> {
         let mut blocks = Vec::with_capacity(commits.len());
         for commit in commits {
-            blocks.push(self.render_one(commit));
+            blocks.push(self.render_commit(commit));
         }
         blocks
+    }
+
+    /// Render the next commit while preserving lane state across calls (full `log --graph` walk).
+    #[must_use]
+    pub fn render_commit(&mut self, commit: &GraphCommitInput) -> Vec<GraphRenderedLine> {
+        self.render_one(commit)
     }
 
     fn render_one(&mut self, commit: &GraphCommitInput) -> Vec<GraphRenderedLine> {
@@ -144,8 +165,10 @@ impl GraphLayout {
         let commit_lane = self.find_or_open_lane(commit.id);
         let prefix = self.format_commit_row(commit_lane, parents);
         self.width = self.width.max(prefix.len());
-        self.topologies
-            .push(self.record_topology(commit_lane, parents));
+        if self.record_topology {
+            self.topologies
+                .push(self.record_topology_row(commit_lane, parents));
+        }
         lines.push(GraphRenderedLine {
             prefix,
             kind: GraphLineKind::Commit,
@@ -195,54 +218,59 @@ impl GraphLayout {
 
     fn format_commit_row(&self, commit_lane: usize, parents: &[ObjectId]) -> String {
         let cols = self.lane_count().max(commit_lane + 1);
-        let mut parts = Vec::with_capacity(cols);
+        let mut out = String::with_capacity(cols.saturating_mul(4));
         for lane in 0..cols {
-            let cell = if lane == commit_lane {
+            if lane == commit_lane {
                 if parents.len() > 1 {
-                    format!("{}   ", self.charset.commit)
+                    out.push(self.charset.commit);
+                    out.push_str("   ");
                 } else {
-                    format!("{} ", self.charset.commit)
+                    out.push(self.charset.commit);
+                    out.push(' ');
                 }
             } else if self.lane_active(lane) {
-                format!("{} ", self.charset.pipe)
+                out.push(self.charset.pipe);
+                out.push(' ');
             } else {
-                "  ".to_owned()
-            };
-            parts.push(cell);
+                out.push_str("  ");
+            }
         }
-        parts.join("")
+        out
     }
 
     fn format_post_merge(&self, commit_lane: usize) -> String {
         let cols = self.lane_count().max(commit_lane + 2);
-        let mut parts = Vec::with_capacity(cols);
+        let mut out = String::with_capacity(cols.saturating_mul(4));
         for lane in 0..cols {
-            let cell = if lane == commit_lane {
-                format!("{} ", self.charset.pipe)
+            if lane == commit_lane {
+                out.push(self.charset.pipe);
+                out.push(' ');
             } else if lane == commit_lane + 1 {
-                format!("{} ", self.charset.merge_right)
+                out.push(self.charset.merge_right);
+                out.push(' ');
             } else if self.lane_active(lane) {
-                format!("{} ", self.charset.pipe)
+                out.push(self.charset.pipe);
+                out.push(' ');
             } else {
-                "  ".to_owned()
-            };
-            parts.push(cell);
+                out.push_str("  ");
+            }
         }
-        parts.join("")
+        out
     }
 
     fn format_convergence(&self) -> String {
         let cols = self.lane_count();
-        let mut parts = Vec::with_capacity(cols);
+        let mut out = String::with_capacity(cols.saturating_mul(4));
         for lane in 0..cols {
-            let cell = if lane == 0 {
-                format!("{}{} ", self.charset.pipe, self.charset.merge_left)
+            if lane == 0 {
+                out.push(self.charset.pipe);
+                out.push(self.charset.merge_left);
+                out.push(' ');
             } else {
-                "  ".to_owned()
-            };
-            parts.push(cell);
+                out.push_str("  ");
+            }
         }
-        parts.join("")
+        out
     }
 
     fn lane_count(&self) -> usize {
@@ -284,7 +312,7 @@ impl GraphLayout {
         self.lanes.retain(|slot| slot.is_some());
     }
 
-    fn record_topology(&self, commit_lane: usize, parents: &[ObjectId]) -> GraphRowTopology {
+    fn record_topology_row(&self, commit_lane: usize, parents: &[ObjectId]) -> GraphRowTopology {
         let mut edges = Vec::new();
         let parent_to_lane: HashMap<ObjectId, usize> = self
             .lanes
@@ -297,9 +325,10 @@ impl GraphLayout {
                 edges.push((commit_lane, parent_lane));
             }
         }
+        let lane_len = self.lanes.len();
         GraphRowTopology {
             commit_column: commit_lane,
-            active_lanes: (0..self.lanes.len()).collect(),
+            active_lanes: (0..lane_len).collect(),
             edges,
         }
     }

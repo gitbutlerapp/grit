@@ -2038,6 +2038,29 @@ pub fn rev_list(
         None
     };
 
+    let log_graph_linkage = if options.preserve_simplify_merges_graph_merges
+        && !options.objects
+        && !options.count
+        && !options.boundary
+    {
+        let mut linkage = LogGraphLinkage::default();
+        let cap = ordered.len();
+        linkage.parents.reserve(cap);
+        linkage.subjects.reserve(cap);
+        for &oid in &ordered {
+            linkage.parents.insert(oid, graph.parents_of(oid)?);
+            if graph.subject_of(oid).is_none() {
+                graph.cache_commit_subject(oid)?;
+            }
+            if let Some(subject) = graph.subject_of(oid) {
+                linkage.subjects.insert(oid, subject.to_owned());
+            }
+        }
+        Some(linkage)
+    } else {
+        None
+    };
+
     Ok(RevListResult {
         commits: ordered,
         objects,
@@ -2055,7 +2078,7 @@ pub fn rev_list(
         reachable_commit_count,
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit,
-        log_graph_linkage: None,
+        log_graph_linkage,
         commit_data: OidHashMap::default(),
     })
 }
@@ -2639,7 +2662,7 @@ fn walk_closure_first_parent_only(
         if !seen.insert(oid) {
             continue;
         }
-        let parents = graph.parents_of(oid)?;
+        let parents = graph.parents_of_ref(oid)?;
         if let Some(&p) = parents.first() {
             queue.push_back(p);
         }
@@ -2674,7 +2697,7 @@ fn walk_closure_ordered_excluding(
             continue;
         }
         order.push(oid);
-        for parent in graph.parents_of(oid)? {
+        for &parent in graph.parents_of_ref(oid)? {
             queue.push_back(parent);
         }
     }
@@ -2699,8 +2722,8 @@ fn walk_closure_ordered_with_missing(
         if excluded.contains(&oid) || seen.contains(&oid) {
             continue;
         }
-        let parents = match graph.parents_of(oid) {
-            Ok(parents) => parents,
+        let parents = match graph.parents_of_ref(oid) {
+            Ok(p) => p,
             Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
                 if missing_action != MissingAction::Error =>
             {
@@ -2713,7 +2736,7 @@ fn walk_closure_ordered_with_missing(
         };
         seen.insert(oid);
         order.push(oid);
-        for parent in parents {
+        for &parent in parents {
             queue.push_back(parent);
         }
     }
@@ -2755,7 +2778,8 @@ fn date_order_walk_through_dropped(
         if emit.contains(&item.oid) && emitted.insert(item.oid) {
             out.push(item.oid);
         }
-        for parent in graph.parents_of(item.oid)? {
+        let parents = graph.parents_of(item.oid)?;
+        for parent in parents {
             if !traversable.contains(&parent) {
                 continue;
             }
@@ -2788,7 +2812,7 @@ pub(crate) fn date_order_walk(
     let mut unfinished_children: HashMap<ObjectId, usize> =
         selected.iter().map(|&oid| (oid, 0usize)).collect();
     for &child in selected {
-        for parent in graph.parents_of(child)? {
+        for &parent in graph.parents_of_ref(child)? {
             if selected.contains(&parent) {
                 if let Some(count) = unfinished_children.get_mut(&parent) {
                     *count += 1;
@@ -2843,7 +2867,8 @@ pub(crate) fn date_order_walk(
             continue;
         }
         out.push(item.oid);
-        for parent in graph.parents_of(item.oid)? {
+        let parents: Vec<ObjectId> = graph.parents_of(item.oid)?;
+        for parent in parents {
             if !selected.contains(&parent) {
                 continue;
             }
@@ -2876,7 +2901,7 @@ fn topo_sort(
     let mut child_count: HashMap<ObjectId, usize> = selected.iter().map(|&oid| (oid, 0)).collect();
 
     for &oid in selected {
-        for parent in graph.parents_of(oid)? {
+        for &parent in graph.parents_of_ref(oid)? {
             if !selected.contains(&parent) {
                 continue;
             }
@@ -2904,7 +2929,8 @@ fn topo_sort(
     while let Some(Reverse(item)) = ready.pop() {
         let oid = item.oid;
         out.push(oid);
-        for parent in graph.parents_of(oid)? {
+        let parents: Vec<ObjectId> = graph.parents_of(oid)?;
+        for parent in parents {
             if !selected.contains(&parent) {
                 continue;
             }
@@ -2958,7 +2984,7 @@ fn graph_order_topo_sort(
     let mut child_count: HashMap<ObjectId, usize> = selected.iter().map(|&oid| (oid, 0)).collect();
 
     for &oid in selected {
-        for parent in graph.parents_of(oid)? {
+        for &parent in graph.parents_of_ref(oid)? {
             if !selected.contains(&parent) {
                 continue;
             }
@@ -2996,7 +3022,8 @@ fn graph_order_topo_sort(
     let mut out = Vec::with_capacity(selected.len());
     while let Some(oid) = ready.pop() {
         out.push(oid);
-        for parent in graph.parents_of(oid)? {
+        let parents: Vec<ObjectId> = graph.parents_of(oid)?;
+        for parent in parents {
             if !selected.contains(&parent) {
                 continue;
             }
@@ -3033,7 +3060,7 @@ fn reorder_adjacent_merge_parent_blocks(
     ordered: &mut [ObjectId],
 ) -> Result<()> {
     for index in 0..ordered.len() {
-        let parents = graph.parents_of(ordered[index])?;
+        let parents = graph.parents_of_ref(ordered[index])?;
         if parents.len() <= 1 || index + parents.len() >= ordered.len() {
             continue;
         }
@@ -7770,6 +7797,15 @@ impl<'r> CommitGraph<'r> {
         Ok(self.parents.get(&oid).cloned().unwrap_or_default())
     }
 
+    /// Cached parent list for `oid` without cloning.
+    ///
+    /// The slice is tied to this graph and remains valid until the next mutation of the same
+    /// graph (any `populate` / walk that can insert into `parents`).
+    pub(crate) fn parents_of_ref(&mut self, oid: ObjectId) -> Result<&[ObjectId]> {
+        self.populate(oid)?;
+        Ok(self.parents.get(&oid).map(Vec::as_slice).unwrap_or(&[]))
+    }
+
     /// Parent count for `--merges` / `--no-merges` output filtering.
     ///
     /// Under [`Self::first_parent_only`], traversal follows only the first parent but merge
@@ -10294,6 +10330,43 @@ mod tests {
         .expect("init");
         let repo = Repository::open(tmp.path(), &RepositoryOptions::empty()).expect("open");
         (tmp, repo)
+    }
+
+    #[test]
+    fn graph_walk_populates_log_graph_linkage() -> Result<()> {
+        let (_tmp, repo) = minimal_repo();
+        let blob = repo.odb().write(ObjectKind::Blob, b"p\n")?;
+        let mut tree_bytes = format!("100644 f\0").into_bytes();
+        tree_bytes.extend_from_slice(blob.as_bytes());
+        let tree = repo.odb().write(ObjectKind::Tree, &tree_bytes)?;
+        let ident = "A <a@b> 1 +0000";
+        let root_commit = repo.odb().write(
+            ObjectKind::Commit,
+            format!("tree {tree}\nauthor {ident}\ncommitter {ident}\n\nroot\n").as_bytes(),
+        )?;
+        let tip = repo.odb().write(
+            ObjectKind::Commit,
+            format!(
+                "tree {tree}\nparent {root_commit}\nauthor {ident}\ncommitter {ident}\n\ntip\n"
+            )
+            .as_bytes(),
+        )?;
+        std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n"))?;
+        let opts = RevListOptions {
+            ordering: OrderingMode::Topo,
+            preserve_simplify_merges_graph_merges: true,
+            ..RevListOptions::default()
+        };
+        let out = rev_list(&repo, &[String::from("main")], &[], &opts)?;
+        let linkage = out.log_graph_linkage.expect("linkage");
+        assert_eq!(out.commits.len(), 2);
+        for oid in &out.commits {
+            assert!(linkage.parents.contains_key(oid));
+            assert!(linkage.subjects.contains_key(oid));
+        }
+        assert_eq!(linkage.parents[&tip], vec![root_commit]);
+        assert_eq!(linkage.parents[&root_commit], Vec::<ObjectId>::new());
+        Ok(())
     }
 
     #[test]
