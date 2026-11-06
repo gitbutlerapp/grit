@@ -230,11 +230,11 @@ fn errors_serialize_with_kind_and_message() {
     assert_eq!(json["holder"]["pid"], 42);
     assert_eq!(json["holder"]["running"], true);
 
-    let err =
-        grit_lib::error::Error::Stash(grit_lib::stash::StashError::CouldNotRestoreUntracked {
-            path: "u.txt".into(),
-        });
+    let err = grit_lib::stash::StashError::CouldNotRestoreUntracked {
+        path: "u.txt".into(),
+    };
     let json = serde_json::to_value(&err).expect("stash untracked");
+    assert_eq!(json["kind"], "stash_could_not_restore_untracked");
     assert_eq!(json["path"], "u.txt");
 }
 

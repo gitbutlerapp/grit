@@ -166,7 +166,10 @@ impl StashError {
     }
 
     pub(crate) fn library(err: crate::error::Error) -> Self {
-        Self::Library(Box::new(err))
+        match err {
+            crate::error::Error::Cancelled => Self::Cancelled,
+            other => Self::Library(Box::new(other)),
+        }
     }
 
     pub(crate) fn from_apply_worktree(err: crate::error::ApplyError) -> Self {
@@ -178,13 +181,82 @@ impl StashError {
             other => Self::Apply(other),
         }
     }
+
+    /// Map into the library umbrella for non-stash APIs (merge autostash, pull, and similar).
+    pub(crate) fn into_error(self) -> crate::error::Error {
+        match self {
+            Self::Cancelled => crate::error::Error::Cancelled,
+            Self::Library(boxed) => *boxed,
+            other => crate::error::Error::Message(other.to_string()),
+        }
+    }
 }
 
 impl From<crate::error::Error> for StashError {
     fn from(err: crate::error::Error) -> Self {
         match err {
-            crate::error::Error::Stash(stash) => stash,
+            crate::error::Error::Cancelled => Self::Cancelled,
             other => Self::Library(Box::new(other)),
+        }
+    }
+}
+
+impl From<StashError> for crate::error::Error {
+    fn from(err: StashError) -> Self {
+        err.into_error()
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl StashError {
+    /// Stable `kind` slug when this error is serialized in the legacy `Error` JSON shape.
+    pub(crate) fn legacy_kind(&self) -> &'static str {
+        match self {
+            Self::CorruptStash { .. } => "corrupt_stash",
+            Self::NotFound { .. } => "stash_not_found",
+            Self::CommitNotOnStack { .. } => "stash_commit_not_on_stack",
+            Self::NoInitialCommit => "stash_no_initial_commit",
+            Self::BareRepository => "stash_bare_repository",
+            Self::IndexConflict => "stash_index_conflict",
+            Self::MissingHead => "stash_missing_head",
+            Self::WouldOverwriteLocalChanges { .. } => "stash_would_overwrite_local_changes",
+            Self::IndexWrite { .. } => "stash_index_write",
+            Self::SymlinkNotUtf8 => "stash_symlink_not_utf8",
+            Self::CouldNotRestoreUntracked { .. } => "stash_could_not_restore_untracked",
+            Self::PushValidation(_) => "stash_option_conflict",
+            Self::Cancelled => "cancelled",
+            Self::HunkSelection(_) => "hunk_selection",
+            Self::Branch(_) => "branch",
+            Self::Apply(_) => "apply",
+            Self::InvalidSignature(_) => "invalid_signature",
+            Self::WorktreeUpdateFailed { .. } => "stash_worktree_update_failed",
+            Self::Library(boxed) => boxed.kind_name(),
+        }
+    }
+}
+
+#[cfg(feature = "serde-models")]
+impl serde::Serialize for StashError {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        match self {
+            Self::CouldNotRestoreUntracked { path } => {
+                let mut out = serializer.serialize_struct("Error", 3)?;
+                out.serialize_field("kind", self.legacy_kind())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.serialize_field("path", path)?;
+                out.end()
+            }
+            _ => {
+                let mut out = serializer.serialize_struct("Error", 2)?;
+                out.serialize_field("kind", self.legacy_kind())?;
+                out.serialize_field("message", &self.to_string())?;
+                out.end()
+            }
         }
     }
 }

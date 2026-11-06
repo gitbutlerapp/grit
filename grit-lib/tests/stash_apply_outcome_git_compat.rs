@@ -3,7 +3,6 @@
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::error::Error;
 use grit_lib::operation::ConflictKind;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
@@ -238,10 +237,7 @@ fn entry_out_of_range_is_stash_not_found() {
         )
         .unwrap_err();
     assert!(
-        matches!(
-            err,
-            grit_lib::error::Error::Stash(grit_lib::stash::StashError::NotFound { n: 0 })
-        ),
+        matches!(err, grit_lib::stash::StashError::NotFound { n: 0 }),
         "{err:?}"
     );
     let err = repo
@@ -254,10 +250,7 @@ fn entry_out_of_range_is_stash_not_found() {
         )
         .unwrap_err();
     assert!(
-        matches!(
-            err,
-            grit_lib::error::Error::Stash(grit_lib::stash::StashError::NotFound { n: 3 })
-        ),
+        matches!(err, grit_lib::stash::StashError::NotFound { n: 3 }),
         "{err:?}"
     );
 }

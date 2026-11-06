@@ -2117,10 +2117,6 @@ pub enum Error {
     #[error(transparent)]
     Worktree(#[from] crate::worktree::WorktreeError),
 
-    /// Stash list, push, apply, pop, and drop failures ([`crate::stash::StashError`]).
-    #[error(transparent)]
-    Stash(#[from] crate::stash::StashError),
-
     /// Ref does not exist and has no reflog entries.
     #[error("unknown ref '{refname}'")]
     ReflogUnknownRef {
@@ -2526,7 +2522,6 @@ impl Error {
             Self::BranchListNamesDateSort => "branch_list_names_date_sort",
             Self::Tag(..) => "tag",
             Self::Worktree(..) => "worktree",
-            Self::Stash(..) => "stash",
             Self::ReflogUnknownRef { .. } => "reflog_unknown_ref",
             Self::ReflogInvalidSelector { .. } => "reflog_invalid_selector",
             Self::ReflogInvalidIndex { .. } => "reflog_invalid_index",

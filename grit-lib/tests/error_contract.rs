@@ -143,7 +143,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "branch_list_names_date_sort",
     "tag",
     "worktree",
-    "stash",
     "reflog_unknown_ref",
     "reflog_invalid_selector",
     "reflog_invalid_index",

@@ -327,9 +327,7 @@ mod raw_stash_paths {
                     &mut grit_lib::progress::NullProgress,
                     &grit_lib::progress::NeverCancel
                 ),
-                Err(grit_lib::error::Error::Stash(
-                    grit_lib::stash::StashError::WouldOverwriteLocalChanges { .. },
-                ))
+                Err(grit_lib::stash::StashError::WouldOverwriteLocalChanges { .. })
             ));
             let mut cmd = std::process::Command::new("git");
             grit_test_support::configure_git_env(&mut cmd);
@@ -885,9 +883,7 @@ mod grit_stash_push_non_utf8 {
             .expect_err("must reject before mutating tracked files");
         assert!(matches!(
             err,
-            grit_lib::error::Error::Stash(
-                grit_lib::stash::StashError::CouldNotRestoreUntracked { .. }
-            )
+            grit_lib::stash::StashError::CouldNotRestoreUntracked { .. }
         ));
 
         assert_eq!(std::fs::read(root.path().join("f")).unwrap(), b"a");

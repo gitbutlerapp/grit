@@ -810,7 +810,17 @@ pub fn indented_paths(paths: &[String]) -> String {
     out
 }
 
+fn guide_stash(err: &grit_lib::stash::StashError) -> Option<Error> {
+    match err {
+        grit_lib::stash::StashError::NotFound { n } => Some(stash_not_found(*n)),
+        _ => None,
+    }
+}
+
 fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
+    if let Some(err) = cause.downcast_ref::<grit_lib::stash::StashError>() {
+        return guide_stash(err);
+    }
     if let Some(err) = cause.downcast_ref::<PushPlanError>() {
         return guide_push_plan(err);
     }
@@ -1250,6 +1260,10 @@ fn git_dir_path_io_hint(path: &str) -> String {
 
 fn no_operation_in_progress(human: String) -> Error {
     guided(ErrorKind::NoOperationInProgress, human, None, None)
+}
+
+pub(crate) fn stash_not_found_cli(n: usize) -> anyhow::Error {
+    stash_not_found(n).into()
 }
 
 fn stash_not_found(n: usize) -> Error {

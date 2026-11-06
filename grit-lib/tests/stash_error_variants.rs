@@ -1,12 +1,11 @@
 //! Typed [`StashError`] coverage (task 7108).
 
-use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{parse_commit, NewCommit};
-use grit_lib::porcelain::stash_error::{CorruptStashReason, StashError};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::StashApplyOptions;
+use grit_lib::stash::{CorruptStashReason, StashError};
 use grit_lib::state::{resolve_head, HeadState};
 use grit_test_support::{git, git_cmd};
 use std::fs;
@@ -119,8 +118,12 @@ fn corrupt_stash_wrong_parent_count() {
 }
 
 #[test]
-fn stash_error_maps_to_umbrella_stash_variant() {
-    let err: Error = StashError::NotFound { n: 2 }.into();
-    assert!(matches!(err, Error::Stash(StashError::NotFound { n: 2 })));
-    assert_eq!(err.kind_name(), "stash");
+fn stash_error_legacy_kind_for_serialization() {
+    let json = serde_json::to_value(StashError::NotFound { n: 2 }).expect("json");
+    assert_eq!(json["kind"], "stash_not_found");
+    let json = serde_json::to_value(StashError::CouldNotRestoreUntracked {
+        path: "u.txt".into(),
+    })
+    .expect("json");
+    assert_eq!(json["kind"], "stash_could_not_restore_untracked");
 }

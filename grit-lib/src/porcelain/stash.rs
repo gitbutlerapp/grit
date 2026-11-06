@@ -75,6 +75,10 @@ use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use crate::progress::{
     poll_cancel, Cancel, NeverCancel, NullProgress, ProgressPhase, ProgressScope, ProgressSink,
 };
+
+fn poll_stash(scope: &mut ProgressScope<'_>) -> StashResult<()> {
+    scope.poll().map_err(StashError::library)
+}
 use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store};
 use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
 use crate::repo::Repository;
@@ -1787,7 +1791,7 @@ pub struct StashPushResult {
 /// # Errors
 ///
 /// [`Error::LockHeld`] when another process holds `index.lock`, with the repository
-/// unchanged; [`Error::Cancelled`] when `cancel` fired;
+/// unchanged; [`StashError::Cancelled`] when `cancel` or [`ProgressSink::should_cancel`] fired;
 /// otherwise the same as [`create_stash`] and [`store_stash`], plus checkout failures.
 pub(crate) fn push_stash(
     repo: &Repository,
@@ -1804,11 +1808,11 @@ pub(crate) fn push_stash(
     let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     let mut lock = repo.lock_index()?;
     let mut scope = ProgressScope::new(progress, cancel);
-    scope.poll()?;
+    poll_stash(&mut scope)?;
     let Some(built) = build_stash_commit(repo, work_tree, options, &mut scope)? else {
         return Ok(None);
     };
-    scope.poll()?;
+    poll_stash(&mut scope)?;
     store_stash(
         repo,
         built.w_commit,

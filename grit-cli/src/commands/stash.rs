@@ -859,9 +859,7 @@ fn map_stash_error(err: grit_lib::stash::StashError) -> anyhow::Error {
         StashError::NoInitialCommit => {
             anyhow::anyhow!("you do not have the initial commit yet")
         }
-        stash @ StashError::NotFound { .. } => {
-            crate::json_error::map_lib_error(Error::Stash(stash))
-        }
+        StashError::NotFound { n } => crate::error_map::stash_not_found_cli(n),
         StashError::CommitNotOnStack { oid } => anyhow::anyhow!(
             "stash commit {} is not on the stash stack; use `grit stash apply {}` instead",
             oid.to_short_hex(),
@@ -887,6 +885,6 @@ fn map_stash_error(err: grit_lib::stash::StashError) -> anyhow::Error {
         StashError::Branch(branch_err) => anyhow::Error::new(Error::Branch(branch_err)),
         StashError::HunkSelection(hunk_err) => anyhow::Error::new(Error::HunkSelection(hunk_err)),
         StashError::Library(lib) => crate::json_error::map_lib_error(*lib),
-        other => crate::json_error::map_lib_error(Error::Stash(other)),
+        other => anyhow::Error::new(other),
     }
 }
