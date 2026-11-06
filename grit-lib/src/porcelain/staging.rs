@@ -109,6 +109,7 @@ pub fn stage_worktree_changes(
         &mut index,
         work_tree,
         pathspecs,
+        None,
         UntrackedScan {
             ignored_mode: IgnoredMode::No,
             show_all: true,

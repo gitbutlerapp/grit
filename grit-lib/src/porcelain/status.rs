@@ -224,6 +224,18 @@ pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String
     status_path_matches(entry.path(), pathspecs)
 }
 
+/// Like [`status_diff_entry_matches_pathspec`], honoring [`Pathspec::globals`].
+pub fn status_diff_entry_matches_pathspec_typed(
+    repo: &Repository,
+    entry: &DiffEntry,
+    pathspec: &crate::pathspec::Pathspec,
+) -> Result<bool> {
+    if pathspec.is_entire_tree() {
+        return Ok(true);
+    }
+    pathspec.matches_change(repo, entry.path(), entry.old_path.as_deref())
+}
+
 /// Apply `status.renameLimit` over `diff.renameLimit` for rename scoring (Git status precedence).
 fn config_for_status_rename_detection(config: &ConfigSet) -> ConfigSet {
     let mut out = config.clone();
@@ -507,6 +519,7 @@ pub fn collect_untracked_and_ignored_with_cache(
         index,
         work_tree,
         pathspecs,
+        None,
         UntrackedScan {
             ignored_mode,
             show_all,
@@ -565,6 +578,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
             index,
             work_tree,
             &[],
+            None,
             UntrackedScan {
                 ignored_mode: IgnoredMode::No,
                 show_all: false,
@@ -591,15 +605,21 @@ pub fn collect_untracked_and_ignored_with_rules_and_cancel(
     work_tree: &Path,
     ignored_mode: IgnoredMode,
     show_all: bool,
-    pathspecs: &[String],
+    pathspec: &crate::pathspec::Pathspec,
     rules: &crate::worktree_rules::WorktreeRules,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<(Vec<String>, Vec<String>, UntrackedCollectMeta)> {
+    let specs = if pathspec.is_entire_tree() {
+        &[] as &[String]
+    } else {
+        pathspec.specs()
+    };
     collect_untracked_and_ignored_inner(
         repo,
         index,
         work_tree,
-        pathspecs,
+        specs,
+        Some(pathspec),
         UntrackedScan {
             ignored_mode,
             show_all,
@@ -687,6 +707,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
     index: &mut Index,
     work_tree: &Path,
     pathspecs: &[String],
+    pathspec_typed: Option<&crate::pathspec::Pathspec>,
     scan: UntrackedScan,
     rules: &crate::worktree_rules::WorktreeRules,
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
@@ -700,6 +721,9 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         cache_miss,
         clean_unit_dirs,
     } = scan;
+    let pathspec_globals = pathspec_typed
+        .map(crate::pathspec::Pathspec::globals)
+        .unwrap_or_default();
     let clean_unit_dirs = &clean_unit_dirs;
     // Keep parity with historical status behavior in tests that rely on broad untracked scans
     // (including detached-HEAD wtstatus cases): when no explicit pathspec is requested, avoid
@@ -815,6 +839,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
         "",
         work_tree,
         effective_pathspecs,
+        pathspec_globals,
         Some(rules),
         &mut untracked,
         &mut ignored,
@@ -909,6 +934,7 @@ pub fn expand_untracked_for_staging_with_rules(
                 &dir,
                 &crate::repo_relpath::worktree_abs(work_tree, &dir),
                 pathspecs,
+                crate::pathspec::PathspecGlobalFlags::default(),
                 Some(rules),
                 &mut expanded,
                 &mut ignored,
@@ -1039,6 +1065,7 @@ fn collect_untracked_parallel_top_level(
                 entry,
                 name,
                 pathspecs,
+                crate::pathspec::PathspecGlobalFlags::default(),
                 None,
                 local_untracked,
                 local_ignored,
@@ -1081,6 +1108,7 @@ fn collect_untracked_parallel_top_level(
                     entry,
                     name,
                     pathspecs,
+                    crate::pathspec::PathspecGlobalFlags::default(),
                     None,
                     &mut untracked,
                     &mut ignored,
@@ -1162,6 +1190,7 @@ fn collect_untracked_parallel_top_level(
                 &task.entry,
                 &task.name,
                 pathspecs,
+                crate::pathspec::PathspecGlobalFlags::default(),
                 None,
                 &mut local_untracked,
                 &mut local_ignored,
@@ -1320,6 +1349,7 @@ fn visit_untracked_dir_entry(
     entry: &DirEntry,
     name: &[u8],
     pathspecs: &[String],
+    pathspec_globals: crate::pathspec::PathspecGlobalFlags,
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
@@ -1353,7 +1383,7 @@ fn visit_untracked_dir_entry(
     let child_rel_match = crate::repo_relpath::as_utf8_for_matching(&child_rel);
 
     if is_dir {
-        if !pathspec_may_match_directory(&child_rel, pathspecs) {
+        if !pathspec_may_match_directory_with_globals(&child_rel, pathspecs, pathspec_globals) {
             return Ok(UntrackedWalkStep::Continue);
         }
         let path = entry.path();
@@ -1372,6 +1402,7 @@ fn visit_untracked_dir_entry(
             &child_rel,
             &path,
             pathspecs,
+            pathspec_globals,
             rules,
             untracked_out,
             ignored_out,
@@ -1385,8 +1416,14 @@ fn visit_untracked_dir_entry(
         if crate::read_dir_kind::entry_is_git_ignored_special(entry).unwrap_or(true) {
             return Ok(UntrackedWalkStep::Continue);
         }
-        if !status_path_matches_worktree_with_rules(
-            repo, index, work_tree, &child_rel, pathspecs, rules,
+        if !status_path_matches_worktree_with_rules_and_globals(
+            repo,
+            index,
+            work_tree,
+            &child_rel,
+            pathspecs,
+            rules,
+            pathspec_globals,
         ) {
             return Ok(UntrackedWalkStep::Continue);
         }
@@ -1421,6 +1458,7 @@ fn visit_untracked_read_dir_lazy(
     tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     rel: &str,
     pathspecs: &[String],
+    pathspec_globals: crate::pathspec::PathspecGlobalFlags,
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
@@ -1456,6 +1494,7 @@ fn visit_untracked_read_dir_lazy(
                 &entry,
                 &name,
                 pathspecs,
+                pathspec_globals,
                 rules,
                 untracked_out,
                 ignored_out,
@@ -1502,6 +1541,7 @@ fn visit_untracked_node(
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
+    pathspec_globals: crate::pathspec::PathspecGlobalFlags,
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
@@ -1538,6 +1578,7 @@ fn visit_untracked_node(
             tracked_paths,
             rel,
             pathspecs,
+            pathspec_globals,
             rules,
             untracked_out,
             ignored_out,
@@ -1571,6 +1612,7 @@ fn visit_untracked_node(
             tracked_paths,
             rel,
             pathspecs,
+            pathspec_globals,
             rules,
             untracked_out,
             ignored_out,
@@ -1606,6 +1648,7 @@ fn visit_untracked_node(
                 entry,
                 name,
                 pathspecs,
+                pathspec_globals,
                 rules,
                 untracked_out,
                 ignored_out,
@@ -1684,6 +1727,7 @@ fn visit_untracked_directory(
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
+    pathspec_globals: crate::pathspec::PathspecGlobalFlags,
     rules: Option<&crate::worktree_rules::WorktreeRules>,
     untracked_out: &mut Vec<String>,
     ignored_out: &mut Vec<String>,
@@ -1718,6 +1762,7 @@ fn visit_untracked_directory(
             rel,
             abs,
             pathspecs,
+            pathspec_globals,
             rules,
             untracked_out,
             ignored_out,
@@ -1759,10 +1804,19 @@ fn visit_untracked_directory(
 
     if ignored_mode == IgnoredMode::Traditional
         && !show_all
-        && directory_pathspec_matches_self(rel, pathspecs)
+        && directory_pathspec_matches_self(rel, pathspecs, pathspec_globals)
     {
         if let Some(dir_line) = traditional_normal_directory_only(
-            repo, index, work_tree, gitlinks, matcher, rel, abs, pathspecs, rules,
+            repo,
+            index,
+            work_tree,
+            gitlinks,
+            matcher,
+            rel,
+            abs,
+            pathspecs,
+            pathspec_globals,
+            rules,
         )? {
             ignored_out.push(dir_line);
             return Ok(());
@@ -1785,6 +1839,7 @@ fn visit_untracked_directory(
             rel,
             abs,
             pathspecs,
+            pathspec_globals,
             rules,
             untracked_out,
             ignored_out,
@@ -1798,7 +1853,8 @@ fn visit_untracked_directory(
     // entry without enumerating every child, then collapse to `dir/` in normal mode.
     if !show_all
         && ignored_mode == IgnoredMode::No
-        && (pathspecs.is_empty() || directory_pathspec_matches_self(rel, pathspecs))
+        && (pathspecs.is_empty()
+            || directory_pathspec_matches_self(rel, pathspecs, pathspec_globals))
     {
         let found = Cell::new(false);
         visit_untracked_node(
@@ -1816,6 +1872,7 @@ fn visit_untracked_directory(
             rel,
             abs,
             pathspecs,
+            pathspec_globals,
             rules,
             untracked_out,
             ignored_out,
@@ -1851,6 +1908,7 @@ fn visit_untracked_directory(
         rel,
         abs,
         pathspecs,
+        pathspec_globals,
         rules,
         &mut sub_untracked,
         &mut sub_ignored,
@@ -1866,7 +1924,7 @@ fn visit_untracked_directory(
 
     // `--untracked-files=normal`: collapse subtrees like Git's `walk_for_untracked`.
     if !sub_untracked.is_empty() && !sub_ignored.is_empty() {
-        if !rel.is_empty() && directory_pathspec_matches_self(rel, pathspecs) {
+        if !rel.is_empty() && directory_pathspec_matches_self(rel, pathspecs, pathspec_globals) {
             untracked_out.push(format!("{rel}/"));
         } else {
             untracked_out.append(&mut sub_untracked);
@@ -1879,7 +1937,7 @@ fn visit_untracked_directory(
         let dir_excluded = matcher.is_path_ignored(repo, Some(index), rel, true)?;
         let collapse_matching = ignored_mode == IgnoredMode::Matching && dir_excluded;
         let collapse_traditional = ignored_mode == IgnoredMode::Traditional
-            && directory_pathspec_matches_self(rel, pathspecs);
+            && directory_pathspec_matches_self(rel, pathspecs, pathspec_globals);
         if collapse_matching || collapse_traditional {
             ignored_out.push(format!("{rel}/"));
         } else {
@@ -1889,7 +1947,7 @@ fn visit_untracked_directory(
     }
 
     if !sub_untracked.is_empty() && sub_ignored.is_empty() {
-        if rel.is_empty() || !directory_pathspec_matches_self(rel, pathspecs) {
+        if rel.is_empty() || !directory_pathspec_matches_self(rel, pathspecs, pathspec_globals) {
             untracked_out.append(&mut sub_untracked);
         } else {
             untracked_out.push(format!("{rel}/"));
@@ -1934,6 +1992,7 @@ fn traditional_normal_directory_only(
     rel: &str,
     abs: &Path,
     pathspecs: &[String],
+    pathspec_globals: crate::pathspec::PathspecGlobalFlags,
     rules: Option<&crate::worktree_rules::WorktreeRules>,
 ) -> Result<Option<String>> {
     let mut any_file = false;
@@ -1959,10 +2018,16 @@ fn traditional_normal_directory_only(
             let path = entry.path();
             let rel_child = crate::repo_relpath::strip_worktree_prefix_stored(&path, work_tree)
                 .unwrap_or_else(|| crate::repo_relpath::storage_string(&name));
-            if !pathspec_may_match_directory(&rel_child, pathspecs)
+            if !pathspec_may_match_directory_with_globals(&rel_child, pathspecs, pathspec_globals)
                 && !(entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
-                    && status_path_matches_worktree_with_rules(
-                        repo, index, work_tree, &rel_child, pathspecs, rules,
+                    && status_path_matches_worktree_with_rules_and_globals(
+                        repo,
+                        index,
+                        work_tree,
+                        &rel_child,
+                        pathspecs,
+                        rules,
+                        pathspec_globals,
                     ))
             {
                 continue;
@@ -2050,15 +2115,39 @@ pub fn dir_is_nested_submodule_worktree(super_git_dir: &Path, dir: &Path) -> boo
     resolved_canon.starts_with(&modules_canon)
 }
 
+fn status_pathspec_match_context(
+    globals: crate::pathspec::PathspecGlobalFlags,
+) -> crate::pathspec::PathspecMatchContext {
+    crate::pathspec::PathspecMatchContext {
+        globals,
+        ..crate::pathspec::PathspecMatchContext::default()
+    }
+}
+
 /// Pathspec match for status using git's exclude / OR-of-positives semantics.
 pub fn status_path_matches(path: &str, pathspecs: &[String]) -> bool {
+    status_path_matches_with_globals(
+        path,
+        pathspecs,
+        crate::pathspec::PathspecGlobalFlags::default(),
+    )
+}
+
+/// Like [`status_path_matches`], with explicit Git global pathspec flags.
+#[must_use]
+pub fn status_path_matches_with_globals(
+    path: &str,
+    pathspecs: &[String],
+    globals: crate::pathspec::PathspecGlobalFlags,
+) -> bool {
     if pathspecs.is_empty() {
         return true;
     }
+    let ctx = status_pathspec_match_context(globals);
     let normalized = path.trim_end_matches('/');
     let excluded = pathspecs.iter().any(|spec| {
-        crate::pathspec::pathspec_exclude_matches(spec, path)
-            || crate::pathspec::pathspec_exclude_matches(spec, normalized)
+        crate::pathspec::pathspec_exclude_element_matches_with_context(spec, path, ctx)
+            || crate::pathspec::pathspec_exclude_element_matches_with_context(spec, normalized, ctx)
     });
     if excluded {
         return false;
@@ -2070,8 +2159,8 @@ pub fn status_path_matches(path: &str, pathspecs: &[String]) -> bool {
             continue;
         }
         has_positive = true;
-        if crate::pathspec::pathspec_matches(spec, path)
-            || crate::pathspec::pathspec_matches(spec, normalized)
+        if crate::pathspec::matches_pathspec_element_with_context(spec, path, ctx)
+            || crate::pathspec::matches_pathspec_element_with_context(spec, normalized, ctx)
         {
             positive_match = true;
         }
@@ -2105,11 +2194,32 @@ pub fn status_path_matches_worktree_with_rules(
     pathspecs: &[String],
     rules: Option<&crate::worktree_rules::WorktreeRules>,
 ) -> bool {
+    status_path_matches_worktree_with_rules_and_globals(
+        repo,
+        index,
+        work_tree,
+        path,
+        pathspecs,
+        rules,
+        crate::pathspec::PathspecGlobalFlags::default(),
+    )
+}
+
+/// Like [`status_path_matches_worktree_with_rules`], with explicit global pathspec flags.
+pub fn status_path_matches_worktree_with_rules_and_globals(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    path: &str,
+    pathspecs: &[String],
+    rules: Option<&crate::worktree_rules::WorktreeRules>,
+    globals: crate::pathspec::PathspecGlobalFlags,
+) -> bool {
     if pathspecs.is_empty() {
         return true;
     }
     if !pathspecs_use_attr_magic(pathspecs) {
-        return status_path_matches(path, pathspecs);
+        return status_path_matches_with_globals(path, pathspecs, globals);
     }
 
     let normalized = path.trim_end_matches('/');
@@ -2162,6 +2272,20 @@ fn is_executable_file(_meta: &fs::Metadata) -> bool {
 
 /// Whether `rel_dir` could contain a path matching any of `pathspecs` (directory prune).
 pub fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool {
+    pathspec_may_match_directory_with_globals(
+        rel_dir,
+        pathspecs,
+        crate::pathspec::PathspecGlobalFlags::default(),
+    )
+}
+
+/// Like [`pathspec_may_match_directory`], with explicit global pathspec flags.
+#[must_use]
+pub fn pathspec_may_match_directory_with_globals(
+    rel_dir: &str,
+    pathspecs: &[String],
+    globals: crate::pathspec::PathspecGlobalFlags,
+) -> bool {
     if pathspecs.is_empty() {
         return true;
     }
@@ -2172,11 +2296,12 @@ pub fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool
     if rel_dir.is_empty() {
         return true;
     }
+    let ctx = status_pathspec_match_context(globals);
     let is_dir_prefix = |dir: &str, path: &str| {
         path.len() > dir.len() && path.as_bytes()[dir.len()] == b'/' && path.starts_with(dir)
     };
     pathspecs.iter().any(|spec| {
-        if crate::pathspec::has_glob_chars(spec) {
+        if crate::pathspec::simple_length(spec) < spec.len() && !globals.literal_pathspecs {
             return true;
         }
         let spec_norm = spec.trim_end_matches('/');
@@ -2186,19 +2311,25 @@ pub fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool
         {
             return true;
         }
-        // Without magic or a `./` prefix, a glob-free spec matches only itself and paths
-        // under it, which the prefix checks above already cover.
         let plain_literal = !spec_norm.is_empty()
             && !spec.starts_with(':')
             && !spec.starts_with("./")
             && spec != ".";
-        !plain_literal && crate::pathspec::pathspec_matches(spec, rel_dir)
+        !plain_literal && crate::pathspec::matches_pathspec_element_with_context(spec, rel_dir, ctx)
     })
 }
 
-fn directory_pathspec_matches_self(rel_dir: &str, pathspecs: &[String]) -> bool {
+fn directory_pathspec_matches_self(
+    rel_dir: &str,
+    pathspecs: &[String],
+    globals: crate::pathspec::PathspecGlobalFlags,
+) -> bool {
     pathspecs.is_empty()
-        || status_path_matches(&format!("{}/", rel_dir.trim_end_matches('/')), pathspecs)
+        || status_path_matches_with_globals(
+            &format!("{}/", rel_dir.trim_end_matches('/')),
+            pathspecs,
+            globals,
+        )
 }
 
 #[cfg(unix)]
@@ -2388,10 +2519,13 @@ pub fn status(
     {
         Vec::new()
     } else {
-        crate::diff::diff_index_to_tree(repo.odb(), &index, head_tree.as_ref(), false)?
-            .into_iter()
-            .filter(|e| status_diff_entry_matches_pathspec(e, opts.pathspec.specs()))
-            .collect()
+        let mut out = Vec::new();
+        for e in crate::diff::diff_index_to_tree(repo.odb(), &index, head_tree.as_ref(), false)? {
+            if status_diff_entry_matches_pathspec_typed(repo, &e, &opts.pathspec)? {
+                out.push(e);
+            }
+        }
+        out
     };
 
     // Unstaged: worktree vs index, narrowed before rename detection.
@@ -2440,10 +2574,12 @@ pub fn status(
     let mut persist_index = index_stat_refresh_changed
         || rewrite_clears_racy_entries
         || index.entry_modes_repaired_on_load;
-    let mut unstaged: Vec<DiffEntry> = unstaged_raw
-        .into_iter()
-        .filter(|e| status_diff_entry_matches_pathspec(e, opts.pathspec.specs()))
-        .collect();
+    let mut unstaged: Vec<DiffEntry> = Vec::new();
+    for e in unstaged_raw {
+        if status_diff_entry_matches_pathspec_typed(repo, &e, &opts.pathspec)? {
+            unstaged.push(e);
+        }
+    }
 
     if let Some(rd) = opts.renames {
         let thread_policy = repo.thread_policy();
@@ -2474,7 +2610,7 @@ pub fn status(
 
     let mut conflict_details = conflicts_from_index(&index);
     if !opts.pathspec.is_entire_tree() {
-        conflict_details.retain(|c| status_path_matches(&c.path, opts.pathspec.specs()));
+        conflict_details.retain(|c| opts.pathspec.matches(repo, &c.path).unwrap_or(false));
     }
     let conflicts: Vec<String> = conflict_details.iter().map(|c| c.path.clone()).collect();
     normalize_status_conflicts(&mut staged, &mut unstaged, &conflicts);
@@ -2494,7 +2630,7 @@ pub fn status(
                     work_tree,
                     opts.ignored,
                     opts.untracked == UntrackedMode::All,
-                    opts.pathspec.specs(),
+                    &opts.pathspec,
                     &rules_guard,
                     Some(std::sync::Arc::clone(&watch)),
                 )?;

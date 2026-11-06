@@ -1564,7 +1564,7 @@ fn attr_requirements_match(
     })
 }
 
-fn matches_pathspec_element_with_context(
+pub(crate) fn matches_pathspec_element_with_context(
     spec: &str,
     path: &str,
     ctx: PathspecMatchContext,
@@ -1581,7 +1581,7 @@ fn matches_pathspec_element_with_context(
         return false;
     }
     if magic.literal || magic.glob || magic.icase {
-        return pathspec_matches(spec, path);
+        return pathspec_match_one_positive(path, magic, raw_pattern);
     }
     let pattern = strip_top_magic(raw_pattern);
     let path_for_match = if let Some(prefix) = magic.prefix.as_deref() {
@@ -1595,7 +1595,7 @@ fn matches_pathspec_element_with_context(
     matches_pathspec_with_context(pattern, path_for_match, ctx)
 }
 
-fn pathspec_exclude_element_matches_with_context(
+pub(crate) fn pathspec_exclude_element_matches_with_context(
     spec: &str,
     path: &str,
     ctx: PathspecMatchContext,

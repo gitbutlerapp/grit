@@ -775,6 +775,7 @@ fn stage_inner_on_index(
             index,
             work_tree,
             staging_pathspecs.as_ref(),
+            None,
             scan,
             &rules,
             None,
