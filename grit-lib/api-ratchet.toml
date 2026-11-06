@@ -8,7 +8,7 @@ semver_baseline = "83cd0e08fd03fb17d43cc02e371d4821b19a0e63"
 [counts]
 pub_repo_constructors = 3
 pub_repo_constructor_offenders = 4
-public_api_lines = 28958
+public_api_lines = 29156
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 108
 pub_fn_too_many_arguments_allow = 22
@@ -17,7 +17,7 @@ pub_fn_result_string_err = 10
 pub_free_fn_repository_first = 384
 pub_free_fn_git_dir_path_first = 108
 pub_free_fn_config_write = 12
-pub_items_multiple_paths = 26
+pub_items_multiple_paths = 30
 pub_libc_types = 0
 pub_unsafe_fn = 0
 pub_cancel_types = 90
