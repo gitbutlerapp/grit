@@ -405,7 +405,7 @@ fn remove_notes(
 }
 
 fn resolve_object(repo: &Repository, rev: &str) -> Result<ObjectId> {
-    resolve_revision(repo, rev).map_err(map_notes_error)
+    resolve_revision(repo, rev).map_err(|e| map_notes_error(e.into()))
 }
 
 fn notes_write_options(

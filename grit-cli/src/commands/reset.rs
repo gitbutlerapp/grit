@@ -270,7 +270,11 @@ pub fn run(
     Ok(outcome.into())
 }
 
-fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
+fn map_reset_committish_error(
+    err: grit_lib::revision_error::RevisionError,
+    spec: &str,
+) -> anyhow::Error {
+    let err: Error = err.into();
     match err {
         Error::Ref(RefError::InvalidName { reason, .. }) => anyhow::anyhow!(reason.clone()),
         Error::ObjectNotFound(msg) => crate::json_error::structured_revision_not_found(format!(

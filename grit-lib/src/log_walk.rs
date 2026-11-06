@@ -47,7 +47,7 @@ impl LogWalkQuery {
         repo: &Repository,
         tokens: &[&str],
         walk: &RevWalkListOptions,
-    ) -> Result<Option<Self>> {
+    ) -> RevResult<Option<Self>> {
         if walk.graph
             || !walk.paths.is_empty()
             || walk.reverse

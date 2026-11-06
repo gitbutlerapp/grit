@@ -674,29 +674,40 @@ fn would_overwrite_classified_from_cause(
 }
 
 fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
-    let lib = cause.downcast_ref::<LibError>()?;
-    match lib {
-        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
-            RevParseError::InvalidObjectName { name },
-        )) => Some(StructuredJsonError::new(
-            format!("revision '{name}' not found"),
-            ErrorKind::RevisionNotFound,
-        )),
-        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
-            RevParseError::AmbiguousArgument { spec },
-        )) => Some(StructuredJsonError::new(
-            format!("revision '{spec}' not found"),
-            ErrorKind::RevisionNotFound,
-        )),
-        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
-            RevParseError::PathNotInRevision { .. }
-            | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-        )) => Some(StructuredJsonError::new(
-            lib.to_string(),
-            ErrorKind::PathNotFound,
-        )),
-        _ => None,
+    fn from_revision_error(re: &RevisionError) -> Option<StructuredJsonError> {
+        match re {
+            RevisionError::RevParse(RevParseError::InvalidObjectName { name }) => {
+                Some(StructuredJsonError::new(
+                    format!("revision '{name}' not found"),
+                    ErrorKind::RevisionNotFound,
+                ))
+            }
+            RevisionError::RevParse(err @ RevParseError::AmbiguousArgument { .. }) => {
+                Some(StructuredJsonError::new(
+                    err.to_string(),
+                    ErrorKind::RevisionNotFound,
+                ))
+            }
+            RevisionError::RevParse(
+                RevParseError::PathNotInRevision { .. }
+                | RevParseError::PathMissingFromWorktreeAndIndex { .. },
+            ) => Some(StructuredJsonError::new(
+                re.to_string(),
+                ErrorKind::PathNotFound,
+            )),
+            _ => None,
+        }
     }
+
+    if let Some(lib) = cause.downcast_ref::<LibError>() {
+        match lib {
+            LibError::Revision(re) => return from_revision_error(re),
+            _ => {}
+        }
+    }
+    cause
+        .downcast_ref::<RevisionError>()
+        .and_then(from_revision_error)
 }
 
 fn cause_is_remote_unreadable(cause: &(dyn StdError + 'static)) -> bool {

@@ -12,6 +12,7 @@ use grit_lib::refs::branch_tracking::{
 };
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
+use grit_lib::revision_error::RevisionError;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use grit_lib::state::{
@@ -639,7 +640,7 @@ fn resolve_filter_revs(
     let Some(rev) = rev else {
         return Ok(Vec::new());
     };
-    let oid = resolve_revision(repo, rev).map_err(map_branch_error)?;
+    let oid = resolve_revision(repo, rev).map_err(|e| map_branch_error(e.into()))?;
     Ok(vec![oid])
 }
 
@@ -711,19 +712,23 @@ fn track_mode(opts: &BranchRunOptions) -> TrackMode {
     }
 }
 
-fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
+fn map_create_start_revision_error(rev: &str, err: RevisionError) -> AnyhowError {
     use grit_lib::porcelain::branch::BranchError;
-    match err {
-        Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
-            RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
-        ))
-        | Error::ObjectNotFound(_) => {
-            map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
-                label: rev.to_owned(),
-                reason: "revision not found".into(),
-            }))
-        }
-        other => map_branch_error(other),
+    let not_found = matches!(
+        &err,
+        RevisionError::RevParse(RevParseError::InvalidObjectName { .. })
+            | RevisionError::RevParse(RevParseError::AmbiguousArgument { .. })
+    ) || matches!(
+        &err,
+        RevisionError::Nested(nested) if matches!(&**nested, Error::ObjectNotFound(_))
+    );
+    if not_found {
+        map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
+            label: rev.to_owned(),
+            reason: "revision not found".into(),
+        }))
+    } else {
+        map_branch_error(err.into())
     }
 }
 

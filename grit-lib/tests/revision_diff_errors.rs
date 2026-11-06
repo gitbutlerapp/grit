@@ -12,6 +12,7 @@ use grit_lib::porcelain::merge::{write_merge_tree, MergePredictionOptions};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revision_error::{ObjectFilterParseError, RevisionError};
 use grit_lib::revwalk::rev_list::{expand_object_filter_for_protocol, ObjectFilter};
+use grit_lib::revwalk::RevWalkCommitStreamItem;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_test_support::{git, git_cmd};
 use std::fs;
@@ -96,7 +97,7 @@ fn userdiff_invalid_funcname() {
 #[test]
 fn rev_walk_public_api_returns_revision_error() {
     let dir = tempdir().unwrap();
-    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
     git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
     let repo = Repository::open(
         &dir.path().join(".git"),
@@ -108,10 +109,61 @@ fn rev_walk_public_api_returns_revision_error() {
 }
 
 #[test]
+fn rev_walk_commits_stream_public_api_returns_revision_error() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
+    match repo
+        .rev_walk()
+        .commits_stream(&["no-such-revision"], &Default::default())
+    {
+        Err(e) => assert!(matches!(e, RevisionError::RevParse(_))),
+        Ok(_) => panic!("expected revision error from commits_stream"),
+    }
+}
+
+fn assert_rev_walk_stream_item_ty(
+    _: std::result::Result<RevWalkCommitStreamItem, RevisionError>,
+) {
+}
+
+#[test]
+fn rev_walk_commits_stream_iter_item_is_revision_error() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
+    let mut stream = repo
+        .rev_walk()
+        .commits_stream(&["HEAD"], &Default::default())
+        .unwrap()
+        .expect("stream");
+    if let Some(item) = stream.next() {
+        assert_rev_walk_stream_item_ty(item);
+    }
+}
+
+#[test]
+fn log_walk_query_from_rev_walk_returns_revision_error() {
+    let dir = tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
+    let err = grit_lib::revwalk::log_walk::LogWalkQuery::from_rev_walk(
+        &repo,
+        &["no-such-rev"],
+        &Default::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(err, RevisionError::RevParse(_)));
+}
+
+#[test]
 fn peel_bad_object_returns_revision_error() {
     let dir = tempdir().unwrap();
     let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
     git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
     let tree_hex = git(dir.path(), &["rev-parse", "HEAD^{tree}"]);
     let tree_oid = ObjectId::from_hex(tree_hex.trim()).unwrap();
@@ -124,7 +176,7 @@ fn peel_bad_object_returns_revision_error() {
 fn apply_patch_that_does_not_apply() {
     let dir = tempdir().unwrap();
     let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
     fs::write(dir.path().join("f"), "hello\n").unwrap();
     git(dir.path(), &["add", "f"]);
     git(dir.path(), &["commit", "-m", "init"]);
@@ -146,7 +198,7 @@ fn apply_patch_that_does_not_apply() {
 fn blame_ignore_revs_file_io_error() {
     let dir = tempdir().unwrap();
     let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
     git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
     let err = IgnoreRevs::load(
         &repo,
@@ -167,7 +219,7 @@ fn blame_ignore_revs_file_io_error() {
 fn blame_ignore_revs_errors() {
     let dir = tempdir().unwrap();
     let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-    git_cmd(&["init"]).in_dir(dir.path()).exec();
+    let _ = git_cmd(&["init"]).in_dir(dir.path()).exec();
     git(dir.path(), &["commit", "--allow-empty", "-m", "c"]);
     let err = IgnoreRevs::load(
         &repo,

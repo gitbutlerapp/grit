@@ -1,5 +1,5 @@
 //! Typed revision-range parsing and high-level rev-walk queries on [`super::RevWalk`].
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::git_date::parse::DateParseError;
 use crate::git_date::parse_date_cutoff;
 use crate::merge_base::{
@@ -325,7 +325,7 @@ pub(crate) fn rev_list_options_from_walk(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when the string cannot be parsed.
+/// Returns [`DateParseError`](crate::git_date::parse::DateParseError) when the string cannot be parsed.
 pub fn committer_cutoff_from_date(
     date: &str,
     now_sec: i64,
@@ -485,7 +485,7 @@ pub struct RevWalkCommitStreamItem {
 pub struct RevWalkCommitStream<'repo>(pub(crate) CommitStream<'repo>);
 
 impl Iterator for RevWalkCommitStream<'_> {
-    type Item = Result<RevWalkCommitStreamItem>;
+    type Item = RevResult<RevWalkCommitStreamItem>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next().map(|item| {
@@ -493,6 +493,7 @@ impl Iterator for RevWalkCommitStream<'_> {
                 oid: row.oid,
                 commit_bytes: row.commit_bytes,
             })
+            .map_err(Into::into)
         })
     }
 }
@@ -511,7 +512,7 @@ impl<'repo> RevWalk<'repo> {
         &self,
         tokens: &[&str],
         walk: &RevWalkListOptions,
-    ) -> Result<Option<RevWalkCommitStream<'repo>>> {
+    ) -> RevResult<Option<RevWalkCommitStream<'repo>>> {
         if !rev_walk_list_supports_stream(walk) {
             return Ok(None);
         }
