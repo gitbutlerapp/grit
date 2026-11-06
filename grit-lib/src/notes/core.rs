@@ -145,7 +145,10 @@ fn collect_notes_tree_entries(
 
 /// Current target of `notes_ref` in the repository's ref store, or `None` when the ref is absent.
 fn notes_ref_tip(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>> {
-    match repo.ref_store().read_raw(RefNameRef::from_trusted(notes_ref))? {
+    match repo
+        .ref_store()
+        .read_raw(RefNameRef::from_trusted(notes_ref))?
+    {
         None => Ok(None),
         Some(RawRef::Direct(oid)) => Ok(Some(oid)),
         Some(RawRef::Symbolic(_)) => repo

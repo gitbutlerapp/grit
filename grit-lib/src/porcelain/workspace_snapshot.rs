@@ -569,7 +569,9 @@ fn expected_from_raw(raw: &RawRef) -> Expected {
 }
 
 fn head_ref_update(repo: &Repository, snapshot: &WorkspaceSnapshot) -> Result<Option<RefUpdate>> {
-    let current = repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?;
+    let current = repo
+        .ref_store()
+        .read_raw(RefNameRef::from_trusted("HEAD"))?;
     let new_value = match &snapshot.head {
         HeadState::Branch { refname, .. } => Some(RawRef::Symbolic(refname.clone())),
         HeadState::Detached { oid } => Some(RawRef::Direct(*oid)),

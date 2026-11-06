@@ -94,7 +94,10 @@ pub fn expand_ref_dwim_full_name(repo: &Repository, spec: &str) -> Result<(usize
     let mut first = None;
     for rule in DWIM_RULES {
         let candidate = rule.replace("{0}", spec);
-        let Some(raw) = repo.ref_store().read_raw(RefNameRef::from_trusted(&candidate))? else {
+        let Some(raw) = repo
+            .ref_store()
+            .read_raw(RefNameRef::from_trusted(&candidate))?
+        else {
             continue;
         };
         let valid = match raw {

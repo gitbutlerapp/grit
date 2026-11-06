@@ -1270,7 +1270,10 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
     for rule in RULES {
         let candidate = rule.replace("{0}", spec);
         // One raw read decides missing and direct candidates; only symrefs need resolving.
-        let resolved = match repo.ref_store().read_raw(RefNameRef::from_trusted(&candidate)) {
+        let resolved = match repo
+            .ref_store()
+            .read_raw(RefNameRef::from_trusted(&candidate))
+        {
             Ok(None) => continue,
             Ok(Some(refs::store::RawRef::Direct(oid))) => Ok(oid),
             Ok(Some(refs::store::RawRef::Symbolic(target))) => {

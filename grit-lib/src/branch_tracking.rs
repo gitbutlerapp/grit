@@ -361,7 +361,9 @@ pub struct TargetComparison {
 /// Resolve `refname` through the repository's ref store; refs that are missing or cannot be
 /// resolved (dangling symrefs, unreadable files) count as absent.
 fn resolve_optional(repo: &Repository, refname: &str) -> Option<ObjectId> {
-    repo.ref_store().resolve(RefNameRef::from_trusted(refname)).ok()
+    repo.ref_store()
+        .resolve(RefNameRef::from_trusted(refname))
+        .ok()
 }
 
 fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {

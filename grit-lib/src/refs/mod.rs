@@ -3484,7 +3484,10 @@ pub fn read_symbolic_ref_for_repository(
     refname: impl AsRef<RefNameRef>,
 ) -> Result<Option<String>> {
     let refname = refname.as_ref().as_str();
-    match repo.ref_store().read_raw(RefNameRef::from_trusted(refname))? {
+    match repo
+        .ref_store()
+        .read_raw(RefNameRef::from_trusted(refname))?
+    {
         Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
         Some(StoreRawRef::Direct(_)) | None => Ok(None),
     }

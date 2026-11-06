@@ -2128,7 +2128,10 @@ fn move_detached_head(repo: &Repository, old: ObjectId, new: ObjectId, reason: &
 
 /// Refuse to merge when detached `HEAD` no longer points at `expected`.
 fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()> {
-    let current = match repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))? {
+    let current = match repo
+        .ref_store()
+        .read_raw(RefNameRef::from_trusted("HEAD"))?
+    {
         Some(RawRef::Direct(oid)) => Some(oid),
         Some(RawRef::Symbolic(_)) => {
             return Err(Error::Message(

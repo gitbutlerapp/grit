@@ -1914,7 +1914,8 @@ fn resolve_continue_replay_message(git_dir: &Path) -> Result<String> {
 /// Pick and revert keep an `ORIG_HEAD` left by an earlier reset, merge or rebase.
 fn write_orig_head_if_absent(repo: &Repository, oid: ObjectId) -> Result<()> {
     if !matches!(
-        repo.ref_store().read_raw(RefNameRef::from_trusted("ORIG_HEAD")),
+        repo.ref_store()
+            .read_raw(RefNameRef::from_trusted("ORIG_HEAD")),
         Ok(None)
     ) {
         return Ok(());
