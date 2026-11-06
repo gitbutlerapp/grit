@@ -2,6 +2,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 
 fn empty_parent_merge_with_blob(dir: &std::path::Path, blob: &[u8], name: &str) -> ObjectId {
@@ -54,7 +55,7 @@ fn combined_merge_show_includes_added_file() {
         DiffMerges::Combined,
         DiffDetail::Patch,
         &DiffOptions::default(),
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &repo.thread_policy(),
     )
     .unwrap();
@@ -83,7 +84,7 @@ fn combined_merge_binary_addition_is_binary_not_text() {
         DiffMerges::Combined,
         DiffDetail::Patch,
         &DiffOptions::default(),
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &repo.thread_policy(),
     )
     .unwrap();

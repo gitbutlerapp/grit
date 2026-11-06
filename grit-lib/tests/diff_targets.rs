@@ -5,6 +5,7 @@ use grit_lib::diff::{resolve_diff_arguments, DiffTarget, ResolveDiffArgumentsErr
 use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 use tempfile::TempDir;
 
@@ -98,7 +99,8 @@ fn files_commit_range_matches_git_name_only() {
         old: Some(base),
         new: tip,
     };
-    let files = repo.diff().files(&target, &[], &opts).expect("files");
+    let empty = Pathspec::entire_tree(PathspecGlobalFlags::default());
+    let files = repo.diff().files(&target, &empty, &opts).expect("files");
     let mut grit_paths: Vec<_> = files.iter().map(|f| f.path.clone()).collect();
     grit_paths.sort();
 
@@ -122,7 +124,12 @@ fn grit_files(
 ) -> Vec<grit_lib::diff::FileDiff> {
     let mut opts = grit_lib::diff::DiffOptions::default();
     opts.word_level_inline = false;
-    repo.diff().files(&target, pathspecs, &opts).expect("files")
+    let ps = if pathspecs.is_empty() {
+        Pathspec::entire_tree(PathspecGlobalFlags::default())
+    } else {
+        Pathspec::scoped(pathspecs.clone(), PathspecGlobalFlags::default())
+    };
+    repo.diff().files(&target, &ps, &opts).expect("files")
 }
 
 fn git_raw(repo: &std::path::Path, args: &[&str]) -> Vec<String> {

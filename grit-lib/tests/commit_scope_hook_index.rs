@@ -8,7 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::Pathspec;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 fn ident() -> String {
     "Hook Index <hook@example.com> 1700000000 +0000".to_owned()
@@ -119,7 +119,7 @@ fn seed_repo(root: &Path) {
     git(root, &["commit", "-m", "initial"]);
 }
 
-fn paths_only() -> ResolvedPathspecs {
+fn paths_only() -> Pathspec {
     Pathspec::scoped(["only.txt"], PathspecGlobalFlags::default())
 }
 

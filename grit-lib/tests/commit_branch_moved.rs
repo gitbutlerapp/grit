@@ -12,7 +12,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::pathspec::Pathspec;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Moved Branch <moved@example.com> 1700000000 +0000".to_owned();

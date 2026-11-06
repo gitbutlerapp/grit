@@ -7,6 +7,18 @@ use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 use support::{git, git_rev_list, open_grit_repo, HistoryRepo};
 
+fn import_rename_repo(wt: &std::path::Path) {
+    use std::fs;
+    git(wt, &["init", "-q"]);
+    fs::write(wt.join("old.txt"), b"1\n").expect("write old");
+    git(wt, &["add", "old.txt"]);
+    git(wt, &["commit", "-q", "-m", "add old"]);
+    git(wt, &["mv", "old.txt", "new.txt"]);
+    git(wt, &["commit", "-q", "-m", "rename"]);
+    git(wt, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    git(wt, &["reset", "-q", "--hard"]);
+}
+
 fn import_linear_touch_repo(wt: &std::path::Path, commits: usize) {
     use std::io::Write;
     use std::process::{Command, Stdio};
@@ -62,10 +74,7 @@ fn log_pathspec_literal_matches_git() {
             },
         )
         .expect("grit commits");
-    assert_eq!(
-        grit_oids.iter().map(|o| o.to_hex()).collect::<Vec<_>>(),
-        git_oids
-    );
+    assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
 }
 
 #[test]
@@ -86,10 +95,7 @@ fn log_pathspec_glob_matches_git() {
             },
         )
         .expect("grit commits");
-    assert_eq!(
-        grit_oids.iter().map(|o| o.to_hex()).collect::<Vec<_>>(),
-        git_oids
-    );
+    assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
 }
 
 #[test]
@@ -110,10 +116,7 @@ fn log_pathspec_exclude_matches_git() {
             },
         )
         .expect("grit commits");
-    assert_eq!(
-        grit_oids.iter().map(|o| o.to_hex()).collect::<Vec<_>>(),
-        git_oids
-    );
+    assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
 }
 
 #[test]
@@ -134,8 +137,48 @@ fn log_pathspec_icase_matches_git() {
             },
         )
         .expect("grit commits");
-    assert_eq!(
-        grit_oids.iter().map(|o| o.to_hex()).collect::<Vec<_>>(),
-        git_oids
-    );
+    assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
+}
+
+#[test]
+fn log_pathspec_after_rename_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_rename_repo(wt);
+    let path = "new.txt";
+    let git_oids = git_rev_list(wt, &["HEAD", "--", path]);
+    let repo = open_grit_repo(wt);
+    let grit_oids = repo
+        .rev_walk()
+        .commits(
+            &["HEAD"],
+            &RevWalkListOptions {
+                pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit commits");
+    assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
+}
+
+#[test]
+fn log_pathspec_rename_follow_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_rename_repo(wt);
+    let path = "new.txt";
+    let git_oids = git_rev_list(wt, &["--follow", "HEAD", "--", path]);
+    let repo = open_grit_repo(wt);
+    let grit_oids = repo
+        .rev_walk()
+        .commits(
+            &["HEAD"],
+            &RevWalkListOptions {
+                pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
+                follow: true,
+                ..RevWalkListOptions::default()
+            },
+        )
+        .expect("grit commits");
+    assert_eq!(grit_oids.iter().copied().collect::<Vec<_>>(), git_oids);
 }

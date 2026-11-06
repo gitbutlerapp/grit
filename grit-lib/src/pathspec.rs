@@ -193,30 +193,8 @@ impl ResolvedPathspecs {
     /// `cwd` is the process working directory used for relative pathspec prefixes (never read
     /// from the environment inside the library).
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// use grit_lib::worktree::pathspec::{PathspecFile, ResolvedPathspecs};
-    /// use grit_lib::repo::{InitOptions, Repository};
-    /// use std::fs;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let dir = tempfile::tempdir()?;
-    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// fs::write(dir.path().join("a.txt"), b"x")?;
-    /// let resolved = ResolvedPathspecs::resolve(
-    ///     &repo,
-    ///     dir.path(),
-    ///     &["a.txt".to_string()],
-    ///     None,
-    /// )?;
-    /// assert_eq!(resolved.specs, ["a.txt"]);
-    /// let from_file = PathspecFile::new(b"a.txt\n".to_vec(), false);
-    /// let from_file = ResolvedPathspecs::resolve(&repo, dir.path(), &[], Some(from_file))?;
-    /// assert_eq!(from_file.specs, ["a.txt"]);
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// Embedders should prefer [`Repository::pathspec`](crate::repo::Repository::pathspec), which
+    /// returns a public [`Pathspec`] instead of this internal snapshot.
     pub fn resolve(
         repo: &Repository,
         cwd: &Path,
@@ -1283,7 +1261,7 @@ pub fn pathspec_has_top(spec: &str) -> bool {
 /// [`crate::repo::Repository::pathspec_matcher`], which loads the repository's attributes and
 /// validates the clauses, or [`matches_pathspec_list_for_object`] with caller-supplied rules.
 #[must_use]
-pub(crate) fn pathspec_has_attr_magic(spec: &str) -> bool {
+pub fn pathspec_has_attr_magic(spec: &str) -> bool {
     // Attr magic only exists in long form; skip the allocating parse for every other spec.
     spec.starts_with(":(") && spec.contains("attr:") && !attr_clauses(spec).is_empty()
 }

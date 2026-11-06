@@ -2253,6 +2253,8 @@ pub(crate) mod pack_cache {
     }
 }
 
+pub use pack_cache::revalidate_stale_pack_bytes;
+
 /// Route pack catalog reads to `store` without changing the active pack-read context.
 pub(crate) fn with_alternate_pack_store<R>(
     store: std::sync::Arc<crate::pack_store::PackStore>,

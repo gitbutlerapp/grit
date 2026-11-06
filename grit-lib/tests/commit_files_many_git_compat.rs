@@ -9,6 +9,7 @@ use grit_lib::objects::{
 };
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 
 #[test]
@@ -113,11 +114,12 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
         detail: DiffDetail::Stat,
         skip_merge_patches: true,
     };
+    let empty_ps = Pathspec::entire_tree(PathspecGlobalFlags::default());
     let parallel = repo
         .diff()
         .commit_files_many(
             &commits,
-            &[],
+            &empty_ps,
             options.clone(),
             &config,
             &ThreadPolicy::with_threads_override(Some(4)),
@@ -127,7 +129,7 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
         .diff()
         .commit_files_many(
             &commits,
-            &[],
+            &empty_ps,
             options.clone(),
             &config,
             &ThreadPolicy::with_threads_override(Some(1)),
@@ -165,11 +167,12 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
         );
         assert_eq!(actual, expected.trim_end(), "commit {oid}");
     }
+    let file_ps = Pathspec::scoped(["file"], PathspecGlobalFlags::default());
     let filtered = repo
         .diff()
         .commit_files_many(
             &commits,
-            &["file".into()],
+            &file_ps,
             options,
             &config,
             &ThreadPolicy::with_threads_override(Some(4)),
@@ -270,11 +273,16 @@ fn commit_line_totals_match_git_numstat_and_skip_merges() {
     let config = ConfigSet::new();
     for (paths, specs) in [(vec![], vec![]), (vec!["b.txt"], vec!["b.txt".to_owned()])] {
         for threads in [1, 4] {
+            let pathspec = if specs.is_empty() {
+                Pathspec::entire_tree(PathspecGlobalFlags::default())
+            } else {
+                Pathspec::scoped(specs.clone(), PathspecGlobalFlags::default())
+            };
             let totals = repo
                 .diff()
                 .commit_line_totals(
                     &oids,
-                    &specs,
+                    &pathspec,
                     DiffOptions::default(),
                     &config,
                     &ThreadPolicy::with_threads_override(Some(threads)),

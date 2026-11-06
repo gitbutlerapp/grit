@@ -19,6 +19,7 @@ use grit_lib::diff::{
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 use tempfile::TempDir;
 
@@ -67,7 +68,11 @@ fn grit_raw(repo: &Repository, target: &DiffTarget) -> Vec<String> {
     let mut opts = DiffOptions::default();
     opts.word_level_inline = false;
     repo.diff()
-        .files(target, &[], &opts)
+        .files(
+            target,
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+            &opts,
+        )
         .expect("files")
         .into_iter()
         .map(|f| {

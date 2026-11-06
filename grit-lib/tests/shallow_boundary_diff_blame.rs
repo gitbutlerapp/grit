@@ -8,6 +8,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 use std::path::Path;
 use std::process::Command;
@@ -75,7 +76,7 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
         DiffMerges::FirstParent,
         DiffDetail::NameStatus,
         &DiffOptions::default(),
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &thread,
     )
     .unwrap();
@@ -142,7 +143,7 @@ fn depth_two_child_still_diffs_against_parent() {
         DiffMerges::FirstParent,
         DiffDetail::NameStatus,
         &DiffOptions::default(),
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &thread,
     )
     .unwrap();
@@ -161,7 +162,7 @@ fn depth_two_child_still_diffs_against_parent() {
         DiffMerges::FirstParent,
         DiffDetail::NameStatus,
         &DiffOptions::default(),
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &thread,
     )
     .unwrap();

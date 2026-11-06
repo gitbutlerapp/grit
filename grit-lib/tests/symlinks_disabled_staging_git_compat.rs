@@ -21,6 +21,7 @@ use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::git;
 
 /// Worktree mtime well before the index write, so entries are not racily clean.
@@ -416,7 +417,11 @@ fn worktree_diff_of_edited_link_is_a_symlink_patch() {
     opts.word_level_inline = false;
     let files = repo
         .diff()
-        .files(&DiffTarget::WorktreeVsIndex, &[], &opts)
+        .files(
+            &DiffTarget::WorktreeVsIndex,
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+            &opts,
+        )
         .expect("worktree diff");
     assert_eq!(files.len(), 1, "{files:?}");
     let file = &files[0];

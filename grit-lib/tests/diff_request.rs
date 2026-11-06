@@ -401,7 +401,10 @@ fn commit_pathspecs_resolve_from_the_cwd_and_allow_missing_paths() {
     let specs =
         resolve_commit_diff_pathspecs(&repo, Some("sub"), &strings(&["deleted.txt", "../a.txt"]))
             .expect("resolve");
-    assert_eq!(specs, strings(&["sub/deleted.txt", "a.txt"]));
+    assert_eq!(
+        pathspec_specs(&specs),
+        strings(&["sub/deleted.txt", "a.txt"])
+    );
     assert!(resolve_commit_diff_pathspecs(&repo, None, &[])
         .expect("empty")
         .is_empty());

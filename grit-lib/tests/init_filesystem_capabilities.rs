@@ -64,7 +64,7 @@ fn init_config_matches_full_capability_detection() {
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
-            .with_ref_storage(grit_lib::RefStorageFormat::Files),
+            .with_ref_storage(grit_lib::refs::store::RefStorageFormat::Files),
     )
     .expect("init");
     let git_dir = root.path().join(".git");

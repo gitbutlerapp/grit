@@ -6,6 +6,7 @@ use grit_lib::diff::{
 };
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::{git, rev_parse, write_file};
 
 fn diffstat(repo: &Repository, detail: DiffDetail, options: DiffOptions) -> DiffStat {
@@ -235,7 +236,7 @@ fn diffstat_honors_rename_detection_like_git() {
                 old: Some(base),
                 new: tip,
             },
-            &[],
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
             &DiffOptions::default(),
         )
         .expect("Diff::files");
@@ -252,7 +253,7 @@ fn diffstat_honors_rename_detection_like_git() {
                 old: Some(base_tree),
                 new: tip_tree,
             },
-            &[],
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
             &DiffOptions::default(),
         )
         .expect("tree ids");
@@ -265,7 +266,7 @@ fn diffstat_honors_rename_detection_like_git() {
                 old: None,
                 new: tip_tree,
             },
-            &[],
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
             &DiffOptions::default(),
         )
         .expect("empty tree to tree oid");
@@ -285,7 +286,7 @@ fn diffstat_honors_rename_detection_like_git() {
             old: Some(blob),
             new: tip,
         },
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &DiffOptions::default(),
     );
     assert!(err.is_err(), "blob id must not be accepted as a tree side");

@@ -492,7 +492,6 @@ mod config_parameters_coverage;
 mod config_parse;
 #[path = "config_repo_load_coverage.rs"]
 mod config_repo_load_coverage;
-#[cfg(feature = "full-tests")]
 #[path = "config_roundtrip.rs"]
 mod config_roundtrip;
 #[path = "config_set_getters_coverage.rs"]
@@ -1338,7 +1337,6 @@ mod pathspec_from_file_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_git_compat.rs"]
 mod pathspec_git_compat;
-#[cfg(feature = "full-tests")]
 #[path = "pathspec_type.rs"]
 mod pathspec_type;
 #[cfg(feature = "full-tests")]

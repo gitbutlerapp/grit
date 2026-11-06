@@ -13,6 +13,7 @@ use grit_lib::revwalk::rev_list::{
 };
 use grit_lib::revwalk::rev_list_error::RevListError;
 use grit_lib::revwalk::{RevWalkCommitIterOptions, RevWalkListOptions};
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use support::{
     assert_rev_list_commits_match_git, build_commit_dag, commit_file, commit_labeled_with_dates,
     expand_token_for_rev_list, git, git_commit_graph_write, git_merge_base_is_ancestor,
@@ -812,7 +813,7 @@ fn assert_replace_graft_history_matches_git(
         DiffMerges::FirstParent,
         DiffDetail::NameOnly,
         &DiffOptions::default(),
-        &[],
+        &Pathspec::entire_tree(PathspecGlobalFlags::default()),
         &thread_policy,
     )
     .expect("commit diff");

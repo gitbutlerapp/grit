@@ -289,7 +289,7 @@ fn path_limited_exclude_only_pathspec_matches_git() {
         .count(
             &["HEAD"],
             &RevWalkListOptions {
-                pathspec: Pathspec::scoped(vec![spec.into()], PathspecGlobalFlags::default()),
+                pathspec: Pathspec::scoped(vec![spec.to_owned()], PathspecGlobalFlags::default()),
                 ..RevWalkListOptions::default()
             },
         )

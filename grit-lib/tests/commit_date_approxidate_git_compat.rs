@@ -4,8 +4,7 @@ use std::process::Command;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use grit_lib::commit::normalize_commit_date_override;
-use grit_lib::config::git_date::parse::parse_date_at;
-use grit_lib::config::git_date::refresh_process_tz;
+use grit_lib::config::git_date::{parse_date_at, refresh_process_tz};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static TZ_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));

@@ -7,6 +7,7 @@ use grit_lib::diff::{
     RenameDetection,
 };
 use grit_lib::objects::ObjectId;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use std::fs;
 
 use support::{git_output, git_quiet, rev_parse_tree, DiffRepo};
@@ -446,7 +447,7 @@ fn pathspec_on_rename_source_side_matches_git_delete_not_rename() {
                 old: Some(parent),
                 new: commit,
             },
-            &["path0".to_owned()],
+            &Pathspec::scoped(["path0"], PathspecGlobalFlags::default()),
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
@@ -467,7 +468,7 @@ fn pathspec_on_rename_destination_side_matches_git_add_not_rename() {
                 old: Some(parent),
                 new: commit,
             },
-            &["path1".to_owned()],
+            &Pathspec::scoped(["path1"], PathspecGlobalFlags::default()),
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
@@ -490,7 +491,7 @@ fn pathspec_covering_both_rename_sides_still_reports_rename() {
                 old: Some(parent),
                 new: commit,
             },
-            &["path0".to_owned(), "path1".to_owned()],
+            &Pathspec::scoped(["path0", "path1"], PathspecGlobalFlags::default()),
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
@@ -519,7 +520,7 @@ fn commit_tree_attr_pathspec_matches_git_name_status() {
     git_quiet(wt, &["commit", "-qm", "edit"]);
     let parent = rev_parse_tree(wt, "HEAD~1^{tree}");
     let commit = rev_parse_tree(wt, "HEAD^{tree}");
-    let spec = vec![":(attr:foo)".to_owned()];
+    let spec = [":(attr:foo)"];
     let git_lines = git_name_status(
         wt,
         &[&parent.to_hex(), &commit.to_hex(), "--", ":(attr:foo)"],
@@ -532,7 +533,7 @@ fn commit_tree_attr_pathspec_matches_git_name_status() {
                 old: Some(parent),
                 new: commit,
             },
-            &spec,
+            &Pathspec::scoped(spec, PathspecGlobalFlags::default()),
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("entries");
@@ -569,7 +570,7 @@ fn pathspec_prunes_tree_walk_before_rename_on_large_delete_add_set() {
                 old: Some(parent),
                 new: commit,
             },
-            &[],
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("full");
@@ -583,7 +584,7 @@ fn pathspec_prunes_tree_walk_before_rename_on_large_delete_add_set() {
                 old: Some(parent),
                 new: commit,
             },
-            &["old/050.txt".to_owned()],
+            &Pathspec::scoped(["old/050.txt"], PathspecGlobalFlags::default()),
             &grit_lib::diff::DiffOptions::default(),
         )
         .expect("limited");

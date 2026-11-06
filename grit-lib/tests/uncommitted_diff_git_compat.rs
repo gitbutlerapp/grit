@@ -14,6 +14,7 @@ use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::{git, rev_parse};
 
 const RENAMES: RenameDetection = RenameDetection::Similarity(50);
@@ -253,12 +254,17 @@ fn entries_for_every_target_match_git_name_status() {
             args.push("--");
             args.extend(pathspecs.iter().copied());
             let expected = git_lines(dir.path(), &args);
-            let pathspecs: Vec<String> = pathspecs.iter().map(|p| (*p).to_owned()).collect();
-            let context = format!("{target:?} {pathspecs:?} {filter:?}");
+            let pathspec_vec: Vec<String> = pathspecs.iter().map(|p| (*p).to_owned()).collect();
+            let ps = if pathspec_vec.is_empty() {
+                Pathspec::entire_tree(PathspecGlobalFlags::default())
+            } else {
+                Pathspec::scoped(pathspec_vec, PathspecGlobalFlags::default())
+            };
+            let context = format!("{target:?} {:?} {filter:?}", ps.specs());
 
             let via_handle = repo
                 .diff()
-                .entries(target, &pathspecs, &options)
+                .entries(target, &ps, &options)
                 .expect("Diff::entries");
             assert_eq!(
                 names(&via_handle.entries),
@@ -268,7 +274,7 @@ fn entries_for_every_target_match_git_name_status() {
 
             let mut uncommitted = repo.diff().uncommitted().expect("uncommitted");
             let via_uncommitted = uncommitted
-                .entries(target, &pathspecs, &options)
+                .entries(target, &ps, &options)
                 .expect("UncommittedDiff::entries");
             assert_eq!(
                 names(&via_uncommitted.entries),
@@ -285,9 +291,15 @@ fn peer_changes_load_the_other_side_of_the_index() {
     history_fixture(dir.path());
     let repo = open(dir.path());
     let mut diff = repo.diff().uncommitted().expect("uncommitted");
+    let empty_ps = Pathspec::entire_tree(PathspecGlobalFlags::default());
 
     let unstaged_peers = diff
-        .peer_changes(DiffSide::Staged, &[], RENAMES, ["keep.txt", "new.txt"])
+        .peer_changes(
+            DiffSide::Staged,
+            &empty_ps,
+            RENAMES,
+            ["keep.txt", "new.txt"],
+        )
         .expect("peers of staged changes");
     assert_eq!(
         unstaged_peers
@@ -301,7 +313,12 @@ fn peer_changes_load_the_other_side_of_the_index() {
     assert_eq!(unstaged_peers[0].new_bytes.data, b"a\nB\nc\nd\n");
 
     let staged_peers = diff
-        .peer_changes(DiffSide::Unstaged, &[], RENAMES, ["keep.txt", "both.txt"])
+        .peer_changes(
+            DiffSide::Unstaged,
+            &empty_ps,
+            RENAMES,
+            ["keep.txt", "both.txt"],
+        )
         .expect("peers of unstaged changes");
     assert_eq!(
         staged_peers
@@ -317,18 +334,18 @@ fn peer_changes_load_the_other_side_of_the_index() {
     let limited = diff
         .peer_changes(
             DiffSide::Staged,
-            &["other".to_owned()],
+            &Pathspec::scoped(["other"], PathspecGlobalFlags::default()),
             RENAMES,
             ["keep.txt"],
         )
         .expect("pathspec-limited peers");
     assert!(limited.is_empty());
     assert!(diff
-        .peer_changes(DiffSide::Other, &[], RENAMES, ["keep.txt"])
+        .peer_changes(DiffSide::Other, &empty_ps, RENAMES, ["keep.txt"])
         .expect("other side")
         .is_empty());
     assert!(diff
-        .peer_changes(DiffSide::Staged, &[], RENAMES, [])
+        .peer_changes(DiffSide::Staged, &empty_ps, RENAMES, [])
         .expect("no primaries")
         .is_empty());
 }
@@ -397,7 +414,11 @@ fn bare_repository_rejects_working_tree_diffs() {
     let options = DiffOptions::default();
     let commit = repo
         .diff()
-        .entries(&DiffTarget::Commit(head), &[], &options)
+        .entries(
+            &DiffTarget::Commit(head),
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+            &options,
+        )
         .expect("commit target needs no work tree");
     assert_eq!(
         names(&commit.entries),
@@ -414,8 +435,11 @@ fn bare_repository_rejects_working_tree_diffs() {
         )
     );
     assert!(matches!(
-        repo.diff()
-            .entries(&DiffTarget::WorktreeVsHead, &[], &options),
+        repo.diff().entries(
+            &DiffTarget::WorktreeVsHead,
+            &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+            &options
+        ),
         Err(Error::RequiresWorkTree)
     ));
 }

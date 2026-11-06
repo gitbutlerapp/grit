@@ -553,7 +553,7 @@ fn rebase_onto_defaults_upstream_from_tracking_config() {
     let merge = config
         .get("branch.feature.merge")
         .expect("branch.feature.merge");
-    assert_eq!(merge, "refs/heads/upstream");
+    assert_eq!(merge.as_deref(), Some("refs/heads/upstream"));
     let upstream = resolve_ref(grit.git_dir(), "refs/heads/upstream").expect("upstream");
     assert_eq!(upstream, oids["u"]);
 }

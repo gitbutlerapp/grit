@@ -58,7 +58,7 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::{InitOptions, Repository};
-    use grit_lib::worktree::pathspec::{PathspecFile, ResolvedPathspecs};
+    use grit_lib::worktree::pathspec::{PathspecFile, PathspecGlobalFlags, PathspecOptions};
 
     let dir2 = tempfile::tempdir().expect("tempdir2");
     let (repo, _) = Repository::init(dir2.path(), &InitOptions::default()).expect("init");
@@ -69,14 +69,16 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     fs::write(dir2.path().join("other"), b"z\n").expect("write");
 
     let data = fs::read(&list).expect("read list");
-    let resolved =
-        ResolvedPathspecs::resolve(&repo, dir2.path(), &[], Some(PathspecFile::new(data, true)))
-            .expect("resolve");
+    let mut options = PathspecOptions::default().with_globals(PathspecGlobalFlags::default());
+    options.from_file = Some(PathspecFile::new(data, true));
+    let resolved = repo
+        .pathspec(std::iter::empty::<&str>(), &options)
+        .expect("resolve");
     let outcome = stage(
         &repo,
         &StageOptions {
-            pathspecs: resolved.specs,
-            pathspec_sources: resolved.sources,
+            pathspecs: resolved.specs().to_vec(),
+            pathspec_sources: resolved.iter().map(str::to_owned).collect(),
             mode: StageMode::All,
             ..Default::default()
         },
@@ -112,7 +114,9 @@ fn empty_pathspec_record_matches_git_rejection() {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::repo::Repository;
-    use grit_lib::worktree::pathspec::{PathspecFile, PathspecResolveError, ResolvedPathspecs};
+    use grit_lib::worktree::pathspec::{
+        PathspecFile, PathspecGlobalFlags, PathspecOptions, PathspecResolveError,
+    };
 
     let git_dir = dir.path().join(".git");
     let repo = Repository::open(
@@ -120,12 +124,10 @@ fn empty_pathspec_record_matches_git_rejection() {
         &RepositoryOptions::empty().with_work_tree(dir.path()),
     )
     .expect("open");
-    let err = ResolvedPathspecs::resolve(
-        &repo,
-        dir.path(),
-        &[],
-        Some(PathspecFile::new(b"\n".to_vec(), false)),
-    )
-    .expect_err("empty line");
+    let mut options = PathspecOptions::default().with_globals(PathspecGlobalFlags::default());
+    options.from_file = Some(PathspecFile::new(b"\n".to_vec(), false));
+    let err = repo
+        .pathspec(std::iter::empty::<&str>(), &options)
+        .expect_err("empty line");
     assert_eq!(err, PathspecResolveError::EmptyPathspec);
 }

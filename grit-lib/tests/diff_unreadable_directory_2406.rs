@@ -13,6 +13,7 @@ mod unix {
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_lib::stash::StashPushOptions;
+    use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
     use grit_test_support::git;
 
     fn set_mode(path: &Path, mode: u32) {
@@ -67,7 +68,11 @@ mod unix {
         let files = fx
             .repo
             .diff()
-            .files(&DiffTarget::WorktreeVsHead, &[], &DiffOptions::default())
+            .files(
+                &DiffTarget::WorktreeVsHead,
+                &Pathspec::entire_tree(PathspecGlobalFlags::default()),
+                &DiffOptions::default(),
+            )
             .expect("diff must succeed");
         assert!(
             files.iter().any(|f| f.path == "pub/a"),
@@ -118,7 +123,7 @@ mod unix {
             .diff()
             .files(
                 &DiffTarget::WorktreeVsHead,
-                &["pub".into()],
+                &Pathspec::scoped(["pub"], PathspecGlobalFlags::default()),
                 &DiffOptions::default(),
             )
             .expect("pathspec diff must succeed");
@@ -193,7 +198,7 @@ mod unix {
             .diff()
             .entries(
                 &DiffTarget::WorktreeVsHead,
-                &["old.txt".into()],
+                &Pathspec::scoped(["old.txt"], PathspecGlobalFlags::default()),
                 &DiffOptions::default(),
             )
             .expect("diff old.txt");
@@ -210,7 +215,7 @@ mod unix {
             .diff()
             .entries(
                 &DiffTarget::WorktreeVsHead,
-                &["dir/".into()],
+                &Pathspec::scoped(["dir/"], PathspecGlobalFlags::default()),
                 &DiffOptions::default(),
             )
             .expect("diff dir/");
@@ -249,7 +254,7 @@ mod unix {
             .diff()
             .entries(
                 &DiffTarget::WorktreeVsHead,
-                &[":(attr:foo)".into()],
+                &Pathspec::scoped([":(attr:foo)"], PathspecGlobalFlags::default()),
                 &DiffOptions::default(),
             )
             .expect("attr pathspec diff");

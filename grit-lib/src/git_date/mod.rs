@@ -6,6 +6,7 @@ pub(crate) mod parse;
 pub(crate) mod show;
 pub(crate) mod tm;
 
+pub use parse::{parse_date, parse_date_at, parse_date_basic_at, DateParseError};
 pub use show::{parse_date_format, show_date, show_date_relative, DateMode, DateModeType};
 pub use tm::{local_tzoffset, local_tzoffset_with_tz, refresh_process_tz, TzHhmm};
 

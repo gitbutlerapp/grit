@@ -4,6 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::patch_ids::PatchIdMode;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
@@ -526,7 +527,12 @@ fn assert_patch_id_matches_normal_patch(
         let from_text = compute_patch_ids_from_text(HashAlgo::Sha1, patch.as_bytes(), mode);
         assert_eq!(from_text.len(), 1, "{label}: {flag}");
         assert_eq!(from_text[0].0, expected, "{label}: text {flag}");
-        let actual = compute_patch_id_for_paths(HashAlgo::Sha1, repo.odb(), &commit, paths, mode)
+        let ps = if paths.is_empty() {
+            Pathspec::entire_tree(PathspecGlobalFlags::default())
+        } else {
+            Pathspec::scoped(paths.clone(), PathspecGlobalFlags::default())
+        };
+        let actual = compute_patch_id_for_paths(HashAlgo::Sha1, repo.odb(), &commit, &ps, mode)
             .unwrap()
             .unwrap();
         assert_eq!(actual, expected, "{label}: filtered ODB {flag}");

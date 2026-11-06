@@ -5,10 +5,10 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::error::Error;
+use grit_lib::error::{AttrPathspecError, Error};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{
-    pathspec_has_attr_magic, validate_attr_pathspecs, AttrPathspecError,
+    pathspec_has_attr_magic, validate_attr_pathspecs, Pathspec, PathspecGlobalFlags,
 };
 use tempfile::TempDir;
 
@@ -68,8 +68,9 @@ fn init_attr_repo() -> TempDir {
 
 fn grit_matches(repo: &Repository, all: &[String], specs: &[&str]) -> Vec<String> {
     let specs: Vec<String> = specs.iter().map(|s| (*s).to_owned()).collect();
+    let pathspec = Pathspec::scoped(specs, PathspecGlobalFlags::default());
     all.iter()
-        .filter(|p| repo.paths_match_pathspecs(p, &specs).expect("match"))
+        .filter(|p| repo.paths_match_pathspecs(p, &pathspec).expect("match"))
         .cloned()
         .collect()
 }
@@ -139,9 +140,10 @@ fn attr_pathspecs_see_gitattributes_edits_on_the_same_handle() {
     let root = dir.path();
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let spec = vec![":(attr:diff=rust)".to_owned()];
-    assert!(!repo.paths_match_pathspecs("lib/c.rs", &spec).unwrap());
+    let pathspec = Pathspec::scoped(spec, PathspecGlobalFlags::default());
+    assert!(!repo.paths_match_pathspecs("lib/c.rs", &pathspec).unwrap());
     std::fs::write(root.join(".gitattributes"), "*.rs diff=rust\n").unwrap();
-    assert!(repo.paths_match_pathspecs("lib/c.rs", &spec).unwrap());
+    assert!(repo.paths_match_pathspecs("lib/c.rs", &pathspec).unwrap());
 }
 
 #[test]
@@ -153,8 +155,9 @@ fn attr_pathspecs_in_bare_repository_use_info_attributes() {
     std::fs::write(root.join("info/attributes"), "*.rs diff=rust\n").unwrap();
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let spec = vec![":(attr:diff=rust)".to_owned()];
-    assert!(repo.paths_match_pathspecs("src/a.rs", &spec).unwrap());
-    assert!(!repo.paths_match_pathspecs("README.md", &spec).unwrap());
+    let pathspec = Pathspec::scoped(spec, PathspecGlobalFlags::default());
+    assert!(repo.paths_match_pathspecs("src/a.rs", &pathspec).unwrap());
+    assert!(!repo.paths_match_pathspecs("README.md", &pathspec).unwrap());
 }
 
 #[test]
@@ -165,25 +168,42 @@ fn pathspec_matcher_matches_paths_and_renames() {
     let all = git_ls_files(root, &[]);
 
     let specs = vec![":(attr:diff=rust)".to_owned()];
-    let matcher = repo.pathspec_matcher(&specs).expect("matcher");
-    assert!(!matcher.is_empty());
-    let got: Vec<_> = all.iter().filter(|p| matcher.matches(p)).cloned().collect();
+    let pathspec = Pathspec::scoped(specs, PathspecGlobalFlags::default());
+    assert!(!pathspec.is_entire_tree());
+    let got: Vec<_> = all
+        .iter()
+        .filter(|p| repo.paths_match_pathspecs(p, &pathspec).expect("match"))
+        .cloned()
+        .collect();
     assert_eq!(got, git_ls_files(root, &[":(attr:diff=rust)"]));
-    assert!(matcher.matches_change("lib/c.rs", Some("src/b.rs")));
-    assert!(matcher.matches_change("src/b.rs", None));
-    assert!(!matcher.matches_change("lib/c.rs", Some("lib/c.rs")));
-    assert!(!matcher.matches_change("README.md", None));
+    assert!(pathspec
+        .matches_change(&repo, "lib/c.rs", Some("src/b.rs"))
+        .expect("change"));
+    assert!(pathspec
+        .matches_change(&repo, "src/b.rs", None)
+        .expect("change"));
+    assert!(!pathspec
+        .matches_change(&repo, "lib/c.rs", Some("lib/c.rs"))
+        .expect("change"));
+    assert!(!pathspec
+        .matches_change(&repo, "README.md", None)
+        .expect("change"));
 
-    let empty: Vec<String> = Vec::new();
-    let all_paths = repo.pathspec_matcher(&empty).expect("matcher");
-    assert!(all_paths.is_empty());
-    assert!(all_paths.matches_change("anything", None));
+    let entire = Pathspec::entire_tree(PathspecGlobalFlags::default());
+    assert!(entire.is_entire_tree());
+    assert!(entire
+        .matches_change(&repo, "anything", None)
+        .expect("change"));
 
     let plain = vec!["src".to_owned(), ":(exclude)src/sub".to_owned()];
-    let plain_matcher = repo.pathspec_matcher(&plain).expect("matcher");
-    assert!(plain_matcher.matches("src/b.rs"));
-    assert!(!plain_matcher.matches("src/sub/a.rs"));
-    assert!(plain_matcher.matches_change("lib/x.rs", Some("src/b.rs")));
+    let plain_ps = Pathspec::scoped(plain, PathspecGlobalFlags::default());
+    assert!(repo.paths_match_pathspecs("src/b.rs", &plain_ps).unwrap());
+    assert!(!repo
+        .paths_match_pathspecs("src/sub/a.rs", &plain_ps)
+        .unwrap());
+    assert!(plain_ps
+        .matches_change(&repo, "lib/x.rs", Some("src/b.rs"))
+        .expect("change"));
 }
 
 fn init_repo_with(files: &[(&str, &str)], config: &[(&str, &str)]) -> TempDir {
@@ -280,7 +300,8 @@ fn attr_pathspecs_follow_core_ignorecase_like_git() {
     let repo =
         Repository::discover(Some(sensitive.path()), &RepositoryOptions::empty()).expect("open");
     let spec = vec![":(attr:diff=upper)".to_owned()];
-    assert!(!repo.paths_match_pathspecs("case.upper", &spec).unwrap());
+    let pathspec = Pathspec::scoped(spec, PathspecGlobalFlags::default());
+    assert!(!repo.paths_match_pathspecs("case.upper", &pathspec).unwrap());
     assert!(git_ls_files(sensitive.path(), &[":(attr:diff=upper)"]).is_empty());
 }
 
@@ -319,7 +340,7 @@ fn malformed_attr_pathspecs_are_rejected_like_git() {
         assert_eq!(out.status.code(), Some(128), "git must reject {spec}");
 
         let specs = vec![(*spec).to_owned()];
-        match repo.pathspec_matcher(&specs) {
+        match validate_attr_pathspecs(&specs) {
             Err(Error::InvalidAttrPathspec {
                 spec: got,
                 reason: why,
@@ -329,7 +350,8 @@ fn malformed_attr_pathspecs_are_rejected_like_git() {
             }
             other => panic!("{spec}: expected InvalidAttrPathspec, got {other:?}"),
         }
-        assert!(repo.paths_match_pathspecs("src/b.rs", &specs).is_err());
+        let pathspec = Pathspec::scoped(specs.clone(), PathspecGlobalFlags::default());
+        assert!(repo.paths_match_pathspecs("src/b.rs", &pathspec).is_err());
         assert!(validate_attr_pathspecs(&specs).is_err());
         assert!(pathspec_has_attr_magic(spec), "{spec}");
     }

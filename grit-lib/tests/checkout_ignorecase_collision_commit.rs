@@ -16,7 +16,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::worktree::pathspec::Pathspec;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 
 fn enable_ignorecase(repo: &Repository, root: &Path) {
     fs::write(

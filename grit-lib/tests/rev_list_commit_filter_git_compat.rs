@@ -11,6 +11,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{rev_list, MissingAction, RevListOptions};
 use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder};
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use support::{
     commit_file, git, git_commit_graph_write, git_rev_list, open_grit_repo, HistoryRepo,
 };
@@ -233,9 +234,12 @@ fn assert_rev_list_filter_matches_git(worktree: &Path, repo: &Repository, args: 
             .map(String::as_str)
             .collect::<Vec<_>>(),
     );
-    let paths = repo
-        .resolve_rev_walk_pathspecs(&parsed.paths)
-        .expect("paths");
+    let path_ps = if parsed.paths.is_empty() {
+        Pathspec::entire_tree(PathspecGlobalFlags::default())
+    } else {
+        Pathspec::scoped(parsed.paths.clone(), PathspecGlobalFlags::default())
+    };
+    let paths = repo.resolve_rev_walk_pathspecs(&path_ps).expect("paths");
     let mut opts = RevListOptions {
         max_count: parsed.max_count,
         min_parents: parsed.min_parents,
@@ -1405,9 +1409,12 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         .author("Alice")
         .build()
         .expect("filter");
-    let paths = repo
-        .resolve_rev_walk_pathspecs(&parsed.paths)
-        .expect("paths");
+    let path_ps = if parsed.paths.is_empty() {
+        Pathspec::entire_tree(PathspecGlobalFlags::default())
+    } else {
+        Pathspec::scoped(parsed.paths.clone(), PathspecGlobalFlags::default())
+    };
+    let paths = repo.resolve_rev_walk_pathspecs(&path_ps).expect("paths");
     let opts = RevListOptions {
         max_count: Some(5000),
         since_cutoff: parsed.since_cutoff,
@@ -1445,7 +1452,10 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         max_count: Some(5000),
         commit_filter: Some(Arc::new(list_filter)),
         paths: repo
-            .resolve_rev_walk_pathspecs(&["frontier-path.txt".to_owned()])
+            .resolve_rev_walk_pathspecs(&Pathspec::scoped(
+                ["frontier-path.txt".to_owned()],
+                PathspecGlobalFlags::default(),
+            ))
             .expect("paths"),
         paths_resolved_from_argv: true,
         missing_action: MissingAction::Error,
