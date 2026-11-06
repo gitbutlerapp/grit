@@ -97,6 +97,8 @@ pub enum ErrorKind {
     IdentityUnknown,
     /// Annotated or lightweight tag name already exists.
     TagAlreadyExists,
+    /// `refs/tags/<name>` does not exist.
+    TagNotFound,
     /// `merge --abort`, `rebase --continue`, `pick --continue`, or similar with nothing paused.
     NoOperationInProgress,
     /// Pathspec matched no tracked or known files.
@@ -178,6 +180,7 @@ impl ErrorKind {
             Self::EmptyCommitMessage,
             Self::IdentityUnknown,
             Self::TagAlreadyExists,
+            Self::TagNotFound,
             Self::NoOperationInProgress,
             Self::PathspecNoMatch,
             Self::StashNotFound,

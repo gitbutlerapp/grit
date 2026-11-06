@@ -967,7 +967,16 @@ fn map_tag_error(err: Error) -> anyhow::Error {
                 })
             }
             TagError::InvalidName { detail } => anyhow::anyhow!("invalid tag name: {detail}"),
-            TagError::NotFound { name } => anyhow::anyhow!("no tag named '{name}'"),
+            TagError::NotFound { name } => {
+                let human = format!("no tag named '{name}'");
+                anyhow::Error::new(crate::json_error::StructuredCliError {
+                    payload: crate::json_error::StructuredJsonError::new(
+                        human.clone(),
+                        crate::error_kind::ErrorKind::TagNotFound,
+                    ),
+                    human,
+                })
+            }
             TagError::EmptyMessage => anyhow::anyhow!("tag message cannot be empty"),
             TagError::Lightweight { name } => {
                 anyhow::anyhow!("tag '{name}' is lightweight (not an annotated tag object)")
