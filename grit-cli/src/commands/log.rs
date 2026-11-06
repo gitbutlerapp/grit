@@ -38,8 +38,7 @@ use crate::diff_format::DiffFormatArgs;
 use crate::diff_render::{render_stat, use_color};
 use crate::log_display::{
     decorate_commit_row, format_decorations_folded, render_author_groups_human,
-    render_author_groups_markdown, render_oneline_from_summary, render_oneline_line,
-    render_oneline_oid_subject,
+    render_author_groups_markdown, render_oneline_line, render_oneline_oid_subject,
 };
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
@@ -1248,14 +1247,15 @@ fn build_commit_outcome(
         None
     };
 
+    let mut abbrev_batch = crate::log_display::display_abbrev_batch(repo)?;
+
     if plain_oneline {
         use grit_lib::objects::read_commit_subject_line;
 
-        let mut abbrev = crate::log_display::display_abbrev_batch(repo)?;
         let oneline_lines = oids
             .iter()
             .map(|oid| {
-                let abbrev_hex = abbrev.abbrev_known(repo, *oid)?;
+                let abbrev_hex = abbrev_batch.abbrev_known(repo, *oid)?;
                 let subject = match parsed.cached_subject_line(oid) {
                     Some(Ok(s)) => s,
                     Some(Err(e)) => return Err(e.into()),
@@ -1331,7 +1331,15 @@ fn build_commit_outcome(
         if display.oneline && (!display.graph || output_mode == OutputMode::Markdown) {
             commits
                 .iter()
-                .map(|c| render_oneline_line(repo, &c.commit, display.decorate, head_branch_ref))
+                .map(|c| {
+                    render_oneline_line(
+                        repo,
+                        &mut abbrev_batch,
+                        &c.commit,
+                        display.decorate,
+                        head_branch_ref,
+                    )
+                })
                 .collect::<Result<Vec<_>>>()?
         } else {
             Vec::new()
@@ -1358,6 +1366,7 @@ fn build_commit_outcome(
             display,
             head_branch_ref,
             now,
+            &mut abbrev_batch,
             &mut graph_for_text,
         )?
     } else {
@@ -1640,6 +1649,7 @@ fn build_graph_text_lines(
     display: LogDisplayOptions,
     head_branch: Option<&str>,
     now: i64,
+    abbrev_batch: &mut OidAbbrevBatch,
     graph: &mut LogGraphBuild,
 ) -> Result<Vec<String>> {
     let visible: HashSet<ObjectId> = oids.iter().copied().collect();
@@ -1661,9 +1671,9 @@ fn build_graph_text_lines(
                     let commit = commits
                         .and_then(|c| c.get(i))
                         .ok_or_else(|| anyhow::anyhow!("internal error: missing log commit row"))?;
-                    render_oneline_line(repo, &commit.commit, true, head_branch)?
+                    render_oneline_line(repo, abbrev_batch, &commit.commit, true, head_branch)?
                 } else {
-                    render_oneline_from_summary(repo, summary)?
+                    render_oneline_oid_subject(repo, summary.oid, &summary.subject, abbrev_batch)?
                 };
                 Ok(ui::fit_width(
                     &text,

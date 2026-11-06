@@ -6,7 +6,6 @@ use anyhow::Result;
 use grit_lib::commit::resolve_core_abbrev_len;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::object_inspect::abbreviate_for_display;
 use grit_lib::revwalk::object_inspect::OidAbbrevBatch;
 
 use crate::context::CommitSummary;
@@ -91,13 +90,8 @@ pub fn decorate_commit_row(row: &str, refs: &[CommitRefJson], head_branch: Optio
     out
 }
 
-/// One `--oneline` row from a loaded summary (avoids hex parse when the oid is already known).
-pub fn render_oneline_from_summary(repo: &Repository, summary: &CommitSummary) -> Result<String> {
-    let abbrev = abbreviate_for_display(repo, summary.oid, true)?;
-    Ok(format!("{abbrev} {}", summary.subject))
-}
-
-/// Like [`render_oneline_from_summary`] but reuses prefix-uniqueness memoization across a page.
+/// One `--oneline` line from a known object id and subject, using a shared [`OidAbbrevBatch`]
+/// so abbreviation stays consistent and fast across many commits (see [`render_oneline_line`]).
 pub fn render_oneline_oid_subject(
     repo: &Repository,
     oid: ObjectId,
@@ -109,8 +103,12 @@ pub fn render_oneline_oid_subject(
 }
 
 /// One `--oneline` row: `<abbrev> [<decorations>] <subject>`.
+///
+/// Pass one [`OidAbbrevBatch`] for the whole listing so abbreviating many commits does not
+/// re-read config or re-scan the object database per row (same rules as [`OidAbbrevBatch::abbrev_known`]).
 pub fn render_oneline_line(
     repo: &Repository,
+    abbrev_batch: &mut OidAbbrevBatch,
     commit: &CommitJson,
     decorate: bool,
     head_branch: Option<&str>,
@@ -119,7 +117,7 @@ pub fn render_oneline_line(
         .oid
         .parse()
         .map_err(|e| anyhow::anyhow!("invalid commit oid in log row: {e}"))?;
-    let abbrev = abbreviate_for_display(repo, oid, true)?;
+    let abbrev = abbrev_batch.abbrev_known(repo, oid)?;
     let deco = if decorate {
         let d = format_decorations_folded(&commit.refs, head_branch);
         if d.is_empty() {
