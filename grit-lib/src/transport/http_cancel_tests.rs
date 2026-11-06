@@ -962,6 +962,10 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
 fn connect_operation_cancel_watch_observes_mirrored_deadline() {
     let cancel = deadline_cancel_token(Instant::now() - Duration::from_secs(1));
     let (watch, _guard) = HttpWaitGuard::bind(&cancel);
+    let deadline = Instant::now() + TEST_HARD_TIMEOUT;
+    while !cancel.is_cancelled() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
     mirror_stack_cancel(&cancel, watch.as_ref());
     let arc = connect_cancel_arc(&cancel, watch);
     assert!(

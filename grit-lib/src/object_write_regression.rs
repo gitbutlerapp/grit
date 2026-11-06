@@ -15,7 +15,6 @@ use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::add::{stage, StageOptions};
 use crate::porcelain::commit::{create_commit, CommitRequest};
-use crate::progress::CancelToken;
 use crate::progress::NullProgress;
 use crate::repo::{init_repository, Repository};
 use crate::write_tree::{cache_tree_update, write_tree_update_index, WriteTreeFlags};
