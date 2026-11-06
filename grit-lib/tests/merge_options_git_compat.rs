@@ -125,7 +125,10 @@ fn ff_only_refuses_divergent_and_changes_nothing() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("ff-only must fail");
-    assert!(matches!(err, grit_lib::error::Error::Merge(MergeError::NotFastForward)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Merge(MergeError::NotFastForward)
+    ));
     assert_eq!(git(tmp.path(), &["rev-parse", "HEAD"]).trim(), head_before);
     assert_eq!(
         std::fs::read(tmp.path().join(".git/index")).expect("index"),
@@ -521,7 +524,10 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
     )
     .expect_err("no msg");
     assert!(
-        matches!(err, grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage),
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage)
+        ),
         "unexpected: {err:?}"
     );
     assert_ne!(squash_msg.trim(), "");

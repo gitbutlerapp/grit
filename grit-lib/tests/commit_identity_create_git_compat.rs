@@ -184,7 +184,10 @@ fn repository_identity_reports_missing_configuration() {
     )
     .expect_err("no identity");
     assert!(
-        matches!(err, grit_lib::error::Error::Commit(CommitError::Identity(_)),
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::Identity(_))
+        ),
         "unexpected error: {err}"
     );
 }

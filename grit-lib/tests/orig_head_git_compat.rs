@@ -261,7 +261,13 @@ fn refused_ff_only_merge_still_records_orig_head_like_git() {
         ..merge_options()
     };
     let err = merge(&open(dir), main, topic, &only).expect_err("not a fast-forward");
-    assert!(matches!(err, grit_lib::error::Error::Merge(MergeError::NotFastForward)), "{err:?}"));
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::Merge(MergeError::NotFastForward)
+        ),
+        "{err:?}"
+    );
     assert_eq!(git_orig_head(dir), Some(main));
     assert_eq!(rev(dir, "HEAD"), main);
 }

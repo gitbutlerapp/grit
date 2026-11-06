@@ -107,7 +107,10 @@ fn default_scope_with_autostage_off_is_staged_and_reports_nothing_staged() {
     )
     .expect_err("commit");
     assert!(
-        matches!(err, grit_lib::error::Error::Commit(CommitError::NothingStagedToCommit { .. }),
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::NothingStagedToCommit { .. })
+        ),
         "got {err:?}"
     );
 }
@@ -135,7 +138,10 @@ fn paths_scope_with_other_paths_staged_reports_nothing_to_commit_not_false_unsta
     )
     .expect_err("path a.txt has nothing to commit");
     assert!(
-        matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit),
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::NothingToCommit)
+        ),
         "must not treat staged b.txt as unstaged in the path index: {err:?}"
     );
 }
@@ -158,7 +164,13 @@ fn clean_tree_still_reports_nothing_to_commit() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit");
-    assert!(matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit)), "got {err:?}"));
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::NothingToCommit)
+        ),
+        "got {err:?}"
+    );
 }
 
 fn init_nested_repo(path: &Path) {

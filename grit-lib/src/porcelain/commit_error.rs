@@ -75,6 +75,14 @@ pub enum CommitError {
     #[error(transparent)]
     PatchApply(#[from] ApplyError),
 
+    /// Commit message bytes are not valid UTF-8 after normalization.
+    #[error("invalid commit message")]
+    InvalidCommitMessage,
+
+    /// Change-id generation failed for a new commit.
+    #[error(transparent)]
+    ChangeId(#[from] crate::change_id::ChangeIdError),
+
     /// Underlying repository, hook, index, or I/O failure.
     #[error(transparent)]
     Library(Box<Error>),
@@ -97,6 +105,8 @@ impl CommitError {
             Self::Signing { .. } => "signing",
             Self::HunkSelect(..) => "hunk_selection",
             Self::PatchApply(..) => "apply",
+            Self::InvalidCommitMessage => "empty_commit_message",
+            Self::ChangeId(..) => "message",
             Self::Library(e) => e.kind_name(),
         }
     }

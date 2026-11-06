@@ -174,9 +174,7 @@ pub fn predict_replay_sequence(
         });
     }
     if req.commits.len() > 1 && req.options.message_override.is_some() {
-        return Err(Error::Message(
-            "message_override is only valid when replaying a single commit".into(),
-        ));
+        return Err(MergeError::MessageOverrideNotForMultiCommit.into());
     }
     let todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
     let _overlay = MemOverlayGuard::enter(repo.odb());
@@ -285,9 +283,7 @@ pub fn start_replay_sequence(
     cancel: &CancelToken,
 ) -> Result<SequenceOutcome> {
     if replay_in_progress(repo.git_dir())? {
-        return Err(Error::Message(
-            "cherry-pick or revert is already in progress".into(),
-        ));
+        return Err(MergeError::ReplayAlreadyInProgress.into());
     }
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
         return Err(MergeError::OperationInProgress(op).into());
@@ -302,9 +298,7 @@ pub fn start_replay_sequence(
         });
     }
     if req.commits.len() > 1 && req.options.message_override.is_some() {
-        return Err(Error::Message(
-            "message_override is only valid when replaying a single commit".into(),
-        ));
+        return Err(MergeError::MessageOverrideNotForMultiCommit.into());
     }
     let mut todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
     if let Some(first) = todo.first() {
@@ -720,7 +714,7 @@ fn branch_head(repo: &Repository) -> Result<(Option<String>, ObjectId)> {
         } => Ok((Some(refname), oid)),
         HeadState::Branch { .. } => Err(Error::UnbornHead),
         HeadState::Detached { oid } => Ok((None, oid)),
-        HeadState::Invalid => Err(Error::Message("HEAD is in an unknown state".into())),
+        HeadState::Invalid => Err(Error::InvalidHead),
     }
 }
 
@@ -2030,15 +2024,25 @@ fn read_created_records(repo: &Repository) -> Result<Vec<ReplayCreated>> {
         }
         let mut parts = line.split_whitespace();
         let src = parts.next().ok_or_else(|| {
-            Error::Message("invalid sequencer/created line: missing source oid".into())
+            Error::from(MergeError::SequencerCreatedParse {
+                detail: "missing source oid",
+            })
         })?;
         let new = parts.next().ok_or_else(|| {
-            Error::Message("invalid sequencer/created line: missing new oid".into())
+            Error::from(MergeError::SequencerCreatedParse {
+                detail: "missing new oid",
+            })
         })?;
-        let source = ObjectId::from_hex(src)
-            .map_err(|_| Error::Message("invalid sequencer/created line: bad source oid".into()))?;
-        let new_oid = ObjectId::from_hex(new)
-            .map_err(|_| Error::Message("invalid sequencer/created line: bad new oid".into()))?;
+        let source = ObjectId::from_hex(src).map_err(|_| {
+            Error::from(MergeError::SequencerCreatedParse {
+                detail: "bad source oid",
+            })
+        })?;
+        let new_oid = ObjectId::from_hex(new).map_err(|_| {
+            Error::from(MergeError::SequencerCreatedParse {
+                detail: "bad new oid",
+            })
+        })?;
         out.push(replay_created_record(repo, source, new_oid)?);
     }
     Ok(out)

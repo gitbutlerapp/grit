@@ -185,7 +185,13 @@ fn commit_msg_hook_emptying_message_aborts_without_moving_branch() {
     )
     .expect_err("emptied message must abort");
 
-    assert!(matches!(err, grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage)), "{err:?}"));
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage)
+        ),
+        "{err:?}"
+    );
     assert_eq!(git(root, &["rev-parse", "HEAD"]), before);
 }
 
