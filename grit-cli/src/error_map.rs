@@ -740,15 +740,6 @@ pub fn map_branch_error(err: LibError) -> Error {
                 human,
             })
         }
-        LibError::Branch(BranchError::CheckedOut { worktree, .. }) => {
-            let worktree =
-                grit_lib::config::git_path::path_for_error_message(std::path::Path::new(&worktree));
-            let human = format!("branch is checked out in '{worktree}'");
-            Error::new(StructuredCliError {
-                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
-                human,
-            })
-        }
         other => crate::json_error::map_lib_error(other),
     }
 }

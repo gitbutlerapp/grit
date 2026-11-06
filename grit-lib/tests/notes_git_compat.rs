@@ -3,11 +3,10 @@
 use std::collections::HashMap;
 use std::io::Write;
 
-use grit_lib::notes::NotesError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::notes::{
-    notes_merge_inner, read_notes_tree, upsert_note_entry, write_notes_commit, NotesMergeStrategy,
-    NotesRef,
+    notes_merge_inner, read_notes_tree, upsert_note_entry, write_notes_commit, NotesError,
+    NotesMergeStrategy, NotesRef,
 };
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
