@@ -976,7 +976,6 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::RemoveBlocked { paths } => {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
-        LibError::Stash(grit_lib::stash::StashError::NotFound { n }) => Some(stash_not_found(*n)),
         LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
@@ -1263,7 +1262,7 @@ fn no_operation_in_progress(human: String) -> Error {
 }
 
 pub(crate) fn stash_not_found_cli(n: usize) -> anyhow::Error {
-    stash_not_found(n).into()
+    stash_not_found(n)
 }
 
 fn stash_not_found(n: usize) -> Error {
@@ -1694,13 +1693,12 @@ mod tests {
     }
 
     fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
+        use grit_lib::error::LockHeldError;
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(WrappedLib(LibError::LockHeld(
-            grit_lib::error::LockHeldError {
-                path: path.clone(),
-                holder,
-            },
-        )))
+        let err = Error::new(WrappedLib(LibError::LockHeld(LockHeldError {
+            path: path.clone(),
+            holder,
+        })))
         .context("staging files");
         (err, path)
     }

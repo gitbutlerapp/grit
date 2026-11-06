@@ -2103,7 +2103,7 @@ pub(crate) fn stash_branch(
     name: &str,
     n: usize,
 ) -> StashResult<StashBranchOutcome> {
-    validate_branch_short_name(name).map_err(|reason| BranchError::InvalidName {
+    RefName::branch(name).map_err(|reason| BranchError::InvalidName {
         name: name.to_owned(),
         reason: reason.to_string(),
     })?;
@@ -2168,7 +2168,7 @@ fn stash_branch_from_commit(
     name: &str,
     stash_oid: ObjectId,
 ) -> StashResult<StashBranchOutcome> {
-    validate_branch_short_name(name).map_err(|reason| BranchError::InvalidName {
+    RefName::branch(name).map_err(|reason| BranchError::InvalidName {
         name: name.to_owned(),
         reason: reason.to_string(),
     })?;

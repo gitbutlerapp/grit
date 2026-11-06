@@ -438,15 +438,12 @@ fn stash_pop_cancel_keeps_the_entry() {
     assert_eq!(reset, "base 0\n");
 
     let before = index_bytes(&repo);
-    assert_stash_cancelled(
-        repo.stash()
-            .pop(
-                0,
-                &StashApplyOptions::default(),
-                &mut NullProgress,
-                &cancelled_flag(),
-            ),
-    );
+    assert_stash_cancelled(repo.stash().pop(
+        0,
+        &StashApplyOptions::default(),
+        &mut NullProgress,
+        &cancelled_flag(),
+    ));
     assert_eq!(repo.stash().list().expect("list").len(), 1);
     assert_index_untouched(&repo, &before);
     let untouched = fs::read_to_string(tmp.path().join("d/f0000.txt")).expect("read");

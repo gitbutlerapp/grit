@@ -51,11 +51,11 @@ impl<'repo> RepositoryStash<'repo> {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::StashOptionConflict`] when [`StashPushOptions::dry_run`] is set
-    ///   (use [`Self::preview`]).
-    /// - [`crate::error::Error::StashNoInitialCommit`] before the first commit.
-    /// - [`crate::error::Error::Cancelled`] when `cancel` or
-    ///   fires. Before `refs/stash` moves, the repository is
+    /// - [`crate::stash::StashPushValidationError::DryRunUsePreview`] when
+    ///   [`StashPushOptions::dry_run`] is set (use [`Self::preview`]).
+    /// - [`crate::stash::StashError::NoInitialCommit`] before the first commit.
+    /// - [`crate::stash::StashError::Cancelled`] when [`crate::progress::Cancel::is_cancelled`]
+    ///   is true on the `cancel` argument. Before `refs/stash` moves, the repository is
     ///   unchanged; once the entry is stored it stays, even when the reset that follows is
     ///   cancelled (the same rule as a failed reset).
     /// - Stash build, ref, and checkout failures.
