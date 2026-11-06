@@ -27,6 +27,9 @@ use crate::index::{
     index_file_mtime, Index, IndexEntry, IndexLock, MODE_GITLINK, MODE_SYMLINK, MODE_TREE,
 };
 use crate::objects::FileMode;
+use crate::porcelain::stash_error::{
+    CorruptStashReason, StashError, StashPushValidationError, StashResult,
+};
 use crate::worktree::{map_worktree_io, WorktreePathOperation};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, IndexApplyOptions};
@@ -82,6 +85,18 @@ use crate::repo_relpath::{
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
+
+fn corrupt_stash_commit(oid: ObjectId) -> StashError {
+    StashError::corrupt_stash(oid, CorruptStashReason::InsufficientParents)
+}
+
+fn stash_worktree_io(
+    path: &str,
+    operation: WorktreePathOperation,
+    source: io::Error,
+) -> StashError {
+    StashError::library(map_worktree_io(path, operation, source))
+}
 
 /// A single blob entry from a recursively flattened tree.
 #[derive(Clone)]
@@ -433,29 +448,21 @@ impl StashPushOptions {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::StashOptionConflict`] when options conflict and
-    /// [`Error::InvalidSignature`] when [`Self::identity`] cannot be written into a commit.
-    pub fn validate(&self) -> Result<()> {
+    /// Returns [`StashPushValidationError`] when options conflict or
+    /// [`Self::identity`] cannot be written into a commit.
+    pub fn validate(&self) -> std::result::Result<(), StashPushValidationError> {
         self.identity.validate()?;
         if self.mode == StashMode::StagedOnly && self.include_untracked {
-            return Err(Error::StashOptionConflict(
-                "cannot combine --staged with --include-untracked".into(),
-            ));
+            return Err(StashPushValidationError::StagedWithUntracked);
         }
         if self.mode == StashMode::StagedOnly && selection_is_active(self) {
-            return Err(Error::StashOptionConflict(
-                "cannot combine --staged with --hunks or --lines".into(),
-            ));
+            return Err(StashPushValidationError::StagedWithSelection);
         }
         if self.mode == StashMode::KeepIndex && selection_is_active(self) {
-            return Err(Error::StashOptionConflict(
-                "cannot combine --keep-index with --hunks or --lines".into(),
-            ));
+            return Err(StashPushValidationError::KeepIndexWithSelection);
         }
         if self.include_untracked && selection_is_active(self) {
-            return Err(Error::StashOptionConflict(
-                "cannot combine --include-untracked with --hunks or --lines".into(),
-            ));
+            return Err(StashPushValidationError::UntrackedWithSelection);
         }
         Ok(())
     }
@@ -466,7 +473,7 @@ impl StashPushOptions {
         repo: &Repository,
         work_tree: &Path,
         head_tree: &ObjectId,
-    ) -> Result<()> {
+    ) -> StashResult<()> {
         if self.mode != StashMode::StagedOnly {
             return Ok(());
         }
@@ -484,9 +491,11 @@ impl StashPushOptions {
         for entry in unstaged {
             let path = entry.path();
             if staged.contains(path) {
-                return Err(Error::StashOptionConflict(format!(
-                    "cannot stash staged changes for '{path}': worktree has unstaged changes"
-                )));
+                return Err(StashError::PushValidation(
+                    StashPushValidationError::StagedWorktreeDirty {
+                        path: path.to_owned(),
+                    },
+                ));
             }
         }
         Ok(())
@@ -601,8 +610,8 @@ fn head_branch_label(head: &HeadState) -> String {
     }
 }
 
-fn head_commit_oid(head: &HeadState) -> Result<ObjectId> {
-    head.oid().copied().ok_or(Error::StashNoInitialCommit)
+fn head_commit_oid(head: &HeadState) -> StashResult<ObjectId> {
+    head.oid().copied().ok_or(StashError::NoInitialCommit)
 }
 
 fn head_commit_subject(repo: &Repository, head_oid: &ObjectId) -> Result<String> {
@@ -819,9 +828,7 @@ fn apply_worktree_diff_to_index(
             diff_index_to_worktree_with_options(repo.odb(), index, work_tree, diff_opts)?.0
         }
     };
-    let mut worktree_rules = rules_arc
-        .lock()
-        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+    let mut worktree_rules = rules_arc.lock().unwrap_or_else(|e| e.into_inner());
     let precompose = crate::precompose_config::effective_core_precomposeunicode_with_config(
         Some(repo.git_dir()),
         Some(&worktree_rules.config_arc()),
@@ -1228,11 +1235,9 @@ fn tracked_stash_preview_paths(
 pub(crate) fn preview_stash(
     repo: &Repository,
     options: &StashPushOptions,
-) -> Result<Option<StashPreview>> {
+) -> StashResult<Option<StashPreview>> {
     options.validate()?;
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
+    let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     let head = resolve_head_for_repository(repo)?;
     let head_oid = head_commit_oid(&head)?;
     let head_tree = repo.odb().commit_tree(&head_oid)?;
@@ -1497,7 +1502,7 @@ fn merge_stash_index_trees(
     base_tree: &ObjectId,
     current_index_tree: &ObjectId,
     stash_index_tree: &ObjectId,
-) -> Result<Option<ObjectId>> {
+) -> StashResult<Option<ObjectId>> {
     if base_tree == stash_index_tree || current_index_tree == stash_index_tree {
         return Ok(None);
     }
@@ -1518,7 +1523,7 @@ fn merge_stash_index_trees(
         DirectoryRenameMode::Off,
     )?;
     if output.index.entries.iter().any(|entry| entry.stage() != 0) {
-        return Err(Error::StashIndexConflict);
+        return Err(StashError::IndexConflict);
     }
     Ok(Some(output.result_tree))
 }
@@ -1545,8 +1550,8 @@ fn build_stash_commit(
     work_tree: &Path,
     options: &StashPushOptions,
     scope: &mut ProgressScope<'_>,
-) -> Result<Option<BuiltStash>> {
-    options.validate()?;
+) -> StashResult<Option<BuiltStash>> {
+    options.validate().map_err(StashError::from)?;
     let head = resolve_head_for_repository(repo)?;
     let head_oid = head_commit_oid(&head)?;
     let head_tree = repo.odb().commit_tree(&head_oid)?;
@@ -1642,7 +1647,7 @@ fn build_stash_commit(
                     head_tree_oid: None,
                 },
             )
-            .map_err(|e| Error::Message(e.to_string()))?;
+            .map_err(StashError::Apply)?;
         } else if pathspec_push {
             apply_worktree_diff_to_index_for_pathspecs(
                 repo,
@@ -1707,13 +1712,13 @@ fn build_stash_commit(
 ///
 /// # Errors
 ///
-/// Returns [`Error::StashNoInitialCommit`] when `HEAD` does not resolve to a commit,
+/// Returns [`StashError::NoInitialCommit`] when `HEAD` does not resolve to a commit,
 /// or propagates index, diff, and object-database failures.
 pub(crate) fn create_stash(
     repo: &Repository,
     options: &StashPushOptions,
-) -> Result<Option<ObjectId>> {
-    let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
+) -> StashResult<Option<ObjectId>> {
+    let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     let mut progress = NullProgress;
     let mut scope = ProgressScope::new(&mut progress, &NeverCancel);
     Ok(build_stash_commit(repo, work_tree, options, &mut scope)?.map(|b| b.w_commit))
@@ -1789,13 +1794,14 @@ pub(crate) fn push_stash(
     options: &StashPushOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<Option<StashPushResult>> {
+) -> StashResult<Option<StashPushResult>> {
     if options.dry_run {
-        return Err(Error::StashOptionConflict(
-            "stash push does not run with dry_run; use RepositoryStash::preview".into(),
+        return Err(StashError::PushValidation(
+            StashPushValidationError::DryRunUsePreview,
         ));
     }
-    let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
+    options.validate()?;
+    let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     let mut lock = repo.lock_index()?;
     let mut scope = ProgressScope::new(progress, cancel);
     scope.poll()?;
@@ -1831,7 +1837,7 @@ fn reset_after_stash_push(
     lock: &mut IndexLock,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<()> {
+) -> StashResult<()> {
     if !built.untracked_paths.is_empty() {
         remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
     }
@@ -1880,7 +1886,8 @@ fn reset_after_stash_push(
             lock,
             progress,
             cancel,
-        ),
+        )
+        .map_err(StashError::library),
         StashMode::KeepIndex => checkout_between_trees_locked(
             repo,
             &built.w_tree,
@@ -1889,7 +1896,8 @@ fn reset_after_stash_push(
             CheckoutIndexWrite::Commit(lock),
             progress,
             cancel,
-        ),
+        )
+        .map_err(StashError::library),
         StashMode::All => {
             let mut checked_out = repo.load_index()?;
             checkout_between_trees_locked(
@@ -1900,25 +1908,21 @@ fn reset_after_stash_push(
                 CheckoutIndexWrite::Defer(lock),
                 progress,
                 cancel,
-            )?;
+            )
+            .map_err(StashError::library)?;
             // The checkout left fresh stat data for every path it rewrote; reuse it so the
             // refresh only hashes files whose stat does not match.
             let mut head_index =
                 index_from_tree_with_seeded_worktree_stats(repo, &head_tree, &checked_out)?;
             drop(checked_out);
             repo.write_index_with_lock(lock, &mut head_index, true)
+                .map_err(StashError::library)
         }
     }
 }
 
-fn stash_worktree_step_error(err: ApplyError) -> Error {
-    match err {
-        ApplyError::Cancelled => Error::Cancelled,
-        ApplyError::Failed { path, message } if !path.is_empty() => Error::Message(format!(
-            "could not update '{path}' while finishing stash: {message}"
-        )),
-        other => Error::Message(other.to_string()),
-    }
+fn stash_worktree_step_error(err: ApplyError) -> StashError {
+    StashError::from_apply_worktree(err)
 }
 
 fn materialize_stash_blob_err(err: Error, index_relpath: &str) -> Error {
@@ -1933,7 +1937,7 @@ fn materialize_stash_blob_err(err: Error, index_relpath: &str) -> Error {
 /// # Errors
 ///
 /// Propagates reflog read failures.
-pub(crate) fn list_stashes(repo: &Repository) -> Result<Vec<StashEntry>> {
+pub(crate) fn list_stashes(repo: &Repository) -> StashResult<Vec<StashEntry>> {
     let entries = read_reflog_on_store(repo.refs(), STASH_REF)?;
     Ok(entries
         .into_iter()
@@ -1947,13 +1951,13 @@ pub(crate) fn list_stashes(repo: &Repository) -> Result<Vec<StashEntry>> {
         .collect())
 }
 
-pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> Result<ObjectId> {
+pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> StashResult<ObjectId> {
     let entries = list_stashes(repo)?;
     entries
         .into_iter()
         .find(|e| e.index == n)
         .map(|e| e.oid)
-        .ok_or(Error::StashNotFound { n })
+        .ok_or(StashError::NotFound { n })
 }
 
 /// Remove `stash@{{n}}` from the reflog and move `refs/stash` to the next entry.
@@ -1962,8 +1966,8 @@ pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> Result<ObjectId> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::StashNotFound`] when `n` is out of range.
-pub(crate) fn drop_stash(repo: &Repository, n: usize) -> Result<ObjectId> {
+/// Returns [`StashError::NotFound`] when `n` is out of range.
+pub(crate) fn drop_stash(repo: &Repository, n: usize) -> StashResult<ObjectId> {
     let oid = stash_oid_at(repo, n)?;
     let store = repo.refs();
     delete_reflog_entries_rechain_on_store(store, STASH_REF, &[n])?;
@@ -1984,18 +1988,18 @@ pub(crate) fn drop_stash(repo: &Repository, n: usize) -> Result<ObjectId> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::StashNotFound`] or [`Error::CorruptStash`] when the entry is invalid.
+/// Returns [`StashError::NotFound`] or [`StashError::CorruptStash`] when the entry is invalid.
 pub(crate) fn stash_diff(
     repo: &Repository,
     n: usize,
     options: &StashDiffOptions,
-) -> Result<Vec<DiffEntry>> {
+) -> StashResult<Vec<DiffEntry>> {
     let oid = stash_oid_at(repo, n)?;
     let stash_commit = repo.odb().read_commit(&oid)?;
     let head_parent = stash_commit
         .parents
         .first()
-        .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
+        .ok_or_else(|| corrupt_stash_commit(oid))?;
     let head_tree = repo.odb().commit_tree(head_parent)?;
     let mut diffs = diff_trees(repo.odb(), Some(&head_tree), Some(&stash_commit.tree), "")?;
     if options.include_untracked {
@@ -2010,7 +2014,7 @@ pub(crate) fn stash_diff_stat(
     n: usize,
     options: &StashDiffOptions,
     diff_options: DiffOptions,
-) -> Result<DiffStat> {
+) -> StashResult<DiffStat> {
     let entries = stash_diff(repo, n, options)?;
     let config = repo.config().snapshot()?;
     let whitespace = diff_options.whitespace;
@@ -2089,10 +2093,16 @@ fn append_stash_untracked_show_entries(
 /// # Errors
 ///
 /// Returns [`BranchError::AlreadyExists`] when the branch name is taken,
-/// [`Error::StashNotFound`] when `n` is out of range, and apply/switch failures otherwise.
-pub(crate) fn stash_branch(repo: &Repository, name: &str, n: usize) -> Result<StashBranchOutcome> {
-    RefName::branch(name)
-        .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
+/// [`StashError::NotFound`] when `n` is out of range, and apply/switch failures otherwise.
+pub(crate) fn stash_branch(
+    repo: &Repository,
+    name: &str,
+    n: usize,
+) -> StashResult<StashBranchOutcome> {
+    validate_branch_short_name(name).map_err(|reason| BranchError::InvalidName {
+        name: name.to_owned(),
+        reason: reason.to_string(),
+    })?;
     let branch_ref = format!("refs/heads/{name}");
     if repo.resolve_ref_oid(&branch_ref).is_ok() {
         return Err(BranchError::AlreadyExists {
@@ -2101,14 +2111,14 @@ pub(crate) fn stash_branch(repo: &Repository, name: &str, n: usize) -> Result<St
         .into());
     }
     if repo.work_tree().is_none() {
-        return Err(Error::StashBareRepository);
+        return Err(StashError::BareRepository);
     }
     let stash_oid = stash_oid_at(repo, n)?;
     let stash_commit = repo.odb().read_commit(&stash_oid)?;
     let base = *stash_commit
         .parents
         .first()
-        .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
+        .ok_or_else(|| corrupt_stash_commit(stash_oid))?;
 
     switch_repository(
         repo,
@@ -2153,9 +2163,11 @@ fn stash_branch_from_commit(
     repo: &Repository,
     name: &str,
     stash_oid: ObjectId,
-) -> Result<StashBranchOutcome> {
-    RefName::branch(name)
-        .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
+) -> StashResult<StashBranchOutcome> {
+    validate_branch_short_name(name).map_err(|reason| BranchError::InvalidName {
+        name: name.to_owned(),
+        reason: reason.to_string(),
+    })?;
     let branch_ref = format!("refs/heads/{name}");
     if repo.resolve_ref_oid(&branch_ref).is_ok() {
         return Err(BranchError::AlreadyExists {
@@ -2164,13 +2176,13 @@ fn stash_branch_from_commit(
         .into());
     }
     if repo.work_tree().is_none() {
-        return Err(Error::StashBareRepository);
+        return Err(StashError::BareRepository);
     }
     let stash_commit = repo.odb().read_commit(&stash_oid)?;
     let base = *stash_commit
         .parents
         .first()
-        .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
+        .ok_or_else(|| corrupt_stash_commit(stash_oid))?;
 
     switch_repository(
         repo,
@@ -2215,7 +2227,7 @@ pub(crate) fn apply_stash_reference(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     match reference {
         StashReference::Index(n) => apply_stash_entry(repo, n, options, progress, cancel),
         StashReference::Commit(oid) => apply_stash_oid(repo, &oid, options, progress, cancel),
@@ -2229,11 +2241,11 @@ pub(crate) fn pop_stash_reference(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let index = match reference {
         StashReference::Index(n) => n,
         StashReference::Commit(oid) => {
-            stash_index_for_oid(repo, &oid).ok_or(Error::StashCommitNotOnStack { oid })?
+            stash_index_for_oid(repo, &oid).ok_or(StashError::CommitNotOnStack { oid })?
         }
     };
     pop_stash_entry(repo, index, options, progress, cancel)
@@ -2244,7 +2256,7 @@ pub(crate) fn stash_branch_reference(
     repo: &Repository,
     name: &str,
     reference: StashReference,
-) -> Result<StashBranchOutcome> {
+) -> StashResult<StashBranchOutcome> {
     match reference {
         StashReference::Index(n) => stash_branch(repo, name, n),
         StashReference::Commit(oid) => {
@@ -2266,7 +2278,7 @@ pub(crate) fn stash_branch_reference(
 /// # Errors
 ///
 /// Propagates ref store and reflog delete failures.
-pub(crate) fn clear_stashes(repo: &Repository) -> Result<usize> {
+pub(crate) fn clear_stashes(repo: &Repository) -> StashResult<usize> {
     let store = repo.refs();
     let count = read_reflog_on_store(store, STASH_REF)?.len();
     let has_ref = repo.resolve_ref_oid(STASH_REF).is_ok();
@@ -2317,7 +2329,7 @@ fn materialize_raw_flat_entry_in_worktree(
     work_tree: &Path,
     rules: &WorktreeRules,
     entry: &RawFlatTreeEntry,
-) -> Result<()> {
+) -> StashResult<()> {
     let stored = storage_string(&entry.path);
     let file_path = worktree_abs(work_tree, &stored);
     if let Some(parent) = file_path.parent() {
@@ -2328,19 +2340,31 @@ fn materialize_raw_flat_entry_in_worktree(
                 if cur.exists() && !cur.is_dir() {
                     let path = crate::repo_relpath::strip_worktree_prefix_stored(&cur, work_tree)
                         .unwrap_or_else(|| stored.clone());
-                    return Err(Error::StashCouldNotRestoreUntracked { path });
+                    return Err(StashError::CouldNotRestoreUntracked { path });
                 }
             }
         }
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(|source| {
+            StashError::library(map_worktree_io(
+                &stored,
+                WorktreePathOperation::Create,
+                source,
+            ))
+        })?;
     }
     if entry.mode == MODE_GITLINK {
-        fs::create_dir_all(&file_path)?;
+        fs::create_dir_all(&file_path).map_err(|source| {
+            StashError::library(map_worktree_io(
+                &stored,
+                WorktreePathOperation::Create,
+                source,
+            ))
+        })?;
         return Ok(());
     }
     let blob = repo.odb().read(&entry.oid)?;
     if entry.mode == MODE_SYMLINK {
-        let target = String::from_utf8(blob.data).map_err(|_| Error::StashSymlinkNotUtf8)?;
+        let target = String::from_utf8(blob.data).map_err(|_| StashError::SymlinkNotUtf8)?;
         if file_path.exists() || file_path.symlink_metadata().is_ok() {
             let _ = fs::remove_file(&file_path);
         }
@@ -2391,12 +2415,12 @@ pub fn check_stash_apply_would_overwrite_local_changes(
     repo: &Repository,
     work_tree: &Path,
     stash_commit: &CommitData,
-) -> Result<()> {
+) -> StashResult<()> {
     let index = load_stash_index(repo)?;
     let head_at_stash = stash_commit
         .parents
         .first()
-        .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
+        .ok_or_else(|| corrupt_stash_commit(stash_commit.tree))?;
     let head_tree = repo.odb().commit_tree(head_at_stash)?;
     let delta = StashTreeDelta::read(repo, &head_tree, &stash_commit.tree)?;
     check_stash_local_changes(
@@ -2412,7 +2436,7 @@ fn check_stash_local_changes<'a>(
     work_tree: &Path,
     current_index: &Index,
     paths: impl IntoIterator<Item = &'a [u8]>,
-) -> Result<()> {
+) -> StashResult<()> {
     let config = repo.config().snapshot()?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config.file_mode();
@@ -2437,7 +2461,7 @@ fn check_stash_local_changes<'a>(
             continue;
         }
         if comparer.differs(repo.odb(), idx_entry, true, None)? {
-            return Err(Error::StashWouldOverwriteLocalChanges {
+            return Err(StashError::WouldOverwriteLocalChanges {
                 paths: crate::repo_relpath::storage_string(path),
             });
         }
@@ -2532,7 +2556,7 @@ fn untracked_stash_restore_collisions(
 ///
 /// # Errors
 ///
-/// Returns [`Error::StashCouldNotRestoreUntracked`] when a path from the untracked parent
+/// Returns [`StashError::CouldNotRestoreUntracked`] when a path from the untracked parent
 /// collides with tracked, untracked, or ignored content already on disk.
 fn check_stash_untracked_restore(
     repo: &Repository,
@@ -2541,7 +2565,7 @@ fn check_stash_untracked_restore(
     index: &mut Index,
     wt_deletions: &BTreeSet<Vec<u8>>,
     options: &StashApplyOptions,
-) -> Result<()> {
+) -> StashResult<()> {
     if stash_commit.parents.len() < 3 {
         return Ok(());
     }
@@ -2579,7 +2603,7 @@ fn check_stash_untracked_restore(
         {
             continue;
         }
-        return Err(Error::StashCouldNotRestoreUntracked { path });
+        return Err(StashError::CouldNotRestoreUntracked { path });
     }
     Ok(())
 }
@@ -2634,7 +2658,7 @@ fn untracked_on_disk_matches_stash(
 ///
 /// # Errors
 ///
-/// Returns [`Error::StashBareRepository`] without a work tree, [`Error::CorruptStash`] for a
+/// Returns [`StashError::BareRepository`] without a work tree, [`StashError::CorruptStash`] for a
 /// malformed stash commit, and local-change, untracked-overwrite, or index write failures.
 pub(crate) fn apply_stash_oid(
     repo: &Repository,
@@ -2642,8 +2666,8 @@ pub(crate) fn apply_stash_oid(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<StashApplyOutcome> {
-    let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
+) -> StashResult<StashApplyOutcome> {
+    let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     apply_stash_commit(repo, work_tree, stash_oid, options, progress, cancel)
 }
 
@@ -2676,14 +2700,14 @@ impl StashApplyOutcome {
 ///
 /// # Errors
 ///
-/// Returns [`Error::StashNotFound`] when `n` is out of range, plus the [`apply_stash_oid`] errors.
+/// Returns [`StashError::NotFound`] when `n` is out of range, plus the [`apply_stash_oid`] errors.
 pub(crate) fn apply_stash_entry(
     repo: &Repository,
     n: usize,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let oid = stash_oid_at(repo, n)?;
     apply_stash_oid(repo, &oid, options, progress, cancel)
 }
@@ -2699,7 +2723,7 @@ pub(crate) fn pop_stash_entry(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let outcome = apply_stash_entry(repo, n, options, progress, cancel)?;
     if !outcome.has_conflicts() {
         drop_stash(repo, n)?;
@@ -2714,12 +2738,12 @@ fn apply_stash_commit(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let restore_index = options.restore_index;
     let stash_commit = repo.odb().read_commit(stash_oid)?;
 
     if stash_commit.parents.len() < 2 {
-        return Err(Error::CorruptStash("expected at least 2 parents"));
+        return Err(corrupt_stash_commit(*stash_oid));
     }
 
     let head_at_stash = &stash_commit.parents[0];
@@ -2809,7 +2833,7 @@ fn apply_stash_commit(
     let current_head_loaded: Vec<StashTreeEntry>;
     let current_head_entries: &[StashTreeEntry] = if head_moved {
         let Some(head_oid) = current_head_oid.as_ref() else {
-            return Err(Error::StashMissingHead);
+            return Err(StashError::MissingHead);
         };
         let head_tree = repo.odb().commit_tree(head_oid)?;
         let affected: BTreeSet<_> = wt_changes
@@ -2881,20 +2905,28 @@ fn apply_stash_commit(
                         }
                     }
                 }
-                fs::create_dir_all(parent)?;
+                let rel_display = storage_string(path);
+                fs::create_dir_all(parent).map_err(|source| {
+                    stash_worktree_io(&rel_display, WorktreePathOperation::Create, source)
+                })?;
                 prepared_dirs.insert(parent.to_path_buf());
             }
         }
         if entry.mode == MODE_GITLINK {
+            let rel_display = storage_string(path);
             if file_path.is_file() || file_path.is_symlink() {
                 let _ = fs::remove_file(&file_path);
             } else if file_path.is_dir() {
                 let git_meta = file_path.join(".git");
                 if !(git_meta.is_file() || git_meta.is_dir()) {
-                    fs::remove_dir_all(&file_path)?;
+                    fs::remove_dir_all(&file_path).map_err(|source| {
+                        stash_worktree_io(&rel_display, WorktreePathOperation::Remove, source)
+                    })?;
                 }
             }
-            fs::create_dir_all(&file_path)?;
+            fs::create_dir_all(&file_path).map_err(|source| {
+                stash_worktree_io(&rel_display, WorktreePathOperation::Create, source)
+            })?;
             continue;
         }
 
@@ -2920,7 +2952,7 @@ fn apply_stash_commit(
 
         if entry.mode == MODE_SYMLINK {
             let target =
-                String::from_utf8(stash_blob.data).map_err(|_| Error::StashSymlinkNotUtf8)?;
+                String::from_utf8(stash_blob.data).map_err(|_| StashError::SymlinkNotUtf8)?;
             if file_path.exists() || file_path.symlink_metadata().is_ok() {
                 let _ = fs::remove_file(&file_path);
             }
@@ -2996,7 +3028,15 @@ fn apply_stash_commit(
                     &output.content,
                     &marker_oid,
                 )?;
-                write_regular_file_replacing_symlink(&file_path, &worktree_bytes)?;
+                write_regular_file_replacing_symlink(&file_path, &worktree_bytes).map_err(
+                    |source| {
+                        stash_worktree_io(
+                            &String::from_utf8_lossy(path),
+                            WorktreePathOperation::Replace,
+                            source,
+                        )
+                    },
+                )?;
                 if output.conflicts > 0 {
                     has_conflicts = true;
                     // Write conflict stages to index
@@ -3300,7 +3340,16 @@ fn apply_stash_commit(
     drop(idx_tree_loaded);
     drop(current_head_loaded);
     repo.write_index_with_lock(&mut lock, &mut new_index, false)
-        .map_err(|e| Error::StashIndexWrite(e.to_string()))?;
+        .map_err(|err| match err {
+            Error::GitDirPathIo {
+                path,
+                operation,
+                source,
+            } => StashError::IndexWrite {
+                source: crate::error::PathIoError::git_dir(path, operation, source),
+            },
+            other => StashError::library(other),
+        })?;
 
     // Apply untracked files if present (3rd parent)
     if stash_commit.parents.len() >= 3 {
@@ -3916,7 +3965,7 @@ mod coverage_tests {
         .expect_err("collision");
         assert!(matches!(
             err,
-            Error::StashCouldNotRestoreUntracked { ref path } if path == "u.txt"
+            StashError::CouldNotRestoreUntracked { ref path } if path == "u.txt"
         ));
     }
 }
@@ -4215,7 +4264,7 @@ mod hunk_push_tests {
             .validate()
             .expect_err("conflict");
         assert!(
-            matches!(err, Error::StashOptionConflict(ref msg) if msg.contains("--include-untracked")),
+            matches!(err, StashPushValidationError::UntrackedWithSelection),
             "got {err:?}"
         );
     }

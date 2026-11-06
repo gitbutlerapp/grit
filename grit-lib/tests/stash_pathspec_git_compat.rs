@@ -364,7 +364,10 @@ fn stash_pop_index_conflict_keeps_entry() {
         )
         .expect_err("index conflict");
     assert!(
-        matches!(err, Error::StashIndexConflict),
+        matches!(
+            err,
+            Error::Stash(grit_lib::stash::StashError::IndexConflict)
+        ),
         "expected index conflict, got {err:?}"
     );
 

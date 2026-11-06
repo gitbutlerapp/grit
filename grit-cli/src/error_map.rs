@@ -966,7 +966,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::RemoveBlocked { paths } => {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
-        LibError::StashNotFound { .. } => Some(stash_not_found(err)),
+        LibError::Stash(grit_lib::stash::StashError::NotFound { n }) => Some(stash_not_found(*n)),
         LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
@@ -1252,18 +1252,15 @@ fn no_operation_in_progress(human: String) -> Error {
     guided(ErrorKind::NoOperationInProgress, human, None, None)
 }
 
-fn stash_not_found(err: &LibError) -> Error {
-    let LibError::StashNotFound { n } = err else {
-        unreachable!("stash_not_found called for {:?}", err);
-    };
-    let (human, hint) = if *n == 0 {
+fn stash_not_found(n: usize) -> Error {
+    let (human, hint) = if n == 0 {
         (
             "no stash entries".to_owned(),
             Some("save local changes with `grit stash push`".to_owned()),
         )
     } else {
         (
-            format!("no stash entry at index {n}"),
+            format!("no stash entry at index {n}",),
             Some("run `grit stash list` to see valid indexes".to_owned()),
         )
     };

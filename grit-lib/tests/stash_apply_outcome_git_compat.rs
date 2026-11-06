@@ -237,7 +237,13 @@ fn entry_out_of_range_is_stash_not_found() {
             &grit_lib::progress::NeverCancel,
         )
         .unwrap_err();
-    assert!(matches!(err, Error::StashNotFound { n: 0 }), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::Stash(grit_lib::stash::StashError::NotFound { n: 0 })
+        ),
+        "{err:?}"
+    );
     let err = repo
         .stash()
         .pop(
@@ -247,5 +253,11 @@ fn entry_out_of_range_is_stash_not_found() {
             &grit_lib::progress::NeverCancel,
         )
         .unwrap_err();
-    assert!(matches!(err, Error::StashNotFound { n: 3 }), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::Stash(grit_lib::stash::StashError::NotFound { n: 3 })
+        ),
+        "{err:?}"
+    );
 }

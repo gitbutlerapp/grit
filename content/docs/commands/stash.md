@@ -359,6 +359,8 @@ hint: save local changes with `grit stash push`
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+With `--json`, typed stash failures use the shared [error schema](/schemas/error/v1.json). Common `kind` values include `stash_not_found` when `apply`, `pop`, `drop`, or `show` names an index with no entry (for example `pop` on an empty stack), `not_a_repository` when the command needs a repository, and `lock_held` when another process holds `.git/index.lock` before any stash write. Human messages name the missing index (`stash@{n}`) or say `no stash entries` when the stack is empty. Apply and pop that would overwrite local tracked edits or clobber an on-disk untracked file exit **1** without changing the stash entry; `--json` still carries the error string (no separate `kind` yet for those cases).
+
 When another process holds `.git/index.lock`, `grit stash`, `stash push`, `apply`, `pop` and `branch` fail with exit `1` (`kind` `lock_held` under `--json`) before writing anything: no stash commit or `refs/stash` entry is created, and the worktree and index are unchanged. Retry once the other process finishes. If a push fails after `refs/stash` was updated (for example an I/O error while resetting the worktree), the entry stays on the stash so the saved changes are never only a dangling object.
 
 

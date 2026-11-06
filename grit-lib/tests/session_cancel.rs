@@ -23,7 +23,7 @@ use grit_lib::revwalk::history::{
     continue_rebase, start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome,
     RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
-use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
+use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions, StashResult};
 
 const IDENT: &str = "Cancel Test <cancel@example.com> 1700000000 +0000";
 const FILES: usize = 300;
@@ -178,6 +178,13 @@ fn assert_cancelled<T: std::fmt::Debug>(result: grit_lib::error::Result<T>) {
     }
 }
 
+fn assert_stash_cancelled<T: std::fmt::Debug>(result: StashResult<T>) {
+    match result {
+        Err(StashError::Cancelled) => {}
+        other => panic!("expected StashError::Cancelled, got {other:?}"),
+    }
+}
+
 fn assert_index_untouched(repo: &Repository, before: &[u8]) {
     assert_eq!(index_bytes(repo), before, "on-disk index must be unchanged");
     assert!(
@@ -326,7 +333,7 @@ fn assert_stash_reset_cancelled(
 ) {
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();
-    assert_cancelled(repo.stash().push(opts, &mut sink, &cancel));
+    assert_stash_cancelled(repo.stash().push(opts, &mut sink, &cancel));
     assert_eq!(
         repo.stash().list().expect("list").len(),
         1,
@@ -404,13 +411,13 @@ fn stash_push_stops_before_storing_the_entry() {
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
     let cancel = sink.flag.clone();
-    assert_cancelled(repo.stash().push(&stash_opts(), &mut sink, &cancel));
+    assert_stash_cancelled(repo.stash().push(&stash_opts(), &mut sink, &cancel));
     assert!(repo.stash().list().expect("list").is_empty());
     assert_index_untouched(&repo, &before);
     let kept = fs::read_to_string(tmp.path().join("d/f0000.txt")).expect("read");
     assert_eq!(kept, "changed 0\n", "work tree keeps its changes");
 
-    assert_cancelled(
+    assert_stash_cancelled(
         repo.stash()
             .push(&stash_opts(), &mut NullProgress, &cancelled_flag()),
     );
@@ -431,12 +438,15 @@ fn stash_pop_cancel_keeps_the_entry() {
     assert_eq!(reset, "base 0\n");
 
     let before = index_bytes(&repo);
-    assert_cancelled(repo.stash().pop(
-        0,
-        &StashApplyOptions::default(),
-        &mut NullProgress,
-        &cancelled_flag(),
-    ));
+    assert_stash_cancelled(
+        repo.stash()
+            .pop(
+                0,
+                &StashApplyOptions::default(),
+                &mut NullProgress,
+                &cancelled_flag(),
+            ),
+    );
     assert_eq!(repo.stash().list().expect("list").len(), 1);
     assert_index_untouched(&repo, &before);
     let untouched = fs::read_to_string(tmp.path().join("d/f0000.txt")).expect("read");
@@ -447,7 +457,7 @@ fn stash_pop_cancel_keeps_the_entry() {
 
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();
-    assert_cancelled(
+    assert_stash_cancelled(
         repo.stash()
             .pop(0, &StashApplyOptions::default(), &mut sink, &cancel),
     );

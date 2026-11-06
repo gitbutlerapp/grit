@@ -84,6 +84,7 @@ pub mod revert;
 pub mod stage_tracked;
 pub mod staging;
 pub(crate) mod stash;
+pub mod stash_error;
 pub mod status;
 pub mod switch;
 pub mod tag;
