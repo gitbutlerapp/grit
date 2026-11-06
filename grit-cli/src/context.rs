@@ -111,7 +111,7 @@ pub fn locate_repository() -> Result<RepositoryLocation> {
 pub fn locate_repository_with_config() -> Result<(RepositoryLocation, ConfigSet)> {
     let repo = Repository::discover(None, &location_options()).context("not in a repository")?;
     let location = RepositoryLocation::from(&repo);
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     Ok((location, (*config).clone()))
 }
 
