@@ -1397,10 +1397,7 @@ pub(crate) fn run_commit_hook_with_cancel(
     commit_env: &CommitHookEnv<'_>,
     cancel: &CancelToken,
 ) -> Result<HookResult, HookError> {
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(HookError::from)?;
+    let config = repo.config().snapshot().map_err(HookError::from)?;
     run_hook_opts_with_cancel(
         Some(repo),
         hook_name,
@@ -1442,10 +1439,7 @@ pub fn run_hook(
     args: &[&str],
     stdin_data: Option<&[u8]>,
 ) -> Result<HookResult, HookError> {
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(HookError::from)?;
+    let config = repo.config().snapshot().map_err(HookError::from)?;
     run_hook_opts(
         Some(repo),
         hook_name,
@@ -1507,10 +1501,7 @@ pub(crate) fn run_hook_in_git_dir_with_cancel(
     let env_vars: Vec<(&str, &str)> = std::iter::once(("GIT_DIR", "."))
         .chain(env_vars.iter().copied())
         .collect();
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(HookError::from)?;
+    let config = repo.config().snapshot().map_err(HookError::from)?;
     run_hook_opts_with_cancel(
         Some(repo),
         hook_name,
@@ -1587,10 +1578,7 @@ pub fn run_pre_push_hook(
     url: &str,
     refs: &[PrePushRef],
 ) -> Result<HookOutput, HookError> {
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(HookError::from)?;
+    let config = repo.config().snapshot().map_err(HookError::from)?;
     let algo = repo.odb().hash_algo();
     let stdin: String = refs.iter().map(|r| r.stdin_line(algo)).collect();
     let result = run_hook_opts(

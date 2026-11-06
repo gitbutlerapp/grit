@@ -11,7 +11,6 @@ use crate::objects::{read_commit_subject_pretty, ObjectId, ObjectKind};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::refs::listing::{
     query_refs_peeling, PeelTips, RefKind, RefNamespace, RefQuery, RefQueryError, RefQueryOptions,
-    SortKey,
 };
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;

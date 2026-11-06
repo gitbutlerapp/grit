@@ -1271,10 +1271,7 @@ fn plan_worktree_reverse(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| HunkSelectError::from(Error::from(RepositoryError::RequiresWorkTree)))?;
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(HunkSelectError::from)?;
+    let config = repo.config().snapshot().map_err(HunkSelectError::from)?;
     let mut out = Vec::with_capacity(patches.len());
     for patch in patches {
         let path = patch
@@ -1333,10 +1330,7 @@ fn commit_worktree_reverse(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| HunkSelectError::from(Error::from(RepositoryError::RequiresWorkTree)))?;
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(HunkSelectError::from)?;
+    let config = repo.config().snapshot().map_err(HunkSelectError::from)?;
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let has_symlinks = dir_cache.has_symlinks();
     for plan in planned {

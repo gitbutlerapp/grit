@@ -4575,7 +4575,9 @@ fn parse_ceiling_directories(env: &Environment) -> (Vec<PathBuf>, bool) {
 }
 
 /// Validate the repository format version from config text.
-/// Returns Ok if the format is supported, Err with message if not.
+///
+/// Returns [`ConfigError::UnsupportedRepositoryFormatVersion`] when the
+/// configured version is not supported.
 pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), ConfigError> {
     let mut version: u32 = 0;
     let mut in_core = false;

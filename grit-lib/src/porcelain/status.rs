@@ -2431,9 +2431,7 @@ pub fn status(
     let cancel_token = cancel.clone();
     let watch = cancel_token.watch_arc();
     crate::progress::poll_cancel_watch(cancel, &watch)?;
-    let work_tree = repo
-        .work_tree()
-        .ok_or(RepositoryError::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     let head = crate::state::resolve_head_for_repository(repo)?;
     let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;
