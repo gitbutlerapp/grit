@@ -5,7 +5,7 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::ownership_check::{OwnershipCheck, OwnershipContext, OwnershipStatus};
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::TempDir;

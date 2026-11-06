@@ -13,7 +13,7 @@ use grit_lib::diff::{
     PatchTextOptions,
 };
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use tempfile::TempDir;
 

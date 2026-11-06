@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use tempfile::TempDir;
 
 #[test]

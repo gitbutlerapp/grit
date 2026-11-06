@@ -13,7 +13,7 @@ use grit_lib::diff::{
 use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use grit_test_support::{git, rev_parse};
 
