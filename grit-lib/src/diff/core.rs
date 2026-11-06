@@ -3213,7 +3213,7 @@ pub fn diff_trees_with_renames(
 /// # Errors
 ///
 /// Propagates errors from [`diff_trees`].
-pub(crate) fn diff_trees_with_renames_and_policy(
+pub fn diff_trees_with_renames_and_policy(
     odb: &Odb,
     old_tree_oid: Option<&ObjectId>,
     new_tree_oid: Option<&ObjectId>,
@@ -12604,8 +12604,7 @@ pub fn count_changes_with_algorithm(
 
 /// Count insertions and deletions using Git's histogram line-diff engine.
 #[must_use]
-#[allow(dead_code)]
-fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
+pub fn count_changes_git_histogram(old_content: &str, new_content: &str) -> (usize, usize) {
     count_changes_with_algorithm(old_content, new_content, similar::Algorithm::Myers, true)
 }
 

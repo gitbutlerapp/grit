@@ -4752,6 +4752,7 @@ pub fn grit_lib::diff::build_file_diffs_streaming(&grit_lib::prelude::Odb, alloc
 pub fn grit_lib::diff::bytes_for_diff(alloc::vec::Vec<u8>) -> (grit_lib::diff::structured::SideBytes, bool)
 pub fn grit_lib::diff::combined_structured_patch_body(&grit_lib::diff::combined_diff_patch::CombinedStructuredTextDiff) -> alloc::string::String
 pub fn grit_lib::diff::commit_diff_files(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, grit_lib::diff::DiffMerges, grit_lib::diff::DiffDetail, &grit_lib::diff::DiffOptions, &[alloc::string::String], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<grit_lib::diff::DiffFilesOutput>
+pub fn grit_lib::diff::count_changes_git_histogram(&str, &str) -> (usize, usize)
 pub fn grit_lib::diff::count_changes_with_algorithm(&str, &str, similar::types::Algorithm, bool) -> (usize, usize)
 pub fn grit_lib::diff::count_git_lines(&[u8]) -> usize
 pub fn grit_lib::diff::detect_copies_with_policy(&grit_lib::prelude::Odb, core::option::Option<&std::path::Path>, alloc::vec::Vec<grit_lib::diff::DiffEntry>, u32, bool, &[(alloc::string::String, grit_lib::objects::FileMode, grit_lib::objects::ObjectId)], &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -4770,6 +4771,7 @@ pub fn grit_lib::diff::diff_tree_to_worktree_with_git_dir_and_rules(&grit_lib::p
 pub fn grit_lib::diff::diff_trees(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_show_tree_entries(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::diff_trees_with_renames(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::diff::diff_trees_with_renames_and_policy(&grit_lib::prelude::Odb, core::option::Option<&grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::objects::ObjectId>, &str, u32, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::diff::empty_blob_oid() -> grit_lib::objects::ObjectId
 pub fn grit_lib::diff::for_each_tree_diff_structured(&grit_lib::prelude::Odb, &[grit_lib::diff::DiffEntry], grit_lib::diff::DiffOptions, &grit_lib::config::ConfigSet, &grit_lib::parallel::ThreadPolicy, impl core::ops::function::FnMut(grit_lib::diff::TreeDiffStructured) -> grit_lib::error::Result<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::diff::format_raw(&grit_lib::diff::DiffEntry) -> alloc::string::String
@@ -6771,6 +6773,7 @@ impl core::marker::Unpin for grit_lib::index::write_tree::WriteTreeFlags
 impl core::marker::UnsafeUnpin for grit_lib::index::write_tree::WriteTreeFlags
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::write_tree::WriteTreeFlags
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::write_tree::WriteTreeFlags
+pub fn grit_lib::index::write_tree::build_cache_tree_from_index(&grit_lib::prelude::Odb, &grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::index::CacheTreeNode>
 pub fn grit_lib::index::write_tree::build_cache_tree_from_tree(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::index::CacheTreeNode>
 pub fn grit_lib::index::write_tree::write_tree_from_index(&grit_lib::prelude::Odb, &grit_lib::index::Index, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::index::write_tree::write_tree_update_index(&grit_lib::prelude::Odb, &mut grit_lib::index::Index, &str, grit_lib::index::write_tree::WriteTreeFlags) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -9283,6 +9286,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::midx::Write
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::midx::WriteMultiPackIndexOptions
 pub fn grit_lib::objects::midx::clear_pack_midx_state(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::midx::midx_lookup_pack_and_offset(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<(u32, u64)>
+pub fn grit_lib::objects::midx::midx_lookup_pack_and_offset_opt(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<(u32, u64)>>
 pub fn grit_lib::objects::midx::read_midx_btmp_ranges(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::midx::MidxBtmpPackRange>>
 pub fn grit_lib::objects::midx::read_midx_objects(&std::path::Path) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<grit_lib::midx::MidxObjectRef>)>
 pub fn grit_lib::objects::midx::try_read_info_via_midx(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
@@ -10302,6 +10306,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_objects::P
 pub const grit_lib::objects::pack_objects::SERVE_WINDOW_MEMORY: u64
 pub fn grit_lib::objects::pack_objects::build_pack(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_objects::PackBuildOptions) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_objects::build_pack_from_send_list(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &grit_lib::objects::pack_objects::PackBuildOptions, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, u32>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::objects::pack_objects::build_pack_with_parallel_threads(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_objects::PackBuildOptions, core::option::Option<usize>, core::option::Option<usize>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_objects::build_pack_with_shallow_and_filter(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_objects::write_pack_for_push(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::io::write::Write) -> grit_lib::error::Result<grit_lib::objects::pack_objects::PackStats>
 pub fn grit_lib::objects::pack_objects::write_upload_pack_stream(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<grit_lib::objects::pack_objects::PackStats>

@@ -16,11 +16,9 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, RwLock};
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use grit_lib::error::Result;
-use grit_lib::objects::odb::builder::OdbBuilder;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStore};
-use grit_lib::objects::odb::WriteOptions;
-use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
+use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, ObjectResult};
 use grit_lib::prelude::RepositoryOptions;
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::revwalk::rev_parse::abbreviate_object_id;
@@ -42,7 +40,7 @@ impl ObjectStore for MinimalStore {
         HashAlgo::Sha1
     }
 
-    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         let guard = self.objects.read().unwrap();
         Ok(guard.get(oid).map(|(kind, data)| Object {
             kind: *kind,
@@ -50,7 +48,7 @@ impl ObjectStore for MinimalStore {
         }))
     }
 
-    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         let guard = self.objects.read().unwrap();
         Ok(guard.get(oid).map(|(kind, data)| ObjectInfo {
             kind: *kind,
@@ -58,7 +56,7 @@ impl ObjectStore for MinimalStore {
         }))
     }
 
-    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         let guard = self.objects.read().unwrap();
         for oid in guard.keys() {
             if f(oid).is_break() {
@@ -70,7 +68,12 @@ impl ObjectStore for MinimalStore {
 }
 
 impl WritableObjectStore for MinimalStore {
-    fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> Result<ObjectId> {
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        _options: WriteOptions,
+    ) -> ObjectResult<ObjectId> {
         let oid = grit_lib::objects::hash::hash_object(HashAlgo::Sha1, kind, data)?;
         self.objects
             .write()
@@ -80,7 +83,7 @@ impl WritableObjectStore for MinimalStore {
         Ok(oid)
     }
 
-    fn freshen(&self, oid: &ObjectId) -> Result<bool> {
+    fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
         Ok(self.objects.read().unwrap().contains_key(oid))
     }
 }

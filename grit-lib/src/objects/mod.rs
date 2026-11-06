@@ -76,8 +76,8 @@ pub(crate) mod pack_write {
 pub mod midx {
     //! Multi-pack-index (MIDX) read and write.
     pub use crate::midx::{
-        clear_pack_midx_state, midx_lookup_pack_and_offset, read_midx_btmp_ranges,
-        read_midx_objects, try_read_info_via_midx, try_read_object_via_midx,
+        clear_pack_midx_state, midx_lookup_pack_and_offset, midx_lookup_pack_and_offset_opt,
+        read_midx_btmp_ranges, read_midx_objects, try_read_info_via_midx, try_read_object_via_midx,
         write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
     };
 }
@@ -168,9 +168,10 @@ pub mod promisor_remote {
 pub mod pack_objects {
     //! Pack-objects negotiation and encoding.
     pub use crate::pack_objects::{
-        build_pack, build_pack_from_send_list, build_pack_with_shallow_and_filter,
-        write_pack_for_push, write_upload_pack_stream, PackBuildOptions, PackObjects,
-        PackObjectsOptions, PackProgress, PackStats, SERVE_WINDOW_MEMORY,
+        build_pack, build_pack_from_send_list, build_pack_with_parallel_threads,
+        build_pack_with_shallow_and_filter, write_pack_for_push, write_upload_pack_stream,
+        PackBuildOptions, PackObjects, PackObjectsOptions, PackProgress, PackStats,
+        SERVE_WINDOW_MEMORY,
     };
 }
 

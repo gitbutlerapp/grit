@@ -931,8 +931,7 @@ fn verify_loose_objects(
             || fsck_opts,
             |opts, item| Ok(check_local_loose_object(item, *opts)),
             |batch, outcomes| record_outcomes(batch, outcomes),
-        )
-        .map_err(|e| Error::Message(format!("parallel fsck: {e}")))?;
+        )?;
     } else {
         for item in &loose {
             let outcome = check_local_loose_object(item, fsck_opts);
@@ -983,7 +982,7 @@ fn verify_custom_primary_objects(
         if checked.is_multiple_of(128) {
             progress.set(checked as u64);
             if cancel.is_cancelled() {
-                return Err(Error::Message("cancelled".into()));
+                return Err(Error::Cancelled);
             }
         }
         checked += 1;
@@ -2396,7 +2395,9 @@ mod tests {
     impl crate::promisor_fetch::PromisorFetcher for RecordingFetcher {
         fn fetch_missing(&self, _repo: &Repository, _oids: &[ObjectId]) -> Result<()> {
             self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(Error::Message("fsck must not fetch".to_owned()))
+            Err(Error::Object(ObjectError::PromisorRemoteFailure {
+                detail: "fsck must not fetch".into(),
+            }))
         }
     }
 

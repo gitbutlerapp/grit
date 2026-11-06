@@ -117,7 +117,12 @@ fn tree_to_index_entries_with_protect(
 ) -> Result<Vec<IndexEntry>> {
     let obj = repo.odb().read(oid)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::Message(format!("expected tree, got {}", obj.kind)));
+        return Err(ObjectError::UnexpectedObjectKind {
+            oid: *oid,
+            expected: ObjectKind::Tree,
+            actual: obj.kind,
+        }
+        .into());
     }
     let entries = parse_tree(&obj.data)?;
     let mut result = Vec::new();

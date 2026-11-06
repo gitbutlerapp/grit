@@ -753,7 +753,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
 /// # Errors
 ///
 /// Returns an error if tree object creation fails.
-pub(crate) fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTreeNode> {
+pub fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTreeNode> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
     let mut entries: Vec<&IndexEntry> = index
         .entries

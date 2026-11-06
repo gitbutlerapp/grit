@@ -6,7 +6,7 @@ use std::hint::black_box;
 use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{serialize_tree, ObjectId, ObjectKind};
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
 use grit_lib::refs::list_refs;
 use grit_lib::repo::{InitOptions, Repository};
@@ -15,8 +15,6 @@ use tempfile::TempDir;
 const REF_COUNT: usize = 100_000;
 const PREFIX_REF_COUNT: usize = 1_000;
 const TXN_CREATE_COUNT: usize = 10_000;
-const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-
 struct ReftableBenchFixture {
     _dir: TempDir,
     git_dir: PathBuf,
@@ -33,8 +31,21 @@ impl ReftableBenchFixture {
                 .with_initial_branch("main".to_owned()),
         )
         .expect("init reftable");
+        let repo = Repository::open(dir.path(), &grit_lib::prelude::RepositoryOptions::empty())
+            .expect("open bench repo");
+        let empty_tree = repo
+            .odb()
+            .write(ObjectKind::Tree, &serialize_tree(&[]))
+            .expect("empty tree");
+        let commit_body = format!(
+            "tree {}\nauthor T <t@example.com> 1 +0000\ncommitter T <t@example.com> 1 +0000\n\n",
+            empty_tree.to_hex()
+        );
+        let base_commit = repo
+            .odb()
+            .write(ObjectKind::Commit, commit_body.as_bytes())
+            .expect("base commit");
         let git_dir = dir.path().to_path_buf();
-        let base_commit = ObjectId::from_hex(EMPTY_TREE).expect("tree oid");
         let mut batch = Vec::with_capacity(REF_COUNT);
         for i in 0..REF_COUNT {
             batch.push(RefTransactionItem {
@@ -77,7 +88,6 @@ fn bench_prefix_seek(c: &mut Criterion) {
 }
 
 fn bench_transaction_create_10k(c: &mut Criterion) {
-    let fx = ReftableBenchFixture::new();
     c.bench_function("refs_reftable/transaction_create_10k", |b| {
         b.iter_batched(
             || {
@@ -94,11 +104,25 @@ fn bench_transaction_create_10k(c: &mut Criterion) {
             },
             |work| {
                 let git_dir = work.path();
+                let repo = Repository::open(git_dir, &grit_lib::prelude::RepositoryOptions::empty())
+                    .expect("open txn repo");
+                let tree_oid = repo
+                    .odb()
+                    .write(ObjectKind::Tree, &serialize_tree(&[]))
+                    .expect("empty tree");
+                let body = format!(
+                    "tree {}\nauthor T <t@example.com> 1 +0000\ncommitter T <t@example.com> 1 +0000\n\n",
+                    tree_oid.to_hex()
+                );
+                let oid = repo
+                    .odb()
+                    .write(ObjectKind::Commit, body.as_bytes())
+                    .expect("seed commit");
                 let mut batch = Vec::with_capacity(TXN_CREATE_COUNT);
                 for i in 0..TXN_CREATE_COUNT {
                     batch.push(RefTransactionItem {
                         name: format!("refs/heads/t{i:05}"),
-                        new_oid: Some(fx.base_commit),
+                        new_oid: Some(oid),
                         expected_old: None,
                     });
                 }
