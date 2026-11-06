@@ -26,6 +26,7 @@ use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, 
 use crate::odb::Odb;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{self, Ref};
+use crate::refs::RefError;
 
 /// Result of a loose-object prune.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -513,7 +514,7 @@ mod update_refs_tests {
         ];
         let err = update_refs(&repo.git_dir(), &items).expect_err("duplicate");
         match &err {
-            Error::RefStore(RefStoreError::DuplicateUpdate { name }) => {
+            Error::Ref(RefError::Store(RefStoreError::DuplicateUpdate { name })) => {
                 assert_eq!(name, "refs/heads/dup");
             }
             other => panic!("expected DuplicateUpdate, got {other}"),
@@ -546,7 +547,7 @@ mod update_refs_tests {
         )
         .expect_err("stale cas");
         match &err {
-            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) => {
                 assert_eq!(name, "refs/heads/cas");
             }
             other => panic!("expected ExpectedMismatch, got {other}"),
@@ -579,7 +580,10 @@ mod update_refs_tests {
         )
         .expect_err("stale cas");
         assert!(
-            matches!(err, Error::RefStore(RefStoreError::ExpectedMismatch { .. })),
+            matches!(
+                err,
+                Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
+            ),
             "{err}"
         );
         assert_eq!(
@@ -703,7 +707,7 @@ mod update_refs_tests {
 
         let err = worker.join().expect("join").expect_err("stale CAS");
         match &err {
-            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) => {
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) => {
                 assert_eq!(name, "refs/heads/last");
             }
             other => panic!("expected ExpectedMismatch for last ref, got {other}"),

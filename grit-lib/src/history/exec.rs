@@ -30,6 +30,7 @@ use super::error::HistoryError;
 use super::plan::{commit_parents, replay_commit_onto_mapping, write_resolved_replay};
 use super::subject::replay_conflict_labels;
 use super::types::{RewriteOptions, RewritePlan};
+use crate::refs::RefError;
 
 /// Shell commands to run at each replayed commit during `rebase --exec`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -976,7 +977,7 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
             ..
         } => (SavedHead::Symbolic(refname), oid),
         HeadState::Detached { oid } => (SavedHead::Detached(oid), oid),
-        HeadState::Branch { oid: None, .. } => return Err(Error::UnbornHead.into()),
+        HeadState::Branch { oid: None, .. } => return Err(Error::Ref(RefError::UnbornHead).into()),
         HeadState::Invalid => {
             return Err(HistoryError::WorktreeApply {
                 message: "HEAD is in an unknown state".into(),
@@ -1501,7 +1502,7 @@ fn reset_moved_exec_branch(
             old,
             new: prestate.head_commit,
         })),
-        Err(Error::RefStore(RefStoreError::ExpectedMismatch { .. })) => {
+        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))) => {
             Err(super::RebaseSessionError::AbortRefMoved { name: name.clone() })
         }
         Err(err) => Err(err.into()),

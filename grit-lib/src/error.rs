@@ -17,6 +17,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::refs::RefError;
+
 pub use crate::git_dir::GitDirPathOperation;
 pub use crate::midx_error::MidxError;
 pub use crate::worktree::io_error::WorktreePathOperation;
@@ -1568,18 +1570,13 @@ pub enum Error {
     #[error("corrupted cache-tree has entries not present in index")]
     CacheTreeCorrupt,
 
-    /// A reference name or value is invalid.
-    #[error("invalid ref: {0}")]
-    InvalidRef(String),
+    /// Reference storage, resolution, HEAD state, and reflog failures.
+    #[error(transparent)]
+    Ref(#[from] crate::refs::RefError),
 
-    /// A `packed-refs` line Git would reject when reading the ref database.
-    #[error("unexpected line in {path}: {line}")]
-    PackedRefsUnexpectedLine {
-        /// Path to the `packed-refs` file being read.
-        path: String,
-        /// Offending line contents.
-        line: String,
-    },
+    /// Git notes read, write, and merge failures.
+    #[error(transparent)]
+    Notes(#[from] crate::notes::NotesError),
 
     /// A general path-related error (invalid UTF-8, out-of-bounds, etc.).
     #[error("path error: {0}")]
@@ -1613,18 +1610,6 @@ pub enum Error {
     /// Branch create, delete, or upstream configuration failure.
     #[error(transparent)]
     Branch(#[from] crate::porcelain::branch_error::BranchError),
-
-    /// Reference lock failure while updating refs.
-    #[error(transparent)]
-    RefLock(#[from] RefLockError),
-
-    /// Reference store transaction or iteration failure.
-    #[error(transparent)]
-    RefStore(crate::refs::store::RefStoreError),
-
-    /// Reftable file, stack, or transaction failure.
-    #[error(transparent)]
-    Reftable(#[from] crate::reftable::ReftableError),
 
     /// Filter or EOL conversion failure.
     #[error(transparent)]
@@ -2039,20 +2024,6 @@ pub enum Error {
         untracked: usize,
     },
 
-    /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
-    #[error("HEAD is detached")]
-    DetachedHead,
-
-    /// `HEAD` is on a branch with no commits yet, but the operation needs a commit
-    /// ([`Repository::head_commit`](crate::repo::Repository::head_commit),
-    /// [`replay_commit`](crate::porcelain::replay::replay_commit)).
-    #[error("no commits yet on this branch")]
-    UnbornHead,
-
-    /// `HEAD` could not be resolved to a branch, detached commit, or unborn branch.
-    #[error("HEAD is in an unknown state")]
-    InvalidHead,
-
     /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits
     /// until callers can select a mainline parent explicitly.
     #[error("merge commit {oid}")]
@@ -2089,26 +2060,6 @@ pub enum Error {
     #[error("{} in progress", .0.description())]
     OperationInProgress(crate::state::InProgressOperation),
 
-    /// A local branch is checked out as `HEAD` in a linked or main worktree.
-    #[error("branch '{branch}' is already checked out in '{worktree_path}'")]
-    BranchCheckedOutInWorktree {
-        /// Short branch name (e.g. `main`).
-        branch: String,
-        /// Path to the worktree that has the branch checked out.
-        worktree_path: String,
-    },
-
-    /// `refs/heads/<branch>` does not exist.
-    #[error("no branch named '{branch}'")]
-    BranchNotFound {
-        /// Short branch name (e.g. `topic`).
-        branch: String,
-    },
-
-    /// [`list_branches`](crate::branch_tracking::list_branches) with [`BranchDetail::Names`](crate::branch_tracking::BranchDetail::Names) cannot use date sort.
-    #[error("branch list with Names detail cannot use date sort (date sort reads commit objects)")]
-    BranchListNamesDateSort,
-
     /// Tag create/delete validation failure ([`crate::porcelain::tag::TagError`]).
     #[error(transparent)]
     Tag(#[from] crate::porcelain::tag::TagError),
@@ -2134,39 +2085,6 @@ pub enum Error {
     StashCommitNotOnStack {
         /// Stash W commit object id.
         oid: crate::objects::ObjectId,
-    },
-
-    /// Ref does not exist and has no reflog entries.
-    #[error("unknown ref '{refname}'")]
-    ReflogUnknownRef {
-        /// User-supplied or DWIM ref name.
-        refname: String,
-    },
-
-    /// A reflog selector is missing its reference or `@{n}` delimiters.
-    #[error("expected ref@{{n}} form, got '{spec}'")]
-    ReflogInvalidSelector {
-        /// Selector after trimming surrounding whitespace.
-        spec: String,
-    },
-
-    /// A reflog selector index is not a nonnegative integer that fits in `usize`.
-    #[error("invalid reflog index in '{spec}'")]
-    ReflogInvalidIndex {
-        /// Selector after trimming surrounding whitespace.
-        spec: String,
-        /// Integer parsing failure, including overflow.
-        #[source]
-        source: std::num::ParseIntError,
-    },
-
-    /// `ref@{{n}}` is out of range for the current reflog.
-    #[error("reflog entry {refname}@{{{index}}} not found")]
-    ReflogIndexOutOfRange {
-        /// Ref whose reflog was read.
-        refname: String,
-        /// Requested newest-first index.
-        index: usize,
     },
 
     /// Pushing or creating a stash ([`crate::repo_handles::RepositoryStash::push`]) requires at least one commit.
@@ -2225,62 +2143,6 @@ pub enum Error {
     /// [`CommitRequest::amend`](crate::porcelain::commit::CommitRequest::amend) was set on an unborn branch.
     #[error("cannot amend: no commits on this branch yet")]
     AmendUnborn,
-
-    /// [`RepositoryNotes::add`](crate::repo_handles::RepositoryNotes::add) was called without
-    /// `force` when a note already exists on the object.
-    #[error("note for object {object} already exists")]
-    NoteAlreadyExists {
-        /// Annotated object that already has a note.
-        object: crate::objects::ObjectId,
-    },
-
-    /// A configured or environment notes ref is not under `refs/notes/`.
-    #[error("notes ref '{0}' must start with 'refs/notes/'")]
-    InvalidNotesRef(String),
-
-    /// Unknown `notes.rewriteMode` or `GIT_NOTES_REWRITE_MODE` value.
-    #[error("unknown notes rewrite mode '{0}'")]
-    NotesRewriteMode(String),
-
-    /// A notes ref resolves to an object that cannot hold notes (notes reads accept a commit or
-    /// a tree; notes merges require a commit).
-    #[error("notes ref '{notes_ref}' points to a {found}, not a notes commit")]
-    NotesRefNotCommit {
-        /// Notes ref (or revision) that was read.
-        notes_ref: String,
-        /// Kind of object the ref resolved to.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// An object reached while reading a notes tree has the wrong kind (for example a note
-    /// entry that is not a blob).
-    #[error("notes object {oid} is a {found}, expected a {expected}")]
-    NotesObjectKind {
-        /// Object that was read.
-        oid: crate::objects::ObjectId,
-        /// Kind the notes layout requires at this position.
-        expected: crate::objects::ObjectKind,
-        /// Kind actually stored.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// [`notes_merge_inner`](crate::notes::notes_merge_inner) was asked to merge two notes refs
-    /// that both have no notes commit.
-    #[error("cannot merge notes: neither '{local}' nor '{remote}' has any notes")]
-    NotesMergeBothEmpty {
-        /// Local notes ref (merge destination).
-        local: String,
-        /// Remote notes ref (merge source).
-        remote: String,
-    },
-
-    /// A manual notes merge was started while an earlier one still has conflict files in the
-    /// notes merge worktree.
-    #[error("unfinished notes merge: conflict files remain in {}", crate::git_path::user_display_path(.path))]
-    NotesMergeInProgress {
-        /// The notes merge worktree directory.
-        path: std::path::PathBuf,
-    },
 
     /// Multi-pack-index load or write failure.
     #[error(transparent)]
@@ -2497,8 +2359,8 @@ impl Error {
             Self::IndexFsmonitorExtensionBadVersion(..) => "index_fsmonitor_extension_bad_version",
             Self::IndexFsmonitorExtensionEwahInvalid => "index_fsmonitor_extension_ewah_invalid",
             Self::CacheTreeCorrupt => "cache_tree_corrupt",
-            Self::InvalidRef(..) => "invalid_ref",
-            Self::PackedRefsUnexpectedLine { .. } => "packed_refs_unexpected_line",
+            Self::Ref(e) => e.kind_name(),
+            Self::Notes(e) => e.kind_name(),
             Self::PathError(..) => "path_error",
             Self::PathspecFromFile(..) => "pathspec_from_file",
             Self::InvalidPath(..) => "invalid_path",
@@ -2506,9 +2368,6 @@ impl Error {
             Self::Config(..) => "config",
             Self::Submodule(..) => "submodule",
             Self::Branch(..) => "branch",
-            Self::RefLock(..) => "ref_lock",
-            Self::RefStore(..) => "ref_store",
-            Self::Reftable(..) => "reftable",
             Self::Filter(..) => "filter",
             Self::Apply(..) => "apply",
             Self::PathOutsideRepo(..) => "path_outside_repo",
@@ -2571,9 +2430,6 @@ impl Error {
             Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
             Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
-            Self::DetachedHead => "detached_head",
-            Self::UnbornHead => "unborn_head",
-            Self::InvalidHead => "invalid_head",
             Self::MergeCommit { .. } => "merge_commit",
             Self::ReplaySourceAtHead => "replay_source_at_head",
             Self::SequencerUnknownCommand { .. } => "sequencer_unknown_command",
@@ -2581,18 +2437,11 @@ impl Error {
             Self::NoReplayInProgress => "no_replay_in_progress",
             Self::NoMergeInProgress => "no_merge_in_progress",
             Self::OperationInProgress(..) => "operation_in_progress",
-            Self::BranchCheckedOutInWorktree { .. } => "branch_checked_out_in_worktree",
-            Self::BranchNotFound { .. } => "branch_not_found",
-            Self::BranchListNamesDateSort => "branch_list_names_date_sort",
             Self::Tag(..) => "tag",
             Self::Worktree(..) => "worktree",
             Self::CorruptStash(..) => "corrupt_stash",
             Self::StashNotFound { .. } => "stash_not_found",
             Self::StashCommitNotOnStack { .. } => "stash_commit_not_on_stack",
-            Self::ReflogUnknownRef { .. } => "reflog_unknown_ref",
-            Self::ReflogInvalidSelector { .. } => "reflog_invalid_selector",
-            Self::ReflogInvalidIndex { .. } => "reflog_invalid_index",
-            Self::ReflogIndexOutOfRange { .. } => "reflog_index_out_of_range",
             Self::StashNoInitialCommit => "stash_no_initial_commit",
             Self::StashBareRepository => "stash_bare_repository",
             Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
@@ -2605,13 +2454,6 @@ impl Error {
             Self::StashSymlinkNotUtf8 => "stash_symlink_not_utf8",
             Self::StashCouldNotRestoreUntracked { .. } => "stash_could_not_restore_untracked",
             Self::AmendUnborn => "amend_unborn",
-            Self::NoteAlreadyExists { .. } => "note_already_exists",
-            Self::InvalidNotesRef(..) => "invalid_notes_ref",
-            Self::NotesRewriteMode(..) => "notes_rewrite_mode",
-            Self::NotesRefNotCommit { .. } => "notes_ref_not_commit",
-            Self::NotesObjectKind { .. } => "notes_object_kind",
-            Self::NotesMergeBothEmpty { .. } => "notes_merge_both_empty",
-            Self::NotesMergeInProgress { .. } => "notes_merge_in_progress",
             Self::Midx(..) => "midx",
             Self::Offload(..) => "offload",
             Self::RevParse(..) => "rev_parse",
@@ -2837,7 +2679,7 @@ impl Error {
             self,
             Error::Config(_)
                 | Error::Submodule(_)
-                | Error::RefLock(_)
+                | Error::Ref(RefError::RefLock(_))
                 | Error::Filter(_)
                 | Error::PathOutsideRepo(_)
         )
@@ -2880,8 +2722,20 @@ impl From<crate::refs::store::RefStoreError> for Error {
                 source: crate::refs::store::RefStoreError::git_dir_io_source(os_error),
             },
             crate::refs::store::RefStoreError::Hook(hook) => Error::Hook(hook.into_hook_error()),
-            other => Error::RefStore(other),
+            other => Error::Ref(other.into()),
         }
+    }
+}
+
+impl From<crate::reftable::ReftableError> for Error {
+    fn from(err: crate::reftable::ReftableError) -> Self {
+        Error::Ref(err.into())
+    }
+}
+
+impl From<RefLockError> for Error {
+    fn from(err: RefLockError) -> Self {
+        Error::Ref(err.into())
     }
 }
 

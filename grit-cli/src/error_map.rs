@@ -136,7 +136,7 @@ pub fn human_message_for_lib(err: &LibError) -> String {
             oid.to_hex()
         ),
         LibError::LockHeld(lock) => lock_held(&lock.path, lock.holder).to_string(),
-        LibError::RefStore(RefStoreError::NotFound { name }) => {
+        LibError::Ref(grit_lib::refs::RefError::Store(RefStoreError::NotFound { name })) => {
             match name.strip_prefix("refs/heads/") {
                 Some(short) => format!("no branch named '{short}'"),
                 None => format!("ref not found: {name}"),
@@ -739,9 +739,9 @@ pub fn map_branch_error(err: LibError) -> Error {
                 human,
             })
         }
-        LibError::BranchCheckedOutInWorktree { worktree_path, .. } => {
+        LibError::Branch(BranchError::CheckedOut { worktree, .. }) => {
             let worktree = grit_lib::config::git_path::path_for_error_message(
-                std::path::Path::new(&worktree_path),
+                std::path::Path::new(&worktree),
             );
             let human = format!("branch is checked out in '{worktree}'");
             Error::new(StructuredCliError {

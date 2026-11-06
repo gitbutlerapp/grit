@@ -421,7 +421,7 @@ fn notes_write_options(
 
 fn map_notes_error(err: Error) -> anyhow::Error {
     match err {
-        Error::NoteAlreadyExists { object } => {
+        Error::Notes(NotesError::NoteAlreadyExists { object }) => {
             anyhow::anyhow!(
                 "note for object {} already exists (use --force)",
                 object.to_hex()

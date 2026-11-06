@@ -54,6 +54,7 @@ use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::refs::SYMREF_MAXDEPTH;
+use crate::refs::RefError;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -339,7 +340,7 @@ fn resolve_via_raw<S: RefStore + ?Sized>(
         return Err(RefStoreError::SymrefLoop);
     }
     match store.read_raw(name).map_err(|err| match err {
-        crate::error::Error::RefStore(err) => err,
+        crate::error::Error::Ref(RefError::Store(err)) => err,
         other => RefStoreError::Corrupt(other.to_string()),
     })? {
         None => Err(RefStoreError::not_found(name)),

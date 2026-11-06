@@ -82,6 +82,7 @@ use crate::repo_relpath::{
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
+use crate::refs::RefError;
 
 /// A single blob entry from a recursively flattened tree.
 #[derive(Clone)]
@@ -575,9 +576,11 @@ pub fn parse_stash_reference(repo: &Repository, spec: Option<&str>) -> Result<St
     if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
         let n = digits
             .parse::<usize>()
-            .map_err(|source| Error::ReflogInvalidIndex {
-                spec: raw.to_owned(),
-                source,
+            .map_err(|source| {
+                Error::Ref(RefError::ReflogInvalidIndex {
+                    spec: raw.to_owned(),
+                    source,
+                })
             })?;
         return Ok(StashReference::Index(n));
     }
@@ -3362,20 +3365,20 @@ pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Resu
         let mut new_tip = None;
         match store.rewrite_reflog(STASH_REF, &mut |mut entries| {
             if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
-                return Err(crate::error::Error::RefStore(
+                return Err(crate::error::Error::Ref(RefError::Store(
                     crate::refs::store::RefStoreError::ReflogRewriteStale {
                         name: STASH_REF.to_owned(),
                     },
-                ));
+                )));
             }
             entries.pop();
             new_tip = entries.last().map(|entry| entry.new_oid);
             Ok(entries)
         }) {
             Ok(()) => {}
-            Err(crate::error::Error::RefStore(
+            Err(crate::error::Error::Ref(RefError::Store(
                 crate::refs::store::RefStoreError::ReflogRewriteStale { .. },
-            )) => continue,
+            ))) => continue,
             Err(err) => return Err(err),
         }
         let ref_result = match new_tip {
@@ -3398,17 +3401,17 @@ pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Resu
         };
         match ref_result {
             Ok(()) => return Ok(true),
-            Err(crate::error::Error::RefStore(
+            Err(crate::error::Error::Ref(RefError::Store(
                 crate::refs::store::RefStoreError::ExpectedMismatch { .. },
-            )) => continue,
+            ))) => continue,
             Err(err) => return Err(err),
         }
     }
-    Err(crate::error::Error::RefStore(
+    Err(crate::error::Error::Ref(RefError::Store(
         crate::refs::store::RefStoreError::Corrupt(
             "refs/stash changed too often during drop".to_owned(),
         ),
-    ))
+    )))
 }
 
 /// Stash dirty worktree/index changes before `pull --autostash` / merge autostash.

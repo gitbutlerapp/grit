@@ -73,6 +73,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
+use crate::refs::RefError;
 
 /// Whether the verifying hooks run before a commit object is written.
 ///
@@ -709,7 +710,7 @@ fn commit_paths_scope(
         .transpose()?;
     let head = resolve_head_for_repository(repo)?;
     if head == HeadState::Invalid {
-        return Err(Error::InvalidHead);
+        return Err(Error::Ref(RefError::InvalidHead));
     }
     let parent_tree = head.tree(repo.odb())?;
 
@@ -1586,7 +1587,7 @@ fn create_commit_with_index(
         } => (refname, Some(short_name), oid),
         HeadState::Detached { oid } => ("HEAD".to_owned(), None, Some(oid)),
         HeadState::Invalid => {
-            return Err(Error::InvalidHead);
+            return Err(Error::Ref(RefError::InvalidHead));
         }
     };
 

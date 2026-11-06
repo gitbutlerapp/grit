@@ -28,9 +28,9 @@ use super::semantics::{
 };
 use super::transaction::RefTransaction;
 use super::types::RefReflogRename;
-use super::{
-    Expected, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate,
-};
+use crate::refs::RefError;
+
+use super::{Expected, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -406,14 +406,14 @@ fn record_to_raw(rec: &crate::reftable::RefRecord) -> Option<RawRef> {
 
 fn map_reftable_err(err: Error) -> RefStoreError {
     match err {
-        Error::Reftable(ReftableError::Locked { .. }) => RefStoreError::LockHeld {
+        Error::Ref(RefError::Reftable(ReftableError::Locked { .. })) => RefStoreError::LockHeld {
             name: "refs".to_owned(),
         },
-        Error::Reftable(ReftableError::ExpectedMismatch {
+        Error::Ref(RefError::Reftable(ReftableError::ExpectedMismatch {
             refname,
             expected,
             actual,
-        }) => RefStoreError::ExpectedMismatch {
+        })) => RefStoreError::ExpectedMismatch {
             name: refname,
             expected: Expected::Oid(expected),
             actual: actual.map(RawRef::Direct),

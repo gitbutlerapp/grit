@@ -31,6 +31,7 @@ use crate::refs::{
 use crate::replay_merge_session::ReplayMergeSession;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
+use crate::refs::RefError;
 
 /// Whether [`replay_commit`] applies a commit's patch or its inverse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,7 +90,7 @@ pub enum ReplayOutcome {
 ///
 /// # Errors
 ///
-/// - [`Error::UnbornHead`] when `HEAD` has no commits yet.
+/// - [`Error::Ref(RefError::UnbornHead)`] when `HEAD` has no commits yet.
 /// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
@@ -116,7 +117,7 @@ pub fn replay_commit(
             oid: Some(oid),
             ..
         } => (CheckoutTip::Branch(refname), oid),
-        HeadState::Branch { .. } => return Err(Error::UnbornHead),
+        HeadState::Branch { .. } => return Err(Error::Ref(RefError::UnbornHead)),
         HeadState::Detached { oid } => (CheckoutTip::Detached, oid),
         HeadState::Invalid => {
             return Err(Error::Message("HEAD is in an unknown state".into()));

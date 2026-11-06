@@ -50,6 +50,7 @@ use crate::state::{
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
+use crate::refs::RefError;
 
 /// How to handle a replay step whose merged tree matches `HEAD` (empty patch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -274,7 +275,7 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 ///
 /// # Errors
 ///
-/// - [`Error::UnbornHead`], [`Error::MergeCommit`] (without `mainline`).
+/// - [`Error::Ref(RefError::UnbornHead)`], [`Error::MergeCommit`] (without `mainline`).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
 /// - Worktree cleanliness, merge, checkout, and ref update failures.
 pub fn start_replay_sequence(
@@ -715,7 +716,7 @@ fn branch_head(repo: &Repository) -> Result<(Option<String>, ObjectId)> {
             oid: Some(oid),
             ..
         } => Ok((Some(refname), oid)),
-        HeadState::Branch { .. } => Err(Error::UnbornHead),
+        HeadState::Branch { .. } => Err(Error::Ref(RefError::UnbornHead)),
         HeadState::Detached { oid } => Ok((None, oid)),
         HeadState::Invalid => Err(Error::Message("HEAD is in an unknown state".into())),
     }

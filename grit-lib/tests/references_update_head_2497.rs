@@ -15,6 +15,7 @@ use grit_test_support::git;
 use std::fs;
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
+use crate::refs::RefError;
 
 const REFLOG_ID: &str = "T <t@example.com> 1700000000 +0000";
 
@@ -237,7 +238,7 @@ fn compare_and_swap_refuses_stale_tip() {
         .expect_err("stale");
     assert!(matches!(
         err,
-        Error::RefStore(RefStoreError::ExpectedMismatch { .. })
+        Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
     ));
     assert_eq!(repo.references().resolve(&main).expect("main"), c1);
 }

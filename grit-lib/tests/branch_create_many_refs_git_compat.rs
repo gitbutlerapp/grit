@@ -15,6 +15,7 @@ use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::RefnameUnavailable;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
+use crate::refs::RefError;
 
 fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("discover")
@@ -73,7 +74,7 @@ fn lock_files(dir: &Path) -> Vec<String> {
 
 fn name_unavailable(err: Error) -> RefnameUnavailable {
     match err {
-        Error::RefStore(RefStoreError::NameUnavailable { reason }) => reason,
+        Error::Ref(RefError::Store(RefStoreError::NameUnavailable { reason })) => reason,
         other => panic!("expected a refname conflict, got {other:?}"),
     }
 }

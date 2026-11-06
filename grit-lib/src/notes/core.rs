@@ -36,6 +36,8 @@ use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use crate::wildmatch::wildmatch;
 use merge3::{Merge3, StandardMarkers};
+use crate::refs::RefError;
+use crate::notes::NotesError;
 
 /// Per-worktree subdirectory holding the conflicted note blobs during a notes merge.
 const NOTES_MERGE_WORKTREE: &str = "NOTES_MERGE_WORKTREE";
@@ -90,11 +92,11 @@ fn collect_notes_tree_entries(
     }
     let tree_obj = repo.odb().read(tree_oid)?;
     if tree_obj.kind != ObjectKind::Tree {
-        return Err(Error::NotesObjectKind {
+        return Err(Error::Notes(NotesError::NotesObjectKind {
             oid: *tree_oid,
             expected: ObjectKind::Tree,
             found: tree_obj.kind,
-        });
+        }));
     }
 
     for entry in parse_tree(&tree_obj.data)? {
@@ -160,8 +162,8 @@ fn notes_ref_tip(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>>
 ///
 /// # Errors
 ///
-/// - [`Error::NotesRefNotCommit`] when the target is neither a commit nor a tree.
-/// - [`Error::NotesObjectKind`] when a subtree entry is not a tree.
+/// - [`Error::Notes(NotesError::NotesRefNotCommit`] when the target is neither a commit nor a tree.
+/// - [`Error::Notes(NotesError::NotesObjectKind`] when a subtree entry is not a tree.
 /// - Ref store and object read failures.
 ///
 /// Returns an empty vec when neither a ref nor a revision named `notes_ref` exists.
@@ -198,10 +200,10 @@ pub(crate) fn read_notes_snapshot(repo: &Repository, notes_ref: &str) -> Result<
         ObjectKind::Commit => parse_commit(&obj.data)?.tree,
         ObjectKind::Tree => tip,
         found => {
-            return Err(Error::NotesRefNotCommit {
+            return Err(Error::Notes(NotesError::NotesRefNotCommit {
                 notes_ref: notes_ref.to_owned(),
                 found,
-            })
+            }))
         }
     };
     let mut entries = Vec::new();
@@ -247,10 +249,10 @@ pub fn read_notes_tree_limited(
         ObjectKind::Commit => parse_commit(&obj.data)?.tree,
         ObjectKind::Tree => tip,
         found => {
-            return Err(Error::NotesRefNotCommit {
+            return Err(Error::Notes(NotesError::NotesRefNotCommit {
                 notes_ref: notes_ref.to_owned(),
                 found,
-            })
+            }))
         }
     };
     let mut entries = Vec::new();
@@ -311,21 +313,21 @@ fn notes_tree_oid(repo: &Repository, tip: &ObjectId) -> Result<ObjectId> {
     match obj.kind {
         ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
         ObjectKind::Tree => Ok(*tip),
-        found => Err(Error::NotesRefNotCommit {
+        found => Err(Error::Notes(NotesError::NotesRefNotCommit {
             notes_ref: String::new(),
             found,
-        }),
+        })),
     }
 }
 
 fn read_tree_entries(repo: &Repository, tree_oid: &ObjectId) -> Result<Vec<TreeEntry>> {
     let tree_obj = repo.odb().read(tree_oid)?;
     if tree_obj.kind != ObjectKind::Tree {
-        return Err(Error::NotesObjectKind {
+        return Err(Error::Notes(NotesError::NotesObjectKind {
             oid: *tree_oid,
             expected: ObjectKind::Tree,
             found: tree_obj.kind,
-        });
+        }));
     }
     parse_tree(&tree_obj.data)
 }
@@ -1105,16 +1107,17 @@ impl NotesRef {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidNotesRef`](crate::error::Error::InvalidNotesRef) when
+    /// Returns [`Error::Notes`](crate::error::Error::Notes) with
+    /// [`NotesError::InvalidNotesRef`](crate::notes::NotesError::InvalidNotesRef) when
     /// `full` is not prefixed with `refs/notes/` or is not a valid ref name (env/config
     /// values are not trimmed or otherwise normalized).
     pub fn from_full(full: &str) -> Result<Self> {
         if !full.starts_with("refs/notes/") {
-            return Err(Error::InvalidNotesRef(full.to_owned()));
+            return Err(Error::Notes(NotesError::InvalidNotesRef { name: full.to_owned() }));
         }
         use crate::check_ref_format::{check_refname_format, RefFormatOptions};
         if check_refname_format(full, &RefFormatOptions::default()).is_err() {
-            return Err(Error::InvalidNotesRef(full.to_owned()));
+            return Err(Error::Notes(NotesError::InvalidNotesRef { name: full.to_owned() }));
         }
         Ok(Self(full.to_owned()))
     }
@@ -1297,15 +1300,15 @@ fn build_merge_pairs(
 ///
 /// # Errors
 ///
-/// [`Error::NotesObjectKind`] when `oid` is not a blob, or object read failures.
+/// [`Error::Notes(NotesError::NotesObjectKind`] when `oid` is not a blob, or object read failures.
 pub(crate) fn read_blob_bytes(repo: &Repository, oid: &ObjectId) -> Result<Vec<u8>> {
     let obj = repo.odb().read(oid)?;
     if obj.kind != ObjectKind::Blob {
-        return Err(Error::NotesObjectKind {
+        return Err(Error::Notes(NotesError::NotesObjectKind {
             oid: *oid,
             expected: ObjectKind::Blob,
             found: obj.kind,
-        });
+        }));
     }
     Ok(obj.data)
 }
@@ -1488,9 +1491,9 @@ fn merge_one_note_change(
             };
             if !*has_worktree {
                 if notes_merge_worktree_nonempty(worktree) {
-                    return Err(Error::NotesMergeInProgress {
+                    return Err(Error::Notes(NotesError::NotesMergeInProgress {
                         path: worktree.to_path_buf(),
-                    });
+                    }));
                 }
                 fs::create_dir_all(worktree)?;
                 *has_worktree = true;
@@ -1600,11 +1603,11 @@ fn merge_changes_into_entries(
 fn resolve_commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
     let obj = repo.odb().read(commit_oid)?;
     if obj.kind != ObjectKind::Commit {
-        return Err(Error::NotesObjectKind {
+        return Err(Error::Notes(NotesError::NotesObjectKind {
             oid: *commit_oid,
             expected: ObjectKind::Commit,
             found: obj.kind,
-        });
+        }));
     }
     Ok(parse_commit(&obj.data)?.tree)
 }
@@ -1615,10 +1618,10 @@ fn resolve_notes_commit_optional(repo: &Repository, notes_ref: &str) -> Result<O
     };
     let kind = repo.odb().read(&oid)?.kind;
     if kind != ObjectKind::Commit {
-        return Err(Error::NotesRefNotCommit {
+        return Err(Error::Notes(NotesError::NotesRefNotCommit {
             notes_ref: notes_ref.to_owned(),
             found: kind,
-        });
+        }));
     }
     Ok(Some(oid))
 }
@@ -1659,9 +1662,9 @@ fn write_notes_commit_with_parents(
 ///
 /// # Errors
 ///
-/// - [`Error::NotesMergeBothEmpty`] when neither ref has a notes commit.
-/// - [`Error::NotesRefNotCommit`] when either ref points at something other than a commit.
-/// - [`Error::NotesMergeInProgress`] when [`NotesMergeStrategy::Manual`] finds conflict files
+/// - [`Error::Notes(NotesError::NotesMergeBothEmpty`] when neither ref has a notes commit.
+/// - [`Error::Notes(NotesError::NotesRefNotCommit`] when either ref points at something other than a commit.
+/// - [`Error::Notes(NotesError::NotesMergeInProgress`] when [`NotesMergeStrategy::Manual`] finds conflict files
 ///   left by an earlier merge.
 /// - Ref store, object, and merge-base failures, or a failure while combining blobs.
 pub fn notes_merge_inner(
@@ -1673,10 +1676,10 @@ pub fn notes_merge_inner(
     let local_commit = resolve_notes_commit_optional(repo, local_ref)?;
     let remote_commit = resolve_notes_commit_optional(repo, remote_ref)?;
     match (local_commit, remote_commit) {
-        (None, None) => Err(Error::NotesMergeBothEmpty {
+        (None, None) => Err(Error::Notes(NotesError::NotesMergeBothEmpty {
             local: local_ref.to_owned(),
             remote: remote_ref.to_owned(),
-        }),
+        })),
         (None, Some(r)) => Ok(Ok(r)),
         (Some(l), None) => Ok(Ok(l)),
         (Some(local_oid), Some(remote_oid)) => {
@@ -1776,7 +1779,7 @@ impl NotesRewriteMode {
             "cat_sort_uniq" => Ok(Self::CatSortUniq),
             "overwrite" => Ok(Self::Overwrite),
             "ignore" => Ok(Self::Ignore),
-            other => Err(Error::NotesRewriteMode(other.to_owned())),
+            other => Err(Error::Notes(NotesError::NotesRewriteMode { mode: other.to_owned() })),
         }
     }
 }
@@ -2058,9 +2061,9 @@ mod tests {
     #[test]
     fn from_full_rejects_whitespace_padded_ref() {
         let err = NotesRef::from_full(" refs/notes/spaced ").expect_err("padded");
-        assert!(matches!(err, Error::InvalidNotesRef(_)));
+        assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })));
         let err = NotesRef::from_full("refs/notes/spaced ").expect_err("trailing");
-        assert!(matches!(err, Error::InvalidNotesRef(_)));
+        assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })));
         let ok = NotesRef::from_full("refs/notes/spaced").expect("valid");
         assert_eq!(ok.as_str(), "refs/notes/spaced");
     }
@@ -2084,7 +2087,7 @@ mod tests {
         let env = MapEnv(HashMap::from([("GIT_NOTES_REF".to_owned(), String::new())]));
         let err = resolve_configured_notes_ref(&env, &ConfigSet::default())
             .expect_err("empty GIT_NOTES_REF");
-        assert!(matches!(err, Error::InvalidNotesRef(_)));
+        assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })));
     }
 
     #[test]
@@ -2307,7 +2310,8 @@ mod tests {
         .expect_err("earlier conflicts are still unresolved");
         assert!(matches!(
             err,
-            Error::NotesMergeInProgress { ref path } if *path == notes_merge_worktree_path(&repo)
+            Error::Notes(NotesError::NotesMergeInProgress { ref path })
+                if *path == notes_merge_worktree_path(&repo)
         ));
     }
 
@@ -2368,7 +2372,7 @@ mod tests {
         .expect_err("nothing to merge");
         assert!(matches!(
             err,
-            Error::NotesMergeBothEmpty { ref local, ref remote }
+            Error::Notes(NotesError::NotesMergeBothEmpty { ref local, ref remote })
                 if local == "refs/notes/commits" && remote == "refs/notes/missing"
         ));
     }
@@ -2389,7 +2393,7 @@ mod tests {
         let err = read_notes_tree(&repo, "refs/notes/blob").expect_err("blob tip");
         assert!(matches!(
             err,
-            Error::NotesRefNotCommit { ref notes_ref, found: ObjectKind::Blob }
+            Error::Notes(NotesError::NotesRefNotCommit { ref notes_ref, found: ObjectKind::Blob })
                 if notes_ref == "refs/notes/blob"
         ));
         let err = notes_merge_inner(
@@ -2401,10 +2405,10 @@ mod tests {
         .expect_err("blob remote");
         assert!(matches!(
             err,
-            Error::NotesRefNotCommit {
+            Error::Notes(NotesError::NotesRefNotCommit {
                 found: ObjectKind::Blob,
                 ..
-            }
+            })
         ));
     }
 
@@ -2471,7 +2475,7 @@ mod tests {
         )
         .expect_err("stale parent must not overwrite a newer notes tip");
         assert!(
-            matches!(err, Error::RefStore(_)),
+            matches!(err, Error::Ref(RefError::Store(_))),
             "expected ref compare-and-swap failure, got {err:?}"
         );
     }
@@ -2484,7 +2488,7 @@ mod tests {
         );
         assert!(matches!(
             NotesRewriteMode::parse("nope").expect_err("bad"),
-            Error::NotesRewriteMode(_)
+            Error::Notes(NotesError::NotesRewriteMode { mode: _ })
         ));
     }
 
@@ -2584,7 +2588,7 @@ mod tests {
                     false,
                 )
                 .expect_err("exists"),
-            Error::NoteAlreadyExists { .. }
+            Error::Notes(NotesError::NoteAlreadyExists { .. })
         ));
     }
 

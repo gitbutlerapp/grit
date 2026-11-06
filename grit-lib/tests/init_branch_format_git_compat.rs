@@ -9,6 +9,7 @@ use grit_lib::objects::HashAlgo;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{resolve_initial_branch, InitOptions, Repository};
 use tempfile::TempDir;
+use crate::refs::RefError;
 
 fn git_fsck_ok(git_dir: &std::path::Path) {
     let output = Command::new("git")
@@ -70,7 +71,7 @@ fn init_falls_back_to_main() {
 #[test]
 fn init_invalid_branch_name_is_typed_error() {
     let err = resolve_initial_branch(&Environment::empty(), Some("-bad")).unwrap_err();
-    assert!(matches!(err, Error::InvalidRef(_)));
+    assert!(matches!(err, Error::Ref(RefError::InvalidName { .. })));
 }
 
 #[test]

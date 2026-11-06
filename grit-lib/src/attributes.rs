@@ -28,6 +28,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
+use crate::refs::RefError;
 
 /// Maximum length of a single `.gitattributes` line (bytes), matching Git (`ATTR_MAX_LINE_LENGTH`).
 /// Lines of this length or longer are ignored with a warning.
@@ -1253,9 +1254,9 @@ pub(crate) fn load_gitattributes_for_diff(
             Ok(oid) => return load_gitattributes_from_tree(repo, &oid),
             Err(_) if ignore_bad_tree => {}
             Err(_) => {
-                return Err(crate::error::Error::InvalidRef(format!(
+                return Err(crate::error::Error::Ref(RefError::invalid_reason(format!(
                     "bad --attr-source or GIT_ATTR_SOURCE: {spec}"
-                )));
+                ))));
             }
         }
     }

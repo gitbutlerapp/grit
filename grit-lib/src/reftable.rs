@@ -39,6 +39,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tempfile::TempPath;
+use crate::refs::RefError;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -83,7 +84,7 @@ const RESTART_INTERVAL: usize = 16;
 /// Wrapped by [`Error::Reftable`]. Corruption variants describe what was wrong
 /// with the bytes; [`Self::Locked`] and [`Self::ExpectedMismatch`] are the
 /// conditions callers usually want to react to (retry, or re-read and redo).
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ReftableError {
     /// The file is shorter than its header and footer require.
@@ -2075,7 +2076,7 @@ const STACK_TABLE_RELOAD_DEADLINE: Duration = Duration::from_secs(3);
 fn is_transient_stack_table_error(err: &Error) -> bool {
     match err {
         Error::Io(e) if e.kind() == std::io::ErrorKind::NotFound => true,
-        Error::Reftable(ReftableError::TooSmall { len: 0 }) => true,
+        Error::Ref(RefError::Reftable(ReftableError::TooSmall { len: 0 })) => true,
         _ => false,
     }
 }
@@ -5069,9 +5070,9 @@ mod tests {
         )
         .unwrap_err();
         match err {
-            Error::RefStore(RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
                 reason: RefnameUnavailable::AncestorExists { blocking, new_ref },
-            }) => {
+            })) => {
                 assert_eq!(blocking, "refs/heads/parent");
                 assert_eq!(new_ref, "refs/heads/parent/child");
             }
@@ -5123,15 +5124,15 @@ mod tests {
         let err = get_varint(&[0x80], 0).expect_err("continuation byte without a successor");
         assert!(matches!(
             err,
-            Error::Reftable(ReftableError::Truncated {
-                field: ReftableField::Varint
-            })
+            Error::Ref(RefError::Reftable(ReftableError::Truncated {
+                field: ReftableField::Varint,
+            }))
         ));
         assert!(matches!(
             get_varint(&[], 0),
-            Err(Error::Reftable(ReftableError::Truncated {
-                field: ReftableField::Varint
-            }))
+            Err(Error::Ref(RefError::Reftable(ReftableError::Truncated {
+                field: ReftableField::Varint,
+            })))
         ));
     }
 
@@ -5154,7 +5155,7 @@ mod tests {
             })
             .expect_err("out of order");
         match err {
-            Error::Reftable(ReftableError::UnsortedRefs { previous, next }) => {
+            Error::Ref(RefError::Reftable(ReftableError::UnsortedRefs { previous, next })) => {
                 assert_eq!(previous, "refs/heads/b");
                 assert_eq!(next, "refs/heads/a");
             }
@@ -5173,19 +5174,19 @@ mod tests {
         mismatched[footer_start + 4] = 2;
         assert!(matches!(
             ReftableReader::new(mismatched),
-            Err(Error::Reftable(ReftableError::FooterVersionMismatch {
+            Err(Error::Ref(RefError::Reftable(ReftableError::FooterVersionMismatch {
                 header: 1,
-                footer: 2
-            }))
+                footer: 2,
+            })))
         ));
 
         assert!(matches!(
             ReftableReader::new(data[..10].to_vec()),
-            Err(Error::Reftable(ReftableError::TooSmall { len: 10 }))
+            Err(Error::Ref(RefError::Reftable(ReftableError::TooSmall { len: 10 })))
         ));
         assert!(matches!(
             ReftableReader::new(data[..HEADER_SIZE + 4].to_vec()),
-            Err(Error::Reftable(ReftableError::TooSmall { .. }))
+            Err(Error::Ref(RefError::Reftable(ReftableError::TooSmall { .. })))
         ));
     }
 
@@ -5226,11 +5227,11 @@ mod tests {
             expected_old: Some(stale),
         };
         match stack.write_transaction(vec![update("refs/heads/topic")], &opts) {
-            Err(Error::Reftable(ReftableError::ExpectedMismatch {
+            Err(Error::Ref(RefError::Reftable(ReftableError::ExpectedMismatch {
                 refname,
                 expected,
                 actual,
-            })) => {
+            }))) => {
                 assert_eq!(refname, "refs/heads/topic");
                 assert_eq!(expected, stale);
                 assert_eq!(actual, Some(current));
@@ -5242,7 +5243,10 @@ mod tests {
             .expect_err("absent ref");
         assert!(matches!(
             &err,
-            Error::Reftable(ReftableError::ExpectedMismatch { actual: None, .. })
+            Error::Ref(RefError::Reftable(ReftableError::ExpectedMismatch {
+                actual: None,
+                ..
+            }))
         ));
         assert!(err.to_string().ends_with("but found <absent>"), "{err}");
     }

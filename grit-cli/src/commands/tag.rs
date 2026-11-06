@@ -952,7 +952,7 @@ fn render_verify_markdown(w: &mut dyn Write, entry: &TagVerifyEntry) -> Result<(
 
 fn map_tag_error(err: Error) -> anyhow::Error {
     match err {
-        Error::TagVerifyNotTag { .. } => {
+        Error::Tag(crate::porcelain::tag::TagError::VerifyNotTag { .. }) => {
             anyhow::anyhow!("tag is not an annotated tag object (use an annotated tag)")
         }
         Error::Tag(tag_err) => match tag_err {

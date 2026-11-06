@@ -19,6 +19,7 @@ use grit_lib::refs::{
 use grit_lib::repo::{InitOptions, Repository};
 
 use support::{
+use crate::refs::RefError;
     assert_fsck_when_git_interop, duplicate_repo, each_backend, git, git_empty_commit_oid,
     git_interop_available, git_show_ref, git_update_ref_stdin, ref_store_bytes_snapshot,
     reflog_bytes_snapshot, reftable_tables_snapshot, two_commit_oids, Backend,
@@ -520,11 +521,11 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
                 },
             )
             .expect_err("stale expected tip must be rejected");
-            let Error::RefStore(RefStoreError::ExpectedMismatch {
+            let Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
                 name,
                 expected,
                 actual,
-            }) = err
+            })) = err
             else {
                 panic!("{backend:?}: expected ExpectedMismatch, got {err:?}");
             };
@@ -545,8 +546,8 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("equal");
     assert!(matches!(
         verify_branch_commit_cas(Some(oid), None, "refs/heads/gone"),
-        Err(Error::RefStore(RefStoreError::ExpectedMismatch {
-            expected: Expected::Oid(want),
+        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
+            expected: Expected::Oid(want)),
             actual: None,
             ..
         })) if want == oid

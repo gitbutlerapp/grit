@@ -13,6 +13,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use crate::refs::RefError;
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = "Moved Branch <moved@example.com> 1700000000 +0000".to_owned();
@@ -84,7 +85,7 @@ fn assert_branch_moved_error(err: &Error) {
     assert!(
         matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { name, .. }) if name == "refs/heads/main"
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { name, .. })) if name == "refs/heads/main"
         ),
         "{err:?}"
     );

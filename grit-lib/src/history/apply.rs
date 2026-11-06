@@ -11,8 +11,10 @@ use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
 use crate::index::MODE_REGULAR;
 use crate::lockfile::LockWait;
 use crate::notes::{
-    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
+    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesError, NotesRewriteCommand,
+    NotesRewritePlan,
 };
+use crate::refs::RefError;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
@@ -1618,8 +1620,8 @@ fn head_commit_after(
     }
     match head {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
-        HeadState::Branch { oid: None, .. } => Err(crate::error::Error::UnbornHead.into()),
-        HeadState::Invalid => Err(crate::error::Error::InvalidHead.into()),
+        HeadState::Branch { oid: None, .. } => Err(crate::error::Error::Ref(RefError::UnbornHead).into()),
+        HeadState::Invalid => Err(crate::error::Error::Ref(RefError::InvalidHead).into()),
     }
 }
 
@@ -2381,7 +2383,10 @@ mod inject_and_apply_tests {
             matches!(
                 &err,
                 HistoryError::Library(e)
-                    if matches!(e.as_ref(), crate::error::Error::NotesRewriteMode(_))
+                    if matches!(
+                        e.as_ref(),
+                        crate::error::Error::Notes(NotesError::NotesRewriteMode { mode: _ })
+                    )
             ),
             "unexpected error: {err:?}"
         );

@@ -15,6 +15,7 @@ use grit_lib::refs::store::{
     RefStore, RefStoreError, RefTransaction,
 };
 use grit_test_support::refstore_conformance::run_suite;
+use crate::refs::RefError;
 
 #[derive(Debug, Default)]
 struct Inner {
@@ -363,7 +364,7 @@ impl RefStore for Offline {
 #[test]
 fn backend_errors_stay_typed_and_downcastable() {
     let err = Offline.resolve("HEAD").expect_err("offline");
-    let Error::RefStore(RefStoreError::Backend(inner)) = &err else {
+    let Error::Ref(RefError::Store(RefStoreError::Backend(inner))) = &err else {
         panic!("expected a backend error, got {err:?}");
     };
     assert!(inner.downcast_ref::<ConnectionLost>().is_some());

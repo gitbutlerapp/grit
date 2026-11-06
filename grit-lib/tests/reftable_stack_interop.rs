@@ -28,6 +28,7 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, HeadState};
 
 use support::{
+use crate::refs::RefError;
     build_commit_dag, git, git_empty_commit_oid, git_for_each_ref_peeled, git_fsck_strict,
     git_init_reftable_repo, git_reflog_lines, git_refs_verify, git_show_ref,
     git_supports_refs_verify, grit_reflog_identity, require_reftable_git,
@@ -348,7 +349,7 @@ fn stack_tables_list_and_update_index_mechanics() {
     assert!(
         matches!(
             &err,
-            Error::Reftable(ReftableError::Locked { lock_path }) if *lock_path == lock
+            Error::Ref(RefError::Reftable(ReftableError::Locked { lock_path }) if *lock_path == lock
         ),
         "expected reftable Locked error, got {err:?}"
     );

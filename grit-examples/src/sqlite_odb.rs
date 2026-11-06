@@ -17,6 +17,7 @@ use grit_lib::objects::odb::store::{LooseStore, ObjectStore, ObjectStream, Writa
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use rusqlite::{params, Connection};
+use crate::refs::RefError;
 
 const SCHEMA_VERSION: i64 = 1;
 
@@ -565,7 +566,7 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
         .write(ObjectKind::Commit, commit_body.as_bytes())?;
     // The commit lives in the custom store, which only the repository's own ref store checks.
     repo.references().update(
-        &RefName::try_from("refs/heads/main").map_err(|e| Error::InvalidRef(e.to_string()))?,
+        &RefName::try_from("refs/heads/main").map_err(|e| Error::Ref(RefError::invalid_reason(e.to_string())))?,
         &commit,
     )?;
 

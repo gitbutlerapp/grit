@@ -3343,7 +3343,7 @@ pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
 pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> {
     odb.commit_tree(commit_oid).map_err(|err| match err {
         Error::UnexpectedObjectKind { .. } => {
-            Error::InvalidRef(format!("invalid ref: {commit_oid} is not a commit"))
+            Error::Ref(RefError::invalid_reason(format!("invalid ref: {commit_oid} is not a commit")))
         }
         other => other,
     })
@@ -3361,9 +3361,9 @@ pub(crate) fn tree_oid_for_diff_side(odb: &Odb, oid: &ObjectId) -> Result<Object
     match object.kind {
         ObjectKind::Commit => Ok(CommitRef::parse(&object.data)?.tree()),
         ObjectKind::Tree => Ok(*oid),
-        actual => Err(Error::InvalidRef(format!(
+        actual => Err(Error::Ref(RefError::invalid_reason(format!(
             "invalid ref: {oid} is not a commit or tree ({actual:?})"
-        ))),
+        )))),
     }
 }
 
@@ -3553,6 +3553,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::refs::RefError;
 
 #[cfg(test)]
 thread_local! {
@@ -16719,11 +16720,11 @@ mod line_coverage_tests {
         assert_eq!(tree_oid_of_commit(&odb, &commit).expect("tree"), tree);
         assert!(matches!(
             tree_oid_of_commit(&odb, &blob),
-            Err(Error::InvalidRef(_))
+            Err(Error::Ref(RefError::InvalidName { .. }))
         ));
         assert!(matches!(
             tree_oid_of_commit(&odb, &tree),
-            Err(Error::InvalidRef(_))
+            Err(Error::Ref(RefError::InvalidName { .. }))
         ));
     }
 

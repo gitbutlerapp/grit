@@ -79,6 +79,15 @@ pub enum TagError {
         /// Short tag name.
         name: String,
     },
+
+    /// Annotated tag verification was requested for a non-tag object.
+    #[error("verify-tag: object {oid} is a {found}, not a tag")]
+    VerifyNotTag {
+        /// Object id that was verified.
+        oid: crate::objects::ObjectId,
+        /// Kind of object found.
+        found: crate::objects::ObjectKind,
+    },
 }
 
 /// Whether a `refs/tags/*` ref is lightweight or an annotated tag object.

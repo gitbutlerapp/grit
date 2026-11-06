@@ -37,6 +37,7 @@ use grit_lib::refs::{
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use time::OffsetDateTime;
+use crate::refs::RefError;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -64,7 +65,7 @@ fn txn(name: &str, value: ObjectId) -> RefTransaction {
 }
 
 fn is_lock_held(err: &Error, ref_name: &str) -> bool {
-    matches!(err, Error::RefStore(RefStoreError::LockHeld { name }) if name == ref_name)
+    matches!(err, Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) if name == ref_name)
 }
 
 #[test]
@@ -621,7 +622,7 @@ fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
         .filter(|r| {
             matches!(
                 r,
-                Err(Error::RefStore(RefStoreError::NameUnavailable { .. }))
+                Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable { .. }))
             )
         })
         .count();
@@ -630,7 +631,10 @@ fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
     for outcome in &outcomes {
         if let Err(err) = outcome {
             assert!(
-                matches!(err, Error::RefStore(RefStoreError::NameUnavailable { .. })),
+                matches!(
+                    err,
+                    Error::Ref(RefError::Store(RefStoreError::NameUnavailable { .. }))
+                ),
                 "commit-time D/F races must return NameUnavailable, not {err:?}"
             );
         }

@@ -11,6 +11,7 @@ use grit_lib::refs::store::RefName;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
 use grit_test_support::git;
+use crate::notes::NotesError;
 
 const IDENT: &str = "Notes Test <notes@grit-scm.com> 1700000000 +0000";
 
@@ -210,7 +211,7 @@ fn add_existing_without_force_is_typed_error() {
         )
         .expect_err("must reject duplicate note");
     assert!(
-        matches!(err, Error::NoteAlreadyExists { .. }),
+        matches!(err, Error::Notes(NotesError::NoteAlreadyExists { .. }),
         "expected typed NoteAlreadyExists, got {err:?}"
     );
 }
@@ -218,13 +219,13 @@ fn add_existing_without_force_is_typed_error() {
 #[test]
 fn padded_git_notes_ref_is_invalid() {
     let err = NotesRef::from_full(" refs/notes/spaced ").expect_err("padded ref");
-    assert!(matches!(err, Error::InvalidNotesRef(_)));
+    assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _)));
 
     let dir = tempfile::tempdir().expect("tempdir");
     init_repo(dir.path());
     let commit = seed_commit(dir.path(), "f", "x\n", "init");
     let git_out = std::process::Command::new("git")
-        .current_dir(dir.path())
+        .current_dir(dir.path( })
         .env("GIT_NOTES_REF", " refs/notes/spaced ")
         .args(["notes", "add", "-m", "test", &commit.to_hex()])
         .output()
@@ -238,7 +239,7 @@ fn padded_git_notes_ref_is_invalid() {
 #[test]
 fn trailing_space_notes_ref_is_invalid() {
     let err = NotesRef::from_full("refs/notes/spaced ").expect_err("trailing space");
-    assert!(matches!(err, Error::InvalidNotesRef(_)));
+    assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _) }));
 }
 
 #[test]
@@ -256,7 +257,7 @@ fn padded_core_notes_ref_is_invalid() {
     )
     .expect_err("padded core.notesRef");
     assert!(
-        matches!(err, Error::InvalidNotesRef(_)),
+        matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ }),
         "expected InvalidNotesRef, got {err:?}"
     );
 }
@@ -273,7 +274,7 @@ fn empty_core_notes_ref_is_invalid() {
     )
     .expect_err("empty config ref");
     assert!(
-        matches!(err, Error::InvalidNotesRef(_)),
+        matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ }),
         "expected InvalidNotesRef, got {err:?}"
     );
 }

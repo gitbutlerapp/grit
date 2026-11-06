@@ -13,6 +13,7 @@ use grit_test_support::git;
 use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
+use crate::refs::RefError;
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -182,7 +183,7 @@ fn head_caret_one_errors_without_reading_missing_parent() {
     let repo = grit_shallow_clone(&bare, &clone_dir, 1);
     match resolve_revision(&repo, "HEAD~1") {
         Err(Error::RevisionNotFound { .. })
-        | Err(Error::InvalidRef(_))
+        | Err(Error::Ref(RefError::InvalidName { .. }))
         | Err(Error::RevParse(_)) => {}
         other => panic!("expected revision not found for HEAD~1, got {other:?}"),
     }

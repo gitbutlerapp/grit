@@ -29,6 +29,7 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::ExpireOptions;
 
 use support::{
+use crate::refs::RefError;
     append_repo_config, assert_reflog_tree_matches, copy_worktree, each_backend, empty_commit_oid,
     git, git_empty_commit_oid, git_fsck_strict, git_interop_available, git_ok, git_reflog_refs,
     reflog_identity, reflog_tree_bytes, write_repo_config, Backend, TestRepo, AUTHOR_EMAIL,
@@ -1226,7 +1227,7 @@ fn delete_out_of_range_is_typed_error() {
             .reflogs()
             .delete(&name, &[9], false)
             .expect_err("out of range");
-        assert!(matches!(err, Error::ReflogIndexOutOfRange { .. }));
+        assert!(matches!(err, Error::Ref(RefError::ReflogIndexOutOfRange { .. }));
         let _ = backend;
     });
 }

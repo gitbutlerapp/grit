@@ -88,6 +88,7 @@ use crate::porcelain::commit::{
 };
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
+use crate::refs::RefError;
 
 /// Flatten a tree object into a recursive list of [`IndexEntry`] values.
 ///
@@ -1013,9 +1014,9 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
     }
     let canonical = format!("refs/heads/{into_ref}");
     if repo.refs().resolve(&canonical).is_err() {
-        return Err(Error::BranchNotFound {
-            branch: into_ref.to_owned(),
-        });
+        return Err(Error::Branch(crate::porcelain::branch_error::BranchError::NotFound {
+            name: into_ref.to_owned(),
+        }));
     }
     Ok(canonical)
 }
@@ -2638,7 +2639,11 @@ mod integrate_tests {
             &crate::progress::NeverCancel,
         )
         .expect_err("missing branch");
-        assert!(matches!(err, Error::BranchNotFound { branch } if branch == "no-such-branch"));
+        assert!(matches!(
+            err,
+            Error::Branch(crate::porcelain::branch_error::BranchError::NotFound { name })
+                if name == "no-such-branch"
+        ));
         assert!(!tmp_missing.path().join(".git/ORIG_HEAD").exists());
         let tip: ObjectId = grit_test_support::git(tmp_missing.path(), &["rev-parse", "main"])
             .trim()
@@ -2660,7 +2665,7 @@ mod integrate_tests {
         assert!(
             matches!(
                 err,
-                Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. })
+                Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { ref name, .. }))
                     if name == "refs/heads/main"
             ),
             "unexpected {err:?}"

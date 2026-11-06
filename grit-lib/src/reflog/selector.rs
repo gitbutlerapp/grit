@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use crate::error::{Error, Result};
 use crate::refs::store::RefName;
+use crate::refs::RefError;
 
 /// One entry in a reference log, indexed from its newest entry.
 ///
@@ -35,20 +36,24 @@ impl FromStr for ReflogSelector {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ReflogInvalidSelector`] for missing delimiters or an empty
-    /// reference, [`Error::ReflogInvalidIndex`] for an invalid or overflowing index,
-    /// and [`Error::ReflogUnknownRef`] for an invalid reference name.
+    /// Returns [`Error::Ref(RefError::ReflogInvalidSelector`] for missing delimiters or an empty
+    /// reference, [`Error::Ref(RefError::ReflogInvalidIndex`] for an invalid or overflowing index,
+    /// and [`Error::Ref(RefError::ReflogUnknownRef`] for an invalid reference name.
     fn from_str(spec: &str) -> Result<Self> {
         let spec = spec.trim();
-        let invalid_selector = || Error::ReflogInvalidSelector {
-            spec: spec.to_owned(),
+        let invalid_selector = || {
+            Error::Ref(RefError::ReflogInvalidSelector {
+                spec: spec.to_owned(),
+            })
         };
         let (ref_part, rest) = spec.split_once("@{").ok_or_else(invalid_selector)?;
         let ref_part = ref_part.trim();
         let rest = rest.strip_suffix('}').ok_or_else(invalid_selector)?;
-        let index = rest.parse().map_err(|source| Error::ReflogInvalidIndex {
-            spec: spec.to_owned(),
-            source,
+        let index = rest.parse().map_err(|source| {
+            Error::Ref(RefError::ReflogInvalidIndex {
+                spec: spec.to_owned(),
+                source,
+            })
         })?;
         if ref_part.is_empty() {
             return Err(invalid_selector());
@@ -70,7 +75,7 @@ impl FromStr for ReflogSelector {
 ///
 /// # Errors
 ///
-/// Returns [`Error::ReflogUnknownRef`] with the supplied `spec` when neither form
+/// Returns [`Error::Ref(RefError::ReflogUnknownRef`] with the supplied `spec` when neither form
 /// is valid.
 pub fn parse_reflog_ref(spec: &str) -> Result<RefName> {
     if let Ok(name) = RefName::try_from(spec) {
@@ -81,9 +86,9 @@ pub fn parse_reflog_ref(spec: &str) -> Result<RefName> {
             return Ok(name);
         }
     }
-    Err(Error::ReflogUnknownRef {
+    Err(Error::Ref(RefError::ReflogUnknownRef {
         refname: spec.to_owned(),
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -106,7 +111,10 @@ mod tests {
         }
         for spec in ["", " main ", "refs/bad..name", "bad name", "a.lock", "@{"] {
             assert!(
-                matches!(parse_reflog_ref(spec), Err(Error::ReflogUnknownRef { refname }) if refname == spec)
+                matches!(
+                    parse_reflog_ref(spec),
+                    Err(Error::Ref(RefError::ReflogUnknownRef { refname })) if refname == spec
+                )
             );
         }
     }
@@ -132,7 +140,11 @@ mod tests {
     fn selectors_return_distinct_typed_failures() {
         for input in ["", "HEAD", "HEAD@0", "HEAD@{0", "HEAD@{0}tail", " @{0} "] {
             assert!(
-                matches!(input.parse::<ReflogSelector>(), Err(Error::ReflogInvalidSelector { spec }) if spec == input.trim())
+                matches!(
+                    input.parse::<ReflogSelector>(),
+                    Err(Error::Ref(RefError::ReflogInvalidSelector { spec }))
+                        if spec == input.trim()
+                )
             );
         }
         for input in [
@@ -144,22 +156,32 @@ mod tests {
             "HEAD@{1}@{2}",
         ] {
             assert!(
-                matches!(input.parse::<ReflogSelector>(), Err(Error::ReflogInvalidIndex { spec, .. }) if spec == input)
+                matches!(
+                    input.parse::<ReflogSelector>(),
+                    Err(Error::Ref(RefError::ReflogInvalidIndex { spec, .. })) if spec == input
+                )
             );
         }
         let overflow = format!("HEAD@{{{}0}}", usize::MAX);
         let err = overflow.parse::<ReflogSelector>().unwrap_err();
         assert!(
-            matches!(&err, Error::ReflogInvalidIndex { source, .. } if *source.kind() == std::num::IntErrorKind::PosOverflow)
+            matches!(
+                &err,
+                Error::Ref(RefError::ReflogInvalidIndex { source, .. })
+                    if *source.kind() == std::num::IntErrorKind::PosOverflow
+            )
         );
         assert!(std::error::Error::source(&err).is_some());
         assert!(
-            matches!("bad name@{0}".parse::<ReflogSelector>(), Err(Error::ReflogUnknownRef { refname }) if refname == "bad name")
+            matches!(
+                "bad name@{0}".parse::<ReflogSelector>(),
+                Err(Error::Ref(RefError::ReflogUnknownRef { refname })) if refname == "bad name"
+            )
         );
         // Preserve index validation before checking an empty reference.
         assert!(matches!(
             "@{bad}".parse::<ReflogSelector>(),
-            Err(Error::ReflogInvalidIndex { .. })
+            Err(Error::Ref(RefError::ReflogInvalidIndex { .. }))
         ));
     }
 }

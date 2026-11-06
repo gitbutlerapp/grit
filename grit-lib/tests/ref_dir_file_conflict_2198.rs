@@ -17,6 +17,7 @@ use grit_lib::refs::{resolve_ref, RefnameUnavailable};
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
+use crate::refs::RefError;
 
 /// How `refs/heads/rel/1.0` is stored when `rel` is created.
 #[derive(Clone, Copy, Debug)]
@@ -48,9 +49,9 @@ fn assert_names_blocking_ref(err: &Error, blocking_ref: &str, new: &str) {
     assert!(
         matches!(
             err,
-            Error::RefStore(RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
                 reason: RefnameUnavailable::DescendantExists { blocking, new_ref }
-            }) if blocking == blocking_ref && new_ref == new
+            })) if blocking == blocking_ref && new_ref == new
         ),
         "expected '{blocking_ref}' to block '{new}': {err:?}"
     );

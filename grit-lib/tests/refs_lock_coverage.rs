@@ -16,6 +16,7 @@ use grit_lib::refs::{
 use grit_lib::repo::{InitOptions, Repository};
 use std::collections::{BTreeSet, HashSet};
 use tempfile::tempdir;
+use crate::refs::RefError;
 
 fn oid(byte: u8) -> ObjectId {
     ObjectId::from_bytes(&[byte; 20]).expect("oid")
@@ -66,7 +67,7 @@ fn write_ref_fails_when_lock_file_exists() {
         {
             true
         }
-        Error::RefStore(RefStoreError::LockHeld { name }) => name == "refs/heads/locked",
+        Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) => name == "refs/heads/locked",
         _ => false,
     };
     let err = write_ref(&git_dir, "refs/heads/locked", &oid(2)).expect_err("lock held");

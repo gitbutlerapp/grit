@@ -14,6 +14,7 @@ use grit_lib::worktree::crlf::{
 use grit_test_support::{git, git_cmd};
 use std::fs;
 use tempfile::tempdir;
+use crate::refs::RefError;
 
 #[test]
 fn malformed_config_line_is_bad_config_line_typed() {
@@ -88,9 +89,9 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     assert!(
         matches!(
             err,
-            Error::RefStore(RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
                 reason: RefnameUnavailable::DescendantExists { ref blocking, .. }
-            }) if blocking == "refs/heads/feature/extra"
+            })) if blocking == "refs/heads/feature/extra"
         ),
         "{err:?}"
     );
@@ -110,7 +111,7 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     fs::write(git_dir.join("refs/heads/feature/extra.lock"), "").unwrap();
     let err = grit_lib::refs::write_ref(&git_dir, "refs/heads/feature", &oid).unwrap_err();
     assert!(
-        matches!(err, Error::RefLock(RefLockError::DirectoryInTheWay { .. })),
+        matches!(err, Error::Ref(RefError::RefLock(RefLockError::DirectoryInTheWay { .. })),
         "{err:?}"
     );
     let git_out = git_cmd(&["update-ref", "refs/heads/feature", &oid.to_hex()])

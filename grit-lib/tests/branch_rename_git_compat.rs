@@ -19,6 +19,7 @@ use grit_test_support::{git, git_cmd};
 use crate::support;
 
 use support::{git_init_reftable_repo, require_reftable_git};
+use crate::refs::RefError;
 
 fn oid(dir: &Path, rev: &str) -> ObjectId {
     git(dir, &["rev-parse", rev]).trim().parse().expect("oid")
@@ -265,7 +266,10 @@ fn rename_force_refuses_when_target_checked_out_in_worktree() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::BranchCheckedOutInWorktree { .. }),
+        matches!(
+            err,
+            Error::Branch(grit_lib::porcelain::branch_error::BranchError::CheckedOut { .. })
+        ),
         "{err:?}"
     );
 }
@@ -498,7 +502,7 @@ fn rename_aborts_when_destination_reflog_path_is_directory() {
     assert!(
         matches!(
             err,
-            Error::RefStore(grit_lib::refs::store::RefStoreError::NameUnavailable {
+            Error::Ref(RefError::Store(grit_lib::refs::store::RefStoreError::NameUnavailable {
                 reason: grit_lib::refs::RefnameUnavailable::DescendantExists { ref blocking, .. }
             }) if blocking == "refs/heads/new/x/y"
         ),

@@ -11,6 +11,7 @@ use grit_lib::refs::branch_tracking::{
 };
 use grit_lib::repo::Repository;
 use grit_test_support::{git, unique_tmp, write_file};
+use crate::refs::RefError;
 
 fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open repo")
@@ -136,7 +137,7 @@ fn compare_with_target_unknown_errors() {
     let err = compare_with_target(&repo, &opts).unwrap_err();
     assert!(
         matches!(err, Error::ObjectNotFound(_))
-            || matches!(err, Error::InvalidRef(_))
+            || matches!(err, Error::Ref(RefError::InvalidName { .. }))
             || matches!(err, Error::RevParse(_))
     );
 }

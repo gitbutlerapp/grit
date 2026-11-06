@@ -15,6 +15,8 @@ use super::store::reference_transaction::{
     branch_commit_reference_transaction_lines, detached_head_commit_reference_transaction_lines,
 };
 use super::store::{Expected, RawRef, RefStore, RefUpdate, RefUpdateFlags, ReflogUpdate};
+use crate::refs::RefError;
+
 use super::{
     append_reflog_with_config, commit_ref_update_on_store, commit_ref_update_on_store_with_wait,
     commit_ref_updates_on_store_with_wait, ensure_refname_safe_for_storage,
@@ -426,7 +428,7 @@ mod tests {
                 .expect_err("stale tip");
         assert!(matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. }) if name == "refs/heads/main"
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { ref name, .. })) if name == "refs/heads/main"
         ));
         assert_eq!(store.resolve("refs/heads/main").expect("tip"), oid(3));
         assert!(log(&store, "HEAD").is_empty());
@@ -435,7 +437,7 @@ mod tests {
             .expect_err("branch exists");
         assert!(matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { .. })
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
         ));
     }
 
@@ -511,14 +513,14 @@ mod tests {
         let err = update_branch_for_commit_on_store(repo.refs(), &branch(oid(9)), &config(None))
             .expect_err("missing tip");
         assert!(
-            matches!(&err, Error::RefStore(RefStoreError::MissingObject { name, oid: o })
+            matches!(&err, Error::Ref(RefError::Store(RefStoreError::MissingObject { name, oid: o }))
                 if name == "refs/heads/main" && *o == oid(9)),
             "{err:?}"
         );
         let err = update_branch_for_commit_on_store(repo.refs(), &branch(tree), &config(None))
             .expect_err("tree tip");
         assert!(
-            matches!(&err, Error::RefStore(RefStoreError::NotACommit { name, .. })
+            matches!(&err, Error::Ref(RefError::Store(RefStoreError::NotACommit { name, .. }))
                 if name == "refs/heads/main"),
             "{err:?}"
         );
@@ -540,9 +542,9 @@ mod tests {
             )
             .expect_err("bad detached tip");
             let expected = if missing {
-                matches!(&err, Error::RefStore(RefStoreError::MissingObject { name, .. }) if name == "HEAD")
+                matches!(&err, Error::Ref(RefError::Store(RefStoreError::MissingObject { name, .. })) if name == "HEAD")
             } else {
-                matches!(&err, Error::RefStore(RefStoreError::NotACommit { name, .. }) if name == "HEAD")
+                matches!(&err, Error::Ref(RefError::Store(RefStoreError::NotACommit { name, .. })) if name == "HEAD")
             };
             assert!(expected, "{err:?}");
         }
@@ -597,7 +599,7 @@ mod tests {
         .expect_err("stale");
         assert!(matches!(
             err,
-            Error::RefStore(RefStoreError::ExpectedMismatch { .. })
+            Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))
         ));
 
         let attached = store_on("refs/heads/main", Some(oid(1)));

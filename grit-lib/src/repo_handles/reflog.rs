@@ -12,6 +12,7 @@ use crate::reflog::{
 use crate::refs::store::{RefName, RefStore};
 use crate::repo::Repository;
 use crate::worktree_ref::resolve_ref_dwim;
+use crate::refs::RefError;
 
 /// Options for [`RepositoryReflogs::expire`].
 #[derive(Debug, Clone)]
@@ -125,7 +126,7 @@ impl<'repo> RepositoryReflogs<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ReflogUnknownRef`] when the ref cannot be resolved and has no reflog.
+    /// Returns [`Error::Ref(RefError::ReflogUnknownRef`] when the ref cannot be resolved and has no reflog.
     pub fn entries(&self, ref_name: &RefName) -> Result<Vec<IndexedReflogEntry>> {
         let page = self.query(ref_name, &ReflogQuery::default())?;
         Ok(page.entries)
@@ -138,7 +139,7 @@ impl<'repo> RepositoryReflogs<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ReflogUnknownRef`] when the ref cannot be resolved and has no reflog.
+    /// Returns [`Error::Ref(RefError::ReflogUnknownRef`] when the ref cannot be resolved and has no reflog.
     pub fn query(&self, ref_name: &RefName, query: &ReflogQuery) -> Result<ReflogPage> {
         let canonical = self.resolve_reflog_canonical(ref_name.as_str())?;
         if query.limit == Some(0) {
@@ -182,8 +183,8 @@ impl<'repo> RepositoryReflogs<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ReflogIndexOutOfRange`] when any index is out of range, or
-    /// [`Error::ReflogUnknownRef`] when the ref does not exist.
+    /// Returns [`Error::Ref(RefError::ReflogIndexOutOfRange`] when any index is out of range, or
+    /// [`Error::Ref(RefError::ReflogUnknownRef`] when the ref does not exist.
     pub fn delete(&self, ref_name: &RefName, indices: &[usize], rewrite: bool) -> Result<()> {
         if indices.is_empty() {
             return Ok(());
@@ -192,10 +193,10 @@ impl<'repo> RepositoryReflogs<'repo> {
         let len = entries.len();
         for &idx in indices {
             if idx >= len {
-                return Err(Error::ReflogIndexOutOfRange {
+                return Err(Error::Ref(RefError::ReflogIndexOutOfRange {
                     refname: canonical,
                     index: idx,
-                });
+                }));
             }
         }
         if rewrite {
@@ -348,9 +349,9 @@ fn canonical_reflog_ref(store: &dyn RefStore, user_ref: &str) -> Result<String> 
         }
     }
     if !ref_exists_dwim(store, user_ref)? {
-        return Err(Error::ReflogUnknownRef {
+        return Err(Error::Ref(RefError::ReflogUnknownRef {
             refname: user_ref.to_owned(),
-        });
+        }));
     }
     if user_ref.starts_with("refs/") || user_ref == "HEAD" {
         return Ok(user_ref.to_owned());
@@ -502,7 +503,7 @@ mod tests {
             .delete(&name, &[1], false)
             .expect_err("out of range");
         match err {
-            Error::ReflogIndexOutOfRange { refname, index } => {
+            Error::Ref(RefError::ReflogIndexOutOfRange { refname, index }) => {
                 assert_eq!(refname, "refs/heads/main");
                 assert_eq!(index, 1);
             }

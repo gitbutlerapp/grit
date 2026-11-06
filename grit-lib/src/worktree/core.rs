@@ -265,11 +265,11 @@ pub fn ensure_branch_not_checked_out_in_any_worktree(
     Ok(())
 }
 
-fn branch_checked_out_error(branch: &str, worktree_path: &Path) -> Error {
-    Error::BranchCheckedOutInWorktree {
-        branch: branch.to_owned(),
-        worktree_path: crate::git_path::path_for_error_message(worktree_path),
-    }
+fn branch_checked_out_error(branch: &str, worktree: &Path) -> Error {
+    Error::Branch(crate::porcelain::branch_error::BranchError::CheckedOut {
+        name: branch.to_owned(),
+        worktree: crate::git_path::path_for_error_message(worktree),
+    })
 }
 
 /// Whether the main worktree row in [`list_worktrees`] is marked bare (matches `git worktree list`).
@@ -1591,7 +1591,7 @@ mod tests {
         assert_eq!(found.worktree_path, path_for_disk_compare(&linked));
         assert!(matches!(
             ensure_branch_not_checked_out_in_any_worktree(&repo, "feature"),
-            Err(Error::BranchCheckedOutInWorktree { .. })
+            Err(Error::Branch(crate::porcelain::branch_error::BranchError::CheckedOut { .. }))
         ));
         git(&linked, &["rebase", "--abort"]);
 

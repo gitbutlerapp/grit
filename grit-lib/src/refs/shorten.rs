@@ -7,6 +7,7 @@ use crate::refs::store::RawRef;
 use crate::refs::SYMREF_MAXDEPTH;
 use crate::repo::Repository;
 use crate::worktree_ref::DWIM_RULES;
+use crate::refs::RefError;
 
 /// Rev-parse DWIM rules in Git precedence order (see `ref_rev_parse_rules` in upstream Git).
 const REV_PARSE_RULES: &[&str] = &[
@@ -59,9 +60,9 @@ pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<Str
             }
         }
     }
-    Err(Error::RefStore(
+    Err(Error::Ref(RefError::Store(
         crate::refs::store::RefStoreError::SymrefLoop,
-    ))
+    )))
 }
 
 fn symref_target_resolves(repo: &Repository, start: &str) -> Result<bool> {

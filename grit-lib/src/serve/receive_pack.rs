@@ -29,6 +29,7 @@ use crate::receive_quarantine::{MigratedPackKeepGuard, ReceiveQuarantine};
 use crate::repo::Repository;
 use crate::shallow::{add_shallow_boundaries, load_shallow_boundaries, PushShallowInfo};
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
+use crate::refs::RefError;
 
 /// Bytes read from the client per call while spooling a pushed pack.
 const SPOOL_CHUNK: usize = 256 * 1024;
@@ -1360,7 +1361,7 @@ fn apply_commands_with_hooks(
     let ref_lock_wait = store.ref_lock_wait();
     if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
-        if let Err(crate::error::Error::RefStore(e)) =
+        if let Err(crate::error::Error::Ref(RefError::Store(e))) =
             crate::refs::commit_ref_updates_on_store_with_wait(store, &batch, || ref_lock_wait)
         {
             let refusal = ref_update_refusal_from_store(&e);
@@ -1634,7 +1635,7 @@ fn commit_receive_ref_updates_on_store(
                 (
                     idx,
                     match &e {
-                        crate::error::Error::RefStore(store) => {
+                        crate::error::Error::Ref(RefError::Store(store)) => {
                             ref_update_refusal_from_store(store)
                         }
                         other => RefUpdateRefusal::RefStore(other.to_string()),

@@ -62,7 +62,7 @@ fn structured(kind: ErrorKind, human: &str, hint: Option<&str>) -> Error {
 }
 
 fn human_ref_branch_missing() -> String {
-    human_message_for_lib(&LibError::RefStore(RefStoreError::NotFound {
+    human_message_for_lib(&LibError::Ref(grit_lib::refs::RefError::Store(RefStoreError::NotFound {
         name: "refs/heads/missing".into(),
     }))
 }
@@ -70,7 +70,7 @@ fn human_ref_branch_missing() -> String {
 static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "ref_store_branch_not_found",
-        build: || Error::new(LibError::RefStore(RefStoreError::NotFound {
+        build: || Error::new(LibError::Ref(grit_lib::refs::RefError::Store(RefStoreError::NotFound {
             name: "refs/heads/missing".into(),
         })),
         kind: None,
@@ -892,8 +892,7 @@ static CONTRACT: &[ContractRow] = &[
         label: "branch_checked_out",
         build: || {
             map_branch_error(LibError::BranchCheckedOutInWorktree {
-                branch: "main".into(),
-                worktree_path: "/wt".into(),
+                branch: "main".into(), worktree: "/wt".into(),
             })
         },
         kind: Some(ErrorKind::BranchCheckedOut),

@@ -27,6 +27,7 @@ use std::thread;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::ReflogEntry;
+use grit_lib::refs::RefError;
 use grit_lib::refs::store::{
     Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefStore, RefStoreError, RefTransaction,
     RefUpdate, RefUpdateFlags, ReflogUpdate,
@@ -318,7 +319,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     assert!(
         matches!(
             missing,
-            Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/absent"
+            Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/absent"
         ),
         "{missing:?}"
     );
@@ -330,7 +331,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     assert!(
         matches!(
             dangling,
-            Error::RefStore(RefStoreError::NotFound { ref name }) if name == "refs/heads/unborn"
+            Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/unborn"
         ),
         "{dangling:?}"
     );

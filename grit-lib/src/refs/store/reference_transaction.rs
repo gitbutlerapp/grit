@@ -6,6 +6,7 @@ use crate::hooks::{RefHookContext, ReferenceTransactionPhase};
 use crate::objects::ObjectId;
 
 use super::{PreparedRefTransaction, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate};
+use crate::refs::RefError;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -114,9 +115,11 @@ fn current_log_only_old_oid(
         RawRef::Direct(oid) => Ok(oid),
         RawRef::Symbolic(_) => match store.resolve(name) {
             Ok(oid) => Ok(oid),
-            Err(crate::error::Error::RefStore(RefStoreError::NotFound { .. })) => Ok(null_oid),
+            Err(crate::error::Error::Ref(RefError::Store(
+                RefStoreError::NotFound { .. },
+            ))) => Ok(null_oid),
             Err(e) => Err(match e {
-                crate::error::Error::RefStore(err) => err,
+                crate::error::Error::Ref(RefError::Store(err)) => err,
                 other => RefStoreError::Corrupt(other.to_string()),
             }),
         },

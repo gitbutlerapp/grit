@@ -13,6 +13,7 @@ use crate::notes::{
 use crate::objects::{ObjectId, ObjectKind};
 use crate::porcelain::merge::MemOverlayGuard;
 use crate::repo::Repository;
+use crate::notes::NotesError;
 
 /// Author, committer, and commit message for a notes ref update.
 #[derive(Debug, Clone)]
@@ -179,7 +180,7 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # Errors
     ///
     /// - Notes tree read failures (see [`Self::list`]).
-    /// - [`Error::NotesObjectKind`](crate::error::Error::NotesObjectKind) when a note entry is
+    /// - [`Error::Notes(NotesError::NotesObjectKind`](crate::error::Error::Notes(NotesError::NotesObjectKind) when a note entry is
     ///   not a blob, and object read failures (a missing note blob is an error, not an empty
     ///   note).
     pub fn list_with_bodies(
@@ -208,7 +209,7 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # Errors
     ///
     /// Propagates notes tree and object read failures;
-    /// [`Error::NotesObjectKind`](crate::error::Error::NotesObjectKind) when the note entry is
+    /// [`Error::Notes(NotesError::NotesObjectKind`](crate::error::Error::Notes(NotesError::NotesObjectKind) when the note entry is
     /// not a blob.
     pub fn read(&self, notes_ref: &NotesRef, object: &ObjectId) -> Result<Option<Vec<u8>>> {
         let hex = object.to_hex();
@@ -228,7 +229,7 @@ impl<'repo> RepositoryNotes<'repo> {
     ///
     /// # Errors
     ///
-    /// Same as [`Self::add`], including [`Error::NoteAlreadyExists`](crate::error::Error::NoteAlreadyExists)
+    /// Same as [`Self::add`], including [`Error::Notes(NotesError::NoteAlreadyExists`](crate::error::Error::Notes(NotesError::NoteAlreadyExists)
     /// when `force` is false and a note already exists.
     pub fn plan_add(
         &self,
@@ -308,7 +309,7 @@ impl<'repo> RepositoryNotes<'repo> {
     /// Add or replace the note on `object`; `content` is stored exactly as given.
     ///
     /// When `force` is false and a note already exists, returns
-    /// [`Error::NoteAlreadyExists`](crate::error::Error::NoteAlreadyExists).
+    /// [`Error::Notes(NotesError::NoteAlreadyExists`](crate::error::Error::Notes(NotesError::NoteAlreadyExists).
     ///
     /// # Returns
     ///
@@ -442,7 +443,7 @@ impl<'repo> RepositoryNotes<'repo> {
             None => false,
         };
         if exists && !force {
-            return Err(crate::error::Error::NoteAlreadyExists { object: *object });
+            return Err(crate::error::Error::Notes(NotesError::NoteAlreadyExists { object: *object }));
         }
         let outcome = if exists {
             NoteAddOutcome::Replaced

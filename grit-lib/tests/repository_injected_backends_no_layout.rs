@@ -16,6 +16,7 @@ use grit_lib::refs::store::{
 use grit_lib::repo::{Repository, RepositoryBuilder};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
+use crate::refs::RefError;
 
 fn open_injected(git_dir: &Path) -> grit_lib::error::Result<(Repository, Arc<MemoryRefStore>)> {
     let refs = Arc::new(MemoryRefStore::new());
@@ -153,7 +154,7 @@ fn initial_branch_rejects_invalid_names() {
         .ref_store(Arc::new(MemoryRefStore::new()))
         .initial_branch("bad..name")
         .open(&git_dir, None);
-    assert!(matches!(result, Err(Error::InvalidRef(_))), "{result:?}");
+    assert!(matches!(result, Err(Error::Ref(RefError::InvalidName { .. }))), "{result:?}");
 }
 
 #[test]

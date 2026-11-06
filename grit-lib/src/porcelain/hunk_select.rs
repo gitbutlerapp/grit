@@ -37,6 +37,7 @@ use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
+use crate::refs::RefError;
 
 /// New-side line range for partial hunk staging (1-based, inclusive).
 ///
@@ -2023,10 +2024,10 @@ mod tests {
 
     #[test]
     fn repository_error_keeps_typed_source() {
-        let err = HunkSelectError::from(Error::InvalidHead);
-        assert_eq!(err.to_string(), Error::InvalidHead.to_string());
+        let err = HunkSelectError::from(Error::Ref(RefError::InvalidHead));
+        assert_eq!(err.to_string(), Error::Ref(RefError::InvalidHead).to_string());
         match err {
-            HunkSelectError::Repository(inner) => assert!(matches!(*inner, Error::InvalidHead)),
+            HunkSelectError::Repository(inner) => assert!(matches!(*inner, Error::Ref(RefError::InvalidHead))),
             other => panic!("expected Repository, got {other:?}"),
         }
     }

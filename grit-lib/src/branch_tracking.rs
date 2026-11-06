@@ -11,6 +11,7 @@ use crate::merge_base::ahead_behind_of_target_commits;
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
+use crate::refs::RefError;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
@@ -421,9 +422,9 @@ fn discover_target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
 fn resolve_explicit_target(repo: &Repository, spec: &str) -> Result<ComparisonBase> {
     let spec = spec.trim();
     if spec.is_empty() {
-        return Err(crate::error::Error::InvalidRef(
-            "empty target revision".into(),
-        ));
+        return Err(crate::error::Error::Ref(RefError::invalid_reason(
+            "empty target revision",
+        )));
     }
     if let Some(base) = try_resolve_target_candidate(repo, spec, BaseSource::Explicit)? {
         return Ok(ComparisonBase {
@@ -449,8 +450,8 @@ fn resolve_explicit_target(repo: &Repository, spec: &str) -> Result<ComparisonBa
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::Error::DetachedHead`] when `HEAD` is detached,
-/// [`crate::error::Error::UnbornHead`] when the current branch has no commits yet, and revision
+/// Returns [`crate::error::Error::Ref(RefError::DetachedHead)`] when `HEAD` is detached,
+/// [`crate::error::Error::Ref(RefError::UnbornHead)`] when the current branch has no commits yet, and revision
 /// resolution errors when an explicit target does not resolve. Returns
 /// [`crate::error::Error::InvalidRef`] when no target branch can be discovered; use
 /// [`compare_with_target_optional`] to handle that case without an error.
@@ -460,7 +461,7 @@ pub(crate) fn compare_with_target(
     opts: &TargetComparisonOptions,
 ) -> Result<TargetComparison> {
     compare_with_target_optional(repo, opts)?
-        .ok_or_else(|| crate::error::Error::InvalidRef("no target branch".into()))
+        .ok_or_else(|| crate::error::Error::Ref(RefError::invalid_reason("no target branch")))
 }
 
 /// Like `compare_with_target`, but returns `Ok(None)` when no target branch can be discovered
@@ -481,9 +482,11 @@ pub fn compare_with_target_optional(
             oid: Some(oid),
             ..
         } => (short_name.clone(), *oid),
-        HeadState::Branch { .. } => return Err(crate::error::Error::UnbornHead),
-        HeadState::Detached { .. } => return Err(crate::error::Error::DetachedHead),
-        HeadState::Invalid => return Err(crate::error::Error::InvalidRef("invalid HEAD".into())),
+        HeadState::Branch { .. } => return Err(crate::error::Error::Ref(RefError::UnbornHead)),
+        HeadState::Detached { .. } => return Err(crate::error::Error::Ref(RefError::DetachedHead)),
+        HeadState::Invalid => {
+            return Err(crate::error::Error::Ref(RefError::invalid_reason("invalid HEAD")));
+        }
     };
 
     let base = match &opts.target {
@@ -1264,7 +1267,9 @@ mod tests {
         };
         assert_eq!(compare_with_target_optional(&repo, &opts).unwrap(), None);
         assert!(matches!(compare_with_target(&repo, &opts),
-            Err(crate::error::Error::InvalidRef(reason)) if reason == "no target branch"));
+            Err(crate::error::Error::Ref(RefError::InvalidName { reason, .. }))
+                if reason == "no target branch"
+        ));
 
         opts.target = Some(TargetSpec("".into()));
         for result in [
@@ -1272,7 +1277,9 @@ mod tests {
             compare_with_target_optional(&repo, &opts),
         ] {
             assert!(matches!(result,
-                Err(crate::error::Error::InvalidRef(reason)) if reason == "empty target revision"));
+                Err(crate::error::Error::Ref(RefError::InvalidName { reason, .. }))
+                    if reason == "empty target revision"
+            ));
         }
     }
 
@@ -1294,7 +1301,7 @@ mod tests {
             compare_with_target(&repo, &opts).map(Some),
             compare_with_target_optional(&repo, &opts),
         ] {
-            assert!(matches!(result, Err(crate::error::Error::UnbornHead)));
+            assert!(matches!(result, Err(crate::error::Error::Ref(RefError::UnbornHead))));
         }
         std::fs::write(
             repo.git_dir().join("HEAD"),
@@ -1305,7 +1312,7 @@ mod tests {
             compare_with_target(&repo, &opts).map(Some),
             compare_with_target_optional(&repo, &opts),
         ] {
-            assert!(matches!(result, Err(crate::error::Error::DetachedHead)));
+            assert!(matches!(result, Err(crate::error::Error::Ref(RefError::DetachedHead))));
         }
         std::fs::write(repo.git_dir().join("HEAD"), "invalid\n").unwrap();
         for result in [
@@ -1313,7 +1320,9 @@ mod tests {
             compare_with_target_optional(&repo, &opts),
         ] {
             assert!(matches!(result,
-                Err(crate::error::Error::InvalidRef(reason)) if reason == "invalid HEAD"));
+                Err(crate::error::Error::Ref(RefError::InvalidName { reason, .. }))
+                    if reason == "invalid HEAD"
+            ));
         }
     }
 

@@ -576,6 +576,9 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
     } else {
         BranchDetail::Names
     };
+    if detail == BranchDetail::Names && matches!(query.refs.sort.key, SortKey::Date) {
+        bail!("branch list with Names detail cannot use date sort (date sort reads commit objects)");
+    }
     let limit = list.limit.get();
     let rows = list_branches(repo, &query, detail).context("could not list branches")?;
     let limited = grit_lib::list_limit::Limited::from_vec(rows, limit);

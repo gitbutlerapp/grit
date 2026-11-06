@@ -12,6 +12,7 @@ use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
 use grit_test_support::git;
+use crate::notes::NotesError;
 
 fn git_cmd(root: &std::path::Path, args: &[&str]) -> String {
     git(root, args)
@@ -503,7 +504,7 @@ fn uppercase_hex_leaf_read_and_add_sees_existing_note() {
         )
         .expect_err("note already exists");
     assert!(
-        matches!(outcome, grit_lib::error::Error::NoteAlreadyExists { .. }),
+        matches!(outcome, grit_lib::error::Error::Notes(NotesError::NoteAlreadyExists { .. }),
         "add without force must not treat uppercase leaf as missing"
     );
 

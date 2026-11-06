@@ -31,6 +31,7 @@ use crate::worktree::{
 };
 
 pub use crate::porcelain::branch_error::{BranchError, DeleteMode, StartPoint, TrackMode};
+use crate::refs::RefError;
 
 const HEADS_PREFIX: &str = "refs/heads/";
 
@@ -755,7 +756,7 @@ fn validate_start_commit(repo: &Repository, oid: ObjectId, label: &str) -> Resul
             label: label.to_owned(),
             reason: "object not found".into(),
         }),
-        Error::InvalidRef(msg) | Error::CorruptObject(msg) => {
+        Error::Ref(RefError::InvalidName { reason: msg, .. }) | Error::CorruptObject(msg) => {
             Error::Branch(BranchError::InvalidStartPoint {
                 label: label.to_owned(),
                 reason: msg,
@@ -802,12 +803,10 @@ fn checked_out_error(repo: &Repository, name: &str) -> Result<Error> {
 
 fn map_checked_out_err(err: Error, name: &str) -> Error {
     match err {
-        Error::BranchCheckedOutInWorktree { worktree_path, .. } => {
-            Error::Branch(BranchError::CheckedOut {
-                name: name.to_owned(),
-                worktree: path_for_error_message(Path::new(&worktree_path)),
-            })
-        }
+        Error::Branch(BranchError::CheckedOut { worktree, .. }) => Error::Branch(BranchError::CheckedOut {
+            name: name.to_owned(),
+            worktree: path_for_error_message(Path::new(&worktree)),
+        }),
         other => other,
     }
 }
@@ -990,10 +989,10 @@ mod tests {
     #[test]
     fn checked_out_in_other_worktree_strips_verbatim_path() {
         let err = map_checked_out_err(
-            Error::BranchCheckedOutInWorktree {
-                branch: "side".into(),
-                worktree_path: r"\\?\C:\Users\tmp\repo".into(),
-            },
+            Error::Branch(BranchError::CheckedOut {
+                name: "side".into(),
+                worktree: r"\\?\C:\Users\tmp\repo".into(),
+            }),
             "side",
         );
         match err {

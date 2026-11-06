@@ -18,6 +18,7 @@ use grit_lib::worktree::attributes::{
     resolve_tree_oid, validate_rules_for_add, AttrValue, MAX_ATTR_FILE_BYTES, MAX_ATTR_LINE_BYTES,
 };
 use support::{
+use crate::refs::RefError;
     assert_all_attrs_match, assert_attrs_match, grit_attr_value, grit_repo, hermetic_git,
     hermetic_git_ok, init_git_repo, load_cached_parsed, load_source_parsed, load_worktree_parsed,
     rel_path_for_check, setup_t0003_tags, setup_t0003_worktree, t0003_corpus_paths,
@@ -585,7 +586,7 @@ fn t0003_resolve_attr_treeish_and_tree_oid_errors() {
     let repo2 =
         Repository::open(&wt.join(".git"), &options.clone().with_work_tree(wt)).expect("open2");
     let err = load_gitattributes_for_diff(&repo2).unwrap_err();
-    assert!(matches!(err, Error::InvalidRef(_)));
+    assert!(matches!(err, Error::Ref(RefError::InvalidName { .. })));
 }
 
 fn null_dev() -> &'static str {
