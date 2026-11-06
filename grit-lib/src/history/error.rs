@@ -19,6 +19,10 @@ pub enum HistoryError {
     #[error(transparent)]
     Engine(#[from] HistoryEngineError),
 
+    /// Wraps a top-level library failure when no more specific [`HistoryError`] applies.
+    #[error(transparent)]
+    Nested(#[from] Box<Error>),
+
     /// Invalid or inconsistent planning inputs (distinct from [`Self::Engine`]).
     #[error(transparent)]
     Planning(#[from] PlanningError),
@@ -334,11 +338,6 @@ pub(crate) fn engine_err(err: Error) -> HistoryError {
     HistoryError::Engine(error_to_engine(err))
 }
 
-#[must_use]
-pub(crate) fn engine_message(message: impl Into<String>) -> HistoryError {
-    HistoryError::Engine(HistoryEngineError::Message(message.into()))
-}
-
 /// Map I/O failure into [`HistoryError::WorktreeApply`].
 #[must_use]
 pub(crate) fn worktree_apply_io(err: std::io::Error) -> HistoryError {
@@ -359,7 +358,7 @@ pub(crate) fn worktree_apply_engine(err: Error) -> HistoryError {
 #[must_use]
 pub(crate) fn worktree_apply_str(message: impl Into<String>) -> HistoryError {
     HistoryError::WorktreeApply {
-        source: Box::new(HistoryEngineError::Message(message.into())),
+        source: Box::new(HistoryEngineError::UmbrellaMessage(message.into())),
     }
 }
 
@@ -387,14 +386,14 @@ pub(crate) fn undo_record_write_io(err: std::io::Error) -> HistoryError {
 #[must_use]
 pub(crate) fn undo_record_read_str(message: impl Into<String>) -> HistoryError {
     HistoryError::UndoRecordRead {
-        source: Box::new(HistoryEngineError::Message(message.into())),
+        source: Box::new(HistoryEngineError::UmbrellaMessage(message.into())),
     }
 }
 
 #[must_use]
 pub(crate) fn undo_record_write_str(message: impl Into<String>) -> HistoryError {
     HistoryError::UndoRecordWrite {
-        source: Box::new(HistoryEngineError::Message(message.into())),
+        source: Box::new(HistoryEngineError::UmbrellaMessage(message.into())),
     }
 }
 
@@ -402,10 +401,14 @@ pub(crate) fn undo_record_write_str(message: impl Into<String>) -> HistoryError 
 pub(crate) fn history_error_to_engine_box(err: HistoryError) -> Box<HistoryEngineError> {
     match err {
         HistoryError::Engine(e) => Box::new(e),
+        HistoryError::Planning(p) => Box::new(HistoryEngineError::Planning(p)),
+        HistoryError::Nested(boxed) => match *boxed {
+            Error::History(inner) => history_error_to_engine_box(inner),
+            other => Box::new(error_to_engine(other)),
+        },
         HistoryError::WorktreeApply { source } => source,
         HistoryError::RefApply(r) => Box::new(HistoryEngineError::RefStore(r.clone())),
-        HistoryError::Planning(p) => Box::new(HistoryEngineError::Message(p.to_string())),
-        other => Box::new(HistoryEngineError::Message(other.to_string())),
+        other => Box::new(HistoryEngineError::UmbrellaMessage(other.to_string())),
     }
 }
 
@@ -415,6 +418,7 @@ impl HistoryError {
     pub fn is_cancelled(&self) -> bool {
         match self {
             Self::Engine(e) => e.is_cancelled(),
+            Self::Nested(e) => e.is_cancelled(),
             Self::WorktreeApply { source } => source.is_cancelled(),
             Self::UndoRecordRead { source } | Self::UndoRecordWrite { source } => {
                 source.is_cancelled()
@@ -434,12 +438,17 @@ impl HistoryError {
 }
 
 impl From<Error> for HistoryError {
-    /// Unwraps [`Error::History`] back to the history failure it carries; every other library
-    /// error becomes [`HistoryError::Engine`].
+    /// Unwraps [`Error::History`] back to the history failure it carries.
+    ///
+    /// Most library failures map into [`Self::Engine`] via [`error_to_engine`]. A small set of
+    /// umbrella-only errors (for example [`Error::InvalidHead`]) stay as [`Self::Nested`] so the
+    /// ratchet can count intentional umbrella wrapping where there is no structured history
+    /// variant.
     fn from(err: Error) -> Self {
         match err {
             Error::History(inner) => inner,
-            other => Self::Engine(error_to_engine(other)),
+            Error::InvalidHead => Self::Nested(Box::new(Error::InvalidHead)),
+            other => engine_err(other),
         }
     }
 }

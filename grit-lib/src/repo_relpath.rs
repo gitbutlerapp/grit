@@ -20,6 +20,45 @@ use crate::quote_path::{quote_c_style, quote_c_style_bytes};
 
 pub(crate) const STORAGE_PREFIX: &str = "grit+pathhex:";
 
+/// Repository-relative path in [`storage_string`] form (UTF-8 when possible, else `grit+pathhex:`).
+///
+/// This is the stable type for paths surfaced from index and tree operations, including
+/// non-UTF-8 file names on Unix (round-trips through [`storage_bytes`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StoredRelPath(String);
+
+impl StoredRelPath {
+    /// Wrap a path already in storage form.
+    #[must_use]
+    pub fn new(stored: String) -> Self {
+        Self(stored)
+    }
+
+    /// Borrow the stored string (UTF-8 or `grit+pathhex:` encoding).
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Decode to raw repository-relative bytes (slash-separated, as in the index).
+    #[must_use]
+    pub fn to_bytes(&self) -> std::borrow::Cow<'_, [u8]> {
+        storage_bytes(&self.0)
+    }
+}
+
+impl std::fmt::Display for StoredRelPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for StoredRelPath {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
 /// Parent directory prefix of a repository-relative path (empty when at repository root).
 #[must_use]
 pub fn parent_dir(path: &[u8]) -> Vec<u8> {
@@ -202,6 +241,16 @@ mod tests {
         let s = storage_string(raw);
         assert!(s.starts_with(STORAGE_PREFIX));
         assert_eq!(storage_bytes(&s)[..], raw[..]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stored_rel_path_round_trip_non_utf8() {
+        let raw: &[u8] = b"deep/b\xff/c.txt";
+        let stored = storage_string(raw);
+        let rel = StoredRelPath::new(stored.clone());
+        assert_eq!(rel.as_str(), stored);
+        assert_eq!(rel.to_bytes().as_ref(), raw);
     }
 
     #[test]

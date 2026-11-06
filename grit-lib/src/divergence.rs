@@ -39,6 +39,7 @@ use crate::merge_trees::{
 use crate::objects::ObjectId;
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::repo::Repository;
+use crate::repo_relpath::StoredRelPath;
 
 /// The most commits of one head looked at.
 const MAX_COMMITS: usize = 500;
@@ -341,7 +342,7 @@ pub struct Divergence {
     /// The commits either side changed (or added), oldest first.
     pub changes: Vec<Change>,
     /// Paths where the two heads' changes conflict, when a merge was tried.
-    pub conflicts: Vec<String>,
+    pub conflicts: Vec<StoredRelPath>,
     /// Whether some commits were matched by patch id, lacking change ids.
     pub matched_without_ids: bool,
 }
@@ -486,8 +487,8 @@ impl Divergence {
     fn conflict_paths(&self) -> String {
         match self.conflicts.as_slice() {
             [] => "the same files".to_owned(),
-            [one] => one.clone(),
-            [first, rest @ ..] => format!("{first} and {} more", rest.len()),
+            [one] => one.as_str().to_owned(),
+            [first, rest @ ..] => format!("{} and {} more", first.as_str(), rest.len()),
         }
     }
 
@@ -870,7 +871,7 @@ fn tree_conflicts(
     base: ObjectId,
     ours: ObjectId,
     theirs: ObjectId,
-) -> Result<Vec<String>> {
+) -> Result<Vec<StoredRelPath>> {
     let merged = merge_trees_three_way(
         repo,
         base,
@@ -882,9 +883,9 @@ fn tree_conflicts(
         TreeMergeConflictPresentation::default(),
         DirectoryRenameMode::from_repo(repo)?,
     )?;
-    let mut paths: Vec<String> = crate::operation::conflicts_from_tree_merge(&merged)
+    let mut paths: Vec<StoredRelPath> = crate::operation::conflicts_from_tree_merge(&merged)
         .into_iter()
-        .map(|c| c.path)
+        .map(|c| StoredRelPath::new(c.path))
         .collect();
     paths.sort();
     paths.dedup();
@@ -1520,7 +1521,7 @@ pub struct Combined {
     /// The new head, when it worked.
     pub head: Option<ObjectId>,
     /// Paths that conflicted, when it didn't.
-    pub conflicts: Vec<String>,
+    pub conflicts: Vec<StoredRelPath>,
     /// The commit whose changes conflicted, when it didn't.
     pub stopped_at: Option<String>,
 }
@@ -1880,7 +1881,7 @@ fn replay(
     repo: &Repository,
     tip: ObjectId,
     step: &Step,
-) -> Result<std::result::Result<Option<ObjectId>, Vec<String>>> {
+) -> Result<std::result::Result<Option<ObjectId>, Vec<StoredRelPath>>> {
     let v = &step.version;
     if v.parent == Some(tip) && step.fold.is_none() && step.message.is_none() && !step.new_change {
         return Ok(Ok(Some(v.oid)));
@@ -1943,7 +1944,7 @@ fn tree_conflicts_with_result(
     base: ObjectId,
     ours: ObjectId,
     theirs: ObjectId,
-) -> Result<std::result::Result<ObjectId, Vec<String>>> {
+) -> Result<std::result::Result<ObjectId, Vec<StoredRelPath>>> {
     let merged = merge_trees_three_way(
         repo,
         base,
@@ -1955,9 +1956,9 @@ fn tree_conflicts_with_result(
         TreeMergeConflictPresentation::default(),
         DirectoryRenameMode::from_repo(repo)?,
     )?;
-    let mut paths: Vec<String> = crate::operation::conflicts_from_tree_merge(&merged)
+    let mut paths: Vec<StoredRelPath> = crate::operation::conflicts_from_tree_merge(&merged)
         .into_iter()
-        .map(|c| c.path)
+        .map(|c| StoredRelPath::new(c.path))
         .collect();
     if paths.is_empty() {
         return Ok(Ok(merged.result_tree));
@@ -2032,7 +2033,7 @@ pub enum ReplayOntoOutcome {
     /// The first replay step that could not be applied cleanly.
     Conflict {
         /// Paths still in conflict after the failed merge, sorted and deduplicated.
-        paths: Vec<String>,
+        paths: Vec<StoredRelPath>,
     },
 }
 

@@ -1805,7 +1805,7 @@ pub(crate) fn history_error(
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
-        HistoryError::Engine(engine) if matches!(engine, HistoryEngineError::Cancelled) => {
+        HistoryError::Engine(HistoryEngineError::Cancelled) => {
             anyhow::Error::new(LibError::Cancelled)
         }
         HistoryError::Engine(HistoryEngineError::Hook(hook)) => {

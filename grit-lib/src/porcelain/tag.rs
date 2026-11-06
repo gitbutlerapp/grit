@@ -311,7 +311,8 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
             let gpg =
                 GpgConfig::from_config(config.as_ref())?.with_command_runner(repo.command_runner());
             signed = true;
-            let bytes = sign_serialized_tag(&gpg, &unsigned, tagger, req.signing_key.as_deref())?;
+            let bytes = sign_serialized_tag(&gpg, &unsigned, tagger, req.signing_key.as_deref())
+                .map_err(Error::from)?;
             (write_tag_bytes(&bytes)?, TagKind::Annotated)
         } else {
             let tag = TagData {
@@ -328,7 +329,8 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
                 let gpg = GpgConfig::from_config(config.as_ref())?
                     .with_command_runner(repo.command_runner());
                 signed = true;
-                sign_serialized_tag(&gpg, &unsigned, tagger, req.signing_key.as_deref())?
+                sign_serialized_tag(&gpg, &unsigned, tagger, req.signing_key.as_deref())
+                    .map_err(Error::from)?
             } else {
                 unsigned
             };

@@ -168,7 +168,7 @@ impl DivergenceJson {
                     paths: c.paths.clone(),
                 })
                 .collect(),
-            conflicts: d.conflicts.clone(),
+            conflicts: d.conflicts.iter().map(|p| p.as_str().to_owned()).collect(),
             also: d
                 .scenarios
                 .iter()
@@ -344,7 +344,11 @@ pub(crate) fn put_together(
             made.stopped_at
                 .map(|s| format!("\"{s}\""))
                 .unwrap_or_else(|| "a commit".to_owned()),
-            made.conflicts.join(", ")
+            made.conflicts
+                .iter()
+                .map(|p| p.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         )),
     })
 }
@@ -1464,7 +1468,11 @@ fn resolve_integrated(
                 grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
                 grit_lib::divergence::ReplayOntoOutcome::Conflict { paths } => bail!(
                     "rebasing {branch} onto {target} conflicts in {}: run `grit rebase origin/{target}` and settle them by hand",
-                    paths.join(", ")
+                    paths
+                        .iter()
+                        .map(|p| p.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             };
             if head != ours {

@@ -1593,8 +1593,10 @@ pub enum Error {
     Branch(#[from] crate::porcelain::branch_error::BranchError),
 
     /// Commit, identity, signing, and patch-scoped commit failures.
+    ///
+    /// [`From`] unwraps [`crate::porcelain::commit_error::CommitError::Library`]; other variants stay here.
     #[error(transparent)]
-    Commit(#[from] crate::porcelain::commit_error::CommitError),
+    Commit(crate::porcelain::commit_error::CommitError),
 
     /// Merge, cherry-pick, revert, and in-progress operation failures.
     #[error(transparent)]

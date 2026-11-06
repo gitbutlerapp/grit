@@ -28,7 +28,7 @@ use crate::state::{resolve_head_for_repository, write_orig_head, HeadState};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 use super::apply::{apply_rewrite, log_head_move};
-use super::error::{engine_message, undo_record_write_str, HistoryError};
+use super::error::{undo_record_write_str, HistoryError};
 use super::last::{write_history_last, HistoryLastRecord};
 use super::plan::{
     commit_parents, plan_rewrite_with_order_resumable_seeded, write_rebase_staged_resolution,
@@ -1809,7 +1809,9 @@ impl From<RebaseSessionError> for crate::error::Error {
             RebaseSessionError::Library(e) => e,
             RebaseSessionError::History(h) => Self::History(h),
             RebaseSessionError::NothingToCommit => Self::Commit(CommitError::NothingToCommit),
-            other => Self::History(engine_message(other.to_string())),
+            other => Self::History(HistoryError::Nested(Box::new(
+                crate::error::Error::Message(other.to_string()),
+            ))),
         }
     }
 }

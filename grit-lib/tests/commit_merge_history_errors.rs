@@ -188,3 +188,13 @@ fn history_error_has_no_string_catch_all() {
         "HistoryError must not use stringly Planning {{ message: ... }}"
     );
 }
+
+#[test]
+fn history_error_from_umbrella_is_nested_not_engine() {
+    let err = Error::InvalidHead;
+    let h: grit_lib::revwalk::history::HistoryError = err.into();
+    assert!(matches!(
+        h,
+        grit_lib::revwalk::history::HistoryError::Nested(_)
+    ));
+}

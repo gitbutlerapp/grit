@@ -255,7 +255,7 @@ pub enum PullError {
     RebaseInteractive,
     /// Starting the rebase session failed (for example a rebase is already in progress).
     #[error(transparent)]
-    Rebase(RebaseSessionError),
+    Rebase(Box<RebaseSessionError>),
     /// Remote resolution or transport failure.
     #[error(transparent)]
     Remote(#[from] RemoteError),
@@ -1090,7 +1090,7 @@ fn map_rebase_session_error(err: RebaseSessionError) -> PullError {
     match err {
         RebaseSessionError::Library(e) => PullError::Repository(e),
         RebaseSessionError::History(e) => map_history_error(e),
-        other => PullError::Rebase(other),
+        other => PullError::Rebase(Box::new(other)),
     }
 }
 

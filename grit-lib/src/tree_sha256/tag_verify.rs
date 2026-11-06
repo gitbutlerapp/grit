@@ -192,7 +192,7 @@ pub(crate) fn verify_tag_data(
             if !check_signature {
                 return Ok(SignatureVerdict::NotChecked);
             }
-            let check = signing::verify_tag(gpg, raw)?;
+            let check = signing::verify_tag(gpg, raw).map_err(Error::from)?;
             Ok(signature_verdict_from_check(&check, min_trust))
         });
 
