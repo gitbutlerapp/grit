@@ -150,7 +150,7 @@ impl Cancel for InterruptCancel {
     }
 
     fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        Some(PROCESS_CANCEL.watch_arc())
+        Some(process_cancel_token().watch_arc())
     }
 }
 
@@ -204,6 +204,27 @@ mod tests {
             libc::sigaction(signal, std::ptr::null(), &mut current);
             current.sa_sigaction
         }
+    }
+
+    #[test]
+    fn process_cancel_token_shares_state_with_the_signal_handler() {
+        #[cfg(unix)]
+        let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let token = process_cancel_token();
+        assert!(!token.is_cancelled());
+        let _install = InterruptCancel::install();
+        assert!(!process_cancel_token().is_cancelled());
+        #[cfg(unix)]
+        unsafe {
+            libc::raise(libc::SIGINT);
+        }
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::System::Console::CTRL_C_EVENT;
+            assert_eq!(on_console_ctrl(CTRL_C_EVENT), 1);
+        }
+        assert!(token.is_cancelled());
+        assert!(process_cancel_token().is_cancelled());
     }
 
     #[cfg(unix)]

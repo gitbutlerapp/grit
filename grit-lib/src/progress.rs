@@ -349,6 +349,7 @@ impl CancelToken {
         std::sync::Arc::clone(&self.flag)
     }
 
+    #[allow(dead_code)]
     pub(crate) fn as_atomic(&self) -> &std::sync::atomic::AtomicBool {
         &self.flag
     }
@@ -676,10 +677,12 @@ impl<'a> CancelProgress<'a> {
     }
 
     #[must_use]
+    #[allow(dead_code)]
     pub fn stopped(&self) -> bool {
         self.stopped.get()
     }
 
+    #[allow(dead_code)]
     pub fn finish_poll(&self) -> crate::error::Result<()> {
         if self.stopped() {
             Err(crate::error::Error::Cancelled)

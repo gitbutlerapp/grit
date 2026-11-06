@@ -25,7 +25,7 @@ type LsRefsAdvertised = (
     std::collections::HashMap<String, ObjectId>,
     Option<ObjectId>,
 );
-use crate::progress::{mirror_stack_cancel, poll_cancel, Cancel, ProgressSink};
+use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::transfer::{
     classify_update, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
     validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
