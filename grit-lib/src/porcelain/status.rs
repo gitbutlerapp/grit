@@ -215,16 +215,7 @@ fn parse_status_renames_config_value(raw: &str) -> Option<RenameDetection> {
     })
 }
 
-/// Whether a diff entry's primary path matches a pathspec list (pre-rename-detection filter).
-#[must_use]
-pub(crate) fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String]) -> bool {
-    if pathspecs.is_empty() {
-        return true;
-    }
-    status_path_matches(entry.path(), pathspecs)
-}
-
-/// Like [`status_diff_entry_matches_pathspec`], honoring [`crate::pathspec::Pathspec::globals`].
+/// Whether a diff entry matches a pathspec (pre-rename-detection filter).
 pub fn status_diff_entry_matches_pathspec_typed(
     repo: &Repository,
     entry: &DiffEntry,
@@ -2175,38 +2166,7 @@ fn pathspecs_use_attr_magic(pathspecs: &[String]) -> bool {
         .any(|spec| crate::pathspec::pathspec_has_attr_magic(spec))
 }
 
-/// Pathspec match that also honors `:(attr:...)` magic against worktree contents.
-pub(crate) fn status_path_matches_worktree(
-    repo: &Repository,
-    index: &Index,
-    work_tree: &Path,
-    path: &str,
-    pathspecs: &[String],
-) -> bool {
-    status_path_matches_worktree_with_rules(repo, index, work_tree, path, pathspecs, None)
-}
-
-/// Like [`status_path_matches_worktree`], reusing an existing [`crate::worktree_rules::WorktreeRules`] when provided.
-pub(crate) fn status_path_matches_worktree_with_rules(
-    repo: &Repository,
-    index: &Index,
-    work_tree: &Path,
-    path: &str,
-    pathspecs: &[String],
-    rules: Option<&crate::worktree_rules::WorktreeRules>,
-) -> bool {
-    status_path_matches_worktree_with_rules_and_globals(
-        repo,
-        index,
-        work_tree,
-        path,
-        pathspecs,
-        rules,
-        crate::pathspec::PathspecGlobalFlags::default(),
-    )
-}
-
-/// Like [`status_path_matches_worktree_with_rules`], with explicit global pathspec flags.
+/// Pathspec match that honors `:(attr:...)` magic against worktree contents.
 pub(crate) fn status_path_matches_worktree_with_rules_and_globals(
     repo: &Repository,
     index: &Index,
@@ -2272,15 +2232,6 @@ fn is_executable_file(_meta: &fs::Metadata) -> bool {
 }
 
 /// Whether `rel_dir` could contain a path matching any of `pathspecs` (directory prune).
-pub(crate) fn pathspec_may_match_directory(rel_dir: &str, pathspecs: &[String]) -> bool {
-    pathspec_may_match_directory_with_globals(
-        rel_dir,
-        pathspecs,
-        crate::pathspec::PathspecGlobalFlags::default(),
-    )
-}
-
-/// Like [`pathspec_may_match_directory`], with explicit global pathspec flags.
 #[must_use]
 pub(crate) fn pathspec_may_match_directory_with_globals(
     rel_dir: &str,
@@ -3455,7 +3406,8 @@ mod guidance_tests {
 
 #[cfg(test)]
 mod pathspec_prune_tests {
-    use super::pathspec_may_match_directory;
+    use super::pathspec_may_match_directory_with_globals;
+    use crate::pathspec::PathspecGlobalFlags;
 
     /// Directory prune without the literal fast path: every spec also goes through
     /// [`crate::pathspec::pathspec_matches`].
@@ -3508,17 +3460,32 @@ mod pathspec_prune_tests {
         for spec in specs {
             for dir in dirs {
                 assert_eq!(
-                    pathspec_may_match_directory(dir, &[spec.to_owned()]),
+                    pathspec_may_match_directory_with_globals(
+                        dir,
+                        &[spec.to_owned()],
+                        PathspecGlobalFlags::default(),
+                    ),
                     may_match_via_full_matcher(dir, spec),
                     "spec {spec:?} dir {dir:?}"
                 );
             }
         }
         let many: Vec<String> = (0..100).map(|i| format!("d{i}/f.txt")).collect();
-        assert!(pathspec_may_match_directory("d42", &many));
-        assert!(pathspec_may_match_directory("d42/f.txt", &many));
-        assert!(!pathspec_may_match_directory("d100", &many));
-        assert!(!pathspec_may_match_directory("d42/g", &many));
+        let globals = PathspecGlobalFlags::default();
+        assert!(pathspec_may_match_directory_with_globals(
+            "d42", &many, globals
+        ));
+        assert!(pathspec_may_match_directory_with_globals(
+            "d42/f.txt",
+            &many,
+            globals
+        ));
+        assert!(!pathspec_may_match_directory_with_globals(
+            "d100", &many, globals
+        ));
+        assert!(!pathspec_may_match_directory_with_globals(
+            "d42/g", &many, globals
+        ));
     }
 }
 

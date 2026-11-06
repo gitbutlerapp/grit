@@ -267,35 +267,6 @@ impl ResolvedPathspecs {
             scoped,
         })
     }
-
-    /// Whether the invocation targets the entire work tree (no path arguments or from-file).
-    #[must_use]
-    pub fn is_entire_tree(&self) -> bool {
-        !self.scoped
-    }
-
-    /// Consume `self` and return resolved specs and user-facing sources.
-    ///
-    /// When [`Self::is_entire_tree`] is true, both vectors are empty (match legacy
-    /// "stage/remove/clean the whole tree" call sites).
-    #[must_use]
-    pub fn into_pathspec_lists(self) -> (Vec<String>, Vec<String>) {
-        if self.scoped {
-            (self.specs, self.sources)
-        } else {
-            (Vec::new(), Vec::new())
-        }
-    }
-
-    /// Resolved pathspec strings only; empty when the invocation is unscoped.
-    #[must_use]
-    pub fn into_specs(self) -> Vec<String> {
-        if self.scoped {
-            self.specs
-        } else {
-            Vec::new()
-        }
-    }
 }
 
 /// Git global pathspec mode flags (`GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, …).
@@ -1298,84 +1269,6 @@ mod pathspec_descent_tests {
     }
 }
 
-/// Like [`matches_pathspec_set_for_object`], but uses `matches_ls_tree_pathspec` for each
-/// element so `ls-files` / index filtering agrees with `ls-tree` on patterns such as `a[a]`.
-#[must_use]
-pub(crate) fn matches_pathspec_set_for_object_ls_tree(
-    specs: &[String],
-    path: &str,
-    mode: u32,
-    attr_rules: &[AttrRule],
-) -> bool {
-    if specs.is_empty() {
-        return true;
-    }
-    let mut positives: Vec<&str> = Vec::new();
-    let mut excludes: Vec<&str> = Vec::new();
-    for s in specs {
-        if pathspec_is_exclude(s) {
-            excludes.push(s.as_str());
-        } else {
-            positives.push(s.as_str());
-        }
-    }
-    let positive_ok = if positives.is_empty() {
-        true
-    } else {
-        positives
-            .iter()
-            .any(|s| matches_ls_tree_pathspec(s, path, mode, attr_rules))
-    };
-    if !positive_ok {
-        return false;
-    }
-    for ex in excludes {
-        if matches_ls_tree_pathspec(ex, path, mode, attr_rules) {
-            return false;
-        }
-    }
-    true
-}
-
-/// True if `path` matches the combined pathspec list: any positive spec (or all paths when there
-/// are only excludes, matching Git `parse_pathspec`), and not matched by any exclude spec.
-#[must_use]
-pub(crate) fn matches_pathspec_set_for_object(
-    specs: &[String],
-    path: &str,
-    mode: u32,
-    attr_rules: &[AttrRule],
-) -> bool {
-    if specs.is_empty() {
-        return true;
-    }
-    let mut positives: Vec<&str> = Vec::new();
-    let mut excludes: Vec<&str> = Vec::new();
-    for s in specs {
-        if pathspec_is_exclude(s) {
-            excludes.push(s.as_str());
-        } else {
-            positives.push(s.as_str());
-        }
-    }
-    let positive_ok = if positives.is_empty() {
-        true
-    } else {
-        positives
-            .iter()
-            .any(|s| matches_pathspec_for_object(s, path, mode, attr_rules))
-    };
-    if !positive_ok {
-        return false;
-    }
-    for ex in excludes {
-        if matches_pathspec_for_object(ex, path, mode, attr_rules) {
-            return false;
-        }
-    }
-    true
-}
-
 /// True if `spec` uses `:(top)` or short `:/` (repo-root-relative) magic.
 #[must_use]
 pub fn pathspec_has_top(spec: &str) -> bool {
@@ -1482,12 +1375,6 @@ impl<'s> PathspecMatcher<'s> {
         self.specs.is_empty()
             || self.matches(path)
             || old_path.is_some_and(|old| old != path && self.matches(old))
-    }
-
-    /// Whether the list is empty (every path is selected).
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.specs.is_empty()
     }
 }
 
@@ -2092,6 +1979,7 @@ fn literal_prefix_match(pattern: &str, path: &str) -> bool {
 }
 
 /// Literal pathspec match for `ls-tree` when the pattern has no `*`/`?` (brackets stay literal).
+#[cfg(test)]
 fn ls_tree_literal_match(pattern: &str, path: &str, ctx: PathspecMatchContext) -> bool {
     if let Some(prefix) = pattern.strip_suffix('/') {
         if path_is_under_dir(path, prefix, false) {
@@ -2227,7 +2115,8 @@ pub(crate) fn matches_pathspec_with_context(
 
 /// Parse a Git mode string (e.g. `100644`, `040000`) into a [`PathspecMatchContext`].
 #[must_use]
-pub fn context_from_mode_octal(mode: &str) -> PathspecMatchContext {
+#[cfg(test)]
+pub(crate) fn context_from_mode_octal(mode: &str) -> PathspecMatchContext {
     let Ok(bits) = u32::from_str_radix(mode, 8) else {
         return PathspecMatchContext::default();
     };
@@ -2252,6 +2141,7 @@ pub(crate) fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
 /// starters unless a `*` or `?` appears — so `a[a]` matches the literal directory `a[a]` (t3102),
 /// while `a*` matches `a/one`, `aa/two`, `a[a]/three`, …
 #[must_use]
+#[cfg(test)]
 pub(crate) fn matches_ls_tree_pathspec(
     spec: &str,
     path: &str,
@@ -2327,19 +2217,6 @@ pub(crate) fn matches_ls_tree_pathspec(
     let pat_rest = &trimmed[nwl..];
     let path_rest = &path[nwl..];
     wildmatch(pat_rest.as_bytes(), path_rest.as_bytes(), flags)
-}
-
-/// Match a pathspec against a tree path, using `.gitattributes` for `:(attr:...)`.
-///
-/// `mode` supplies directory/gitlink context for literal pathspecs ending in `/`.
-#[must_use]
-pub(crate) fn matches_pathspec_for_object(
-    spec: &str,
-    path: &str,
-    mode: u32,
-    attr_rules: &[AttrRule],
-) -> bool {
-    matches_pathspec_for_object_with_attrs(spec, path, mode, AttrLookup::rules_only(attr_rules))
 }
 
 fn matches_pathspec_for_object_with_attrs(
@@ -2620,6 +2497,7 @@ pub(crate) fn pathspec_match_context_with_precompose(
 
 /// Like [`matches_pathspec_list`], with an explicit `precompose_paths` flag.
 #[must_use]
+#[cfg(test)]
 pub(crate) fn matches_pathspec_list_precompose(
     path: &str,
     specs: &[String],
@@ -2762,18 +2640,7 @@ fn resolve_pathspec_impl(pathspec: &str, work_tree: &Path, prefix: Option<&str>)
 
 /// Resolve a pathspec and ensure it lies inside `work_tree` (used by `git add`, etc.).
 ///
-/// Returns `PathOutsideRepository` when resolution stays absolute, matching Git's
-/// `'%s' is outside repository at '%s'` fatal (t7010).
-pub fn resolve_pathspec_in_worktree(
-    elt: &str,
-    pathspec: &str,
-    work_tree: &Path,
-    prefix: Option<&str>,
-) -> Result<String, PathOutsideRepository> {
-    resolve_pathspec_in_worktree_with_argv_precompose(elt, pathspec, work_tree, prefix, false)
-}
-
-/// Like [`resolve_pathspec_in_worktree`], NFC-normalizing `pathspec` when `argv_precompose` is set.
+/// NFC-normalizes `pathspec` when `argv_precompose` is set.
 ///
 /// Callers holding a [`Repository`] should use [`Repository::resolve_worktree_pathspec`], which
 /// computes `argv_precompose` once per handle instead of reloading config per pathspec.
@@ -3440,7 +3307,7 @@ mod resolved_pathspecs_tests {
     fn resolved_pathspecs_entire_tree_when_unscoped() {
         let (dir, repo) = repo_with_tree();
         let resolved = ResolvedPathspecs::resolve(&repo, dir.path(), &[], None).expect("ok");
-        assert!(resolved.is_entire_tree());
+        assert!(!resolved.scoped);
         assert!(resolved.specs.is_empty());
     }
 }

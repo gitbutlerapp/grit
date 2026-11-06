@@ -13,7 +13,7 @@ use grit_lib::revwalk::{
     committer_cutoff_from_date, MergeFilter, RefSelection, RevWalkListOptions,
 };
 use grit_lib::revwalk::{CommitFilter, CommitFilterBuilder, CommitFilterError};
-use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
+use grit_lib::worktree::pathspec::Pathspec;
 
 use crate::error_kind::ErrorKind;
 use crate::json_error::{

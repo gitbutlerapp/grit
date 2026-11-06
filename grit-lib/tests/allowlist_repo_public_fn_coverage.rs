@@ -53,7 +53,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::porcelain::status::{expand_untracked_for_staging, status_path_matches_worktree};
+use grit_lib::porcelain::status::expand_untracked_for_staging;
 use grit_lib::porcelain::tag::creator_date;
 use grit_lib::porcelain::worktree_guard::prepare_tree_switch;
 use grit_lib::progress::NullProgress;
@@ -324,7 +324,6 @@ fn porcelain_stash_tag_status_and_worktree() {
     let repo = init_repo(dir.path());
     let mut index = repo.index_handle().load().expect("index");
     let work_tree = dir.path();
-    let _ = status_path_matches_worktree(&repo, &index, work_tree, "tracked.txt", &[]);
     let _ = expand_untracked_for_staging(&repo, &mut index, work_tree, Vec::new(), &[]);
 
     let file = work_tree.join("mode.txt");
