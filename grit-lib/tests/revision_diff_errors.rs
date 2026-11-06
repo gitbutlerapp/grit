@@ -12,8 +12,8 @@ use grit_lib::porcelain::merge::{write_merge_tree, MergePredictionOptions};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revision_error::{ObjectFilterParseError, RevisionError};
 use grit_lib::revwalk::rev_list::{expand_object_filter_for_protocol, ObjectFilter};
-use grit_lib::revwalk::RevWalkCommitStreamItem;
 use grit_lib::revwalk::rev_parse::resolve_revision;
+use grit_lib::revwalk::RevWalkCommitStreamItem;
 use grit_test_support::{git, git_cmd};
 use std::fs;
 use std::path::Path;
@@ -123,10 +123,7 @@ fn rev_walk_commits_stream_public_api_returns_revision_error() {
     }
 }
 
-fn assert_rev_walk_stream_item_ty(
-    _: std::result::Result<RevWalkCommitStreamItem, RevisionError>,
-) {
-}
+fn assert_rev_walk_stream_item_ty(_: std::result::Result<RevWalkCommitStreamItem, RevisionError>) {}
 
 #[test]
 fn rev_walk_commits_stream_iter_item_is_revision_error() {

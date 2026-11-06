@@ -302,7 +302,9 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::ReflogDateUnparseable { .. }
     ) {
-        Error::msg(human_message_for_lib(&LibError::Revision(RevisionError::RevParse(err))))
+        Error::msg(human_message_for_lib(&LibError::Revision(
+            RevisionError::RevParse(err),
+        )))
     } else {
         Error::msg(format!("could not resolve ref '{spec}': {err}"))
     }
@@ -682,12 +684,9 @@ fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Struc
                     ErrorKind::RevisionNotFound,
                 ))
             }
-            RevisionError::RevParse(err @ RevParseError::AmbiguousArgument { .. }) => {
-                Some(StructuredJsonError::new(
-                    err.to_string(),
-                    ErrorKind::RevisionNotFound,
-                ))
-            }
+            RevisionError::RevParse(err @ RevParseError::AmbiguousArgument { .. }) => Some(
+                StructuredJsonError::new(err.to_string(), ErrorKind::RevisionNotFound),
+            ),
             RevisionError::RevParse(
                 RevParseError::PathNotInRevision { .. }
                 | RevParseError::PathMissingFromWorktreeAndIndex { .. },
