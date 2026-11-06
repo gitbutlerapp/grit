@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
 use crate::git_date::approx::approxidate_careful;
 use crate::git_path::CanonicalizeExt;
+use crate::index::IndexResult;
 use crate::index::{Index, IndexEntry};
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{HashAlgo, ObjectId};
@@ -12,11 +13,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-fn split_index_error(detail: impl Into<String>) -> Error {
-    IndexError::SplitIndex {
-        detail: detail.into(),
-    }
-    .into()
+fn split_index_error(path: Option<&Path>, reason: IndexCorruptReason) -> IndexError {
+    IndexError::corrupt_at(path, None, reason)
 }
 
 /// Split-index metadata carried on an [`Index`] (in-memory; bitmaps cleared after merge/write).
@@ -201,11 +199,7 @@ pub(crate) fn merge_split_into_index(
         .cloned()
         .collect();
     if stubs.len() != replace_pos.len() {
-        return Err(split_index_error(format!(
-            "split index: expected {} replacement stubs, found {}",
-            replace_pos.len(),
-            stubs.len()
-        )));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     }
     let mut stub_iter = stubs.into_iter();
     let rest: Vec<IndexEntry> = saved.into_iter().filter(|e| !e.path.is_empty()).collect();
@@ -227,9 +221,7 @@ pub(crate) fn merge_split_into_index(
             .is_some_and(|b| b.bit_size > 0 && bitmap_has_bit(b, i))
         {
             let Some(rep) = stub_iter.next() else {
-                return Err(split_index_error(
-                    "split index: missing replacement entry".to_owned(),
-                ));
+                return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
             };
             let mut e = rep;
             e.path = base_e.path.clone();
@@ -242,9 +234,7 @@ pub(crate) fn merge_split_into_index(
     }
 
     if stub_iter.next().is_some() {
-        return Err(split_index_error(
-            "split index: too many replacement stubs".to_owned(),
-        ));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     }
 
     for mut e in rest {
@@ -261,9 +251,7 @@ pub(crate) fn merge_split_into_index(
 pub(crate) fn parse_link_extension(data: &[u8], algo: HashAlgo) -> Result<SplitIndexLink> {
     let hash_len = algo.len();
     if data.len() < hash_len {
-        return Err(split_index_error(
-            "corrupt link extension (too short)".to_owned(),
-        ));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     }
     let base_oid = ObjectId::from_bytes(&data[..hash_len])?;
     let mut rest = &data[hash_len..];
@@ -275,21 +263,15 @@ pub(crate) fn parse_link_extension(data: &[u8], algo: HashAlgo) -> Result<SplitI
         });
     }
     let Some((del, consumed)) = EwahBitmap::deserialize_prefix(rest) else {
-        return Err(split_index_error(
-            "corrupt delete bitmap in link extension".to_owned(),
-        ));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     };
     rest = &rest[consumed..];
     let Some((rep, consumed2)) = EwahBitmap::deserialize_prefix(rest) else {
-        return Err(split_index_error(
-            "corrupt replace bitmap in link extension".to_owned(),
-        ));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     };
     rest = &rest[consumed2..];
     if !rest.is_empty() {
-        return Err(split_index_error(
-            "garbage at the end of link extension".to_owned(),
-        ));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     }
     Ok(SplitIndexLink {
         base_oid,
@@ -665,9 +647,7 @@ pub(crate) fn write_index_file_split(
     }
 
     if index.sparse_directories {
-        return Err(split_index_error(
-            "cannot write split index for a sparse index".to_owned(),
-        ));
+        return Err(split_index_error(None, IndexCorruptReason::SplitIndexCorrupt).into());
     }
 
     let prev_base = index
@@ -938,7 +918,7 @@ pub fn resolve_split_index_if_needed(
     index: &mut Index,
     git_dir: &Path,
     index_path: &Path,
-) -> Result<()> {
+) -> IndexResult<()> {
     let Some(link) = index.split_link.clone() else {
         return Ok(());
     };
@@ -947,16 +927,20 @@ pub fn resolve_split_index_if_needed(
     }
     let base_oid = link.base_oid;
     let shared_path = resolve_shared_index_file(git_dir, index_path, &base_oid);
-    let data = fs::read(&shared_path).map_err(|e| {
-        split_index_error(format!(
-            "split index: cannot read shared index {}: {e}",
-            shared_path.display()
-        ))
+    let data = fs::read(&shared_path).map_err(|source| {
+        IndexError::PathIo(crate::error::PathIoError {
+            operation: crate::error::PathIoOperation::GitDir(
+                crate::error::GitDirPathOperation::WriteIndex,
+            ),
+            path: Some(shared_path.clone()),
+            source,
+        })
     })?;
     let hash_len = index.hash_algo.len();
     if data.len() < hash_len {
         return Err(split_index_error(
-            "split index: shared index too short".to_owned(),
+            Some(index_path),
+            IndexCorruptReason::SplitIndexTooShort,
         ));
     }
     let (body, trailer) = data.split_at(data.len() - hash_len);
@@ -968,12 +952,10 @@ pub fn resolve_split_index_if_needed(
         trailer
     };
     if got != base_oid {
-        return Err(split_index_error(format!(
-            "broken index, expect {} in {}, got {}",
-            base_oid.to_hex(),
-            shared_path.display(),
-            got.to_hex()
-        )));
+        return Err(split_index_error(
+            Some(index_path),
+            IndexCorruptReason::SplitIndexCorrupt,
+        ));
     }
     freshen_shared_index(&shared_path);
     let base_entries = Index::parse_with_algo(&data, index.hash_algo)?.entries;
@@ -989,13 +971,13 @@ pub fn resolve_split_index_if_needed(
 /// Format output for `test-tool dump-split-index` (Git reads the index with `do_read_index` only,
 /// without merging the shared base — stubs and EWAH bitmaps stay intact).
 #[allow(dead_code)] // integration / re-export use only
-pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> Result<String> {
+pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> IndexResult<String> {
     use std::fmt::Write;
     let hash_len = index.hash_algo.len();
     if data.len() < hash_len {
-        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+        return Err(IndexError::corrupt(IndexCorrupt::new(
             IndexCorruptReason::SplitIndexTooShort,
-        ))));
+        )));
     }
     let body = &data[..data.len() - hash_len];
     let trail = &data[data.len() - hash_len..];
@@ -1006,12 +988,12 @@ pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> Result<String
     };
 
     let mut s = String::new();
-    writeln!(s, "own {}", own.to_hex()).map_err(|e| split_index_error(e.to_string()))?;
+    writeln!(s, "own {}", own.to_hex()).map_err(std::io::Error::other)?;
     let Some(link) = &index.split_link else {
-        writeln!(s, "not a split index").map_err(|e| split_index_error(e.to_string()))?;
+        writeln!(s, "not a split index").map_err(std::io::Error::other)?;
         return Ok(s);
     };
-    writeln!(s, "base {}", link.base_oid.to_hex()).map_err(|e| split_index_error(e.to_string()))?;
+    writeln!(s, "base {}", link.base_oid.to_hex()).map_err(std::io::Error::other)?;
     for e in &index.entries {
         // Split-index replacement stubs use `CE_STRIP_NAME`: zero-length path on disk (Git still prints the line).
         let path_disp = String::from_utf8_lossy(&e.path);
@@ -1023,22 +1005,22 @@ pub fn format_dump_split_index_file(data: &[u8], index: &Index) -> Result<String
             e.stage(),
             path_disp
         )
-        .map_err(|e| split_index_error(e.to_string()))?;
+        .map_err(std::io::Error::other)?;
     }
-    write!(s, "replacements:").map_err(|e| split_index_error(e.to_string()))?;
+    write!(s, "replacements:").map_err(std::io::Error::other)?;
     if let Some(bm) = &link.replace_bitmap {
         bm.each_set_bit(|pos| {
             write!(s, " {}", pos).ok();
         });
     }
-    writeln!(s).map_err(|e| split_index_error(e.to_string()))?;
-    write!(s, "deletions:").map_err(|e| split_index_error(e.to_string()))?;
+    writeln!(s).map_err(std::io::Error::other)?;
+    write!(s, "deletions:").map_err(std::io::Error::other)?;
     if let Some(bm) = &link.delete_bitmap {
         bm.each_set_bit(|pos| {
             write!(s, " {}", pos).ok();
         });
     }
-    writeln!(s).map_err(|e| split_index_error(e.to_string()))?;
+    writeln!(s).map_err(std::io::Error::other)?;
     Ok(s)
 }
 
@@ -1315,7 +1297,10 @@ mod tests {
         let index_path = git_dir.join("index");
         fs::write(&index_path, b"x").expect("write");
         let err = resolve_split_index_if_needed(&mut idx, &git_dir, &index_path).expect_err("read");
-        assert!(err.to_string().contains("shared index"));
+        assert!(
+            matches!(err, IndexError::PathIo(_)),
+            "expected missing shared index I/O error, got {err:?}"
+        );
     }
 
     fn system_git(root: &Path, args: &[&str]) -> String {
@@ -1498,7 +1483,11 @@ mod tests {
         let index_path = git_dir.join("index");
         let err = resolve_split_index_if_needed(&mut idx, &git_dir, &index_path)
             .expect_err("zero trailer does not match the link");
-        assert!(err.to_string().contains("broken index"), "{err}");
+        assert!(
+            matches!(err, IndexError::Corrupt { .. }),
+            "expected corrupt split index, got {err:?}"
+        );
+        assert!(err.to_string().contains("split index corrupt"), "{err}");
     }
 
     #[test]

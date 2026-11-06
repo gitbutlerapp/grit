@@ -4,16 +4,17 @@
 //! the executable bit. Staging can still record `100755` in the index when
 //! the caller sets an [`StageExecutableHint`], matching Git's `update-index --chmod` behavior.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::index::{
-    Index, IndexError, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
+    Index, IndexChmodReason, IndexError, IndexResult, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR,
+    MODE_SYMLINK, MODE_TREE,
 };
 
-fn chmod_error(detail: impl Into<String>) -> Error {
+fn chmod_error(path: &[u8], reason: IndexChmodReason) -> IndexError {
     IndexError::Chmod {
-        detail: detail.into(),
+        path: String::from_utf8_lossy(path).into_owned(),
+        reason,
     }
-    .into()
 }
 
 /// Whether staging should force the executable bit for matched regular files.
@@ -58,31 +59,25 @@ pub(crate) fn staged_mode_with_hint(base: u32, hint: StageExecutableHint) -> u32
 /// # Errors
 ///
 /// Returns [`IndexError::Chmod`] when the path is not a regular file entry or is unmerged.
-pub fn set_stage0_file_mode(index: &mut Index, path: &[u8], mode: u32) -> Result<bool> {
+pub fn set_stage0_file_mode(index: &mut Index, path: &[u8], mode: u32) -> IndexResult<bool> {
     if index
         .entries
         .iter()
         .any(|e| e.path == path && e.stage() != 0)
     {
-        return Err(chmod_error(format!(
-            "cannot change mode of unmerged path '{}'",
-            String::from_utf8_lossy(path)
-        )));
+        return Err(chmod_error(path, IndexChmodReason::UnmergedPath));
     }
     let Some(entry) = index.get_mut(path, 0) else {
         return Ok(false);
     };
     if !is_chmod_eligible_mode(entry.mode) {
-        return Err(chmod_error(format!(
-            "cannot set executable bit on '{}'",
-            String::from_utf8_lossy(path)
-        )));
+        return Err(chmod_error(path, IndexChmodReason::NotChmodEligible));
     }
     if !is_chmod_eligible_mode(mode) {
-        return Err(chmod_error(format!(
-            "invalid mode for regular file '{}'",
-            String::from_utf8_lossy(path)
-        )));
+        return Err(chmod_error(
+            path,
+            IndexChmodReason::InvalidTargetMode { mode },
+        ));
     }
     if entry.mode == mode {
         return Ok(false);
@@ -120,15 +115,13 @@ pub(crate) fn apply_executable_hint_to_index(
             .iter()
             .any(|e| e.path == path && e.stage() != 0)
         {
-            return Err(chmod_error(format!(
-                "cannot change mode of unmerged path '{rel}'"
-            )));
+            return Err(chmod_error(&path, IndexChmodReason::UnmergedPath).into());
         }
         let Some(entry) = index.get(&path, 0) else {
             continue;
         };
         if entry.mode == MODE_SYMLINK || entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
-            return Err(chmod_error(format!("cannot set executable bit on '{rel}'")));
+            return Err(chmod_error(&path, IndexChmodReason::NotChmodEligible).into());
         }
         if !is_chmod_eligible_mode(entry.mode) {
             continue;
@@ -196,7 +189,7 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(regular_entry("link", MODE_SYMLINK));
         let err = set_stage0_file_mode(&mut index, b"link", MODE_EXECUTABLE).unwrap_err();
-        assert!(matches!(err, Error::Index(IndexError::Chmod { .. })));
+        assert!(matches!(err, IndexError::Chmod { .. }));
     }
 
     #[test]
@@ -215,7 +208,7 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(regular_entry("x", 0o100664));
         let err = set_stage0_file_mode(&mut index, b"x", MODE_EXECUTABLE).unwrap_err();
-        assert!(matches!(err, Error::Index(IndexError::Chmod { .. })));
+        assert!(matches!(err, IndexError::Chmod { .. }));
     }
 
     #[test]
@@ -223,6 +216,6 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(regular_entry("run.sh", MODE_REGULAR));
         let err = set_stage0_file_mode(&mut index, b"run.sh", MODE_SYMLINK).unwrap_err();
-        assert!(matches!(err, Error::Index(IndexError::Chmod { .. })));
+        assert!(matches!(err, IndexError::Chmod { .. }));
     }
 }

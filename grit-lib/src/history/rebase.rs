@@ -1275,6 +1275,7 @@ fn applied_by_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
     use crate::index::write_tree::write_tree_from_index;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
@@ -1304,7 +1305,7 @@ mod tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Error::from)
     }
 
     fn write_commit(
@@ -1493,7 +1494,8 @@ mod tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        let tree = write_tree_from_index(repo.odb(), &index, "").map_err(history_repo_err)?;
+        let tree = write_tree_from_index(repo.odb(), &index, "")
+            .map_err(|e| history_repo_err(Error::from(e)))?;
         write_commit(repo, tree, &[parent], msg, id).map_err(history_repo_err)
     }
 
@@ -1888,7 +1890,7 @@ mod tests {
                 base_index_pos: 0,
             });
         }
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Error::from)
     }
 
     fn init_repo(dir: &std::path::Path) -> Repository {

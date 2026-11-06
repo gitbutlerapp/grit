@@ -1550,6 +1550,12 @@ pub enum ContinueMergeError {
     Repository(#[from] Error),
 }
 
+impl From<crate::index::IndexError> for ContinueMergeError {
+    fn from(err: crate::index::IndexError) -> Self {
+        Error::from(err).into()
+    }
+}
+
 /// Finish an in-progress merge after conflicts are resolved or after `--no-commit`.
 ///
 /// Builds a merge commit from the current index tree with parents `HEAD` and each
@@ -1579,7 +1585,7 @@ pub fn continue_merge(
         .map_err(ContinueMergeError::Repository)?;
     let auto_stage = default_commit_scope_from_config(config.as_ref()) == CommitScope::AutoStage;
 
-    let mut index = repo.load_index().map_err(ContinueMergeError::Repository)?;
+    let mut index = repo.load_index()?;
     if auto_stage {
         stage_for_commit_on_index(repo, &mut index, progress, cancel, false)
             .map_err(ContinueMergeError::Repository)?;

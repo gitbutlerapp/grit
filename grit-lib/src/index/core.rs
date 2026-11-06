@@ -24,9 +24,26 @@ use std::path::{Path, PathBuf};
 
 use crate::hash::verify_trailer;
 
+fn index_path_io(path: &Path, source: io::Error) -> IndexError {
+    IndexError::PathIo(PathIoError {
+        operation: PathIoOperation::GitDir(GitDirPathOperation::WriteIndex),
+        path: Some(path.to_path_buf()),
+        source,
+    })
+}
+
+fn corrupt_at_ctx(
+    ctx: &IndexParseContext,
+    offset: Option<usize>,
+    reason: IndexCorruptReason,
+) -> IndexError {
+    IndexError::corrupt_at(ctx.source_path.as_deref(), offset, reason)
+}
+
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
-use crate::index::error::{IndexCorrupt, IndexCorruptReason, IndexError};
+use crate::error::{GitDirPathOperation, PathIoError, PathIoOperation};
+use crate::index::error::{IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
 use crate::lockfile::{grit_lockfile_pid_enabled, pid_path_for_lock};
 use crate::objects::{parse_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
@@ -538,7 +555,7 @@ impl CacheTreeNode {
 pub use crate::index_eoie_ieot::IndexParseContext;
 
 /// Options for loading an index from disk.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct IndexLoadOptions {
     /// If the index contains sparse directory placeholders, expand them to full file entries.
     pub expand_sparse_directories: bool,
@@ -939,10 +956,16 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::Index`](crate::error::Error::Index) with [`IndexError::Corrupt`](crate::index::IndexError::Corrupt) if the file is present but corrupt.
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load(path: &Path) -> IndexResult<Self> {
         match read_index_file(path) {
             Ok((data, mtime)) => {
-                let mut idx = Self::parse(&data)?;
+                let ctx = IndexParseContext::default().with_source_path(path);
+                let mut idx = Self::parse_with_algo_and_config(
+                    &data,
+                    detect_index_hash_algo(&data),
+                    None,
+                    ctx,
+                )?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 Ok(idx)
             }
@@ -950,7 +973,7 @@ impl Index {
                 sparse_directories: false,
                 ..Self::new()
             }),
-            Err(e) => Err(Error::Io(e)),
+            Err(e) => Err(index_path_io(path, e)),
         }
     }
 
@@ -958,10 +981,11 @@ impl Index {
     ///
     /// After a successful return, [`Index::sparse_directories`] is cleared and every
     /// placeholder is replaced by the blob entries from the referenced tree.
-    pub fn load_expand_sparse(path: &Path, odb: &Odb) -> Result<Self> {
+    pub fn load_expand_sparse(path: &Path, odb: &Odb) -> IndexResult<Self> {
+        let ctx = IndexParseContext::default().with_source_path(path);
         let mut idx = match read_index_file(path) {
             Ok((data, mtime)) => {
-                let mut idx = Self::parse_with_algo(&data, odb.hash_algo())?;
+                let mut idx = Self::parse_with_algo_and_config(&data, odb.hash_algo(), None, ctx)?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 idx
             }
@@ -970,7 +994,7 @@ impl Index {
                 hash_algo: odb.hash_algo(),
                 ..Self::new()
             },
-            Err(e) => return Err(Error::Io(e)),
+            Err(e) => return Err(index_path_io(path, e)),
         };
         idx.expand_sparse_directory_placeholders(
             odb,
@@ -984,24 +1008,24 @@ impl Index {
         path: &Path,
         odb: &Odb,
         config: &ConfigSet,
-    ) -> Result<Self> {
+    ) -> IndexResult<Self> {
         Self::load_expand_sparse_optional_with_context(
             path,
             odb,
             Some(config),
-            IndexParseContext::default(),
+            IndexParseContext::default().with_source_path(path),
         )
     }
 
     /// Like [`Index::load_expand_sparse`], but treats a missing index as an empty index.
     ///
     /// An index file too short to hold a header and checksum is an error, as in Git.
-    pub fn load_expand_sparse_optional(path: &Path, odb: &Odb) -> Result<Self> {
+    pub fn load_expand_sparse_optional(path: &Path, odb: &Odb) -> IndexResult<Self> {
         Self::load_expand_sparse_optional_with_context(
             path,
             odb,
             None,
-            IndexParseContext::default(),
+            IndexParseContext::default().with_source_path(path),
         )
     }
 
@@ -1010,8 +1034,11 @@ impl Index {
         path: &Path,
         odb: &Odb,
         config: Option<&ConfigSet>,
-        parse_context: IndexParseContext,
-    ) -> Result<Self> {
+        mut parse_context: IndexParseContext,
+    ) -> IndexResult<Self> {
+        if parse_context.source_path.is_none() {
+            parse_context = parse_context.with_source_path(path);
+        }
         let mut idx =
             Self::load_preserving_sparse_optional_with_context(path, odb, config, parse_context)?;
         let protect = config
@@ -1027,8 +1054,11 @@ impl Index {
         path: &Path,
         odb: &Odb,
         config: Option<&ConfigSet>,
-        parse_context: IndexParseContext,
-    ) -> Result<Self> {
+        mut parse_context: IndexParseContext,
+    ) -> IndexResult<Self> {
+        if parse_context.source_path.is_none() {
+            parse_context = parse_context.with_source_path(path);
+        }
         let algo = odb.hash_algo();
         let idx = match read_index_file(path) {
             Ok((data, mtime)) => {
@@ -1040,7 +1070,7 @@ impl Index {
                 hash_algo: algo,
                 ..Self::new()
             },
-            Err(e) => return Err(Error::Io(e)),
+            Err(e) => return Err(index_path_io(path, e)),
         };
         Ok(idx)
     }
@@ -1250,7 +1280,7 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::Index`](crate::error::Error::Index) on structural problems.
-    pub fn parse(data: &[u8]) -> Result<Self> {
+    pub fn parse(data: &[u8]) -> IndexResult<Self> {
         // The index file does not record its hash width; it is fixed by the
         // repository. Detect it from the trailing checksum (callers with a
         // repository should prefer [`Self::parse_with_algo`]).
@@ -1260,7 +1290,7 @@ impl Index {
     /// Parse an index using a known hash algorithm (e.g. from the repository's
     /// `extensions.objectformat`), which determines the entry OID width and the
     /// trailing checksum width.
-    pub fn parse_with_algo(data: &[u8], hash_algo: HashAlgo) -> Result<Self> {
+    pub fn parse_with_algo(data: &[u8], hash_algo: HashAlgo) -> IndexResult<Self> {
         Self::parse_with_algo_and_config(data, hash_algo, None, IndexParseContext::default())
     }
 
@@ -1270,33 +1300,38 @@ impl Index {
         hash_algo: HashAlgo,
         config: Option<&ConfigSet>,
         parse_context: IndexParseContext,
-    ) -> Result<Self> {
+    ) -> IndexResult<Self> {
         const INDEX_HEADER_LEN: usize = 12;
 
         let hash_len = hash_algo.len();
         if data.len() < INDEX_HEADER_LEN + hash_len {
-            return Err(IndexError::corrupt(IndexCorrupt::new(
+            return Err(corrupt_at_ctx(
+                &parse_context,
+                None,
                 IndexCorruptReason::FileTooShortForHeader,
-            ))
-            .into());
+            ));
         }
         let (body, checksum) = data.split_at(data.len() - hash_len);
         if body.len() < INDEX_HEADER_LEN {
-            return Err(IndexError::corrupt(IndexCorrupt::new(
+            return Err(corrupt_at_ctx(
+                &parse_context,
+                None,
                 IndexCorruptReason::FileTooShortForHeader,
-            ))
-            .into());
+            ));
         }
+        let ctx = parse_context.clone();
         let trailer_error = |_e: crate::hash::TrailerMismatch| {
-            IndexError::corrupt(IndexCorrupt::new(IndexCorruptReason::ChecksumMismatch {
-                algo: hash_algo,
-            }))
+            corrupt_at_ctx(
+                &ctx,
+                Some(data.len() - hash_len),
+                IndexCorruptReason::ChecksumMismatch { algo: hash_algo },
+            )
         };
         if checksum.iter().all(|&b| b == 0) {
             return Self::parse_body(body, hash_algo, config, parse_context);
         }
         let verify_in_parallel = data.len() >= PARALLEL_TRAILER_VERIFY_MIN_BYTES
-            && parse_context.thread_policy.threads_override != Some(1);
+            && ctx.thread_policy.threads_override != Some(1);
         if !verify_in_parallel {
             verify_trailer(hash_algo, data).map_err(trailer_error)?;
             return Self::parse_body(body, hash_algo, config, parse_context);
@@ -1324,7 +1359,7 @@ impl Index {
         hash_algo: HashAlgo,
         config: Option<&ConfigSet>,
         parse_context: IndexParseContext,
-    ) -> Result<Self> {
+    ) -> IndexResult<Self> {
         use crate::index_eoie_ieot::{
             index_load_worker_count, parallel_index_load_allowed, parse_entries_parallel,
             parse_entries_serial, parse_index_extensions, read_eoie_extension, read_ieot_extension,
@@ -1334,24 +1369,32 @@ impl Index {
         let hash_len = hash_algo.len();
         let magic = &body[..4];
         if magic != b"DIRC" {
-            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            return Err(corrupt_at_ctx(
+                &parse_context,
+                Some(0),
                 IndexCorruptReason::BadSignature,
-            ))));
+            ));
         }
         let version = u32::from_be_bytes(body[4..8].try_into().map_err(|_| {
-            Error::from(IndexError::corrupt(IndexCorrupt::new(
+            corrupt_at_ctx(
+                &parse_context,
+                Some(4),
                 IndexCorruptReason::CannotReadVersion,
-            )))
+            )
         })?);
         if version != 2 && version != 3 && version != 4 {
-            return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
+            return Err(corrupt_at_ctx(
+                &parse_context,
+                Some(4),
                 IndexCorruptReason::UnsupportedVersion { version },
-            ))));
+            ));
         }
         let count = u32::from_be_bytes(body[8..12].try_into().map_err(|_| {
-            Error::from(IndexError::corrupt(IndexCorrupt::new(
+            corrupt_at_ctx(
+                &parse_context,
+                Some(8),
                 IndexCorruptReason::CannotReadEntryCount,
-            )))
+            )
         })?);
 
         let workers = index_load_worker_count(parse_context.thread_policy, config, count as usize);
@@ -1377,8 +1420,7 @@ impl Index {
             let Some(ext_off) = extension_offset else {
                 return Err(IndexError::corrupt(IndexCorrupt::new(
                     IndexCorruptReason::ParallelLoadMissingEoie,
-                ))
-                .into());
+                )));
             };
             let ieot = read_ieot_extension(body, ext_off, extensions_end);
             let mut loaded_entries = if let Some(ref ieot) = ieot {
@@ -1432,7 +1474,7 @@ impl Index {
     /// # Errors
     ///
     /// Returns [`Error::Io`] on filesystem errors.
-    pub fn write(&mut self, path: &Path) -> Result<()> {
+    pub fn write(&mut self, path: &Path) -> IndexResult<()> {
         let git_dir = path.parent();
         let config = git_dir.and_then(|d| {
             ConfigSet::load(
@@ -1454,8 +1496,9 @@ impl Index {
     /// # Errors
     ///
     /// Same as [`Self::write`].
-    pub fn write_with_config(&mut self, path: &Path, config: &ConfigSet) -> Result<()> {
+    pub fn write_with_config(&mut self, path: &Path, config: &ConfigSet) -> IndexResult<()> {
         self.write_with_config_and_policy(path, config, crate::parallel::ThreadPolicy::default())
+            .map_err(IndexError::from)
     }
 
     /// Write the index using config and an explicit thread policy (EOIE/IEOT emission).
@@ -1472,8 +1515,9 @@ impl Index {
     /// Write this index to `path` with an explicit trailing-checksum policy.
     ///
     /// When `skip_hash` is true, the trailing SHA-1 is written as all zeros (Git `index.skipHash`).
-    pub fn write_to_path(&mut self, path: &Path, skip_hash: bool) -> Result<()> {
+    pub fn write_to_path(&mut self, path: &Path, skip_hash: bool) -> IndexResult<()> {
         self.write_to_path_with_config(path, skip_hash, None)
+            .map_err(IndexError::from)
     }
 
     /// Like [`Self::write_to_path`], but uses `config` for `core.lockfilepid` instead of reloading.
@@ -3069,7 +3113,7 @@ impl Index {
     ///
     /// Returns an error if the reference cache-tree cannot be built (for example,
     /// if a tree object cannot be written to the object database).
-    pub fn dump_cache_tree(&self, odb: &Odb) -> Result<String> {
+    pub fn dump_cache_tree(&self, odb: &Odb) -> IndexResult<String> {
         let Some(it_root) = self.cache_tree.as_ref() else {
             return Ok(String::new());
         };
@@ -3988,25 +4032,25 @@ impl IndexLock {
     /// Returns [`Error::LockHeld`] (with the pid sidecar's [`LockHolder`](crate::lockfile::LockHolder)
     /// when one was written) when `index.lock` already exists after the
     /// `core.filesRefLockTimeout` budget, or [`Error::Io`] for other filesystem failures.
-    pub fn acquire(index_path: &Path, config: Option<&ConfigSet>) -> Result<Self> {
+    pub fn acquire(index_path: &Path, config: Option<&ConfigSet>) -> IndexResult<Self> {
         let lock_path = index_path.with_extension("lock");
         let pid_path = pid_path_for_lock(&lock_path);
         let lockfile_pid_enabled = grit_lockfile_pid_enabled(config, index_path.parent());
 
         use crate::lockfile::{LockFile, LockWait};
         let wait = LockWait::files_ref_lock(config);
-        let mut lock_file = LockFile::acquire(&lock_path, wait).map_err(Error::from)?;
+        let mut lock_file = LockFile::acquire(&lock_path, wait).map_err(IndexError::from)?;
         if lockfile_pid_enabled {
             if let Err(e) = lock_file
                 .write_holder_pid()
                 .map_err(crate::error::Error::from)
             {
                 lock_file.rollback();
-                return Err(e);
+                return Err(IndexError::from(e));
             }
         }
         let wrote_pid = lockfile_pid_enabled;
-        let (lock_path, file) = lock_file.into_open_file()?;
+        let (lock_path, file) = lock_file.into_open_file().map_err(IndexError::from)?;
 
         Ok(Self {
             index_path: index_path.to_path_buf(),
@@ -6514,7 +6558,7 @@ mod tests {
         let lock = IndexLock::acquire(&path, None).unwrap();
         assert!(matches!(
             IndexLock::acquire(&path, None),
-            Err(Error::LockHeld(..))
+            Err(IndexError::LockHeld(..))
         ));
         drop(lock);
         idx.write(&path).unwrap(); // idx is mut in each test scope
@@ -6539,7 +6583,7 @@ mod tests {
         let write_err = Index::new().write(&path).unwrap_err();
         for err in [acquire_err, write_err] {
             match &err {
-                Error::LockHeld(crate::error::LockHeldError { path: p, holder }) => {
+                IndexError::LockHeld(crate::error::LockHeldError { path: p, holder }) => {
                     assert_eq!(p, &lock_path);
                     assert_eq!(
                         *holder,
@@ -6756,7 +6800,7 @@ mod tests {
             assert!(
                 matches!(
                     Index::load_expand_sparse_optional(&path, &odb),
-                    Err(Error::Index(_))
+                    Err(IndexError::Corrupt { .. })
                 ),
                 "len={len}"
             );

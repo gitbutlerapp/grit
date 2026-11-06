@@ -358,6 +358,10 @@ path = "tests/index_error_variants.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "index_error_kind_names"
+path = "tests/index_error_kind_names.rs"
+
+[[test]]
 name = "hygiene"
 path = "tests/hygiene.rs"
 

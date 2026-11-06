@@ -45,7 +45,7 @@ use crate::error::{ConfigError, Error, NotARepositoryReason, Result};
 use crate::git_dir::io_error::{map_git_dir_io, map_index_write_error, GitDirPathOperation};
 use crate::git_path::path_for_error_message;
 use crate::hooks::run_hook;
-use crate::index::Index;
+use crate::index::{Index, IndexError, IndexResult};
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -2108,14 +2108,14 @@ impl Repository {
     /// Load the index, expanding sparse-directory placeholders from the object database.
     ///
     /// Commands that operate on individual paths should use this instead of [`Index::load`].
-    pub(crate) fn load_index(&self) -> Result<Index> {
+    pub(crate) fn load_index(&self) -> IndexResult<Index> {
         let path = self.index_path_for_env()?;
         self.load_index_at(&path)
     }
 
     /// Like [`Repository::load_index`], but reads from an explicit index file path
     /// (e.g. `GIT_INDEX_FILE` or a worktree-specific index).
-    pub(crate) fn load_index_at(&self, path: &std::path::Path) -> Result<Index> {
+    pub(crate) fn load_index_at(&self, path: &std::path::Path) -> IndexResult<Index> {
         self.load_index_at_with_context(
             path,
             crate::index::IndexParseContext::from_policy(self.thread_policy()),
@@ -2126,7 +2126,7 @@ impl Repository {
         &self,
         path: &std::path::Path,
         parse_ctx: crate::index::IndexParseContext,
-    ) -> Result<Index> {
+    ) -> IndexResult<Index> {
         let mut idx = self.load_index_at_preserving_sparse(path, parse_ctx)?;
         let cfg = self
             .config()
@@ -2141,7 +2141,7 @@ impl Repository {
     }
 
     /// Load rows for a sparse-aware operation, with the same repository context as `load_index`.
-    pub(crate) fn load_index_preserving_sparse(&self) -> Result<Index> {
+    pub(crate) fn load_index_preserving_sparse(&self) -> IndexResult<Index> {
         self.load_index_at_preserving_sparse(
             &self.index_path_for_env()?,
             crate::index::IndexParseContext::from_policy(self.thread_policy()),
@@ -2154,13 +2154,19 @@ impl Repository {
         &self,
         path: &std::path::Path,
         parse_ctx: crate::index::IndexParseContext,
-    ) -> Result<Index> {
+    ) -> IndexResult<Index> {
         crate::trace::trace_span!("grit.index.read");
         let cfg = self
             .config()
             .snapshot()
             .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
-        cfg.as_ref().get_bool("index.sparse")?;
+        cfg.as_ref()
+            .get_bool("index.sparse")
+            .map_err(crate::index::IndexError::from)?;
+        let mut parse_ctx = parse_ctx;
+        if parse_ctx.source_path.is_none() {
+            parse_ctx = parse_ctx.with_source_path(path);
+        }
         let mut idx = Index::load_preserving_sparse_optional_with_context(
             path,
             &self.odb,
@@ -2187,7 +2193,7 @@ impl Repository {
 
     /// Write the index to the default path after optionally collapsing skip-worktree
     /// subtrees into sparse-directory placeholders (when sparse index is enabled).
-    pub(crate) fn write_index(&self, index: &mut Index) -> Result<()> {
+    pub(crate) fn write_index(&self, index: &mut Index) -> IndexResult<()> {
         self.write_index_with_post_index_change(index, false, false)
     }
 
@@ -2199,7 +2205,7 @@ impl Repository {
     /// # Errors
     ///
     /// Returns [`Error::Io`] when the lock file already exists or cannot be created.
-    pub(crate) fn begin_index_update(&self) -> Result<crate::index::IndexLock> {
+    pub(crate) fn begin_index_update(&self) -> IndexResult<crate::index::IndexLock> {
         test_inject_index_write_fail()?;
         let _ = crate::porcelain::commit::reap_stale_next_index_files(self, false)?;
         let path = self.index_path_for_env()?;
@@ -2217,9 +2223,10 @@ impl Repository {
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
         updated_workdir: bool,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.flush_index_update(lock, index)?;
         self.finish_index_update(lock, updated_workdir)
+            .map_err(IndexError::from)
     }
 
     /// Serialize `index` into a held [`crate::index::IndexLock`] without replacing the on-disk index.
@@ -2227,7 +2234,7 @@ impl Repository {
         &self,
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         let path = lock.index_path.clone();
         let (skip_hash, cfg) = self.prepare_index_for_disk_write(&path, index)?;
         self.odb.flush_for_publish()?;
@@ -2242,6 +2249,7 @@ impl Repository {
             Some(lock),
             false,
         )
+        .map_err(IndexError::from)
     }
 
     /// Commit a staged index lock after a successful working-tree update.
@@ -2289,13 +2297,13 @@ impl Repository {
     ///
     /// Propagates non-recoverable failures (for example cache-tree verification or split-index
     /// constraints).
-    pub(crate) fn try_write_index(&self, index: &mut Index) -> Result<bool> {
+    pub(crate) fn try_write_index(&self, index: &mut Index) -> IndexResult<bool> {
         self.try_write_index_at(&self.index_path_for_env()?, index)
     }
 
     /// Like [`Repository::try_write_index`], but writes to an explicit index file path
     /// (for example the path selected by `GIT_INDEX_FILE`).
-    pub(crate) fn try_write_index_at(&self, path: &Path, index: &mut Index) -> Result<bool> {
+    pub(crate) fn try_write_index_at(&self, path: &Path, index: &mut Index) -> IndexResult<bool> {
         if !self.environment().git_optional_locks {
             return Ok(false);
         }
@@ -2316,12 +2324,11 @@ impl Repository {
         }
     }
 
-    fn opportunistic_index_write_skippable(err: &crate::error::Error) -> bool {
-        use crate::error::Error;
+    fn opportunistic_index_write_skippable(err: &IndexError) -> bool {
         match err {
-            Error::LockHeld(..) => true,
-            Error::Io(e) => matches!(
-                e.kind(),
+            IndexError::LockHeld(..) => true,
+            IndexError::PathIo(path_io) => matches!(
+                path_io.source.kind(),
                 std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
             ),
             _ => false,
@@ -2343,7 +2350,7 @@ impl Repository {
         index: &mut Index,
         updated_workdir: bool,
         updated_skipworktree: bool,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         let path = self.index_path_for_env()?;
         self.write_index_at_with_post_index_change(
             &path,
@@ -2354,7 +2361,11 @@ impl Repository {
     }
 
     /// Like [`Repository::write_index`], but writes to an explicit index file path.
-    pub(crate) fn write_index_at(&self, path: &std::path::Path, index: &mut Index) -> Result<()> {
+    pub(crate) fn write_index_at(
+        &self,
+        path: &std::path::Path,
+        index: &mut Index,
+    ) -> IndexResult<()> {
         self.write_index_at_with_post_index_change(path, index, false, false)
     }
 
@@ -2364,7 +2375,7 @@ impl Repository {
         path: &std::path::Path,
         index: &mut Index,
         split: WriteSplitIndexRequest,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_index_at_split(path, index, split)
     }
 
@@ -2388,7 +2399,7 @@ impl Repository {
         index: &mut Index,
         updated_workdir: bool,
         updated_skipworktree: bool,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_index_at_split_with_post_index_change(
             path,
             index,
@@ -2404,7 +2415,7 @@ impl Repository {
         path: &std::path::Path,
         index: &mut Index,
         split: WriteSplitIndexRequest,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_index_at_split_with_post_index_change(path, index, split, false, false)
     }
 
@@ -2427,7 +2438,7 @@ impl Repository {
         split: WriteSplitIndexRequest,
         updated_workdir: bool,
         updated_skipworktree: bool,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_index_file(
             path,
             index,
@@ -2436,6 +2447,7 @@ impl Repository {
             updated_skipworktree,
             None,
         )
+        .map_err(IndexError::from)
     }
 
     /// Persist `index` through `lock` (from [`Self::lock_index`] or [`Self::begin_index_update`])
@@ -2454,7 +2466,7 @@ impl Repository {
         lock: &mut crate::index::IndexLock,
         index: &mut Index,
         updated_workdir: bool,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         let path = lock.index_path.clone();
         self.write_index_file(
             &path,
@@ -2464,6 +2476,7 @@ impl Repository {
             false,
             Some(lock),
         )
+        .map_err(IndexError::from)
     }
 
     /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`) without reading it.
@@ -2480,7 +2493,7 @@ impl Repository {
     pub(crate) fn lock_index(&self) -> Result<crate::index::IndexLock> {
         let path = self.index_path_for_env()?;
         let cfg = self.config().snapshot()?;
-        crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
+        crate::index::IndexLock::acquire(&path, Some(cfg.as_ref())).map_err(Into::into)
     }
 
     /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`), then load it.

@@ -7,7 +7,7 @@ use crate::index::{
     CacheTreeNode, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
     MODE_TREE,
 };
-use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
+use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
 use crate::objects::{
     oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind,
     OidHashSet, TreeEntry,
@@ -190,7 +190,7 @@ pub fn write_tree_update_index(
     index: &mut Index,
     prefix: &str,
     flags: WriteTreeFlags,
-) -> Result<ObjectId> {
+) -> IndexResult<ObjectId> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
 
     let was_valid =
@@ -378,12 +378,9 @@ fn rebuild_directory_node(
         };
         let child_name = &tail[..component_end];
         let child = find_or_create_child(node, child_name, true).ok_or_else(|| {
-            Error::from(IndexError::WriteTree {
-                detail: format!(
-                    "failed to attach cache-tree child '{}'",
-                    String::from_utf8_lossy(child_name)
-                ),
-            })
+            Error::from(IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::WriteTreeCacheTreeChildMissing,
+            )))
         })?;
         let nested_len = prefix_len + component_end + 1;
         let mut nested_extra = 0i32;
@@ -430,13 +427,9 @@ fn rebuild_directory_node(
         let (oid, mode, name_len, advance, known_present) = if let Some(off) = slash {
             let name = &tail[..off];
             let child = find_or_create_child(node, name, false).ok_or_else(|| {
-                Error::from(IndexError::WriteTree {
-                    detail: format!(
-                        "cache-tree child '{}' missing for '{}'",
-                        String::from_utf8_lossy(name),
-                        String::from_utf8_lossy(path)
-                    ),
-                })
+                Error::from(IndexError::corrupt(IndexCorrupt::new(
+                    IndexCorruptReason::WriteTreeCacheTreeChildMissing,
+                )))
             })?;
             let (covered, known_present) = *nested_sizes.get(name).ok_or_else(|| {
                 Error::from(IndexError::corrupt(IndexCorrupt::new(
@@ -638,13 +631,11 @@ fn entry_relative_to_dir_prefix<'a>(path: &'a [u8], dir_prefix: &[u8]) -> Result
     path.strip_prefix(dir_prefix)
         .and_then(|suffix| suffix.strip_prefix(b"/"))
         .ok_or_else(|| {
-            IndexError::WriteTree {
-                detail: format!(
-                    "index path {} is not under tree prefix {}",
-                    String::from_utf8_lossy(path),
-                    String::from_utf8_lossy(dir_prefix)
-                ),
-            }
+            IndexError::corrupt(IndexCorrupt::new(
+                IndexCorruptReason::WriteTreeInvalidPrefix {
+                    prefix: String::from_utf8_lossy(dir_prefix).into_owned(),
+                },
+            ))
             .into()
         })
 }
@@ -747,7 +738,7 @@ pub(crate) fn write_tree_from_index_subset(
 /// Unlike [`write_tree_update_index`], this does not read or update the index cache-tree
 /// extension. Callers that need incremental reuse must use [`write_tree_update_index`] on a
 /// mutable index instead.
-pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<ObjectId> {
+pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> IndexResult<ObjectId> {
     if prefix.is_empty() {
         if let Some(root) = index.cache_tree_root {
             if cache_tree_fully_valid(odb, index.cache_tree.as_ref()) {
@@ -756,7 +747,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
         }
     }
 
-    ensure_empty_blob_for_intent_to_add(odb, index)?;
+    ensure_empty_blob_for_intent_to_add(odb, index).map_err(IndexError::from)?;
 
     let prefix_bytes = prefix.as_bytes();
     let mut entries: Vec<&IndexEntry> = index
@@ -770,7 +761,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> Result<O
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
-    build_tree(odb, &entries, prefix_bytes)
+    build_tree(odb, &entries, prefix_bytes).map_err(IndexError::from)
 }
 
 /// Build a valid cache-tree extension from the index and write any missing tree objects.

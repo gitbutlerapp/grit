@@ -298,8 +298,12 @@ fn stash_tree_entry_at_path(
 fn load_stash_index(repo: &Repository) -> Result<Index> {
     match repo.load_index() {
         Ok(index) => Ok(index),
-        Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound => Ok(Index::new()),
-        Err(e) => Err(e),
+        Err(crate::index::IndexError::PathIo(path_io))
+            if path_io.source.kind() == io::ErrorKind::NotFound =>
+        {
+            Ok(Index::new())
+        }
+        Err(e) => Err(Error::from(e)),
     }
 }
 
@@ -1204,7 +1208,7 @@ fn apply_staged_only_reset(
         }
     }
     progress.finish();
-    repo.write_index_with_lock(lock, &mut index, false)
+    Ok(repo.write_index_with_lock(lock, &mut index, false)?)
 }
 
 fn tracked_stash_preview_paths(

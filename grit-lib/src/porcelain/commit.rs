@@ -389,6 +389,12 @@ pub enum CommitPatchError {
     Commit(#[from] Error),
 }
 
+impl From<crate::index::IndexError> for CommitPatchError {
+    fn from(err: crate::index::IndexError) -> Self {
+        Error::from(err).into()
+    }
+}
+
 /// Default [`CommitScope`] from `commit.autoStage` (default true → [`CommitScope::AutoStage`]).
 ///
 /// # Errors
@@ -588,7 +594,7 @@ fn commit_patch_scope(
     };
 
     let head = resolve_head_for_repository(repo).map_err(CommitPatchError::Commit)?;
-    let mut index = repo.load_index().map_err(CommitPatchError::Commit)?;
+    let mut index = repo.load_index()?;
     if index.has_unmerged_entries() {
         return Err(CommitPatchError::Commit(
             Error::from(IndexError::unmerged()),

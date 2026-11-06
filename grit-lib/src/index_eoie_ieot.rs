@@ -59,10 +59,12 @@ pub(crate) struct ParsedIndexExtensions {
 }
 
 /// Context for index parse/load threading and config.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct IndexParseContext {
     /// `thread_policy` field.
     pub thread_policy: ThreadPolicy,
+    /// Index file path for structured [`IndexError::Corrupt`] reporting.
+    pub(crate) source_path: Option<std::path::PathBuf>,
 }
 
 impl IndexParseContext {
@@ -71,7 +73,15 @@ impl IndexParseContext {
     pub fn from_policy(policy: ThreadPolicy) -> Self {
         Self {
             thread_policy: policy,
+            source_path: None,
         }
+    }
+
+    /// Attach the on-disk index path to corruption errors raised while parsing.
+    #[must_use]
+    pub fn with_source_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.source_path = Some(path.into());
+        self
     }
 }
 
@@ -287,7 +297,7 @@ pub(crate) fn parse_index_extensions(
             INDEX_EXT_SPARSE_DIRECTORIES => out.sparse_directories = true,
             INDEX_EXT_UNTRACKED => {
                 let ext_data = &body[pos..pos + ext_sz];
-                out.untracked_cache = untracked_cache::parse_untracked_extension(ext_data);
+                out.untracked_cache = Some(untracked_cache::parse_untracked_extension(ext_data)?);
             }
             INDEX_EXT_FSMONITOR => {
                 let ext_data = &body[pos..pos + ext_sz];

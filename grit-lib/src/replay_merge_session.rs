@@ -815,6 +815,7 @@ fn index_entry_from_diff(entry: &DiffEntry, path: Vec<u8>) -> IndexEntry {
 #[cfg(test)]
 mod upstream_cache_tests {
     use super::*;
+    use crate::error::Error;
     use crate::index::MODE_REGULAR;
     use crate::merge_trees::TreeMergeConflictPresentation;
     use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
@@ -852,7 +853,7 @@ mod upstream_cache_tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Error::from)
     }
 
     fn write_commit(repo: &Repository, tree: ObjectId, parent: ObjectId, msg: &str) -> ObjectId {

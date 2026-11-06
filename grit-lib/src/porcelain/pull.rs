@@ -271,6 +271,12 @@ impl From<Error> for PullError {
     }
 }
 
+impl From<crate::index::IndexError> for PullError {
+    fn from(err: crate::index::IndexError) -> Self {
+        Error::from(err).into()
+    }
+}
+
 impl PullError {
     /// Whether the remote could not be read at all ([`RemoteError::Unreadable`]).
     #[must_use]

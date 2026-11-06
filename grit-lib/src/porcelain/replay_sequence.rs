@@ -2059,7 +2059,12 @@ fn hard_reset_replay_tip(
 
 fn index_stage0_tree(repo: &Repository) -> Result<ObjectId> {
     let mut index = repo.load_index()?;
-    write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
+    Ok(write_tree_update_index(
+        repo.odb(),
+        &mut index,
+        "",
+        WriteTreeFlags::silent(),
+    )?)
 }
 
 fn apply_git_sequencer_opts(git_dir: &Path, opts: &mut ReplayOptions) {

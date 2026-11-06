@@ -270,7 +270,7 @@ fn finish_checkout_from_journal(
 /// Take `index.lock` for recovery, removing it first when its recorded holder has exited.
 fn lock_index_for_recovery(repo: &Repository) -> Result<IndexLock, HistoryError> {
     match repo.begin_index_update() {
-        Err(crate::error::Error::LockHeld(crate::error::LockHeldError { path, holder })) => {
+        Err(crate::index::IndexError::LockHeld(crate::error::LockHeldError { path, holder })) => {
             if LockHolder::remove_if_stale(&path).map_err(crate::error::Error::Io)? {
                 repo.begin_index_update().map_err(Into::into)
             } else {

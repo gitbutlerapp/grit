@@ -1,8 +1,8 @@
 //! Typed failures for index read, write, extensions, and write-tree.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::error::{LockHeldError, PathIoError};
+use crate::error::{GitDirPathOperation, LockHeldError, PathIoError, PathIoOperation};
 use crate::objects::HashAlgo;
 use thiserror::Error;
 
@@ -143,6 +143,16 @@ pub enum IndexCorruptReason {
     ResolveUndoCorrupt,
     /// Resolve-undo object id field truncated.
     ResolveUndoTruncatedOid,
+    /// Untracked-cache (`UNTR`) payload ends before required fields.
+    UntrackedCacheTruncated,
+    /// Untracked-cache varint could not be decoded.
+    UntrackedCacheInvalidVarint,
+    /// Untracked-cache payload missing trailing NUL.
+    UntrackedCacheMissingNul,
+    /// Untracked-cache string field is not valid UTF-8.
+    UntrackedCacheInvalidUtf8,
+    /// Untracked-cache directory tree could not be parsed.
+    UntrackedCacheDirCorrupt,
     /// Untracked-cache extension has no root directory.
     UntrackedCacheNoRoot,
     /// Split index link or merge failure (detail in message via split variant).
@@ -172,6 +182,21 @@ pub struct IndexCorrupt {
     pub offset: Option<usize>,
     /// Structured reason for the failure.
     pub reason: IndexCorruptReason,
+}
+
+/// Why [`IndexError::Chmod`] rejected a mode change.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum IndexChmodReason {
+    /// Conflict stages exist for the path.
+    UnmergedPath,
+    /// Entry is not a regular file (symlink, gitlink, directory, …).
+    NotChmodEligible,
+    /// Target mode is not `100644` or `100755`.
+    InvalidTargetMode {
+        /// Mode the caller requested.
+        mode: u32,
+    },
 }
 
 impl IndexCorrupt {
@@ -257,25 +282,13 @@ pub enum IndexError {
     #[error(transparent)]
     PathIo(#[from] PathIoError),
 
-    /// Split-index link, merge, or dump failed.
-    #[error("split index error: {detail}")]
-    SplitIndex {
-        /// What went wrong when reading or writing a split index.
-        detail: String,
-    },
-
     /// `update-index --chmod` / staging hint rejected the path or mode.
-    #[error("{detail}")]
+    #[error("cannot change mode of index path '{path}': {reason:?}")]
     Chmod {
-        /// Explanation (unmerged path, non-regular file, invalid target mode).
-        detail: String,
-    },
-
-    /// write-tree or cache-tree rebuild failed (structured detail).
-    #[error("{detail}")]
-    WriteTree {
-        /// What went wrong while building or updating the cache-tree.
-        detail: String,
+        /// Repository-relative path (UTF-8 lossy when stored as bytes).
+        path: String,
+        /// Why the mode change was rejected.
+        reason: IndexChmodReason,
     },
 }
 
@@ -293,9 +306,7 @@ impl IndexError {
             Self::CacheTreeCorrupt => "cache_tree_corrupt",
             Self::LockHeld(_) => "lock_held",
             Self::PathIo(_) => "git_dir_path_io",
-            Self::SplitIndex { .. } => "index_error",
             Self::Chmod { .. } => "message",
-            Self::WriteTree { .. } => "index_error",
         }
     }
 
@@ -303,6 +314,22 @@ impl IndexError {
     pub(crate) fn corrupt(corrupt: IndexCorrupt) -> Self {
         let detail = corrupt_detail(&corrupt);
         Self::Corrupt { corrupt, detail }
+    }
+
+    /// Build a corrupt index error with optional file path and byte offset.
+    pub(crate) fn corrupt_at(
+        path: Option<&Path>,
+        offset: Option<usize>,
+        reason: IndexCorruptReason,
+    ) -> Self {
+        let mut corrupt = IndexCorrupt::new(reason);
+        if let Some(p) = path {
+            corrupt = corrupt.at_path(p);
+        }
+        if let Some(o) = offset {
+            corrupt = corrupt.at_offset(o);
+        }
+        Self::corrupt(corrupt)
     }
 
     /// Unmerged index with no path list (legacy `IndexUnmerged` shape).
@@ -407,6 +434,19 @@ fn corrupt_detail(corrupt: &IndexCorrupt) -> String {
         IndexCorruptReason::ResolveUndoTruncatedOid => {
             "truncated resolve-undo object id".to_owned()
         }
+        IndexCorruptReason::UntrackedCacheTruncated => {
+            "untracked-cache extension truncated".to_owned()
+        }
+        IndexCorruptReason::UntrackedCacheInvalidVarint => {
+            "untracked-cache invalid varint".to_owned()
+        }
+        IndexCorruptReason::UntrackedCacheMissingNul => {
+            "untracked-cache payload missing NUL terminator".to_owned()
+        }
+        IndexCorruptReason::UntrackedCacheInvalidUtf8 => "untracked-cache invalid UTF-8".to_owned(),
+        IndexCorruptReason::UntrackedCacheDirCorrupt => {
+            "untracked-cache directory tree corrupt".to_owned()
+        }
         IndexCorruptReason::UntrackedCacheNoRoot => "no uc root".to_owned(),
         IndexCorruptReason::SplitIndexCorrupt => "split index corrupt".to_owned(),
         IndexCorruptReason::SplitIndexTooShort => "index too short".to_owned(),
@@ -431,6 +471,29 @@ fn corrupt_detail(corrupt: &IndexCorrupt) -> String {
     }
 }
 
+impl From<crate::lockfile::LockError> for IndexError {
+    fn from(err: crate::lockfile::LockError) -> Self {
+        use crate::lockfile::LockError;
+        match err {
+            LockError::Held { path } => Self::LockHeld(LockHeldError {
+                holder: crate::lockfile::LockHolder::read(&path),
+                path,
+            }),
+            LockError::Io { path, source } => Self::PathIo(PathIoError {
+                operation: PathIoOperation::GitDir(GitDirPathOperation::WriteIndex),
+                path: Some(path),
+                source,
+            }),
+        }
+    }
+}
+
+impl From<crate::error::ConfigError> for IndexError {
+    fn from(err: crate::error::ConfigError) -> Self {
+        Self::from(crate::error::Error::Config(err))
+    }
+}
+
 impl From<IndexError> for crate::error::Error {
     fn from(err: IndexError) -> Self {
         match err {
@@ -442,10 +505,55 @@ impl From<IndexError> for crate::error::Error {
             IndexError::FsmonitorExtensionBadVersion(_) => Self::Index(err),
             IndexError::FsmonitorExtensionEwahInvalid => Self::Index(err),
             IndexError::CacheTreeCorrupt => Self::Index(err),
-            IndexError::Corrupt { .. }
-            | IndexError::SplitIndex { .. }
-            | IndexError::Chmod { .. }
-            | IndexError::WriteTree { .. } => Self::Index(err),
+            IndexError::Corrupt { .. } | IndexError::Chmod { .. } => Self::Index(err),
+        }
+    }
+}
+
+impl From<std::io::Error> for IndexError {
+    fn from(source: std::io::Error) -> Self {
+        Self::PathIo(PathIoError {
+            operation: crate::error::PathIoOperation::GitDir(
+                crate::error::GitDirPathOperation::WriteIndex,
+            ),
+            path: None,
+            source,
+        })
+    }
+}
+
+impl From<crate::error::Error> for IndexError {
+    fn from(err: crate::error::Error) -> Self {
+        match err {
+            crate::error::Error::Index(index) => index,
+            crate::error::Error::LockHeld(h) => Self::LockHeld(h),
+            crate::error::Error::Io(source) => Self::PathIo(PathIoError {
+                operation: PathIoOperation::GitDir(GitDirPathOperation::WriteIndex),
+                path: None,
+                source,
+            }),
+            crate::error::Error::GitDirPathIo {
+                operation,
+                path,
+                source,
+            } => Self::PathIo(PathIoError {
+                operation: PathIoOperation::GitDir(operation),
+                path: Some(PathBuf::from(path)),
+                source,
+            }),
+            crate::error::Error::WorktreePathIo {
+                operation,
+                path,
+                source,
+            } => Self::PathIo(PathIoError {
+                operation: PathIoOperation::Worktree(operation),
+                path: Some(PathBuf::from(path)),
+                source,
+            }),
+            other => IndexError::Corrupt {
+                corrupt: IndexCorrupt::new(IndexCorruptReason::BadEntry),
+                detail: other.to_string(),
+            },
         }
     }
 }

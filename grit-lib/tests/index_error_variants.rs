@@ -3,7 +3,6 @@
 use std::fs;
 use std::io::Write;
 
-use grit_lib::error::Error;
 use grit_lib::index::{Index, IndexCorruptReason, IndexError, IndexLock};
 use grit_lib::objects::HashAlgo;
 use grit_test_support::git;
@@ -29,17 +28,19 @@ fn index_error_variants() {
         bytes.truncate(bytes.len().saturating_sub(10));
         fs::write(index_path.with_extension("trunc"), &bytes).expect("write trunc");
         let err = Index::load(&index_path.with_extension("trunc")).unwrap_err();
+        let trunc = index_path.with_extension("trunc");
         assert!(matches!(
             &err,
-            Error::Index(IndexError::Corrupt {
+            IndexError::Corrupt {
                 corrupt,
                 ..
-            }) if matches!(
-                corrupt.reason,
-                IndexCorruptReason::Truncated
-                    | IndexCorruptReason::FileTooShortForHeader
-                    | IndexCorruptReason::ChecksumMismatch { .. }
-            )
+            } if corrupt.path.as_deref() == Some(trunc.as_path())
+                && matches!(
+                    corrupt.reason,
+                    IndexCorruptReason::Truncated
+                        | IndexCorruptReason::FileTooShortForHeader
+                        | IndexCorruptReason::ChecksumMismatch { .. }
+                )
         ));
         assert_eq!(err.kind_name(), "index_error");
     }
@@ -50,13 +51,16 @@ fn index_error_variants() {
         let last = bytes.len() - 1;
         bytes[last] ^= 0xff;
         fs::write(index_path.with_extension("badsum"), &bytes).expect("write badsum");
-        let err = Index::load(&index_path.with_extension("badsum")).unwrap_err();
+        let badsum = index_path.with_extension("badsum");
+        let err = Index::load(&badsum).unwrap_err();
         assert!(matches!(
             &err,
-            Error::Index(IndexError::Corrupt {
+            IndexError::Corrupt {
                 corrupt,
                 ..
-            }) if matches!(corrupt.reason, IndexCorruptReason::ChecksumMismatch { .. })
+            } if corrupt.path.as_deref() == Some(badsum.as_path())
+                && corrupt.offset.is_some()
+                && matches!(corrupt.reason, IndexCorruptReason::ChecksumMismatch { .. })
         ));
         assert_eq!(err.kind_name(), "index_error");
     }
@@ -71,13 +75,14 @@ fn index_error_variants() {
         let err = Index::parse_with_algo(&bytes, algo).unwrap_err();
         assert!(matches!(
             &err,
-            Error::Index(IndexError::Corrupt {
+            IndexError::Corrupt {
                 corrupt,
                 ..
-            }) if matches!(
-                corrupt.reason,
-                IndexCorruptReason::UnsupportedVersion { version: 5 }
-            )
+            } if corrupt.offset == Some(4)
+                && matches!(
+                    corrupt.reason,
+                    IndexCorruptReason::UnsupportedVersion { version: 5 }
+                )
         ));
         assert_eq!(err.kind_name(), "index_error");
     }
@@ -93,20 +98,18 @@ fn index_error_variants() {
             .windows(4)
             .position(|w| w == b"FSMN")
             .expect("FSMN extension present");
-        bytes.truncate(fsmn + 12);
+        let payload = fsmn + 8;
+        bytes[payload..payload + 4].copy_from_slice(&99u32.to_be_bytes());
+        let hash_len = algo.len();
+        let body_len = bytes.len() - hash_len;
+        let digest = algo.checksum_digest(&bytes[..body_len]);
+        bytes[body_len..].copy_from_slice(&digest);
         let err = Index::parse_with_algo(&bytes, algo).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Index(IndexError::FsmonitorExtensionTruncated)
-                | Error::Index(IndexError::FsmonitorExtensionEwahInvalid)
-                | Error::Index(IndexError::Corrupt { .. })
-        ));
-        let kind = err.kind_name();
         assert!(
-            kind == "index_fsmonitor_extension_truncated"
-                || kind == "index_fsmonitor_extension_ewah_invalid"
-                || kind == "index_error"
+            matches!(err, IndexError::FsmonitorExtensionBadVersion(99)),
+            "fsmonitor damage: {err:?}"
         );
+        assert_eq!(err.kind_name(), "index_fsmonitor_extension_bad_version");
     }
 
     // Held `index.lock` → top-level lock (legacy slug unchanged).
@@ -118,14 +121,14 @@ fn index_error_variants() {
             Err(e) => e,
             Ok(_) => panic!("expected lock held"),
         };
-        assert!(matches!(acquire_err, Error::LockHeld(_)));
+        assert!(matches!(acquire_err, IndexError::LockHeld(_)));
         assert_eq!(acquire_err.kind_name(), "lock_held");
         let mut idx = Index::load(&index_path).expect("load");
         let write_err = match idx.write(&index_path) {
             Err(e) => e,
             Ok(()) => panic!("expected write to fail under lock"),
         };
-        assert!(matches!(write_err, Error::LockHeld(_)));
+        assert!(matches!(write_err, IndexError::LockHeld(_)));
         drop(lock);
         let _ = fs::remove_file(lock_path);
     }

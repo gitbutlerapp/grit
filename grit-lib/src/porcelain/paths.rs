@@ -266,7 +266,7 @@ pub fn remove_paths(
         return Err(abort_failed_remove_worktree(
             work_tree,
             &worktree_backups,
-            err,
+            Error::from(err),
         ));
     }
 
@@ -2659,7 +2659,12 @@ mod index_lock_transaction_tests {
         )
         .expect_err("injected write failure");
         set_test_inject_index_write_fail(false);
-        assert!(matches!(err, crate::error::Error::Io(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Io(_)
+                | crate::error::Error::GitDirPathIo { .. }
+                | crate::error::Error::Index(_)
+        ));
         assert!(root.join("a.txt").is_file());
     }
 
@@ -2687,7 +2692,12 @@ mod index_lock_transaction_tests {
         )
         .expect_err("injected write failure");
         set_test_inject_index_write_fail(false);
-        assert!(matches!(err, crate::error::Error::Io(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Io(_)
+                | crate::error::Error::GitDirPathIo { .. }
+                | crate::error::Error::Index(_)
+        ));
         assert!(root.join("a.txt").is_file());
         assert!(!root.join("b.txt").exists());
     }

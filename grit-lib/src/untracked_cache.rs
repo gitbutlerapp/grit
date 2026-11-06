@@ -402,10 +402,20 @@ pub fn write_untracked_extension(uc: &UntrackedCache) -> Vec<u8> {
 }
 
 /// Parse UNTR body (after 4-byte signature + 4-byte size).
-pub(crate) fn parse_untracked_extension(data: &[u8]) -> Option<UntrackedCache> {
+pub(crate) fn parse_untracked_extension(data: &[u8]) -> crate::index::IndexResult<UntrackedCache> {
     if data.len() <= 1 || data[data.len() - 1] != 0 {
-        return None;
+        return Err(IndexError::corrupt_at(
+            None,
+            data.len().checked_sub(1),
+            IndexCorruptReason::UntrackedCacheMissingNul,
+        ));
     }
+    parse_untracked_extension_body(data).ok_or_else(|| {
+        IndexError::corrupt_at(None, None, IndexCorruptReason::UntrackedCacheDirCorrupt)
+    })
+}
+
+fn parse_untracked_extension_body(data: &[u8]) -> Option<UntrackedCache> {
     let end = data.len() - 1;
     let data = &data[..end];
 
@@ -2178,10 +2188,10 @@ mod tests {
     #[test]
     fn untracked_extension_truncated_and_corrupt_no_panic() {
         let raw = write_untracked_extension(&UntrackedCache::new_shell(0, b"x\x00".to_vec()));
-        assert!(parse_untracked_extension(&raw[..raw.len().saturating_sub(5)]).is_none());
+        assert!(parse_untracked_extension(&raw[..raw.len().saturating_sub(5)]).is_err());
         let mut no_nul = raw;
         no_nul.pop();
-        assert!(parse_untracked_extension(&no_nul).is_none());
+        assert!(parse_untracked_extension(&no_nul).is_err());
     }
 
     #[test]

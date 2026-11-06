@@ -159,6 +159,12 @@ impl From<Error> for HunkSelectError {
     }
 }
 
+impl From<crate::index::IndexError> for HunkSelectError {
+    fn from(err: crate::index::IndexError) -> Self {
+        Error::from(err).into()
+    }
+}
+
 /// Result of [`stage_hunks`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StageHunksOutcome {

@@ -214,6 +214,12 @@ pub enum RebaseSessionError {
     Library(#[from] crate::error::Error),
 }
 
+impl From<crate::index::IndexError> for RebaseSessionError {
+    fn from(err: crate::index::IndexError) -> Self {
+        crate::error::Error::from(err).into()
+    }
+}
+
 impl RebaseSessionError {
     /// Whether the rebase session was cancelled ([`crate::error::Error::Cancelled`]).
     #[must_use]

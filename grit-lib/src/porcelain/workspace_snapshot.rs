@@ -334,7 +334,12 @@ fn build_worktree_tree(repo: &Repository, include_untracked: bool) -> Result<Obj
         }
     }
     out.sort();
-    write_tree_update_index(repo.odb(), &mut out, "", WriteTreeFlags::silent())
+    Ok(write_tree_update_index(
+        repo.odb(),
+        &mut out,
+        "",
+        WriteTreeFlags::silent(),
+    )?)
 }
 
 fn stage_worktree_path_for_tree(
@@ -496,7 +501,12 @@ fn build_pre_restore_disk_tree(
         }
     }
     out.sort();
-    write_tree_update_index(repo.odb(), &mut out, "", WriteTreeFlags::silent())
+    Ok(write_tree_update_index(
+        repo.odb(),
+        &mut out,
+        "",
+        WriteTreeFlags::silent(),
+    )?)
 }
 
 fn restore_worktree_tree(

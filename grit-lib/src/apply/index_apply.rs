@@ -134,10 +134,14 @@ pub fn apply_patch_to_index_and_write(
     cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<IndexApplyOutcome, ApplyError> {
     let handle = repo.index_handle();
-    let mut lock = handle.begin_update().map_err(|e| library_err_path("", e))?;
+    let mut lock = handle
+        .begin_update()
+        .map_err(|e| library_err_path("", Error::from(e)))?;
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
         .map_err(|e| library_err_path("", e))?;
-    let mut index = handle.load().map_err(|e| library_err_path("", e))?;
+    let mut index = handle
+        .load()
+        .map_err(|e| library_err_path("", Error::from(e)))?;
     let outcome = apply_patch_to_index(repo, &mut index, patches, opts)?;
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
         .map_err(|e| library_err_path("", e))?;
@@ -146,7 +150,7 @@ pub fn apply_patch_to_index_and_write(
     }
     handle
         .commit_update(&mut lock, &mut index, false)
-        .map_err(|e| library_err_path("", e))?;
+        .map_err(|e| library_err_path("", Error::from(e)))?;
     Ok(outcome)
 }
 

@@ -18,7 +18,7 @@ pub(crate) mod handle;
 mod mode_policy;
 
 pub use core::*;
-pub use error::{IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
+pub use error::{IndexChmodReason, IndexCorrupt, IndexCorruptReason, IndexError, IndexResult};
 pub use handle::IndexHandle;
 pub use mode_policy::WorktreeModePolicy;
 

@@ -343,3 +343,9 @@ impl From<Error> for HistoryError {
         }
     }
 }
+
+impl From<crate::index::IndexError> for HistoryError {
+    fn from(err: crate::index::IndexError) -> Self {
+        Error::from(err).into()
+    }
+}

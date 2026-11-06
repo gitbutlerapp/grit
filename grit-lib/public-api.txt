@@ -5326,6 +5326,8 @@ impl core::cmp::PartialEq for grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
+impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::ConfigError) -> Self
 impl core::error::Error for grit_lib::error::ConfigError
 pub fn grit_lib::error::ConfigError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::ConfigError
@@ -5680,6 +5682,8 @@ impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::commit::CommitPatchError
@@ -6669,6 +6673,28 @@ pub fn grit_lib::ident::signature_timestamp_for_pretty(&str) -> grit_lib::ident:
 pub fn grit_lib::ident::timestamp_for_at_ct(grit_lib::ident::SignatureTimestamp) -> core::option::Option<i64>
 pub mod grit_lib::index
 pub mod grit_lib::index::error
+#[non_exhaustive] pub enum grit_lib::index::error::IndexChmodReason
+pub grit_lib::index::error::IndexChmodReason::InvalidTargetMode
+pub grit_lib::index::error::IndexChmodReason::InvalidTargetMode::mode: u32
+pub grit_lib::index::error::IndexChmodReason::NotChmodEligible
+pub grit_lib::index::error::IndexChmodReason::UnmergedPath
+impl core::clone::Clone for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::index::error::IndexChmodReason
+impl core::cmp::PartialEq for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::index::error::IndexChmodReason
+impl core::marker::Freeze for grit_lib::index::error::IndexChmodReason
+impl core::marker::Send for grit_lib::index::error::IndexChmodReason
+impl core::marker::Sync for grit_lib::index::error::IndexChmodReason
+impl core::marker::Unpin for grit_lib::index::error::IndexChmodReason
+impl core::marker::UnsafeUnpin for grit_lib::index::error::IndexChmodReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::error::IndexChmodReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::error::IndexChmodReason
 #[non_exhaustive] pub enum grit_lib::index::error::IndexCorruptReason
 pub grit_lib::index::error::IndexCorruptReason::BadEntry
 pub grit_lib::index::error::IndexCorruptReason::BadSignature
@@ -6729,7 +6755,12 @@ pub grit_lib::index::error::IndexCorruptReason::UnsupportedExtension
 pub grit_lib::index::error::IndexCorruptReason::UnsupportedExtension::sig: u32
 pub grit_lib::index::error::IndexCorruptReason::UnsupportedVersion
 pub grit_lib::index::error::IndexCorruptReason::UnsupportedVersion::version: u32
+pub grit_lib::index::error::IndexCorruptReason::UntrackedCacheDirCorrupt
+pub grit_lib::index::error::IndexCorruptReason::UntrackedCacheInvalidUtf8
+pub grit_lib::index::error::IndexCorruptReason::UntrackedCacheInvalidVarint
+pub grit_lib::index::error::IndexCorruptReason::UntrackedCacheMissingNul
 pub grit_lib::index::error::IndexCorruptReason::UntrackedCacheNoRoot
+pub grit_lib::index::error::IndexCorruptReason::UntrackedCacheTruncated
 pub grit_lib::index::error::IndexCorruptReason::V4PathMissingNul
 pub grit_lib::index::error::IndexCorruptReason::WriteTreeCacheTreeChildMissing
 pub grit_lib::index::error::IndexCorruptReason::WriteTreeCacheTreeRootMissingOid
@@ -6759,7 +6790,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::error::IndexCorru
 #[non_exhaustive] pub enum grit_lib::index::error::IndexError
 pub grit_lib::index::error::IndexError::CacheTreeCorrupt
 pub grit_lib::index::error::IndexError::Chmod
-pub grit_lib::index::error::IndexError::Chmod::detail: alloc::string::String
+pub grit_lib::index::error::IndexError::Chmod::path: alloc::string::String
+pub grit_lib::index::error::IndexError::Chmod::reason: grit_lib::index::error::IndexChmodReason
 pub grit_lib::index::error::IndexError::Corrupt
 pub grit_lib::index::error::IndexError::Corrupt::corrupt: grit_lib::index::error::IndexCorrupt
 pub grit_lib::index::error::IndexError::Corrupt::detail: alloc::string::String
@@ -6771,21 +6803,39 @@ pub grit_lib::index::error::IndexError::PathIo(grit_lib::error::PathIoError)
 pub grit_lib::index::error::IndexError::PathPrefixConflict
 pub grit_lib::index::error::IndexError::PathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::index::error::IndexError::PathPrefixConflict::file: std::path::PathBuf
-pub grit_lib::index::error::IndexError::SplitIndex
-pub grit_lib::index::error::IndexError::SplitIndex::detail: alloc::string::String
 pub grit_lib::index::error::IndexError::Unmerged
 pub grit_lib::index::error::IndexError::Unmerged::paths: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::index::error::IndexError::WriteTree
-pub grit_lib::index::error::IndexError::WriteTree::detail: alloc::string::String
 impl grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::kind_name(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::unmerged() -> Self
+impl core::convert::From<core::io::error::Error> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(core::io::error::Error) -> Self
+impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::ConfigError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::LockHeldError) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::commit::CommitPatchError
+pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::hunk_select::HunkSelectError
+pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::merge::ContinueMergeError
+pub fn grit_lib::porcelain::merge::ContinueMergeError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::remote::snapshot_checkout::CheckoutError
+pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::RebaseSessionError
+pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::lockfile::LockError) -> Self
 impl core::error::Error for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::index::error::IndexError
@@ -6889,8 +6939,8 @@ impl core::marker::Unpin for grit_lib::index::split_index::WriteSplitIndexReques
 impl core::marker::UnsafeUnpin for grit_lib::index::split_index::WriteSplitIndexRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::split_index::WriteSplitIndexRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::split_index::WriteSplitIndexRequest
-pub fn grit_lib::index::split_index::format_dump_split_index_file(&[u8], &grit_lib::index::Index) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::index::split_index::resolve_split_index_if_needed(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::split_index::format_dump_split_index_file(&[u8], &grit_lib::index::Index) -> grit_lib::index::error::IndexResult<alloc::string::String>
+pub fn grit_lib::index::split_index::resolve_split_index_if_needed(&mut grit_lib::index::Index, &std::path::Path, &std::path::Path) -> grit_lib::index::error::IndexResult<()>
 pub mod grit_lib::index::untracked_cache
 pub enum grit_lib::index::untracked_cache::UntrackedIgnoredMode
 pub grit_lib::index::untracked_cache::UntrackedIgnoredMode::Matching
@@ -7053,8 +7103,30 @@ impl core::marker::UnsafeUnpin for grit_lib::index::write_tree::WriteTreeFlags
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::write_tree::WriteTreeFlags
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::write_tree::WriteTreeFlags
 pub fn grit_lib::index::write_tree::build_cache_tree_from_tree(&grit_lib::prelude::Odb, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::index::CacheTreeNode>
-pub fn grit_lib::index::write_tree::write_tree_from_index(&grit_lib::prelude::Odb, &grit_lib::index::Index, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::index::write_tree::write_tree_update_index(&grit_lib::prelude::Odb, &mut grit_lib::index::Index, &str, grit_lib::index::write_tree::WriteTreeFlags) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::index::write_tree::write_tree_from_index(&grit_lib::prelude::Odb, &grit_lib::index::Index, &str) -> grit_lib::index::error::IndexResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::index::write_tree::write_tree_update_index(&grit_lib::prelude::Odb, &mut grit_lib::index::Index, &str, grit_lib::index::write_tree::WriteTreeFlags) -> grit_lib::index::error::IndexResult<grit_lib::objects::ObjectId>
+#[non_exhaustive] pub enum grit_lib::index::IndexChmodReason
+pub grit_lib::index::IndexChmodReason::InvalidTargetMode
+pub grit_lib::index::IndexChmodReason::InvalidTargetMode::mode: u32
+pub grit_lib::index::IndexChmodReason::NotChmodEligible
+pub grit_lib::index::IndexChmodReason::UnmergedPath
+impl core::clone::Clone for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::index::error::IndexChmodReason
+impl core::cmp::PartialEq for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::index::error::IndexChmodReason
+pub fn grit_lib::index::error::IndexChmodReason::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::index::error::IndexChmodReason
+impl core::marker::Freeze for grit_lib::index::error::IndexChmodReason
+impl core::marker::Send for grit_lib::index::error::IndexChmodReason
+impl core::marker::Sync for grit_lib::index::error::IndexChmodReason
+impl core::marker::Unpin for grit_lib::index::error::IndexChmodReason
+impl core::marker::UnsafeUnpin for grit_lib::index::error::IndexChmodReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::error::IndexChmodReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::error::IndexChmodReason
 #[non_exhaustive] pub enum grit_lib::index::IndexCorruptReason
 pub grit_lib::index::IndexCorruptReason::BadEntry
 pub grit_lib::index::IndexCorruptReason::BadSignature
@@ -7115,7 +7187,12 @@ pub grit_lib::index::IndexCorruptReason::UnsupportedExtension
 pub grit_lib::index::IndexCorruptReason::UnsupportedExtension::sig: u32
 pub grit_lib::index::IndexCorruptReason::UnsupportedVersion
 pub grit_lib::index::IndexCorruptReason::UnsupportedVersion::version: u32
+pub grit_lib::index::IndexCorruptReason::UntrackedCacheDirCorrupt
+pub grit_lib::index::IndexCorruptReason::UntrackedCacheInvalidUtf8
+pub grit_lib::index::IndexCorruptReason::UntrackedCacheInvalidVarint
+pub grit_lib::index::IndexCorruptReason::UntrackedCacheMissingNul
 pub grit_lib::index::IndexCorruptReason::UntrackedCacheNoRoot
+pub grit_lib::index::IndexCorruptReason::UntrackedCacheTruncated
 pub grit_lib::index::IndexCorruptReason::V4PathMissingNul
 pub grit_lib::index::IndexCorruptReason::WriteTreeCacheTreeChildMissing
 pub grit_lib::index::IndexCorruptReason::WriteTreeCacheTreeRootMissingOid
@@ -7145,7 +7222,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::error::IndexCorru
 #[non_exhaustive] pub enum grit_lib::index::IndexError
 pub grit_lib::index::IndexError::CacheTreeCorrupt
 pub grit_lib::index::IndexError::Chmod
-pub grit_lib::index::IndexError::Chmod::detail: alloc::string::String
+pub grit_lib::index::IndexError::Chmod::path: alloc::string::String
+pub grit_lib::index::IndexError::Chmod::reason: grit_lib::index::error::IndexChmodReason
 pub grit_lib::index::IndexError::Corrupt
 pub grit_lib::index::IndexError::Corrupt::corrupt: grit_lib::index::error::IndexCorrupt
 pub grit_lib::index::IndexError::Corrupt::detail: alloc::string::String
@@ -7157,21 +7235,39 @@ pub grit_lib::index::IndexError::PathIo(grit_lib::error::PathIoError)
 pub grit_lib::index::IndexError::PathPrefixConflict
 pub grit_lib::index::IndexError::PathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::index::IndexError::PathPrefixConflict::file: std::path::PathBuf
-pub grit_lib::index::IndexError::SplitIndex
-pub grit_lib::index::IndexError::SplitIndex::detail: alloc::string::String
 pub grit_lib::index::IndexError::Unmerged
 pub grit_lib::index::IndexError::Unmerged::paths: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::index::IndexError::WriteTree
-pub grit_lib::index::IndexError::WriteTree::detail: alloc::string::String
 impl grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::kind_name(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::unmerged() -> Self
+impl core::convert::From<core::io::error::Error> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(core::io::error::Error) -> Self
+impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::ConfigError) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::LockHeldError) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::commit::CommitPatchError
+pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::hunk_select::HunkSelectError
+pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::merge::ContinueMergeError
+pub fn grit_lib::porcelain::merge::ContinueMergeError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::remote::snapshot_checkout::CheckoutError
+pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::RebaseSessionError
+pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::index::error::IndexError) -> Self
+impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::lockfile::LockError) -> Self
 impl core::error::Error for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::index::error::IndexError
@@ -7225,7 +7321,7 @@ pub fn grit_lib::index::Index::clear_cache_tree(&mut self)
 pub fn grit_lib::index::Index::clear_fsmonitor_extension(&mut self)
 pub fn grit_lib::index::Index::clear_resolve_undo(&mut self)
 pub fn grit_lib::index::Index::dedup_paths_keep_last(&mut self)
-pub fn grit_lib::index::Index::dump_cache_tree(&self, &grit_lib::prelude::Odb) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::index::Index::dump_cache_tree(&self, &grit_lib::prelude::Odb) -> grit_lib::index::error::IndexResult<alloc::string::String>
 pub fn grit_lib::index::Index::empty(u32) -> Self
 pub fn grit_lib::index::Index::ensure_canonical_order(&mut self)
 pub fn grit_lib::index::Index::entries(&self) -> &[grit_lib::index::IndexEntry]
@@ -7243,19 +7339,19 @@ pub fn grit_lib::index::Index::has_unmerged_entries(&self) -> bool
 pub fn grit_lib::index::Index::install_unmerged_from_resolve_undo(&mut self, &[u8], &grit_lib::index::resolve_undo::ResolveUndoRecord)
 pub fn grit_lib::index::Index::invalidate_cache_tree_for_path(&mut self, &[u8])
 pub fn grit_lib::index::Index::invalidate_untracked_cache_for_path(&mut self, &str)
-pub fn grit_lib::index::Index::load(&std::path::Path) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse_optional(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse_optional_with_context(&std::path::Path, &grit_lib::prelude::Odb, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse_with_config(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<Self>
+pub fn grit_lib::index::Index::load(&std::path::Path) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse_optional(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse_optional_with_context(&std::path::Path, &grit_lib::prelude::Odb, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse_with_config(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::config::ConfigSet) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::mark_entries_unsorted(&mut self)
 pub fn grit_lib::index::Index::new() -> Self
 pub fn grit_lib::index::Index::new_from_config(&grit_lib::config::ConfigSet) -> Self
 pub fn grit_lib::index::Index::new_with_config(core::option::Option<&str>, core::option::Option<&str>) -> Self
 pub fn grit_lib::index::Index::overlay_tree_on_index(&mut self, &grit_lib::repo::Repository, &str, &[u8]) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::parse(&[u8]) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::parse_with_algo(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::parse_with_algo_and_config(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::error::Result<Self>
+pub fn grit_lib::index::Index::parse(&[u8]) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::parse_with_algo(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::parse_with_algo_and_config(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::remove(&mut self, &[u8]) -> bool
 pub fn grit_lib::index::Index::remove_descendants_under_path(&mut self, &str)
 pub fn grit_lib::index::Index::remove_path_all_stages(&mut self, &[u8]) -> bool
@@ -7270,9 +7366,9 @@ pub fn grit_lib::index::Index::sync_fsmonitor_dirty_bitmap(&mut self)
 pub fn grit_lib::index::Index::take_resolve_undo_record(&mut self, &[u8]) -> core::option::Option<grit_lib::index::resolve_undo::ResolveUndoRecord>
 pub fn grit_lib::index::Index::try_collapse_sparse_directories(&mut self, &grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &[alloc::string::String], bool, bool, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) -> bool
-pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::index::error::IndexResult<()>
 pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
@@ -7356,19 +7452,19 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::IndexEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::IndexEntry
 pub struct grit_lib::index::IndexHandle<'repo>
 impl<'repo> grit_lib::index::IndexHandle<'repo>
-pub fn grit_lib::index::IndexHandle<'repo>::begin_update(&self) -> grit_lib::error::Result<grit_lib::index::IndexLock>
-pub fn grit_lib::index::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::IndexHandle<'repo>::load(&self) -> grit_lib::error::Result<grit_lib::index::Index>
-pub fn grit_lib::index::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::index::Index>
-pub fn grit_lib::index::IndexHandle<'repo>::load_preserving_sparse(&self) -> grit_lib::error::Result<grit_lib::index::Index>
+pub fn grit_lib::index::IndexHandle<'repo>::begin_update(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::IndexLock>
+pub fn grit_lib::index::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::IndexHandle<'repo>::load(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
+pub fn grit_lib::index::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
+pub fn grit_lib::index::IndexHandle<'repo>::load_preserving_sparse(&self) -> grit_lib::index::error::IndexResult<grit_lib::index::Index>
 pub fn grit_lib::index::IndexHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::index::IndexHandle<'repo>::path(&self) -> std::path::PathBuf
 pub fn grit_lib::index::IndexHandle<'repo>::path_for_env(&self) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::index::IndexHandle<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::index::IndexHandle<'repo>::try_write(&self, &mut grit_lib::index::Index) -> grit_lib::error::Result<bool>
-pub fn grit_lib::index::IndexHandle<'repo>::write(&self, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::IndexHandle<'repo>::write_at(&self, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::IndexHandle<'repo>::write_at_with_split(&self, &std::path::Path, &mut grit_lib::index::Index, grit_lib::index::split_index::WriteSplitIndexRequest) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::IndexHandle<'repo>::try_write(&self, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<bool>
+pub fn grit_lib::index::IndexHandle<'repo>::write(&self, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::IndexHandle<'repo>::write_at(&self, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::IndexHandle<'repo>::write_at_with_split(&self, &std::path::Path, &mut grit_lib::index::Index, grit_lib::index::split_index::WriteSplitIndexRequest) -> grit_lib::index::error::IndexResult<()>
 impl<'repo> core::clone::Clone for grit_lib::index::IndexHandle<'repo>
 pub fn grit_lib::index::IndexHandle<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::index::IndexHandle<'repo>
@@ -7390,7 +7486,6 @@ impl core::default::Default for grit_lib::index::IndexLoadOptions
 pub fn grit_lib::index::IndexLoadOptions::default() -> Self
 impl core::fmt::Debug for grit_lib::index::IndexLoadOptions
 pub fn grit_lib::index::IndexLoadOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::index::IndexLoadOptions
 impl core::marker::Freeze for grit_lib::index::IndexLoadOptions
 impl core::marker::Send for grit_lib::index::IndexLoadOptions
 impl core::marker::Sync for grit_lib::index::IndexLoadOptions
@@ -7400,7 +7495,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::IndexLoadOptio
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::IndexLoadOptions
 pub struct grit_lib::index::IndexLock
 impl grit_lib::index::IndexLock
-pub fn grit_lib::index::IndexLock::acquire(&std::path::Path, core::option::Option<&grit_lib::config::ConfigSet>) -> grit_lib::error::Result<Self>
+pub fn grit_lib::index::IndexLock::acquire(&std::path::Path, core::option::Option<&grit_lib::config::ConfigSet>) -> grit_lib::index::error::IndexResult<Self>
 impl core::ops::drop::Drop for grit_lib::index::IndexLock
 pub fn grit_lib::index::IndexLock::drop(&mut self)
 impl core::marker::Freeze for grit_lib::index::IndexLock
@@ -7414,13 +7509,13 @@ pub struct grit_lib::index::IndexParseContext
 pub grit_lib::index::IndexParseContext::thread_policy: grit_lib::parallel::ThreadPolicy
 impl grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::from_policy(grit_lib::parallel::ThreadPolicy) -> Self
+pub fn grit_lib::index::IndexParseContext::with_source_path(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 impl core::clone::Clone for grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::default() -> Self
 impl core::fmt::Debug for grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::index::IndexParseContext
 impl core::marker::Freeze for grit_lib::index::IndexParseContext
 impl core::marker::Send for grit_lib::index::IndexParseContext
 impl core::marker::Sync for grit_lib::index::IndexParseContext
@@ -7586,6 +7681,8 @@ pub grit_lib::lockfile::LockError::Io::path: std::path::PathBuf
 pub grit_lib::lockfile::LockError::Io::source: core::io::error::Error
 impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::lockfile::LockError) -> Self
+impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::lockfile::LockError) -> Self
 impl core::error::Error for grit_lib::lockfile::LockError
 pub fn grit_lib::lockfile::LockError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::lockfile::LockError
@@ -12257,6 +12354,8 @@ impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::porcelain::c
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::error::ApplyError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::commit::CommitPatchError
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::commit::CommitPatchError
+pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::porcelain::commit::CommitPatchError
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::error::Error for grit_lib::porcelain::commit::CommitPatchError
@@ -12498,6 +12597,8 @@ impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::porcelain::h
 pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::error::ApplyError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::hunk_select::HunkSelectError
 pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::hunk_select::HunkSelectError
+pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::porcelain::commit::CommitPatchError
@@ -12654,7 +12755,7 @@ impl core::marker::Unpin for grit_lib::porcelain::index_mode::StageExecutableHin
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::index_mode::StageExecutableHint
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::index_mode::StageExecutableHint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::index_mode::StageExecutableHint
-pub fn grit_lib::porcelain::index_mode::set_stage0_file_mode(&mut grit_lib::index::Index, &[u8], u32) -> grit_lib::error::Result<bool>
+pub fn grit_lib::porcelain::index_mode::set_stage0_file_mode(&mut grit_lib::index::Index, &[u8], u32) -> grit_lib::index::error::IndexResult<bool>
 pub mod grit_lib::porcelain::log
 pub enum grit_lib::porcelain::log::DecorationKind
 pub grit_lib::porcelain::log::DecorationKind::Branch
@@ -12789,6 +12890,8 @@ pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths
 pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths::paths: alloc::vec::Vec<alloc::string::String>
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::merge::ContinueMergeError
 pub fn grit_lib::porcelain::merge::ContinueMergeError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::merge::ContinueMergeError
+pub fn grit_lib::porcelain::merge::ContinueMergeError::from(grit_lib::index::error::IndexError) -> Self
 impl core::error::Error for grit_lib::porcelain::merge::ContinueMergeError
 pub fn grit_lib::porcelain::merge::ContinueMergeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::porcelain::merge::ContinueMergeError
@@ -13290,6 +13393,8 @@ impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::porcelain::pull::PullError> for grit_lib::remote::snapshot_checkout::CheckoutError
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::porcelain::pull::PullError) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::porcelain::pull::PullError
@@ -14945,6 +15050,8 @@ impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::error::ConfigError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::commit::CommitPatchError
@@ -15456,7 +15563,7 @@ pub fn grit_lib::index::Index::clear_cache_tree(&mut self)
 pub fn grit_lib::index::Index::clear_fsmonitor_extension(&mut self)
 pub fn grit_lib::index::Index::clear_resolve_undo(&mut self)
 pub fn grit_lib::index::Index::dedup_paths_keep_last(&mut self)
-pub fn grit_lib::index::Index::dump_cache_tree(&self, &grit_lib::prelude::Odb) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::index::Index::dump_cache_tree(&self, &grit_lib::prelude::Odb) -> grit_lib::index::error::IndexResult<alloc::string::String>
 pub fn grit_lib::index::Index::empty(u32) -> Self
 pub fn grit_lib::index::Index::ensure_canonical_order(&mut self)
 pub fn grit_lib::index::Index::entries(&self) -> &[grit_lib::index::IndexEntry]
@@ -15474,19 +15581,19 @@ pub fn grit_lib::index::Index::has_unmerged_entries(&self) -> bool
 pub fn grit_lib::index::Index::install_unmerged_from_resolve_undo(&mut self, &[u8], &grit_lib::index::resolve_undo::ResolveUndoRecord)
 pub fn grit_lib::index::Index::invalidate_cache_tree_for_path(&mut self, &[u8])
 pub fn grit_lib::index::Index::invalidate_untracked_cache_for_path(&mut self, &str)
-pub fn grit_lib::index::Index::load(&std::path::Path) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse_optional(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse_optional_with_context(&std::path::Path, &grit_lib::prelude::Odb, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::load_expand_sparse_with_config(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<Self>
+pub fn grit_lib::index::Index::load(&std::path::Path) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse_optional(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse_optional_with_context(&std::path::Path, &grit_lib::prelude::Odb, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::load_expand_sparse_with_config(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::config::ConfigSet) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::mark_entries_unsorted(&mut self)
 pub fn grit_lib::index::Index::new() -> Self
 pub fn grit_lib::index::Index::new_from_config(&grit_lib::config::ConfigSet) -> Self
 pub fn grit_lib::index::Index::new_with_config(core::option::Option<&str>, core::option::Option<&str>) -> Self
 pub fn grit_lib::index::Index::overlay_tree_on_index(&mut self, &grit_lib::repo::Repository, &str, &[u8]) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::parse(&[u8]) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::parse_with_algo(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::error::Result<Self>
-pub fn grit_lib::index::Index::parse_with_algo_and_config(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::error::Result<Self>
+pub fn grit_lib::index::Index::parse(&[u8]) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::parse_with_algo(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::parse_with_algo_and_config(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::remove(&mut self, &[u8]) -> bool
 pub fn grit_lib::index::Index::remove_descendants_under_path(&mut self, &str)
 pub fn grit_lib::index::Index::remove_path_all_stages(&mut self, &[u8]) -> bool
@@ -15501,9 +15608,9 @@ pub fn grit_lib::index::Index::sync_fsmonitor_dirty_bitmap(&mut self)
 pub fn grit_lib::index::Index::take_resolve_undo_record(&mut self, &[u8]) -> core::option::Option<grit_lib::index::resolve_undo::ResolveUndoRecord>
 pub fn grit_lib::index::Index::try_collapse_sparse_directories(&mut self, &grit_lib::prelude::Odb, &grit_lib::objects::ObjectId, &[alloc::string::String], bool, bool, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) -> bool
-pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::index::error::IndexResult<()>
+pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::index::error::IndexResult<()>
 pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
@@ -20854,6 +20961,8 @@ impl core::convert::From<core::io::error::Error> for grit_lib::remote::snapshot_
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::snapshot_checkout::CheckoutError
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::remote::snapshot_checkout::CheckoutError
+pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::porcelain::pull::PullError> for grit_lib::remote::snapshot_checkout::CheckoutError
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::porcelain::pull::PullError) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::remote::snapshot_checkout::CheckoutError
@@ -24265,6 +24374,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history:
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::ident::AuthorArgError) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::error::Error
@@ -24420,6 +24531,8 @@ impl grit_lib::revwalk::history::RebaseSessionError
 pub fn grit_lib::revwalk::history::RebaseSessionError::is_cancelled(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history::RebaseSessionError
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::index::error::IndexError> for grit_lib::revwalk::history::RebaseSessionError
+pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::index::error::IndexError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::revwalk::history::RebaseSessionError
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::revwalk::history::HistoryError) -> Self
 impl core::error::Error for grit_lib::revwalk::history::RebaseSessionError

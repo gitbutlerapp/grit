@@ -2002,7 +2002,7 @@ mod merge_call_tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Error::from)
     }
 
     fn tree_with_file(
@@ -2036,7 +2036,7 @@ mod merge_call_tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         });
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Error::from)
     }
 
     use crate::replay_merge_session::{
@@ -2718,6 +2718,6 @@ mod merge_call_tests {
             entry.base_index_pos = 0;
             index.add_or_replace(entry);
         }
-        write_tree_from_index(repo.odb(), &index, "")
+        write_tree_from_index(repo.odb(), &index, "").map_err(Error::from)
     }
 }
