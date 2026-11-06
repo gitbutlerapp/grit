@@ -18,8 +18,6 @@
 //!   A file the base or the renaming side has at the destination does not block the move: the
 //!   moved file is merged with it there as the adding side's version.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-
 use super::merge_tree_cache::{lookup_index_entry_at_path_cached, MergeTreeCache};
 use super::{
     merge_one_path, stage_entry, DirectoryRenameConflict, DirectoryRenameMode, MergeSide,
@@ -30,6 +28,7 @@ use crate::index::{Index, IndexEntry};
 use crate::merge_file::MergeFavor;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 const MODE_DIR: u32 = 0o040000;
 

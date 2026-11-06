@@ -1425,7 +1425,7 @@ fn hide_other_branch_tips(
         }
         hidden.insert(oid);
         excluded.push(AbsorbExcludedRef {
-            ref_name: name,
+            ref_name: name.as_str().to_owned(),
             tip: oid,
         });
     }

@@ -6,14 +6,20 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use grit_lib::error::{Error, Result};
+use grit_lib::refs::check_ref_format::RefNamePolicy;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::backend::{
     apply_transaction, check_transaction, resolve_symbolic, RefBatchState,
 };
 use grit_lib::refs::store::{
-    BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat,
-    RefStore, RefStoreError, RefTransaction,
+    BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef,
+    RefStorageFormat, RefStore, RefStoreError, RefTransaction,
 };
+
+fn rnr(name: &str) -> &RefNameRef {
+    RefNameRef::parse(name, &RefNamePolicy::default()).expect("valid test ref name")
+}
+
 use grit_test_support::refstore_conformance::run_suite;
 
 #[derive(Debug, Default)]
@@ -44,8 +50,8 @@ impl RefStore for MapStore {
         RefStorageFormat::Custom("map")
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
-        Ok(self.inner().state.refs.get(name).cloned())
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
+        Ok(self.inner().state.refs.get(name.as_str()).cloned())
     }
 
     fn for_each_ref(
@@ -64,7 +70,7 @@ impl RefStore for MapStore {
                 RawRef::Symbolic(_) => resolve_symbolic(&state.refs, name).ok(),
             };
             let entry = RefEntry {
-                name: name.clone(),
+                name: RefName::from_trusted(name.clone()),
                 value: value.clone(),
                 peeled,
             };
@@ -93,18 +99,18 @@ impl RefStore for MapStore {
         }))
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
-        Ok(self.inner().state.reflogs.contains_key(name))
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
+        Ok(self.inner().state.reflogs.contains_key(name.as_str()))
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         let state = self.snapshot();
-        let Some(entries) = state.reflogs.get(name) else {
+        let Some(entries) = state.reflogs.get(name.as_str()) else {
             return Ok(());
         };
         let mut visit = |entry: &ReflogEntry| f(entry).is_break();
@@ -116,40 +122,55 @@ impl RefStore for MapStore {
         Ok(())
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.inner()
             .state
             .reflogs
-            .entry(name.to_owned())
+            .entry(name.as_str().to_owned())
             .or_default();
         Ok(())
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
-        self.inner().state.reflogs.remove(name);
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
+        self.inner().state.reflogs.remove(name.as_str());
         Ok(())
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
-        self.inner().state.reflogs.insert(name.to_owned(), entries);
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
+        self.inner()
+            .state
+            .reflogs
+            .insert(name.as_str().to_owned(), entries);
         Ok(())
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         let mut inner = self.inner();
-        let current = inner.state.reflogs.get(name).cloned().unwrap_or_default();
+        let current = inner
+            .state
+            .reflogs
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_default();
         let rewritten = transform(current)?;
-        inner.state.reflogs.insert(name.to_owned(), rewritten);
+        inner
+            .state
+            .reflogs
+            .insert(name.as_str().to_owned(), rewritten);
         Ok(())
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         let state = self.snapshot();
-        state.reflogs.keys().any(|name| f(name).is_break());
+        for key in state.reflogs.keys() {
+            if f(RefNameRef::from_trusted(key)).is_break() {
+                break;
+            }
+        }
         Ok(())
     }
 }
@@ -199,7 +220,7 @@ impl RefStore for PlainForwarding {
         RefStorageFormat::Custom("plain-forwarding")
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
         self.0.read_raw(name)
     }
 
@@ -218,34 +239,34 @@ impl RefStore for PlainForwarding {
         self.0.prepare(txn)
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
         self.0.reflog_exists(name)
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         self.0.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.0.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.0.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
         self.0.replace_reflog(name, entries)
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         let mut entries = Vec::new();
@@ -257,7 +278,7 @@ impl RefStore for PlainForwarding {
         self.replace_reflog(name, rewritten)
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         self.0.for_each_reflog_ref(f)
     }
 }
@@ -303,7 +324,7 @@ impl RefStore for Offline {
         RefStorageFormat::Custom("offline")
     }
 
-    fn read_raw(&self, _name: &str) -> Result<Option<RawRef>> {
+    fn read_raw(&self, _name: &RefNameRef) -> Result<Option<RawRef>> {
         Err(RefStoreError::backend(ConnectionLost).into())
     }
 
@@ -322,47 +343,52 @@ impl RefStore for Offline {
         Err(RefStoreError::backend(ConnectionLost))
     }
 
-    fn reflog_exists(&self, _name: &str) -> Result<bool> {
+    fn reflog_exists(&self, _name: &RefNameRef) -> Result<bool> {
         Ok(false)
     }
 
     fn for_each_reflog_entry(
         &self,
-        _name: &str,
+        _name: &RefNameRef,
         _reverse: bool,
         _f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         Ok(())
     }
 
-    fn create_reflog(&self, _name: &str) -> Result<()> {
+    fn create_reflog(&self, _name: &RefNameRef) -> Result<()> {
         Ok(())
     }
 
-    fn delete_reflog(&self, _name: &str) -> Result<()> {
+    fn delete_reflog(&self, _name: &RefNameRef) -> Result<()> {
         Ok(())
     }
 
-    fn replace_reflog(&self, _name: &str, _entries: Vec<ReflogEntry>) -> Result<()> {
+    fn replace_reflog(&self, _name: &RefNameRef, _entries: Vec<ReflogEntry>) -> Result<()> {
         Ok(())
     }
 
     fn rewrite_reflog(
         &self,
-        _name: &str,
+        _name: &RefNameRef,
         _transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         Err(RefStoreError::backend(ConnectionLost).into())
     }
 
-    fn for_each_reflog_ref(&self, _f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(
+        &self,
+        _f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>,
+    ) -> Result<()> {
         Ok(())
     }
 }
 
 #[test]
 fn backend_errors_stay_typed_and_downcastable() {
-    let err = Offline.resolve("HEAD").expect_err("offline");
+    let err = Offline
+        .resolve(RefNameRef::from_trusted("HEAD"))
+        .expect_err("offline");
     let Error::RefStore(RefStoreError::Backend(inner)) = &err else {
         panic!("expected a backend error, got {err:?}");
     };

@@ -36,7 +36,7 @@ use crate::ident::committer_unix_seconds_for_ordering_bytes;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::refs::query_reachability::{self, ReachRow};
-use crate::refs::store::{RefEntry, RefStore};
+use crate::refs::store::{RefEntry, RefNameRef, RefStore};
 use crate::refs::version_sort::compare_refname_versions;
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
@@ -210,29 +210,29 @@ pub fn short_name_in_namespace(full_name: &str, namespace: &RefNamespace) -> Str
         .to_owned()
 }
 
-/// Whether `refname` matches `pattern` using `git ls-remote` tail-match rules.
+/// Whether `full_ref_name` matches `pattern` using `git ls-remote` tail-match rules.
 #[must_use]
-pub fn pattern_matches_ls_remote_pattern(refname: &str, pattern: &str) -> bool {
+pub fn pattern_matches_ls_remote_pattern(full_ref_name: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return false;
     }
-    let path = format!("/{refname}");
+    let path = format!("/{full_ref_name}");
     let full = format!("*/{pattern}");
     ls_remote_glob_match(&full, &path)
 }
 
-/// Returns `true` when `refname` matches one of `patterns`.
+/// Returns `true` when `full_ref_name` matches one of `patterns`.
 ///
 /// An empty `patterns` slice means no pattern filter (all ref names pass). An explicit
 /// empty-string pattern (`patterns == [""]`) matches nothing, like `git ls-remote`.
 #[must_use]
-pub fn patterns_match_ls_remote(refname: &str, patterns: &[String]) -> bool {
+pub fn patterns_match_ls_remote(full_ref_name: &str, patterns: &[String]) -> bool {
     if patterns.is_empty() {
         return true;
     }
     patterns
         .iter()
-        .any(|p| pattern_matches_ls_remote_pattern(refname, p))
+        .any(|p| pattern_matches_ls_remote_pattern(full_ref_name, p))
 }
 
 fn ls_remote_glob_match(pattern: &str, text: &str) -> bool {
@@ -525,7 +525,7 @@ pub(crate) fn query_refs_peeling(
         let prefix = ns.prefix();
         store.for_each_ref(prefix, &mut |entry: &RefEntry| {
             if linked_worktree
-                && !crate::worktree_ref::ref_visible_from_worktree(git_dir, &entry.name)
+                && !crate::worktree_ref::ref_visible_from_worktree(git_dir, entry.name.as_str())
             {
                 return ControlFlow::Continue(());
             }
@@ -570,13 +570,19 @@ fn insert_collected_ref(
         .peeled
         .or_else(|| match &entry.value {
             crate::refs::store::RawRef::Direct(oid) => Some(*oid),
-            crate::refs::store::RawRef::Symbolic(target) => store.resolve(target).ok(),
+            crate::refs::store::RawRef::Symbolic(target) => {
+                store.resolve(RefNameRef::from_trusted(target)).ok()
+            }
         })
-        .or_else(|| store.resolve(&entry.name).ok());
+        .or_else(|| {
+            store
+                .resolve(RefNameRef::from_trusted(entry.name.as_str()))
+                .ok()
+        });
     let Some(resolved) = resolved else {
         return;
     };
-    let short_name = short_name_for_query(&entry.name, namespaces);
+    let short_name = short_name_for_query(entry.name.as_str(), namespaces);
     if !patterns_match(&short_name, &query.patterns, options.ignore_case) {
         return;
     }
@@ -588,9 +594,9 @@ fn insert_collected_ref(
         crate::refs::store::RawRef::Direct(_) => entry.peeled,
         crate::refs::store::RawRef::Symbolic(_) => None,
     };
-    let kind = ref_kind_from_name(&entry.name);
+    let kind = ref_kind_from_name(entry.name.as_str());
     collected.push(CollectedRef {
-        full_name: entry.name.clone(),
+        full_name: entry.name.as_str().to_owned(),
         short_name,
         oid: direct_oid,
         peeled,

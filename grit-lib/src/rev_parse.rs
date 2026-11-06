@@ -26,7 +26,7 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, ObjectKind};
 use crate::reflog::ReflogEntry;
 use crate::refs;
-use crate::refs::store::RawRef;
+use crate::refs::store::{RawRef, RefNameRef};
 use crate::repo::Repository;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
 
@@ -1270,7 +1270,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
     for rule in RULES {
         let candidate = rule.replace("{0}", spec);
         // One raw read decides missing and direct candidates; only symrefs need resolving.
-        let resolved = match repo.refs().read_raw(&candidate) {
+        let resolved = match repo.refs().read_raw(RefNameRef::from_trusted(&candidate)) {
             Ok(None) => continue,
             Ok(Some(refs::store::RawRef::Direct(oid))) => Ok(oid),
             Ok(Some(refs::store::RawRef::Symbolic(target))) => {
@@ -2775,11 +2775,14 @@ fn resolve_base(
 
 fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEntry>> {
     let mut entries = Vec::new();
-    repo.refs()
-        .for_each_reflog_entry(refname, false, &mut |entry| {
+    repo.refs().for_each_reflog_entry_str(
+        RefNameRef::from_trusted(refname),
+        false,
+        &mut |entry| {
             entries.push(entry.clone());
             ControlFlow::Continue(())
-        })?;
+        },
+    )?;
     Ok(entries)
 }
 
@@ -2974,7 +2977,9 @@ fn resolve_reflog_oid(
     if refname == "HEAD" {
         if let ReflogSelector::Index(index) = index_or_date {
             if index >= entries.len() {
-                if let Ok(Some(RawRef::Symbolic(branch_ref))) = repo.refs().read_raw("HEAD") {
+                if let Ok(Some(RawRef::Symbolic(branch_ref))) =
+                    repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))
+                {
                     if let Ok(branch_entries) = read_reflog_for_repo(repo, &branch_ref) {
                         if index < branch_entries.len() {
                             entries = branch_entries;
@@ -2995,7 +3000,11 @@ fn resolve_reflog_oid(
                     // fails. Only when the reflog exists but is empty does `ref@{0}` fall
                     // back to the ref's current value (the `nth == co_cnt` case in
                     // object-name.c).
-                    if !repo.refs().reflog_exists(refname).unwrap_or(false) {
+                    if !repo
+                        .refs()
+                        .reflog_exists(RefNameRef::from_trusted(refname))
+                        .unwrap_or(false)
+                    {
                         return Err(RevParseError::ReflogEmpty {
                             ref_display: display.clone(),
                         }

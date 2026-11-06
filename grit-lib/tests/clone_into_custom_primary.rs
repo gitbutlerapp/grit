@@ -10,7 +10,7 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneCheckout, CloneIntoOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::{InitOptions, Repository};
@@ -158,7 +158,7 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
     );
     assert_eq!(
         ref_store
-            .read_raw("refs/remotes/origin/main")
+            .read_raw(RefNameRef::from_trusted("refs/remotes/origin/main"))
             .expect("read tracking"),
         Some(RawRef::Direct(tip)),
         "fetch must keep origin/main in the injected ref store"
@@ -167,12 +167,14 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
     assert!(matches!(outcome.checkout, CloneCheckout::CheckedOut(_)));
     assert_eq!(
         ref_store
-            .read_raw("refs/heads/main")
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
             .expect("read local branch"),
         Some(RawRef::Direct(tip))
     );
     assert_eq!(
-        ref_store.read_raw("HEAD").expect("HEAD"),
+        ref_store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
     assert!(store.contains(&tip).expect("contains"));

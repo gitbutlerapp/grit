@@ -12,7 +12,7 @@ use std::sync::Arc;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::InspectOptions;
@@ -216,7 +216,7 @@ fn wire_fetch_stays_in_the_injected_store() {
     fetch_opts.prune = true;
     fetch(&repo, "origin", fetch_opts);
     assert!(store
-        .read_raw("refs/remotes/origin/topic")
+        .read_raw(RefNameRef::from_trusted("refs/remotes/origin/topic"))
         .expect("read")
         .is_none());
     assert_no_disk_tracking_refs(&local);
@@ -365,7 +365,7 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
         .expect("remote prune");
     assert_eq!(pruned, ["refs/remotes/origin/topic"]);
     assert!(store
-        .read_raw("refs/remotes/origin/topic")
+        .read_raw(RefNameRef::from_trusted("refs/remotes/origin/topic"))
         .expect("read")
         .is_none());
 
@@ -378,7 +378,7 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
         Some("refs/remotes/origin/main")
     );
     assert!(store
-        .read_raw("refs/remotes/origin/HEAD")
+        .read_raw(RefNameRef::from_trusted("refs/remotes/origin/HEAD"))
         .expect("read")
         .is_none());
 
@@ -388,7 +388,9 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
         .expect("set head");
     assert_eq!(set.previous_target, None);
     assert_eq!(
-        store.read_raw("refs/remotes/origin/HEAD").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/remotes/origin/HEAD"))
+            .expect("read"),
         Some(RawRef::Symbolic("refs/remotes/origin/main".into()))
     );
     assert!(repo

@@ -109,10 +109,10 @@ fn verify_record_still_valid(
     record: &HistoryLastRecord,
 ) -> Result<(), HistoryError> {
     for update in &record.ref_updates {
-        let live = repo.references().resolve_if_exists(&update.name);
+        let live = repo.references().resolve_if_exists(update.name.as_str());
         if !matches!(live, Ok(Some(oid)) if oid == update.new) {
             return Err(HistoryError::UndoStale {
-                name: update.name.clone(),
+                name: update.name.as_str().to_owned(),
             });
         }
     }
@@ -143,6 +143,7 @@ mod tests {
     use super::*;
     use crate::history::types::{HeadEffect, PlannedRefUpdate};
     use crate::objects::ObjectId;
+    use crate::refs::store::RefName;
 
     #[test]
     fn undo_plan_swaps_refs_and_head_trees() {
@@ -162,7 +163,7 @@ mod tests {
                 ObjectId::from_hex("0000000000000000000000000000000000000004").unwrap(),
             ),
             ref_updates: vec![PlannedRefUpdate {
-                name: "refs/heads/main".into(),
+                name: RefName::from_trusted("refs/heads/main"),
                 old: ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap(),
                 new: ObjectId::from_hex("0000000000000000000000000000000000000002").unwrap(),
             }],

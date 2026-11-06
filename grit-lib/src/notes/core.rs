@@ -30,7 +30,7 @@ use crate::objects::{
 };
 use crate::refs::list_refs_for_repository;
 use crate::refs::should_autocreate_reflog_with_config;
-use crate::refs::store::{Expected, RawRef, ReflogUpdate};
+use crate::refs::store::{Expected, RawRef, RefNameRef, ReflogUpdate};
 use crate::refs::store_write_value_on_store;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
@@ -145,10 +145,13 @@ fn collect_notes_tree_entries(
 
 /// Current target of `notes_ref` in the repository's ref store, or `None` when the ref is absent.
 fn notes_ref_tip(repo: &Repository, notes_ref: &str) -> Result<Option<ObjectId>> {
-    match repo.refs().read_raw(notes_ref)? {
+    match repo.refs().read_raw(RefNameRef::from_trusted(notes_ref))? {
         None => Ok(None),
         Some(RawRef::Direct(oid)) => Ok(Some(oid)),
-        Some(RawRef::Symbolic(_)) => repo.refs().resolve(notes_ref).map(Some),
+        Some(RawRef::Symbolic(_)) => repo
+            .refs()
+            .resolve(RefNameRef::from_trusted(notes_ref))
+            .map(Some),
     }
 }
 
@@ -888,7 +891,9 @@ fn update_notes_ref(
 ) -> Result<()> {
     let config = repo.config().snapshot()?;
     let log = should_autocreate_reflog_with_config(config.as_ref(), repo.git_dir(), notes_ref)
-        || repo.refs().reflog_exists(notes_ref)?;
+        || repo
+            .refs()
+            .reflog_exists(RefNameRef::from_trusted(notes_ref))?;
     let reflog = log.then(|| ReflogUpdate {
         identity: commit.committer.to_owned(),
         message: format!("notes: {}", commit.message.trim_end_matches('\n')),
@@ -2007,6 +2012,7 @@ mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
     use crate::objects::ObjectKind;
+    use crate::refs::store::RefNameRef;
     use crate::repo::Repository;
     use std::io::Write;
     use std::process::Command;
@@ -2422,9 +2428,15 @@ mod tests {
         let mut entries = Vec::new();
         upsert_note_entry(&mut entries, &"ab".repeat(20), blob);
         write_notes_commit(&repo, "refs/notes/commits", &entries, "first").unwrap();
-        let first = repo.refs().resolve("refs/notes/commits").unwrap();
+        let first = repo
+            .refs()
+            .resolve(RefNameRef::from_trusted("refs/notes/commits"))
+            .unwrap();
         write_notes_commit(&repo, "refs/notes/commits", &[], "second").unwrap();
-        let second = repo.refs().resolve("refs/notes/commits").unwrap();
+        let second = repo
+            .refs()
+            .resolve(RefNameRef::from_trusted("refs/notes/commits"))
+            .unwrap();
 
         let commit = parse_commit(&repo.odb().read(&second).unwrap().data).unwrap();
         assert_eq!(commit.parents, vec![first]);

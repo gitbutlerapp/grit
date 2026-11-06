@@ -35,6 +35,7 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
+use crate::refs::store::RefNameRef;
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -732,7 +733,7 @@ fn advance_replay_tip(
 ) -> Result<()> {
     if let Some(refname) = branch_ref {
         let ref_update = BranchCommitRefUpdate {
-            branch_ref: refname,
+            branch_ref: crate::refs::store::RefNameRef::from_trusted(refname),
             expected_old: Some(head_oid),
             new_oid,
             identity: committer,
@@ -1912,7 +1913,10 @@ fn resolve_continue_replay_message(git_dir: &Path) -> Result<String> {
 
 /// Pick and revert keep an `ORIG_HEAD` left by an earlier reset, merge or rebase.
 fn write_orig_head_if_absent(repo: &Repository, oid: ObjectId) -> Result<()> {
-    if !matches!(repo.refs().read_raw("ORIG_HEAD"), Ok(None)) {
+    if !matches!(
+        repo.refs().read_raw(RefNameRef::from_trusted("ORIG_HEAD")),
+        Ok(None)
+    ) {
         return Ok(());
     }
     write_orig_head(repo, oid)

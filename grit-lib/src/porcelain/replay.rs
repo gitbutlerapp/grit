@@ -24,6 +24,7 @@ use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
+use crate::refs::store::RefNameRef;
 use crate::refs::{
     should_autocreate_reflog_with_config, update_branch_for_commit_on_store,
     update_detached_head_for_commit_on_store, BranchCommitRefLock, BranchCommitRefUpdate,
@@ -213,7 +214,7 @@ pub fn replay_commit(
     match checkout_tip {
         CheckoutTip::Branch(ref refname) => {
             let ref_update = BranchCommitRefUpdate {
-                branch_ref: refname,
+                branch_ref: RefNameRef::from_trusted(refname),
                 expected_old: Some(head_oid),
                 new_oid,
                 identity: &committer_line,
@@ -222,8 +223,11 @@ pub fn replay_commit(
             if let Some(files) = repo.refs().as_files() {
                 crate::refs::verify_new_tip(repo.refs(), refname, new_oid)?;
                 let git_dir = files.git_dir();
-                let mut branch_ref_lock =
-                    BranchCommitRefLock::acquire(git_dir, refname, Some(head_oid))?;
+                let mut branch_ref_lock = BranchCommitRefLock::acquire(
+                    git_dir,
+                    RefNameRef::from_trusted(refname),
+                    Some(head_oid),
+                )?;
                 branch_ref_lock.write_reflogs(git_dir, &ref_update, &head_oid, config.as_ref())?;
 
                 if let Err(err) =

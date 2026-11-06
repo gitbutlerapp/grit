@@ -16,10 +16,10 @@ mod reflog_fail_inject {
     }
 }
 
-/// Fail the next reflog append for `refname` (or any ref when `None`).
-pub fn set_reflog_fail(refname: Option<&str>) {
+/// Fail the next reflog append for `failed_ref` (or any ref when `None`).
+pub fn set_reflog_fail(failed_ref: Option<&str>) {
     reflog_fail_inject::INJECT.with(|c| {
-        *c.borrow_mut() = refname.map(str::to_owned);
+        *c.borrow_mut() = failed_ref.map(str::to_owned);
     });
 }
 

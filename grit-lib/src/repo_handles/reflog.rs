@@ -9,7 +9,7 @@ use crate::reflog::{
     read_reflog_on_store, reflog_identity_timestamp, reflog_refs_on_store, MessageMatcher,
     ReflogEntry, ReflogExpireParams, ReflogExpireResult, ReflogExpiryCache,
 };
-use crate::refs::store::{RefName, RefStore};
+use crate::refs::store::{RefName, RefNameRef, RefStore};
 use crate::repo::Repository;
 use crate::worktree_ref::resolve_ref_dwim;
 
@@ -154,12 +154,15 @@ impl<'repo> RepositoryReflogs<'repo> {
             truncated: false,
         };
         let mut index = 0usize;
-        self.store()
-            .for_each_reflog_entry(&canonical, true, &mut |entry| {
+        self.store().for_each_reflog_entry_str(
+            RefNameRef::from_trusted(&canonical),
+            true,
+            &mut |entry| {
                 let flow = state.visit(index, entry);
                 index += 1;
                 flow
-            })?;
+            },
+        )?;
         Ok(ReflogPage {
             entries: state.entries,
             truncated: state.truncated,
@@ -323,7 +326,7 @@ fn entry_matches_query(entry: &ReflogEntry, query: &ReflogQuery) -> bool {
 /// Whether `refname`'s reflog in `store` has at least one entry (reads only the newest one).
 fn reflog_has_entries(store: &dyn RefStore, refname: &str) -> Result<bool> {
     let mut found = false;
-    store.for_each_reflog_entry(refname, true, &mut |_| {
+    store.for_each_reflog_entry_str(RefNameRef::from_trusted(refname), true, &mut |_| {
         found = true;
         ControlFlow::Break(())
     })?;
@@ -343,7 +346,7 @@ fn dwim_reflog_candidates(user_ref: &str) -> Vec<String> {
 /// reflog, else the full name of a ref that exists without one.
 fn canonical_reflog_ref(store: &dyn RefStore, user_ref: &str) -> Result<String> {
     for candidate in dwim_reflog_candidates(user_ref) {
-        if store.reflog_exists(&candidate)? {
+        if store.reflog_exists(RefNameRef::from_trusted(&candidate))? {
             return Ok(candidate);
         }
     }
@@ -362,9 +365,12 @@ fn canonical_reflog_ref(store: &dyn RefStore, user_ref: &str) -> Result<String> 
 /// is stored, even unborn).
 fn ref_exists_dwim(store: &dyn RefStore, user_ref: &str) -> Result<bool> {
     if user_ref == "HEAD" {
-        return Ok(store.read_raw("HEAD")?.is_some());
+        return Ok(store.read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
     }
-    let (_, oid) = resolve_ref_dwim(|candidate| store.resolve(candidate).ok(), user_ref);
+    let (_, oid) = resolve_ref_dwim(
+        |candidate| store.resolve(RefNameRef::from_trusted(candidate)).ok(),
+        user_ref,
+    );
     Ok(oid.is_some())
 }
 
@@ -378,7 +384,7 @@ fn expire_target_refs(store: &dyn RefStore, all: bool) -> Result<Vec<String>> {
         .into_iter()
         .map(|(name, _)| name)
         .collect();
-    if store.reflog_exists("HEAD")? {
+    if store.reflog_exists(RefNameRef::from_trusted("HEAD"))? {
         names.push("HEAD".to_owned());
     }
     names.sort();

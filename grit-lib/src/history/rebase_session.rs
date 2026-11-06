@@ -1,10 +1,9 @@
 //! Stop/resume rebase sessions with Git-compatible `.git/rebase-merge/` state.
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-
-use serde::{Deserialize, Serialize};
 
 use crate::change_id::logical_change_id_for_commit;
 use crate::hooks::{
@@ -23,6 +22,7 @@ use crate::progress::{
     poll_cancel, CancelToken, NullProgress, ProgressSink, UncancellableProgress,
 };
 use crate::refs;
+use crate::refs::store::RefName;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, write_orig_head, HeadState};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -1468,15 +1468,19 @@ fn advance_after_plan(
             };
             if !rebase_head_is_branch(&prev.head_ref) {
                 for update in &mut plan.ref_updates {
-                    if update.name == "HEAD" {
+                    if update.name.as_str() == "HEAD" {
                         update.old = head_before;
                     }
                 }
             }
             if let Some(new_tip) = plan.mapped_tip(prev.orig_head) {
-                if !plan.ref_updates.iter().any(|u| u.name == movable_head) {
+                if !plan
+                    .ref_updates
+                    .iter()
+                    .any(|u| u.name.as_str() == movable_head)
+                {
                     plan.ref_updates.push(PlannedRefUpdate {
-                        name: movable_head.to_owned(),
+                        name: RefName::from_trusted(movable_head.to_owned()),
                         old: head_ref_old,
                         new: new_tip,
                     });
@@ -1495,7 +1499,7 @@ fn advance_after_plan(
                 if let Some(branch) = plan
                     .ref_updates
                     .iter()
-                    .find(|u| u.name == prev.head_ref && u.old != u.new)
+                    .find(|u| u.name.as_str() == prev.head_ref.as_str() && u.old != u.new)
                 {
                     log_head_move(repo, branch, apply)?;
                 }
@@ -1774,7 +1778,7 @@ fn hard_reset_branch(
         .map_err(map_lib)?;
     hard_reset_head(repo, target, identity)?;
     let overwritten = (before != Some(target)).then(|| PlannedRefUpdate {
-        name: refname.to_owned(),
+        name: RefName::from_trusted(refname.to_owned()),
         old: before.unwrap_or_else(crate::diff::zero_oid),
         new: target,
     });

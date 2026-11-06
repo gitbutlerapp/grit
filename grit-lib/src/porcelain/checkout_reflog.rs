@@ -6,7 +6,9 @@ use crate::error::Result;
 use crate::ident_resolve::resolve_loose_committer_identity_with;
 use crate::objects::ObjectId;
 use crate::refs::handle::ExistingRef;
-use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
+use crate::refs::store::{
+    Expected, RawRef, RefName, RefNameRef, RefUpdate, RefUpdateFlags, ReflogUpdate,
+};
 use crate::refs::{
     append_reflog_on_store, commit_ref_update_on_store, create_ref_with_reflog_on_store,
     delete_ref_on_store, update_direct_ref_on_store, write_symbolic_ref_on_store,
@@ -130,7 +132,9 @@ pub(crate) fn reset_branch_ref_with_reflog(
     .unwrap_or_default();
     let reflog =
         if crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), branch_ref)
-            || repo.refs().reflog_exists(branch_ref)?
+            || repo
+                .refs()
+                .reflog_exists(RefNameRef::from_trusted(branch_ref))?
         {
             Some(ReflogUpdate {
                 identity,
@@ -143,13 +147,16 @@ pub(crate) fn reset_branch_ref_with_reflog(
             None
         };
     let (expected, no_deref) = match &existing.raw {
-        RawRef::Symbolic(target) => (Expected::Symref(target.clone()), true),
+        RawRef::Symbolic(target) => (
+            Expected::Symref(RefName::from_trusted(target.clone())),
+            true,
+        ),
         RawRef::Direct(oid) => (Expected::Oid(*oid), false),
     };
     commit_ref_update_on_store(
         repo.refs(),
         RefUpdate {
-            name: branch_ref.to_owned(),
+            name: RefName::from_trusted(branch_ref.to_owned()),
             new_value: Some(RawRef::Direct(new_oid)),
             expected,
             reflog,

@@ -124,6 +124,7 @@ pub struct RefName(String);
 
 /// Borrowed validated ref name (like [`std::path::Path`] to [`std::path::PathBuf`]).
 #[repr(transparent)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct RefNameRef(str);
 
 impl RefName {
@@ -163,7 +164,8 @@ impl RefName {
     }
 
     /// Construct a ref name read from storage without re-validating.
-    pub(crate) fn from_trusted(name: impl Into<String>) -> Self {
+    #[must_use]
+    pub fn from_trusted(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 
@@ -213,10 +215,34 @@ impl RefNameRef {
         &self.0
     }
 
+    /// Borrow a name read from ref storage without re-validating.
+    #[must_use]
+    pub fn from_trusted(s: &str) -> &Self {
+        Self::new(s)
+    }
+
     #[must_use]
     fn new(s: &str) -> &Self {
         // SAFETY: RefNameRef is repr(transparent) over str.
         unsafe { &*(s as *const str as *const RefNameRef) }
+    }
+}
+
+impl AsRef<RefNameRef> for str {
+    fn as_ref(&self) -> &RefNameRef {
+        RefNameRef::from_trusted(self)
+    }
+}
+
+impl AsRef<RefNameRef> for String {
+    fn as_ref(&self) -> &RefNameRef {
+        RefNameRef::from_trusted(self.as_str())
+    }
+}
+
+impl AsRef<RefNameRef> for RefNameRef {
+    fn as_ref(&self) -> &RefNameRef {
+        self
     }
 }
 

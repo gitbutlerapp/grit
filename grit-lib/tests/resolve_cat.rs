@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use grit_lib::config::environment::Environment;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
+use grit_lib::refs::store::RefNameRef;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::object_inspect::{format_tree_cat_file_p, ObjectContents, ResolveError};
 

@@ -17,6 +17,7 @@ use crate::merge_file::MergeFavor;
 use crate::objects::{parse_commit, ObjectId};
 use crate::operation::Conflict;
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
+use crate::refs::store::RefName;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::topo_order_commit_subset;
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -872,11 +873,15 @@ pub(crate) fn plan_rebase_identity_exec(
     if let Some(&oldest) = replay_order.first() {
         let scoped = collect_scoped_refs(repo, &opts.rewrite, oldest)?;
         for (name, old) in scoped {
-            if plan.ref_updates.iter().any(|update| update.name == name) {
+            if plan
+                .ref_updates
+                .iter()
+                .any(|update| update.name.as_str() == name.as_str())
+            {
                 continue;
             }
             plan.ref_updates.push(PlannedRefUpdate {
-                name,
+                name: RefName::from_trusted(name),
                 old,
                 new: old,
             });
@@ -2098,7 +2103,10 @@ mod tests {
         .expect("expected tree");
         assert_eq!(commit.tree, expected_tree);
         assert_eq!(plan.ref_updates.len(), 1);
-        assert_eq!(plan.ref_updates[0].name, "refs/heads/main");
+        assert_eq!(
+            plan.ref_updates[0].name,
+            RefName::from_trusted("refs/heads/main")
+        );
         assert_eq!(
             plan.ref_updates[0].new, replayed,
             "the branch lands on the replayed local commit, not the merged-in upstream commit"

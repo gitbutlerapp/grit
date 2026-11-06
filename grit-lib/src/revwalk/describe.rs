@@ -5,8 +5,6 @@
 //! from the target discovers candidates and early-exits; without a graph, fixpoint within
 //! propagation over the reachable subgraph yields exact distances in one history pass.
 
-use std::collections::{BinaryHeap, VecDeque};
-
 use crate::commit_pretty::resolve_core_abbrev_len;
 use crate::error::Result;
 use crate::merge_base::{push_describe_heap_key, CommitGraphCache, PaintKey};
@@ -20,6 +18,7 @@ use crate::refs::store::RefName;
 use crate::repo::Repository;
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::OidAbbrevBatch;
+use std::collections::{BinaryHeap, VecDeque};
 
 use super::RevWalk;
 

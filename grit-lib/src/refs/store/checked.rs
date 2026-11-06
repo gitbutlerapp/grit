@@ -13,13 +13,13 @@ use crate::odb::Odb;
 use crate::reflog::ReflogEntry;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
-type ObjectPartitionResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
+type ObjectPartitionResult = (Vec<RefUpdate>, Vec<(RefName, RefStoreError)>);
 
 use super::backend::{is_per_ref_rejectable, verify_direct_targets};
 use super::reference_transaction::prepare_with_reference_transaction_hooks;
 use super::{
-    FilesRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore,
-    RefStoreError, RefTransaction, RefUpdate,
+    FilesRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef, RefStorageFormat,
+    RefStore, RefStoreError, RefTransaction, RefUpdate,
 };
 
 /// Check `updates` against `odb`: direct values and explicit reflog object ids must name
@@ -70,12 +70,12 @@ fn txn_with_accepted_updates(
 }
 
 struct ObjectCheckedPrepared<'a> {
-    rejections: Vec<(String, RefStoreError)>,
+    rejections: Vec<(RefName, RefStoreError)>,
     inner: Option<Box<dyn PreparedRefTransaction + Send + 'a>>,
 }
 
 impl PreparedRefTransaction for ObjectCheckedPrepared<'_> {
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         &self.rejections
     }
 
@@ -95,7 +95,7 @@ impl PreparedRefTransaction for ObjectCheckedPrepared<'_> {
 }
 
 fn wrap_checked_prepared<'a>(
-    object_rejections: Vec<(String, RefStoreError)>,
+    object_rejections: Vec<(RefName, RefStoreError)>,
     inner: Box<dyn PreparedRefTransaction + Send + 'a>,
 ) -> Box<dyn PreparedRefTransaction + Send + 'a> {
     let mut rejections = object_rejections;
@@ -181,11 +181,11 @@ impl RefStore for ObjectCheckedRefStore {
         self.inner.format()
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
         self.inner.read_raw(name)
     }
 
-    fn resolve(&self, name: &str) -> Result<ObjectId> {
+    fn resolve(&self, name: &RefNameRef) -> Result<ObjectId> {
         self.inner.resolve(name)
     }
 
@@ -248,40 +248,40 @@ impl RefStore for ObjectCheckedRefStore {
         verify_update_targets(&self.odb, updates)
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
         self.inner.reflog_exists(name)
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         self.inner.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.inner.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.inner.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
         self.inner.replace_reflog(name, entries)
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         self.inner.rewrite_reflog(name, transform)
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         self.inner.for_each_reflog_ref(f)
     }
 

@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use grit_lib::diff::{format_raw, DiffEntry};
 use grit_lib::objects::ObjectKind;
-use grit_lib::refs::store::{MemoryRefStore, RefName, RefStorageFormat};
+use grit_lib::refs::store::{MemoryRefStore, RefName, RefNameRef, RefStorageFormat};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};

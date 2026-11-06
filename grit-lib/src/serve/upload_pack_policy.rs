@@ -383,7 +383,7 @@ mod tests {
     use crate::config::environment::RepositoryOptions;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::refs::store::{
-        Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+        Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
     };
     use crate::repo::{InitOptions, Repository};
 
@@ -421,7 +421,7 @@ mod tests {
             .prepare(
                 RefTransaction::new()
                     .update(RefUpdate {
-                        name: "refs/heads/master".into(),
+                        name: RefName::from_trusted("refs/heads/master"),
                         new_value: Some(RawRef::Direct(commit)),
                         expected: Expected::Missing,
                         reflog: None,
@@ -449,7 +449,7 @@ mod tests {
             .prepare(
                 RefTransaction::new()
                     .update(RefUpdate {
-                        name: "refs/heads/only-memory".into(),
+                        name: RefName::from_trusted("refs/heads/only-memory"),
                         new_value: Some(RawRef::Direct(commit)),
                         expected: Expected::Missing,
                         reflog: None,

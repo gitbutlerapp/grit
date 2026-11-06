@@ -32,7 +32,7 @@ use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog;
-use crate::refs::store::RefStoreError;
+use crate::refs::store::{RefNameRef, RefStoreError};
 use crate::repo::Repository;
 
 /// The current state of HEAD.
@@ -483,16 +483,16 @@ pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<Hea
 
 fn resolve_head_from_store(store: &dyn crate::refs::store::RefStore) -> Result<HeadState> {
     use crate::refs::store::RawRef;
-    match store.read_raw("HEAD")? {
+    match store.read_raw(RefNameRef::from_trusted("HEAD"))? {
         None => Ok(HeadState::Invalid),
         Some(RawRef::Direct(oid)) => Ok(HeadState::Detached { oid }),
-        Some(RawRef::Symbolic(refname)) => {
-            symbolic_head_state(refname, |name| match store.resolve(name) {
+        Some(RawRef::Symbolic(refname)) => symbolic_head_state(refname, |name| {
+            match store.resolve(RefNameRef::from_trusted(name)) {
                 Ok(oid) => Ok(Some(oid)),
                 Err(Error::RefStore(RefStoreError::NotFound { .. })) => Ok(None),
                 Err(err) => Err(err),
-            })
-        }
+            }
+        }),
     }
 }
 

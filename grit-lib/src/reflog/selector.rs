@@ -1,9 +1,8 @@
 //! Typed parsing for reflog references and newest-first selectors.
 
-use std::str::FromStr;
-
 use crate::error::{Error, Result};
 use crate::refs::store::RefName;
+use std::str::FromStr;
 
 /// One entry in a reference log, indexed from its newest entry.
 ///

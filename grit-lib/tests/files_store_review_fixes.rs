@@ -7,8 +7,8 @@ use std::process::Command;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefStore, RefStoreError, RefTransaction,
-    RefUpdate, ReflogUpdate,
+    Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefNameRef, RefStore, RefStoreError,
+    RefTransaction, RefUpdate, ReflogUpdate,
 };
 use std::ops::ControlFlow;
 use time::OffsetDateTime;
@@ -77,7 +77,9 @@ fn files_store_applies_explicit_namespace_prefix() {
         unscoped.display()
     );
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("read"),
         Some(RawRef::Direct(oid))
     );
 }
@@ -211,7 +213,9 @@ fn files_store_observes_external_packed_refs_without_reopen() {
 
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("read loose"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("read loose"),
         Some(RawRef::Direct(oid))
     );
 
@@ -227,7 +231,9 @@ fn files_store_observes_external_packed_refs_without_reopen() {
     );
 
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("read packed"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("read packed"),
         Some(RawRef::Direct(oid)),
         "long-lived store must reload packed-refs after external rewrite"
     );
@@ -334,15 +340,19 @@ fn files_store_reflog_identity_with_digits_in_name_gets_timestamp() {
 
     let mut count = 0;
     store
-        .for_each_reflog_entry("refs/heads/main", false, &mut |entry| {
-            assert!(
-                entry.identity.contains("1700000000"),
-                "stored identity must include unix time: {}",
-                entry.identity
-            );
-            count += 1;
-            std::ops::ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::from_trusted("refs/heads/main"),
+            false,
+            &mut |entry| {
+                assert!(
+                    entry.identity.contains("1700000000"),
+                    "stored identity must include unix time: {}",
+                    entry.identity
+                );
+                count += 1;
+                std::ops::ControlFlow::Continue(())
+            },
+        )
         .expect("read reflog via store");
     assert_eq!(count, 1, "expected one reflog entry");
 }
@@ -402,7 +412,7 @@ fn files_store_symref_expected_oid_update_reflog_old_oid() {
 
     let mut last: Option<ReflogEntry> = None;
     store
-        .for_each_reflog_entry("refs/heads/sym", true, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/sym"), true, &mut |e| {
             last = Some(e.clone());
             ControlFlow::Break(())
         })
@@ -482,7 +492,7 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
 
     let mut head_entry: Option<ReflogEntry> = None;
     store
-        .for_each_reflog_entry("HEAD", true, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted("HEAD"), true, &mut |e| {
             head_entry = Some(e.clone());
             ControlFlow::Break(())
         })
@@ -495,7 +505,9 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
     assert_eq!(head_entry.new_oid, oid_next);
 
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("main"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main"),
         Some(RawRef::Direct(oid_next)),
         "deref update must move packed main to the new oid"
     );
@@ -512,7 +524,12 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
 fn files_store_observes_new_packed_refs_file_without_reopen() {
     let (_dir, git_dir) = bare_git_dir();
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
-    assert_eq!(store.read_raw("refs/heads/main").expect("missing"), None);
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("missing"),
+        None
+    );
 
     let oid = sample_oid();
     let mut packed = String::from("# pack-refs with: peeled fully-peeled sorted \n");
@@ -520,7 +537,9 @@ fn files_store_observes_new_packed_refs_file_without_reopen() {
     fs::write(git_dir.join("packed-refs"), packed).expect("packed-refs");
 
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("read new packed"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("read new packed"),
         Some(RawRef::Direct(oid))
     );
 }
@@ -578,7 +597,9 @@ fn files_store_sees_external_packed_refs_rewrite() {
     )
     .expect("packed v1");
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("main"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main"),
         Some(RawRef::Direct(oid1))
     );
 
@@ -590,7 +611,9 @@ fn files_store_sees_external_packed_refs_rewrite() {
     )
     .expect("packed v2");
     assert_eq!(
-        store.read_raw("refs/heads/other").expect("other"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/other"))
+            .expect("other"),
         Some(RawRef::Direct(oid2))
     );
 }

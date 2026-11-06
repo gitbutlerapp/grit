@@ -22,6 +22,7 @@ use grit_lib::refs::reflog::{
     expire_reflog_git, load_gc_reflog_expire_config, ReflogEntry, ReflogExpireActionKind,
     ReflogExpireParams,
 };
+use grit_lib::refs::store::RefNameRef;
 use grit_lib::refs::{reflog_file_path, write_ref};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::ExpireOptions;

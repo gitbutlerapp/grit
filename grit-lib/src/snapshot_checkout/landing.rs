@@ -25,14 +25,13 @@
 //!   the server reserved ([`CheckoutClient::reserve_work_branch`]); the
 //!   landed branch is gone here and stays on the server.
 
+use super::{CheckoutClient, CheckoutError, CheckoutMarker, IntegrateResponse, Result};
 use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
 use crate::objects::ObjectId;
 use crate::porcelain::branch::{rename_branch, RenameBranchOptions};
 use crate::porcelain::branch_error::BranchError;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
-
-use super::{CheckoutClient, CheckoutError, CheckoutMarker, IntegrateResponse, Result};
 
 /// How many names [`move_off_landed_branch`] asks the server for before
 /// giving up on finding one that is free here.

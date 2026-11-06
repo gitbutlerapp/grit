@@ -6128,7 +6128,7 @@ mod tests {
         use crate::hot_path_test_metrics::HotPathMetricsScope;
         use crate::pack::clear_pack_cache;
         use crate::refs::commit_initial_clone_ref_updates_on_store;
-        use crate::refs::store::{Expected, ObjectCheckedRefStore, RawRef, RefUpdate};
+        use crate::refs::store::{Expected, ObjectCheckedRefStore, RawRef, RefName, RefUpdate};
 
         const N: usize = 4096;
         let dir = TempDir::new().unwrap();
@@ -6153,7 +6153,7 @@ mod tests {
         let store = ObjectCheckedRefStore::new(inner, odb);
         let updates: Vec<RefUpdate> = (0..N)
             .map(|i| RefUpdate {
-                name: format!("refs/remotes/origin/b/{i}"),
+                name: RefName::from_trusted(format!("refs/remotes/origin/b/{i}")),
                 new_value: Some(RawRef::Direct(head)),
                 expected: Expected::Any,
                 reflog: None,

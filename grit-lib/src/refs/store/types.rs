@@ -1,6 +1,6 @@
 //! Reference store value types.
 
-pub use crate::check_ref_format::RefName;
+pub use crate::check_ref_format::{RefName, RefNameRef};
 
 use crate::objects::ObjectId;
 
@@ -26,7 +26,7 @@ impl RawRef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefEntry {
     /// Full ref name.
-    pub name: String,
+    pub name: RefName,
     /// Stored value (direct or symbolic).
     pub value: RawRef,
     /// Peeled tip when `value` is symbolic and resolves, or when a direct ref's
@@ -47,7 +47,7 @@ pub enum Expected {
     /// Ref must be a direct ref pointing at this oid.
     Oid(ObjectId),
     /// Ref must be symbolic with this exact target name.
-    Symref(String),
+    Symref(RefName),
 }
 
 /// Metadata appended to a ref update for the reflog.
@@ -102,18 +102,18 @@ pub struct RefUpdateFlags {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefCaseOnlyRename {
     /// Full ref name before rename (for example `refs/heads/topic`).
-    pub from: String,
+    pub from: RefName,
     /// Full ref name after rename (for example `refs/heads/Topic`).
-    pub to: String,
+    pub to: RefName,
 }
 
 /// Move a branch reflog to a new ref name and append one entry (branch rename).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefReflogRename {
     /// Full ref name whose reflog is moved (for example `refs/heads/topic`).
-    pub from: String,
+    pub from: RefName,
     /// Destination ref name (for example `refs/heads/new`).
-    pub to: String,
+    pub to: RefName,
     /// Rename entry appended as the newest reflog line on `to`.
     pub append: ReflogUpdate,
 }
@@ -122,7 +122,7 @@ pub struct RefReflogRename {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefUpdate {
     /// Full ref name.
-    pub name: String,
+    pub name: RefName,
     /// New stored value, or `None` to delete the ref.
     pub new_value: Option<RawRef>,
     /// Required current state for compare-and-swap.

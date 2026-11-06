@@ -4,11 +4,6 @@
 //! This is not a Git stash: stash commits require a merged index. Workspace snapshots preserve
 //! unmerged index stages and record the worktree as it appears on disk.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fs;
-use std::path::Path;
-use std::time::SystemTime;
-
 use crate::error::{Error, Result};
 use crate::index::{entry_from_stat, Index, MODE_GITLINK, MODE_TREE};
 use crate::lockfile::LockWait;
@@ -18,12 +13,18 @@ use crate::porcelain::checkout::checkout_between_trees_with_progress;
 use crate::porcelain::stash::{collect_untracked_paths, flatten_tree_full};
 use crate::progress::{CancelToken, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
-use crate::refs::store::{Expected, RawRef, RefName, RefTransaction, RefUpdate, RefUpdateFlags};
+use crate::refs::store::{
+    Expected, RawRef, RefName, RefNameRef, RefTransaction, RefUpdate, RefUpdateFlags,
+};
 use crate::repo::Repository;
 use crate::state::{
     merge_completion_sentinels, resolve_head_for_repository, HeadState, InProgressOperation,
 };
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::Path;
+use std::time::SystemTime;
 
 /// Options for [`capture_workspace_snapshot`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -92,7 +93,7 @@ pub fn pin_workspace_snapshot(
 ) -> Result<()> {
     let name = workspace_snapshot_pin_ref_name(caller_id)?;
     let update = RefUpdate {
-        name,
+        name: RefName::from_trusted(name),
         new_value: Some(RawRef::Direct(snapshot.worktree_tree)),
         expected: Expected::Any,
         reflog: None,
@@ -114,7 +115,7 @@ pub fn pin_workspace_snapshot(
 pub fn unpin_workspace_snapshot(repo: &Repository, caller_id: &str) -> Result<()> {
     let name = workspace_snapshot_pin_ref_name(caller_id)?;
     let update = RefUpdate {
-        name,
+        name: RefName::from_trusted(name),
         new_value: None,
         expected: Expected::Any,
         reflog: None,
@@ -179,7 +180,7 @@ pub fn capture_workspace_snapshot(
     let head = resolve_head_for_repository(repo)?;
     let mut refs = BTreeMap::new();
     for name in &options.refs {
-        let raw = repo.refs().read_raw(name)?;
+        let raw = repo.refs().read_raw(RefNameRef::from_trusted(name))?;
         refs.insert(name.clone(), raw);
     }
     let (index_bytes, index_mtime) = capture_index_bytes(repo)?;
@@ -536,12 +537,12 @@ fn commit_ref_restore(
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let mut txn = RefTransaction::new();
     for (name, new_value) in &snapshot.refs {
-        let expected = match store.read_raw(name)? {
+        let expected = match store.read_raw(RefNameRef::from_trusted(name))? {
             Some(current) => expected_from_raw(&current),
             None => Expected::Missing,
         };
         let update = RefUpdate {
-            name: name.clone(),
+            name: RefName::from_trusted(name),
             new_value: new_value.clone(),
             expected,
             reflog: None,
@@ -563,12 +564,12 @@ fn commit_ref_restore(
 fn expected_from_raw(raw: &RawRef) -> Expected {
     match raw {
         RawRef::Direct(oid) => Expected::Oid(*oid),
-        RawRef::Symbolic(name) => Expected::Symref(name.clone()),
+        RawRef::Symbolic(name) => Expected::Symref(RefName::from_trusted(name.clone())),
     }
 }
 
 fn head_ref_update(repo: &Repository, snapshot: &WorkspaceSnapshot) -> Result<Option<RefUpdate>> {
-    let current = repo.refs().read_raw("HEAD")?;
+    let current = repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?;
     let new_value = match &snapshot.head {
         HeadState::Branch { refname, .. } => Some(RawRef::Symbolic(refname.clone())),
         HeadState::Detached { oid } => Some(RawRef::Direct(*oid)),
@@ -582,7 +583,7 @@ fn head_ref_update(repo: &Repository, snapshot: &WorkspaceSnapshot) -> Result<Op
         None => Expected::Missing,
     };
     Ok(Some(RefUpdate {
-        name: "HEAD".to_owned(),
+        name: RefName::from_trusted("HEAD"),
         new_value: Some(new_value),
         expected,
         reflog: None,

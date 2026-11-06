@@ -1336,6 +1336,7 @@ mod pathspec_from_file_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_git_compat.rs"]
 mod pathspec_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "pathspec_type.rs"]
 mod pathspec_type;
 #[cfg(feature = "full-tests")]
@@ -1530,6 +1531,8 @@ mod refs_query_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "refs_query_reachability_git_compat.rs"]
 mod refs_query_reachability_git_compat;
+#[path = "refs_refname_git_roundtrip.rs"]
+mod refs_refname_git_roundtrip;
 #[cfg(feature = "full-tests")]
 #[path = "refs_transactions.rs"]
 mod refs_transactions;

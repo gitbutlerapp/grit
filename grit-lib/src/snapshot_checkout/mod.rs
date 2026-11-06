@@ -1648,7 +1648,7 @@ pub fn materialize(
     let upstream = upstream_ref(&info.branch);
     crate::refs::write_ref(&git_dir, &upstream, &root)?;
     crate::refs::write_symbolic_ref(&git_dir, "refs/remotes/origin/HEAD", &upstream)?;
-    crate::refs::write_ref(&git_dir, &format!("refs/heads/{work}"), &root)?;
+    crate::refs::write_ref(&git_dir, format!("refs/heads/{work}"), &root)?;
     crate::refs::write_symbolic_ref(&git_dir, "HEAD", &format!("refs/heads/{work}"))?;
     let config_path = git_dir.join("config");
     let content = std::fs::read_to_string(&config_path).unwrap_or_default();

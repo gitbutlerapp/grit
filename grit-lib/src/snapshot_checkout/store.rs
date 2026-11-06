@@ -133,7 +133,7 @@ impl CheckoutStore {
             };
             i += 1;
             let has_branch =
-                crate::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{name}")).is_ok();
+                crate::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{name}")).is_ok();
             if !has_branch && self.reserve(&name)? {
                 return Ok(ReservedName { name, next: i });
             }

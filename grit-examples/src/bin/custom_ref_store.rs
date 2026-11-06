@@ -9,7 +9,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+    Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
@@ -32,7 +32,7 @@ fn main() -> grit_lib::error::Result<()> {
     println!("for_each_ref_calls={}", counting.for_each_ref_calls());
 
     let txn = RefTransaction::new().update(RefUpdate {
-        name: "refs/heads/custom-demo".to_owned(),
+        name: RefName::from_trusted("refs/heads/custom-demo"),
         new_value: Some(RawRef::Direct(oid)),
         expected: Expected::Oid(oid),
         reflog: None,

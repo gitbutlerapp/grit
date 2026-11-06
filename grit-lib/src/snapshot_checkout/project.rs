@@ -425,7 +425,7 @@ pub fn project_branch(
     };
     let name = name.as_str();
     let targets: Vec<ObjectId> =
-        crate::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{}", checkout.branch))
+        crate::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{}", checkout.branch))
             .into_iter()
             .collect();
     let own: Vec<ObjectId> = crate::refs::list_refs(repo.git_dir(), &out_ref(&checkout.id, ""))?
@@ -448,7 +448,7 @@ pub fn project_branch(
     crate::refs::update_direct_ref_on_store(
         repo.refs(),
         repo.git_dir(),
-        &in_ref(&checkout.id, name),
+        in_ref(&checkout.id, name),
         &projection.tip,
     )?;
     Ok(Ok(BranchInfo {

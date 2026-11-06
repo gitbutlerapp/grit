@@ -14,7 +14,9 @@ use crate::objects::ObjectId;
 use super::store::reference_transaction::{
     branch_commit_reference_transaction_lines, detached_head_commit_reference_transaction_lines,
 };
-use super::store::{Expected, RawRef, RefStore, RefUpdate, RefUpdateFlags, ReflogUpdate};
+use super::store::{
+    Expected, RawRef, RefName, RefNameRef, RefStore, RefUpdate, RefUpdateFlags, ReflogUpdate,
+};
 use super::{
     append_reflog_with_config, commit_ref_update_on_store, commit_ref_update_on_store_with_wait,
     commit_ref_updates_on_store_with_wait, ensure_refname_safe_for_storage,
@@ -31,7 +33,7 @@ pub(crate) fn reflog_wanted(
     if should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config()) {
         return Ok(true);
     }
-    store.reflog_exists(refname)
+    store.reflog_exists(RefNameRef::from_trusted(refname))
 }
 
 /// Reflog entry with explicit old/new ids. `identity` is a full `Name <email> <epoch> <tz>`
@@ -54,7 +56,7 @@ fn expected_tip(expected_old: Option<ObjectId>) -> Expected {
 /// `new_oid`, for the files-backend paths that write without a transaction.
 pub(crate) fn verify_new_tip(store: &dyn RefStore, refname: &str, new_oid: ObjectId) -> Result<()> {
     store.verify_update_targets(&[RefUpdate {
-        name: refname.to_owned(),
+        name: RefName::from_trusted(refname.to_owned()),
         new_value: Some(RawRef::Direct(new_oid)),
         expected: Expected::Any,
         reflog: None,
@@ -89,8 +91,8 @@ pub fn update_branch_for_commit_on_store(
     update: &BranchCommitRefUpdate<'_>,
     config: &ConfigSet,
 ) -> Result<()> {
-    match store.read_raw("HEAD")? {
-        Some(RawRef::Symbolic(target)) if target == update.branch_ref => {}
+    match store.read_raw(RefNameRef::from_trusted("HEAD"))? {
+        Some(RawRef::Symbolic(target)) if target.as_str() == update.branch_ref.as_str() => {}
         _ => {
             return Err(Error::Message(format!(
                 "HEAD does not point at branch '{}'",
@@ -101,11 +103,11 @@ pub fn update_branch_for_commit_on_store(
     let null_oid = store.reference_transaction_null_oid();
     let reflog_old = update.expected_old.unwrap_or(null_oid);
     if let Some(files) = store.as_files() {
-        verify_new_tip(store, update.branch_ref, update.new_oid)?;
+        verify_new_tip(store, update.branch_ref.as_str(), update.new_oid)?;
         if let Some(ctx) = store.ref_hook_context() {
             let hook_old = update.expected_old.unwrap_or_else(|| ctx.null_oid());
             let lines = branch_commit_reference_transaction_lines(
-                update.branch_ref,
+                update.branch_ref.as_str(),
                 hook_old,
                 update.new_oid,
             );
@@ -121,7 +123,7 @@ pub fn update_branch_for_commit_on_store(
         return super::update_branch_for_commit_files(files.git_dir(), update, &reflog_old, config);
     }
 
-    ensure_refname_safe_for_storage(update.branch_ref)?;
+    ensure_refname_safe_for_storage(update.branch_ref.as_str())?;
     let reflog = || {
         explicit_reflog(
             update.identity,
@@ -132,15 +134,15 @@ pub fn update_branch_for_commit_on_store(
     };
     let mut updates = Vec::with_capacity(2);
     updates.push(RefUpdate {
-        name: update.branch_ref.to_owned(),
+        name: RefName::from_trusted(update.branch_ref.as_str()),
         new_value: Some(RawRef::Direct(update.new_oid)),
         expected: expected_tip(update.expected_old),
-        reflog: reflog_wanted(store, config, update.branch_ref)?.then(reflog),
+        reflog: reflog_wanted(store, config, update.branch_ref.as_str())?.then(reflog),
         flags: RefUpdateFlags::default(),
     });
     if reflog_wanted(store, config, "HEAD")? {
         updates.push(RefUpdate {
-            name: "HEAD".to_owned(),
+            name: RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Direct(update.new_oid)),
             expected: Expected::Any,
             reflog: Some(reflog()),
@@ -172,7 +174,10 @@ pub(crate) fn update_detached_head_for_commit_on_store(
     reflog_message: &str,
     config: &ConfigSet,
 ) -> Result<()> {
-    if matches!(store.read_raw("HEAD")?, Some(RawRef::Symbolic(_))) {
+    if matches!(
+        store.read_raw(RefNameRef::from_trusted("HEAD"))?,
+        Some(RawRef::Symbolic(_))
+    ) {
         return Err(Error::Message(
             "HEAD points at a branch; use update_branch_for_commit".into(),
         ));
@@ -208,7 +213,7 @@ pub(crate) fn update_detached_head_for_commit_on_store(
     commit_ref_update_on_store_with_wait(
         store,
         RefUpdate {
-            name: "HEAD".to_owned(),
+            name: RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Direct(new_oid)),
             expected: expected_tip(expected_old),
             reflog,
@@ -261,7 +266,7 @@ pub(crate) fn append_reflog_on_store(
     commit_ref_update_on_store_with_wait(
         store,
         RefUpdate {
-            name: refname.to_owned(),
+            name: RefName::from_trusted(refname.to_owned()),
             new_value: Some(RawRef::Direct(*new_oid)),
             expected: Expected::Any,
             reflog: Some(explicit_reflog(identity, message, *old_oid, *new_oid)),
@@ -313,7 +318,7 @@ pub(crate) fn delete_ref_on_store(store: &dyn RefStore, refname: &str) -> Result
     commit_ref_update_on_store(
         store,
         RefUpdate {
-            name: refname.to_owned(),
+            name: RefName::from_trusted(refname.to_owned()),
             new_value: None,
             expected: Expected::Exists,
             reflog: None,
@@ -324,7 +329,7 @@ pub(crate) fn delete_ref_on_store(store: &dyn RefStore, refname: &str) -> Result
             },
         },
     )?;
-    store.delete_reflog(refname)
+    store.delete_reflog(RefNameRef::from_trusted(refname))
 }
 
 #[cfg(test)]
@@ -372,7 +377,7 @@ mod tests {
     fn log(store: &dyn RefStore, name: &str) -> Vec<(ObjectId, ObjectId, String, String)> {
         let mut out = Vec::new();
         store
-            .for_each_reflog_entry(name, false, &mut |e| {
+            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |e| {
                 out.push((e.old_oid, e.new_oid, e.identity.clone(), e.message.clone()));
                 ControlFlow::Continue(())
             })
@@ -382,7 +387,7 @@ mod tests {
 
     fn update<'a>(expected_old: Option<ObjectId>, new_oid: ObjectId) -> BranchCommitRefUpdate<'a> {
         BranchCommitRefUpdate {
-            branch_ref: "refs/heads/main",
+            branch_ref: RefNameRef::from_trusted("refs/heads/main"),
             expected_old,
             new_oid,
             identity: IDENT,
@@ -397,11 +402,15 @@ mod tests {
             .expect("update");
 
         assert_eq!(
-            store.read_raw("refs/heads/main").expect("read"),
+            store
+                .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("read"),
             Some(RawRef::Direct(oid(2)))
         );
         assert_eq!(
-            store.read_raw("HEAD").expect("read"),
+            store
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("read"),
             Some(RawRef::Symbolic("refs/heads/main".into()))
         );
         let expected = vec![(oid(1), oid(2), IDENT.to_owned(), "commit: two".to_owned())];
@@ -414,7 +423,12 @@ mod tests {
         let store = store_on("refs/heads/main", None);
         update_branch_for_commit_on_store(&store, &update(None, oid(1)), &config(None))
             .expect("update");
-        assert_eq!(store.resolve("HEAD").expect("HEAD"), oid(1));
+        assert_eq!(
+            store
+                .resolve(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
+            oid(1)
+        );
         assert_eq!(log(&store, "refs/heads/main")[0].0, zero_oid());
     }
 
@@ -428,7 +442,12 @@ mod tests {
             err,
             Error::RefStore(RefStoreError::ExpectedMismatch { ref name, .. }) if name == "refs/heads/main"
         ));
-        assert_eq!(store.resolve("refs/heads/main").expect("tip"), oid(3));
+        assert_eq!(
+            store
+                .resolve(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("tip"),
+            oid(3)
+        );
         assert!(log(&store, "HEAD").is_empty());
 
         let err = update_branch_for_commit_on_store(&store, &update(None, oid(2)), &config(None))
@@ -449,7 +468,12 @@ mod tests {
             update_branch_for_commit_on_store(&store, &update(Some(oid(1)), oid(2)), &config(None))
                 .expect_err("HEAD elsewhere");
         assert!(matches!(err, Error::Message(_)));
-        assert_eq!(store.resolve("refs/heads/main").expect("tip"), oid(1));
+        assert_eq!(
+            store
+                .resolve(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("tip"),
+            oid(1)
+        );
     }
 
     #[test]
@@ -461,10 +485,16 @@ mod tests {
             &config(Some("false")),
         )
         .expect("update");
-        assert!(!store.reflog_exists("refs/heads/main").expect("exists"));
-        assert!(!store.reflog_exists("HEAD").expect("exists"));
+        assert!(!store
+            .reflog_exists(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("exists"));
+        assert!(!store
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("exists"));
 
-        store.create_reflog("HEAD").expect("create");
+        store
+            .create_reflog(RefNameRef::from_trusted("HEAD"))
+            .expect("create");
         update_branch_for_commit_on_store(
             &store,
             &update(Some(oid(2)), oid(3)),
@@ -472,7 +502,9 @@ mod tests {
         )
         .expect("update");
         assert_eq!(log(&store, "HEAD").len(), 1);
-        assert!(!store.reflog_exists("refs/heads/main").expect("exists"));
+        assert!(!store
+            .reflog_exists(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("exists"));
     }
 
     #[test]
@@ -502,7 +534,7 @@ mod tests {
         );
 
         let branch = |new_oid| BranchCommitRefUpdate {
-            branch_ref: "refs/heads/main",
+            branch_ref: RefNameRef::from_trusted("refs/heads/main"),
             expected_old: Some(base),
             new_oid,
             identity: IDENT,
@@ -547,7 +579,9 @@ mod tests {
             assert!(expected, "{err:?}");
         }
         assert_eq!(
-            repo.refs().read_raw("HEAD").expect("HEAD"),
+            repo.refs()
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
             Some(RawRef::Direct(base))
         );
 
@@ -581,7 +615,9 @@ mod tests {
         )
         .expect("detached");
         assert_eq!(
-            store.read_raw("HEAD").expect("HEAD"),
+            store
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
             Some(RawRef::Direct(oid(2)))
         );
         assert_eq!(log(&store, "HEAD").len(), 1);
@@ -628,7 +664,9 @@ mod tests {
             &config(None),
         )
         .expect("skip");
-        assert!(!store.reflog_exists("refs/tags/v1").expect("exists"));
+        assert!(!store
+            .reflog_exists(RefNameRef::from_trusted("refs/tags/v1"))
+            .expect("exists"));
 
         append_reflog_on_store(
             &store,
@@ -645,7 +683,12 @@ mod tests {
             log(&store, "refs/stash"),
             vec![(zero_oid(), oid(4), IDENT.to_owned(), "WIP".to_owned())]
         );
-        assert_eq!(store.read_raw("refs/stash").expect("read"), None);
+        assert_eq!(
+            store
+                .read_raw(RefNameRef::from_trusted("refs/stash"))
+                .expect("read"),
+            None
+        );
 
         append_reflog_on_store(
             &store,
@@ -660,7 +703,12 @@ mod tests {
         .expect("HEAD");
         assert_eq!(log(&store, "HEAD").len(), 1);
         assert!(log(&store, "refs/heads/main").is_empty());
-        assert_eq!(store.resolve("refs/heads/main").expect("tip"), oid(1));
+        assert_eq!(
+            store
+                .resolve(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("tip"),
+            oid(1)
+        );
     }
 
     #[test]
@@ -669,17 +717,28 @@ mod tests {
         write_symbolic_ref_on_store(&store, Path::new("unused"), "HEAD", "refs/heads/topic")
             .expect("symref");
         assert_eq!(
-            store.read_raw("HEAD").expect("HEAD"),
+            store
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
             Some(RawRef::Symbolic("refs/heads/topic".into()))
         );
 
         store
             .set_ref("refs/stash", RawRef::Direct(oid(5)))
             .expect("stash");
-        store.create_reflog("refs/stash").expect("log");
+        store
+            .create_reflog(RefNameRef::from_trusted("refs/stash"))
+            .expect("log");
         delete_ref_on_store(&store, "refs/stash").expect("delete");
-        assert_eq!(store.read_raw("refs/stash").expect("read"), None);
-        assert!(!store.reflog_exists("refs/stash").expect("exists"));
+        assert_eq!(
+            store
+                .read_raw(RefNameRef::from_trusted("refs/stash"))
+                .expect("read"),
+            None
+        );
+        assert!(!store
+            .reflog_exists(RefNameRef::from_trusted("refs/stash"))
+            .expect("exists"));
         assert!(delete_ref_on_store(&store, "refs/stash").is_err());
     }
 }

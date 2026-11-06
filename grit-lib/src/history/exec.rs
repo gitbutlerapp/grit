@@ -1,9 +1,5 @@
 //! Run `rebase --exec` hooks after planning and before ref updates.
 
-use std::collections::{HashMap, HashSet};
-use std::fs;
-use std::path::Path;
-
 use crate::command_runner::{
     run_sh_dash_c, CommandOutput, CommandRunner, CommandStdin, CommandStdio,
 };
@@ -21,9 +17,13 @@ use crate::porcelain::worktree_guard::{
     ensure_worktree_clean_for_rebase_exec, ensure_worktree_clean_from_snapshot,
     load_worktree_index, WorktreeSnapshot,
 };
+use crate::refs::store::RefName;
 use crate::refs::{update_direct_ref_on_store, write_symbolic_ref_on_store};
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 
 use super::apply::commit_tree_for_apply;
 use super::error::HistoryError;
@@ -80,7 +80,7 @@ pub struct ExecReport {
 
 #[derive(Debug, Clone)]
 enum SavedHead {
-    Symbolic(String),
+    Symbolic(RefName),
     Detached(ObjectId),
 }
 
@@ -254,7 +254,7 @@ impl ExecRewrites {
         if !plan
             .ref_updates
             .iter()
-            .any(|update| update.name == head_name)
+            .any(|update| update.name.as_str() == head_name)
         {
             if let Some((old, new)) = plan
                 .head
@@ -262,7 +262,7 @@ impl ExecRewrites {
                 .and_then(|old| self.remap.get(&old).map(|new| (old, *new)))
             {
                 plan.ref_updates.push(super::PlannedRefUpdate {
-                    name: head_name.to_owned(),
+                    name: RefName::from_trusted(head_name.to_owned()),
                     old,
                     new,
                 });
@@ -272,7 +272,7 @@ impl ExecRewrites {
         if let Some(new) = plan
             .ref_updates
             .iter()
-            .find(|update| update.name == head_name)
+            .find(|update| update.name.as_str() == head_name)
             .map(|update| update.new)
         {
             plan.head.new_tree = Some(commit_tree_for_apply(repo, new)?);
@@ -974,7 +974,7 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
             refname,
             oid: Some(oid),
             ..
-        } => (SavedHead::Symbolic(refname), oid),
+        } => (SavedHead::Symbolic(RefName::from_trusted(refname)), oid),
         HeadState::Detached { oid } => (SavedHead::Detached(oid), oid),
         HeadState::Branch { oid: None, .. } => return Err(Error::UnbornHead.into()),
         HeadState::Invalid => {
@@ -1034,16 +1034,15 @@ fn restore_exec_prestate(
 ) -> Result<(), HistoryError> {
     match &pre.head {
         SavedHead::Symbolic(refname) => {
-            if repo.resolve_ref_oid(refname)? != pre.head_commit {
+            if repo.resolve_ref_oid(refname.as_str())? != pre.head_commit {
                 return Err(HistoryError::RefCasMismatch {
-                    name: refname.clone(),
+                    name: refname.as_str().to_owned(),
                 });
             }
-            write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname).map_err(
-                |e| HistoryError::WorktreeApply {
+            write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname.as_str())
+                .map_err(|e| HistoryError::WorktreeApply {
                     message: e.to_string(),
-                },
-            )?;
+                })?;
         }
         SavedHead::Detached(oid) => {
             update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", oid).map_err(|e| {
@@ -1125,7 +1124,7 @@ fn store_exec_stop(
     let pre = session.prestate;
     let state = StoredExec {
         head_ref: match &pre.head {
-            SavedHead::Symbolic(name) => Some(name.clone()),
+            SavedHead::Symbolic(name) => Some(name.as_str().to_owned()),
             SavedHead::Detached(_) => None,
         },
         original_head: pre.head_commit.to_hex(),
@@ -1149,7 +1148,7 @@ fn store_exec_stop(
         refs: plan
             .ref_updates
             .iter()
-            .map(|r| (r.name.clone(), r.old.to_hex(), r.new.to_hex()))
+            .map(|r| (r.name.as_str().to_owned(), r.old.to_hex(), r.new.to_hex()))
             .collect(),
         checkout_onto: plan.head.checkout_onto.map(|o| o.to_hex()),
         new_tree: plan.head.new_tree.map(|o| o.to_hex()),
@@ -1202,7 +1201,7 @@ fn stored_prestate(state: &StoredExec) -> Result<ExecPrestate, HistoryError> {
             .head_ref
             .as_ref()
             .map_or(SavedHead::Detached(head_commit), |name| {
-                SavedHead::Symbolic(name.clone())
+                SavedHead::Symbolic(RefName::from_trusted(name.clone()))
             }),
         head_commit,
         head_tree: ObjectId::from_hex(&state.original_tree)?,
@@ -1243,7 +1242,7 @@ fn stored_plan(
             .iter()
             .map(|(name, old, new)| {
                 Ok(PlannedRefUpdate {
-                    name: name.clone(),
+                    name: RefName::from_trusted(name.clone()),
                     old: ObjectId::from_hex(old)?,
                     new: ObjectId::from_hex(new)?,
                 })
@@ -1448,7 +1447,7 @@ fn ensure_exec_plan_current(
     let planned = plan
         .ref_updates
         .iter()
-        .filter(|update| update.name != "HEAD")
+        .filter(|update| update.name.as_str() != "HEAD")
         .map(|update| (update.name.as_str(), update.old));
     for (name, expected) in branch.into_iter().chain(planned) {
         let actual = repo.references().resolve_if_exists(name)?;
@@ -1474,7 +1473,7 @@ fn reset_moved_exec_branch(
     let SavedHead::Symbolic(name) = &prestate.head else {
         return Ok(None);
     };
-    let current = repo.references().resolve_if_exists(name)?;
+    let current = repo.references().resolve_if_exists(name.as_str())?;
     if current == Some(prestate.head_commit) {
         return Ok(None);
     }
@@ -1502,7 +1501,9 @@ fn reset_moved_exec_branch(
             new: prestate.head_commit,
         })),
         Err(Error::RefStore(RefStoreError::ExpectedMismatch { .. })) => {
-            Err(super::RebaseSessionError::AbortRefMoved { name: name.clone() })
+            Err(super::RebaseSessionError::AbortRefMoved {
+                name: name.as_str().to_owned(),
+            })
         }
         Err(err) => Err(err.into()),
     }
@@ -1716,7 +1717,8 @@ mod tests {
     fn exec_restores_one_consistent_head_when_injected_ref_store_disagrees() {
         use crate::config::environment::RepositoryOptions;
         use crate::refs::store::{
-            Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+            Expected, MemoryRefStore, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
+            RefUpdateFlags,
         };
 
         let (dir, repo) = init_repo();
@@ -1736,7 +1738,7 @@ mod tests {
         let store = Arc::new(MemoryRefStore::new());
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: "HEAD".to_owned(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Direct(tip)),
                 expected: Expected::Any,
                 reflog: None,
@@ -1772,7 +1774,9 @@ mod tests {
         .expect("exec");
 
         assert_eq!(
-            store.read_raw("HEAD").expect("store HEAD"),
+            store
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("store HEAD"),
             Some(RawRef::Direct(tip)),
             "restore writes the HEAD the clean check and saved tree came from"
         );
@@ -2157,7 +2161,7 @@ mod tests {
         let [update] = plan.ref_updates.as_slice() else {
             panic!("expected one ref update, got {:?}", plan.ref_updates)
         };
-        assert_eq!(update.name, "refs/heads/main");
+        assert_eq!(update.name, RefName::from_trusted("refs/heads/main"));
         assert_eq!(update.old, tip);
         assert_eq!(plan.commits[0].new, Some(update.new));
         assert_eq!(plan.commits[0].subject.as_deref(), Some("amended"));

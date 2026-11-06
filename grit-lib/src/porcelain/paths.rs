@@ -1,10 +1,5 @@
 //! Remove and rename paths in the working tree and index (`git rm` / `git mv` semantics).
 
-use std::collections::{BTreeSet, HashSet};
-use std::fs;
-use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
-
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,
 };
@@ -24,6 +19,10 @@ use crate::porcelain::pathspec_match::{
 };
 use crate::progress::{poll_cancel, CancelToken, NullProgress};
 use crate::repo::Repository;
+use std::collections::{BTreeSet, HashSet};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Options for [`remove_paths`].
 #[derive(Debug, Clone, Default)]

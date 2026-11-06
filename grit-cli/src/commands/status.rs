@@ -281,7 +281,7 @@ fn shared_status(repo: &grit_lib::repo::Repository, branch: &str) -> Option<Stat
     if !crate::commands::sync::is_shared(&config, branch) {
         return None;
     }
-    let ours = grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{branch}")).ok();
+    let ours = grit_lib::refs::resolve_ref(repo.git_dir(), format!("refs/heads/{branch}")).ok();
     let mut remotes: Vec<String> =
         crate::context::config_string(&config, &format!("branch.{branch}.remote"))
             .into_iter()

@@ -191,7 +191,7 @@ mod tests {
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{CancelToken, NullProgress};
     use crate::refs::store::{
-        Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
+        Expected, MemoryRefStore, RawRef, RefName, RefTransaction, RefUpdate, ReflogUpdate,
     };
     use crate::repo::{InitOptions, Repository};
     use crate::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
@@ -518,7 +518,7 @@ mod tests {
         let update = |new, exp, msg: &str| {
             let txn = RefTransaction::new()
                 .update(RefUpdate {
-                    name: "refs/heads/main".into(),
+                    name: RefName::from_trusted("refs/heads/main"),
                     new_value: Some(RawRef::Direct(new)),
                     expected: exp,
                     flags: Default::default(),

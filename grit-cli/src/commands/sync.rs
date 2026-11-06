@@ -517,7 +517,7 @@ fn fast_forward(repo: &Repository, name: &str, to: &str, oid: ObjectId) -> Resul
         .with_context(|| format!("fast-forwarding {name}"))?;
         Ok(())
     } else {
-        grit_lib::refs::write_ref(repo.git_dir(), &format!("refs/heads/{name}"), &oid)
+        grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{name}"), &oid)
             .with_context(|| format!("moving {name}"))
     }
 }
@@ -610,7 +610,7 @@ pub(crate) fn sync_target(
     let ours = tips(repo, "refs/heads/")?.get(target).copied();
     let action = match ours {
         None => {
-            grit_lib::refs::write_ref(repo.git_dir(), &format!("refs/heads/{target}"), &theirs)?;
+            grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{target}"), &theirs)?;
             TargetAction::Created
         }
         Some(ours) if ours == theirs => TargetAction::UpToDate,
@@ -771,7 +771,7 @@ pub fn run(mode: OutputMode) -> Result<SyncOutcome> {
                 SyncAction::Pushed
             }
             (None, Some(theirs)) => {
-                grit_lib::refs::write_ref(repo.git_dir(), &format!("refs/heads/{name}"), &theirs)?;
+                grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{name}"), &theirs)?;
                 set_tracking(&repo, name, &setup.remote)?;
                 SyncAction::Created
             }

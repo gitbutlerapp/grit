@@ -28,8 +28,8 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::RefName;
 use grit_lib::refs::store::{
-    Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefStore, RefStoreError,
-    RefTransaction, RefUpdate, RefUpdateFlags,
+    Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefNameRef, RefStore,
+    RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
 };
 use grit_lib::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store, prepare_with_lock_wait,
@@ -49,7 +49,7 @@ fn oid(n: u32) -> ObjectId {
 
 fn set(name: &str, value: ObjectId, expected: Expected) -> RefUpdate {
     RefUpdate {
-        name: name.to_owned(),
+        name: RefName::from_trusted(name),
         new_value: Some(RawRef::Direct(value)),
         expected,
         reflog: None,
@@ -92,7 +92,9 @@ fn concurrent_batches_on_disjoint_refs_all_commit() {
     });
     for t in 0..THREADS {
         assert_eq!(
-            store.read_raw(&format!("refs/heads/b{t}")).expect("read"),
+            store
+                .read_raw(RefNameRef::from_trusted(&format!("refs/heads/b{t}")))
+                .expect("read"),
             Some(RawRef::Direct(oid(t * UPDATES + UPDATES)))
         );
     }
@@ -168,7 +170,12 @@ fn held_transaction_still_fails_after_the_budget() {
     assert!(is_lock_held(&err, "refs/heads/waiter"), "{err:?}");
 
     held.commit().expect("commit holder");
-    assert_eq!(store.read_raw("refs/heads/waiter").expect("read"), None);
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/waiter"))
+            .expect("read"),
+        None
+    );
 }
 
 #[test]
@@ -198,11 +205,15 @@ fn waiter_proceeds_once_the_holder_releases() {
         .expect("commit waiter");
     });
     assert_eq!(
-        store.read_raw("refs/heads/waiter").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/waiter"))
+            .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
     assert_eq!(
-        store.read_raw("refs/heads/holder").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/holder"))
+            .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
 }
@@ -477,7 +488,10 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
 
     for i in 0..THREADS {
         let mut depth = 0;
-        let mut tip = Some(refs.resolve(&format!("refs/heads/b{i}")).expect("branch"));
+        let mut tip = Some(
+            refs.resolve(RefNameRef::from_trusted(&format!("refs/heads/b{i}")))
+                .expect("branch"),
+        );
         while let Some(commit) = tip {
             depth += 1;
             tip = main
@@ -580,11 +594,15 @@ fn files_prepare_disjoint_ref_while_another_transaction_is_open() {
     waiter.commit().expect("commit b");
     held.commit().expect("commit a");
     assert_eq!(
-        store.read_raw("refs/heads/a").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/a"))
+            .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
     assert_eq!(
-        store.read_raw("refs/heads/b").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/b"))
+            .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
 }
@@ -604,7 +622,9 @@ fn files_create_over_stale_empty_directory_at_exact_ref_path() {
     commit_ref_update_on_store(&store, set("refs/tags/empty", value, Expected::Missing))
         .expect("empty directory at ref path must not block create");
     assert_eq!(
-        store.read_raw("refs/tags/empty").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/tags/empty"))
+            .expect("read"),
         Some(RawRef::Direct(value))
     );
     assert!(stale.is_file(), "ref file replaces the empty directory");

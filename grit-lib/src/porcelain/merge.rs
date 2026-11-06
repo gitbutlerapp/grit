@@ -24,11 +24,6 @@
 //! - [`resolve_merge_source`] — turn a merge argument (branch, tag, object id or any
 //!   revision expression) into the commit to merge.
 
-use std::borrow::Cow;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fs;
-use std::path::Path;
-
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::error::{Error, OverwriteReason, Result};
@@ -67,7 +62,7 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::refs;
-use crate::refs::store::RawRef;
+use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -79,6 +74,10 @@ use crate::state::{
     write_orig_head,
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
+use std::borrow::Cow;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::path::Path;
 use thiserror::Error;
 
 use crate::hooks::{CommitHookEnv, HookName};
@@ -1013,7 +1012,11 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
         return Ok(into_ref.to_owned());
     }
     let canonical = format!("refs/heads/{into_ref}");
-    if repo.refs().resolve(&canonical).is_err() {
+    if repo
+        .refs()
+        .resolve(RefNameRef::from_trusted(canonical.as_str()))
+        .is_err()
+    {
         return Err(Error::BranchNotFound {
             branch: into_ref.to_owned(),
         });
@@ -2125,7 +2128,7 @@ fn move_detached_head(repo: &Repository, old: ObjectId, new: ObjectId, reason: &
 
 /// Refuse to merge when detached `HEAD` no longer points at `expected`.
 fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()> {
-    let current = match repo.refs().read_raw("HEAD")? {
+    let current = match repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))? {
         Some(RawRef::Direct(oid)) => Some(oid),
         Some(RawRef::Symbolic(_)) => {
             return Err(Error::Message(
@@ -2144,7 +2147,10 @@ pub(crate) fn ensure_branch_tip(
     branch_ref: &str,
     expected: Option<ObjectId>,
 ) -> Result<()> {
-    let current = repo.refs().resolve(branch_ref).ok();
+    let current = repo
+        .refs()
+        .resolve(RefNameRef::from_trusted(branch_ref))
+        .ok();
     refs::verify_branch_commit_cas(expected, current, branch_ref)
 }
 
@@ -2169,7 +2175,7 @@ pub(crate) fn update_checked_out_branch(
     update_branch_for_commit_on_store(
         repo.refs(),
         &BranchCommitRefUpdate {
-            branch_ref,
+            branch_ref: RefNameRef::from_trusted(branch_ref),
             expected_old,
             new_oid: new,
             identity: &identity,
@@ -2621,7 +2627,10 @@ mod integrate_tests {
                 .parse()
                 .expect("feature/foo tip");
         assert_eq!(stored, feature_merge);
-        assert!(repo.refs().resolve("refs/feature/foo").is_err());
+        assert!(repo
+            .refs()
+            .resolve(RefNameRef::from_trusted("refs/feature/foo"))
+            .is_err());
 
         let tmp_missing = tempfile::tempdir().expect("tempdir");
         grit_test_support::git(tmp_missing.path(), &["init", "-q", "-b", "main"]);

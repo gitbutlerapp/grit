@@ -20,15 +20,15 @@ use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStore,
-    RefStoreError, RefTransaction,
+    BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef,
+    RefStore, RefStoreError, RefTransaction,
 };
 use grit_lib::repo::Repository;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
 #[derive(Default)]
-struct TxnLog(Mutex<Vec<Vec<(String, bool, Option<String>)>>>);
+struct TxnLog(Mutex<Vec<Vec<(RefName, bool, Option<String>)>>>);
 
 struct RefStoreProbe {
     inner: Arc<MemoryRefStore>,
@@ -57,7 +57,7 @@ impl RefStore for RefStoreProbe {
         self.inner.format()
     }
 
-    fn read_raw(&self, name: &str) -> grit_lib::error::Result<Option<RawRef>> {
+    fn read_raw(&self, name: &RefNameRef) -> grit_lib::error::Result<Option<RawRef>> {
         self.inner.read_raw(name)
     }
 
@@ -98,34 +98,38 @@ impl RefStore for RefStoreProbe {
         }))
     }
 
-    fn reflog_exists(&self, name: &str) -> grit_lib::error::Result<bool> {
+    fn reflog_exists(&self, name: &RefNameRef) -> grit_lib::error::Result<bool> {
         self.inner.reflog_exists(name)
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> grit_lib::error::Result<()> {
         self.inner.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> grit_lib::error::Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> grit_lib::error::Result<()> {
         self.inner.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> grit_lib::error::Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> grit_lib::error::Result<()> {
         self.inner.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> grit_lib::error::Result<()> {
+    fn replace_reflog(
+        &self,
+        name: &RefNameRef,
+        entries: Vec<ReflogEntry>,
+    ) -> grit_lib::error::Result<()> {
         self.inner.replace_reflog(name, entries)
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> grit_lib::error::Result<Vec<ReflogEntry>>,
     ) -> grit_lib::error::Result<()> {
         self.inner.rewrite_reflog(name, transform)
@@ -133,7 +137,7 @@ impl RefStore for RefStoreProbe {
 
     fn for_each_reflog_ref(
         &self,
-        f: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>,
     ) -> grit_lib::error::Result<()> {
         self.inner.for_each_reflog_ref(f)
     }
@@ -161,7 +165,7 @@ impl PreparedRefTransaction for ProbePrepared<'_> {
         inner.commit()
     }
 
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         self.inner.rejected_updates()
     }
 
@@ -263,7 +267,7 @@ fn diverged_merge_fixture(repo: &Repository, wt: &std::path::Path) -> (ObjectId,
 fn last_reflog_message(store: &dyn RefStore, name: &str) -> Option<String> {
     let mut last = None;
     store
-        .for_each_reflog_entry(name, false, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |e| {
             last = Some(e.message.clone());
             ControlFlow::Continue(())
         })
@@ -295,7 +299,7 @@ fn merge_ref_update_rolls_back_when_reflog_commit_fails() {
     assert_eq!(
         ref_store
             .inner
-            .read_raw("refs/heads/main")
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
             .expect("main ref"),
         Some(RawRef::Direct(main_tip))
     );
@@ -340,7 +344,7 @@ fn merge_branch_move_and_reflogs_share_one_transaction() {
     assert_eq!(
         ref_store
             .inner
-            .read_raw("refs/heads/main")
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
             .expect("main ref"),
         Some(RawRef::Direct(merge_oid))
     );
@@ -361,15 +365,18 @@ fn merge_branch_move_and_reflogs_share_one_transaction() {
         .clone();
     let branch_txns = txns
         .iter()
-        .filter(|txn| txn.iter().any(|(name, _, _)| name == "refs/heads/main"))
+        .filter(|txn| {
+            txn.iter()
+                .any(|(name, _, _)| name.as_str() == "refs/heads/main")
+        })
         .collect::<Vec<_>>();
     assert_eq!(branch_txns.len(), 1, "branch move txns: {txns:?}");
     let txn = branch_txns[0];
     assert_eq!(txn.len(), 2);
     assert!(txn.iter().any(|(name, log_only, msg)| {
-        name == "refs/heads/main" && !log_only && msg.as_deref() == Some("merge feat")
+        name.as_str() == "refs/heads/main" && !log_only && msg.as_deref() == Some("merge feat")
     }));
     assert!(txn
         .iter()
-        .any(|(name, log_only, _)| name == "HEAD" && *log_only));
+        .any(|(name, log_only, _)| name.as_str() == "HEAD" && *log_only));
 }

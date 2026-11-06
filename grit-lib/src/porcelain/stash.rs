@@ -33,7 +33,7 @@ use crate::porcelain::stash_error::{
 use crate::worktree::{map_worktree_io, WorktreePathOperation};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, IndexApplyOptions};
-use crate::check_ref_format::RefName;
+use crate::check_ref_format::{RefName, RefNameRef};
 use crate::diff::HunkId;
 use crate::ident::Signature;
 #[cfg(unix)]
@@ -2294,7 +2294,7 @@ pub(crate) fn clear_stashes(repo: &Repository) -> StashResult<usize> {
         return Ok(0);
     }
     if count > 0 {
-        store.delete_reflog(STASH_REF)?;
+        store.delete_reflog(RefNameRef::from_trusted(STASH_REF))?;
     }
     if has_ref {
         delete_ref_on_store(store, STASH_REF)?;
@@ -3404,14 +3404,14 @@ pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Resu
     let git_dir = repo.git_dir();
     for _ in 0..RETRIES {
         if store
-            .resolve(STASH_REF)
+            .resolve(RefNameRef::from_trusted(STASH_REF))
             .ok()
             .is_none_or(|tip| tip != *stash_oid)
         {
             return Ok(false);
         }
         let mut new_tip = None;
-        match store.rewrite_reflog(STASH_REF, &mut |mut entries| {
+        match store.rewrite_reflog_str(RefNameRef::from_trusted(STASH_REF), &mut |mut entries| {
             if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
                 return Err(crate::error::Error::RefStore(
                     crate::refs::store::RefStoreError::ReflogRewriteStale {

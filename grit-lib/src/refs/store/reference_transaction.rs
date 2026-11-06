@@ -5,7 +5,10 @@ use std::sync::Arc;
 use crate::hooks::{RefHookContext, ReferenceTransactionPhase};
 use crate::objects::ObjectId;
 
-use super::{PreparedRefTransaction, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate};
+use super::{
+    PreparedRefTransaction, RawRef, RefName, RefNameRef, RefStore, RefStoreError, RefTransaction,
+    RefUpdate,
+};
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -53,28 +56,28 @@ fn line_for_update(
         let Some(RawRef::Direct(new_oid)) = &update.new_value else {
             return Ok(None);
         };
-        let old_oid = current_log_only_old_oid(store, &update.name, null_oid)?;
+        let old_oid = current_log_only_old_oid(store, update.name.as_str(), null_oid)?;
         return Ok(Some(ReferenceTransactionLine {
             old_oid,
             new_oid: *new_oid,
-            refname: update.name.clone(),
+            refname: update.name.as_str().to_owned(),
         }));
     }
     match &update.new_value {
         None => {
-            let old_oid = current_direct_oid(store, &update.name, null_oid)?;
+            let old_oid = current_direct_oid(store, update.name.as_str(), null_oid)?;
             Ok(Some(ReferenceTransactionLine {
                 old_oid,
                 new_oid: null_oid,
-                refname: update.name.clone(),
+                refname: update.name.as_str().to_owned(),
             }))
         }
         Some(RawRef::Direct(new_oid)) => {
-            let old_oid = current_direct_oid(store, &update.name, null_oid)?;
+            let old_oid = current_direct_oid(store, update.name.as_str(), null_oid)?;
             Ok(Some(ReferenceTransactionLine {
                 old_oid,
                 new_oid: *new_oid,
-                refname: update.name.clone(),
+                refname: update.name.as_str().to_owned(),
             }))
         }
         Some(RawRef::Symbolic(_)) => Ok(None),
@@ -87,7 +90,7 @@ fn current_direct_oid(
     null_oid: ObjectId,
 ) -> StoreResult<ObjectId> {
     let Some(raw) = store
-        .read_raw(name)
+        .read_raw(RefNameRef::from_trusted(name))
         .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
     else {
         return Ok(null_oid);
@@ -105,14 +108,14 @@ fn current_log_only_old_oid(
     null_oid: ObjectId,
 ) -> StoreResult<ObjectId> {
     let Some(raw) = store
-        .read_raw(name)
+        .read_raw(RefNameRef::from_trusted(name))
         .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
     else {
         return Ok(null_oid);
     };
     match raw {
         RawRef::Direct(oid) => Ok(oid),
-        RawRef::Symbolic(_) => match store.resolve(name) {
+        RawRef::Symbolic(_) => match store.resolve(RefNameRef::from_trusted(name)) {
             Ok(oid) => Ok(oid),
             Err(crate::error::Error::RefStore(RefStoreError::NotFound { .. })) => Ok(null_oid),
             Err(e) => Err(match e {
@@ -182,7 +185,7 @@ impl Drop for HookWrappedPrepared<'_> {
 }
 
 impl PreparedRefTransaction for HookWrappedPrepared<'_> {
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         match self.inner.as_ref() {
             Some(inner) => inner.rejected_updates(),
             None => &[],
@@ -306,7 +309,7 @@ mod tests {
         let lines = reference_transaction_lines(
             &store,
             &[RefUpdate {
-                name: "HEAD".into(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Symbolic("refs/heads/other".into())),
                 expected: crate::refs::store::Expected::Any,
                 reflog: None,
@@ -328,7 +331,7 @@ mod tests {
         let lines = reference_transaction_lines(
             &store,
             &[RefUpdate {
-                name: "HEAD".into(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Direct(new)),
                 expected: crate::refs::store::Expected::Any,
                 reflog: None,
@@ -361,7 +364,7 @@ mod tests {
         let lines = reference_transaction_lines(
             &store,
             &[RefUpdate {
-                name: "HEAD".into(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Direct(new)),
                 expected: crate::refs::store::Expected::Any,
                 reflog: None,
@@ -390,7 +393,7 @@ mod tests {
         let lines = reference_transaction_lines(
             &store,
             &[RefUpdate {
-                name: "HEAD".into(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Direct(new)),
                 expected: crate::refs::store::Expected::Any,
                 reflog: None,

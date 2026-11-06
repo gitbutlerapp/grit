@@ -371,7 +371,7 @@ pub(crate) fn move_branch(repo: &Repository, branch: &str, head: ObjectId) -> Re
         crate::commands::reset::run(Some(head.to_hex()), false, false, false, true, false, None)
             .with_context(|| format!("moving {branch} (it is checked out)"))?;
     } else {
-        grit_lib::refs::write_ref(repo.git_dir(), &format!("refs/heads/{branch}"), &head)
+        grit_lib::refs::write_ref(repo.git_dir(), format!("refs/heads/{branch}"), &head)
             .with_context(|| format!("moving {branch}"))?;
     }
     Ok(())

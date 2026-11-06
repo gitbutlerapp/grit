@@ -11,7 +11,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
 use grit_lib::refs::reflog::read_reflog;
-use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::store::{open_ref_store, RefNameRef, RefStoreError};
 use grit_lib::refs::{
     append_reflog, delete_ref, list_refs, list_refs_glob, list_refs_physical,
     packed_refs_entry_exists, read_head, read_log_refs_config, read_raw_ref, read_ref_file,
@@ -381,7 +381,7 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
             .refs();
         assert!(
             matches!(
-                store.resolve("refs/heads/dangling"),
+                store.resolve(RefNameRef::from_trusted("refs/heads/dangling")),
                 Err(Error::RefStore(RefStoreError::NotFound { ref name })) if name == "refs/heads/gone"
             ),
             "{}",

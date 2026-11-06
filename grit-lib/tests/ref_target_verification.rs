@@ -13,8 +13,8 @@ use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefCaseOnlyRename, RefName, RefStore,
-    RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefCaseOnlyRename, RefName,
+    RefNameRef, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
@@ -58,7 +58,10 @@ impl Fixture {
     }
 
     fn raw(&self, refname: &str) -> Option<RawRef> {
-        self.repo.refs().read_raw(refname).expect("read ref")
+        self.repo
+            .refs()
+            .read_raw(RefNameRef::from_trusted(refname))
+            .expect("read ref")
     }
 }
 
@@ -109,7 +112,7 @@ fn write_commit(repo: &Repository, message: &str, content: &[u8]) -> (ObjectId, 
 
 fn put(refname: &str, oid: ObjectId) -> RefUpdate {
     RefUpdate {
-        name: refname.to_owned(),
+        name: name(refname),
         new_value: Some(RawRef::Direct(oid)),
         expected: Expected::Any,
         reflog: None,
@@ -249,14 +252,14 @@ fn deletes_and_well_formed_symbolic_updates_commit_without_object_lookup() {
     each_format(|format, fx| {
         commit_updates(fx.repo.refs(), vec![put("refs/heads/gone", fx.commit)]).expect("seed");
         let delete = RefUpdate {
-            name: "refs/heads/gone".to_owned(),
+            name: name("refs/heads/gone"),
             new_value: None,
             expected: Expected::Oid(fx.commit),
             reflog: None,
             flags: RefUpdateFlags::default(),
         };
         let symbolic = RefUpdate {
-            name: "refs/heads/alias".to_owned(),
+            name: name("refs/heads/alias"),
             new_value: Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
             expected: Expected::Any,
             reflog: None,
@@ -308,7 +311,7 @@ fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
         let log_len = || read_reflog(git_dir, "refs/heads/main").map_or(0, |e| e.len());
         let before = log_len();
         let log_only = RefUpdate {
-            name: "refs/heads/main".to_owned(),
+            name: name("refs/heads/main"),
             new_value: None,
             expected: Expected::Any,
             reflog: Some(ReflogUpdate {
@@ -344,9 +347,9 @@ fn invalid_symref(name: &str, target: &str) -> RefStoreError {
     }
 }
 
-fn symref_update(name: &str, target: &str) -> RefUpdate {
+fn symref_update(refname: &str, target: &str) -> RefUpdate {
     RefUpdate {
-        name: name.to_owned(),
+        name: name(refname),
         new_value: Some(RawRef::Symbolic(target.to_owned())),
         expected: Expected::Any,
         reflog: None,
@@ -586,10 +589,22 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
     repo.references()
         .update(&name("refs/heads/ok"), &fx.commit)
         .expect("branch at a commit");
-    assert_eq!(store.read_raw("refs/heads/bogus").expect("read"), None);
-    assert_eq!(store.read_raw("refs/heads/tree").expect("read"), None);
     assert_eq!(
-        store.read_raw("refs/heads/ok").expect("read"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/bogus"))
+            .expect("read"),
+        None
+    );
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/tree"))
+            .expect("read"),
+        None
+    );
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/ok"))
+            .expect("read"),
         Some(RawRef::Direct(fx.commit))
     );
 
@@ -600,7 +615,7 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
 
 fn branch_commit<'a>(expected_old: ObjectId, new_oid: ObjectId) -> BranchCommitRefUpdate<'a> {
     BranchCommitRefUpdate {
-        branch_ref: "refs/heads/main",
+        branch_ref: RefNameRef::from_trusted("refs/heads/main"),
         expected_old: Some(expected_old),
         new_oid,
         identity: "Ref Verify <verify@example.com> 1700000000 +0000",
@@ -680,10 +695,7 @@ fn allowing_failures_prepare_missing_object_commits_sibling() {
         .expect("prepare with allowing_failures");
         assert_eq!(
             prepared.rejected_updates(),
-            &[(
-                String::from("refs/heads/bad"),
-                missing("refs/heads/bad", bogus())
-            )],
+            &[(name("refs/heads/bad"), missing("refs/heads/bad", bogus()))],
             "{format:?}"
         );
         prepared.commit().expect("commit");
@@ -710,7 +722,7 @@ fn allowing_failures_prepare_not_a_commit_commits_sibling() {
         assert_eq!(
             prepared.rejected_updates(),
             &[(
-                String::from("refs/heads/tree-branch"),
+                name("refs/heads/tree-branch"),
                 not_a_commit("refs/heads/tree-branch", fx.tree, ObjectKind::Tree)
             )],
             "{format:?}"
@@ -732,8 +744,8 @@ fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
     assert_eq!(fx.raw("refs/heads/topic"), Some(RawRef::Direct(fx.commit)));
     let txn = RefTransaction::new()
         .with_case_only_rename(RefCaseOnlyRename {
-            from: String::from("refs/heads/topic"),
-            to: String::from("refs/heads/Topic"),
+            from: name("refs/heads/topic"),
+            to: name("refs/heads/Topic"),
         })
         .allowing_failures();
     let prepared = fx

@@ -20,7 +20,8 @@ use grit_lib::refs::reftable::{
     reftable_write_symref, RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate,
 };
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReftableRefStore,
+    open_ref_store, Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    RefUpdateFlags, ReftableRefStore,
 };
 use grit_lib::refs::{read_head, read_symbolic_ref, resolve_ref};
 use grit_lib::repo::{InitOptions, Repository};
@@ -510,7 +511,7 @@ fn reftable_reflog_api_matches_git() {
     )
     .expect("seed ref");
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.create_reflog("refs/heads/log-test"))
+        .and_then(|store| store.create_reflog(RefNameRef::from_trusted("refs/heads/log-test")))
         .expect("create reflog");
     assert!(reflog_exists(&git_dir, "refs/heads/log-test"));
 
@@ -543,7 +544,12 @@ fn reftable_reflog_api_matches_git() {
         message: "replaced\n".to_owned(),
     }];
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.replace_reflog("refs/heads/log-test", replaced.to_vec()))
+        .and_then(|store| {
+            store.replace_reflog(
+                RefNameRef::from_trusted("refs/heads/log-test"),
+                replaced.to_vec(),
+            )
+        })
         .expect("replace");
 
     let grit_entries = read_reflog(&git_dir, "refs/heads/log-test").expect("read");
@@ -559,7 +565,7 @@ fn reftable_reflog_api_matches_git() {
     );
 
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.delete_reflog("refs/heads/log-test"))
+        .and_then(|store| store.delete_reflog(RefNameRef::from_trusted("refs/heads/log-test")))
         .expect("delete reflog");
     assert!(!reflog_exists(&git_dir, "refs/heads/log-test"));
     assert!(
@@ -710,7 +716,7 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
     assert_eq!(resolve_ref(&git_dir, "refs/heads/main").expect("main"), tip);
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.resolve("HEAD"))
+            .and_then(|store| store.resolve(RefNameRef::from_trusted("HEAD")))
             .expect("HEAD"),
         tip
     );
@@ -790,7 +796,7 @@ fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
     );
     assert_eq!(
         store
-            .read_raw("refs/heads/hot")
+            .read_raw(RefNameRef::from_trusted("refs/heads/hot"))
             .expect("read hot")
             .and_then(|r| match r {
                 RawRef::Direct(oid) => Some(oid),
@@ -871,7 +877,7 @@ fn resolve_detached_head_after_git_checkout_detach_on_reftable() {
     assert_eq!(read_symbolic_ref(&git_dir, "HEAD").expect("sym"), None);
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.resolve("HEAD"))
+            .and_then(|store| store.resolve(RefNameRef::from_trusted("HEAD")))
             .expect("resolve HEAD"),
         tip
     );

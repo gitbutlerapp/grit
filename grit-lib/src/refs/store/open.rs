@@ -10,7 +10,7 @@ use crate::ref_storage::RefStorageFormat as OnDiskFormat;
 use crate::reftable::ReftableWriteOptions;
 
 use super::routing::resolve_common_dir;
-use super::{FilesRefStore, FilesRefStoreConfig, RefStore, ReftableRefStore};
+use super::{FilesRefStore, FilesRefStoreConfig, RefName, RefStore, ReftableRefStore};
 
 /// Select and open the ref store for `git_dir` (detects backend via [`OnDiskFormat::detect`]).
 ///
@@ -51,7 +51,7 @@ pub(crate) fn initialize_head(git_dir: &Path, head: super::RawRef) -> Result<()>
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/.invalid\n")?;
     }
     let txn = super::RefTransaction::new().update(super::RefUpdate {
-        name: "HEAD".to_owned(),
+        name: RefName::from_trusted("HEAD"),
         new_value: Some(head),
         expected: super::Expected::Any,
         reflog: None,

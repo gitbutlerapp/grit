@@ -146,13 +146,15 @@ pub mod progress;
 ///
 /// ```rust
 /// use grit_lib::prelude::*;
+/// use grit_lib::refs::store::RefNameRef;
 /// use grit_lib::repo::InitOptions;
 ///
 /// # fn main() -> Result<()> {
+/// use grit_lib::refs::store::RefNameRef;
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 /// let _cfg = repo.config().snapshot()?;
-/// assert!(repo.refs().read_raw("HEAD")?.is_some());
+/// assert!(repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
 /// # Ok(())
 /// # }
 /// ```

@@ -12,14 +12,20 @@ use grit_lib::notes::{
     apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRef, NotesRewriteCommand,
 };
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::refs::check_ref_format::RefNamePolicy;
 use grit_lib::refs::commit_ref_update_on_store;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore,
-    RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
+    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef,
+    RefStorageFormat, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
+
+fn rnr(name: &str) -> &RefNameRef {
+    RefNameRef::parse(name, &RefNamePolicy::default()).expect("valid test ref name")
+}
+
 use grit_test_support::git;
 
 const NOTES: &str = "refs/notes/commits";
@@ -37,7 +43,7 @@ impl RacingStore {
         commit_ref_update_on_store(
             &self.inner,
             RefUpdate {
-                name: NOTES.to_owned(),
+                name: RefName::from_trusted(NOTES),
                 new_value: Some(RawRef::Direct(oid)),
                 expected: Expected::Any,
                 reflog: None,
@@ -60,9 +66,9 @@ impl RefStore for RacingStore {
         self.inner.format()
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
         let value = self.inner.read_raw(name)?;
-        if name == NOTES {
+        if name.as_str() == NOTES {
             let pending = self
                 .move_to_after_read
                 .lock()
@@ -90,40 +96,40 @@ impl RefStore for RacingStore {
         self.inner.prepare(txn)
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
         self.inner.reflog_exists(name)
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         self.inner.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.inner.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
         self.inner.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
         self.inner.replace_reflog(name, entries)
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         self.inner.rewrite_reflog(name, transform)
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         self.inner.for_each_reflog_ref(f)
     }
 }

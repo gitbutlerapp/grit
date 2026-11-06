@@ -38,10 +38,10 @@ fn apply_ref_change(trial: &mut BTreeMap<String, RawRef>, update: &RefUpdate) ->
     match &update.new_value {
         None => {
             if should_deref_symref(trial, update) {
-                let target = symref_peel_write_target(trial, &update.name)?;
+                let target = symref_peel_write_target(trial, update.name.as_str())?;
                 trial.remove(&target);
             } else {
-                trial.remove(&update.name);
+                trial.remove(update.name.as_str());
             }
         }
         Some(new_value) => {
@@ -51,10 +51,10 @@ fn apply_ref_change(trial: &mut BTreeMap<String, RawRef>, update: &RefUpdate) ->
                         "deref update requires direct oid".to_owned(),
                     ));
                 };
-                let target = symref_peel_write_target(trial, &update.name)?;
+                let target = symref_peel_write_target(trial, update.name.as_str())?;
                 trial.insert(target, RawRef::Direct(*oid));
             } else {
-                trial.insert(update.name.clone(), new_value.clone());
+                trial.insert(update.name.as_str().to_owned(), new_value.clone());
             }
         }
     }
@@ -62,7 +62,7 @@ fn apply_ref_change(trial: &mut BTreeMap<String, RawRef>, update: &RefUpdate) ->
 }
 
 fn should_deref_symref(refs: &BTreeMap<String, RawRef>, update: &RefUpdate) -> bool {
-    !update.flags.no_deref && matches!(refs.get(&update.name), Some(RawRef::Symbolic(_)))
+    !update.flags.no_deref && matches!(refs.get(update.name.as_str()), Some(RawRef::Symbolic(_)))
 }
 
 fn should_deref_symref_update(refs: &BTreeMap<String, RawRef>, update: &RefUpdate) -> bool {
@@ -79,7 +79,7 @@ pub(crate) fn deref_reflog_target(
     if !should_deref_symref_update(refs, update) {
         return None;
     }
-    symref_peel_write_target(refs, &update.name).ok()
+    symref_peel_write_target(refs, update.name.as_str()).ok()
 }
 
 fn symref_peel_write_target(
@@ -120,7 +120,8 @@ pub(crate) fn reflog_old_oid_before(
     if let Some(oid) = update.reflog.as_ref().and_then(|log| log.old_oid) {
         return oid;
     }
-    resolved_oid_at_name(trial, baseline, &update.name, update.flags).unwrap_or_else(|_| zero_oid())
+    resolved_oid_at_name(trial, baseline, update.name.as_str(), update.flags)
+        .unwrap_or_else(|_| zero_oid())
 }
 
 pub(crate) fn reflog_new_oid_before(
@@ -211,7 +212,7 @@ pub(crate) fn reftable_write_target(
     update: &RefUpdate,
 ) -> StoreResult<ReftableWriteTarget> {
     let (_store, storage_refname) =
-        crate::reftable::reftable_storage_location(git_dir, &update.name);
+        crate::reftable::reftable_storage_location(git_dir, update.name.as_str());
     if update.flags.log_only {
         return Ok(ReftableWriteTarget {
             storage_refname,
@@ -221,7 +222,7 @@ pub(crate) fn reftable_write_target(
     let value = match &update.new_value {
         None => {
             if should_deref_symref(refs, update) {
-                let target = symref_peel_write_target(refs, &update.name)?;
+                let target = symref_peel_write_target(refs, update.name.as_str())?;
                 let (_s, storage) = crate::reftable::reftable_storage_location(git_dir, &target);
                 return Ok(ReftableWriteTarget {
                     storage_refname: storage,
@@ -231,7 +232,7 @@ pub(crate) fn reftable_write_target(
             Some(crate::reftable::RefValue::Deletion)
         }
         Some(RawRef::Direct(oid)) if should_deref_symref_update(refs, update) => {
-            let target = symref_peel_write_target(refs, &update.name)?;
+            let target = symref_peel_write_target(refs, update.name.as_str())?;
             let (_s, storage) = crate::reftable::reftable_storage_location(git_dir, &target);
             return Ok(ReftableWriteTarget {
                 storage_refname: storage,

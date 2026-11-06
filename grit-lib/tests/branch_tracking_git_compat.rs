@@ -4,6 +4,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::refs::branch_tracking::{Standing, TipComparison};
+use grit_lib::refs::store::RefNameRef;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 

@@ -27,8 +27,8 @@ use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    MemoryRefStore, PreparedRefTransaction, RefEntry, RefStorageFormat, RefStore, RefStoreError,
-    RefTransaction,
+    MemoryRefStore, PreparedRefTransaction, RefEntry, RefName, RefNameRef, RefStorageFormat,
+    RefStore, RefStoreError, RefTransaction,
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
@@ -107,7 +107,7 @@ impl PreparedRefTransaction for LoggingPrepared<'_> {
         inner.commit()
     }
 
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         self.inner.rejected_updates()
     }
 
@@ -124,7 +124,7 @@ impl RefStore for LoggingRefStore {
 
     fn read_raw(
         &self,
-        name: &str,
+        name: &RefNameRef,
     ) -> grit_lib::error::Result<Option<grit_lib::refs::store::RawRef>> {
         self.inner.read_raw(name)
     }
@@ -149,34 +149,38 @@ impl RefStore for LoggingRefStore {
         }))
     }
 
-    fn reflog_exists(&self, name: &str) -> grit_lib::error::Result<bool> {
+    fn reflog_exists(&self, name: &RefNameRef) -> grit_lib::error::Result<bool> {
         self.inner.reflog_exists(name)
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> grit_lib::error::Result<()> {
         self.inner.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> grit_lib::error::Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> grit_lib::error::Result<()> {
         self.inner.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> grit_lib::error::Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> grit_lib::error::Result<()> {
         self.inner.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> grit_lib::error::Result<()> {
+    fn replace_reflog(
+        &self,
+        name: &RefNameRef,
+        entries: Vec<ReflogEntry>,
+    ) -> grit_lib::error::Result<()> {
         self.inner.replace_reflog(name, entries)
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> grit_lib::error::Result<Vec<ReflogEntry>>,
     ) -> grit_lib::error::Result<()> {
         self.inner.rewrite_reflog(name, transform)

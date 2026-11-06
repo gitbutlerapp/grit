@@ -19,7 +19,9 @@ use super::error::RefStoreError;
 use super::gate::SingleWriterGate;
 use super::gate::SingleWriterTicket;
 use super::transaction::RefTransaction;
-use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore};
+use super::{
+    PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef, RefStorageFormat, RefStore,
+};
 
 #[derive(Debug, Clone)]
 struct MemoryRefStoreInner {
@@ -29,7 +31,7 @@ struct MemoryRefStoreInner {
     /// The single writer slot: the transaction between `prepare` and commit or abort.
     prepared: Option<RefTransaction>,
     /// Per-ref rejections from the last [`RefTransaction::allowing_failures`] prepare.
-    rejections: Vec<(String, RefStoreError)>,
+    rejections: Vec<(RefName, RefStoreError)>,
 }
 
 impl MemoryRefStoreInner {
@@ -74,13 +76,13 @@ impl MemoryRefStore {
     /// # Errors
     ///
     /// Returns [`RefStoreError::LockHeld`] naming `name` when a transaction is prepared.
-    pub fn set_ref(&self, name: impl Into<String>, value: RawRef) -> StoreResult<()> {
-        let name = name.into();
+    pub fn set_ref(&self, name: impl AsRef<str>, value: RawRef) -> StoreResult<()> {
+        let key = name.as_ref().to_owned();
         let mut inner = self.lock();
         if inner.prepared.is_some() {
-            return Err(RefStoreError::LockHeld { name });
+            return Err(RefStoreError::LockHeld { name: key.clone() });
         }
-        inner.state_mut().refs.insert(name, value);
+        inner.state_mut().refs.insert(key, value);
         Ok(())
     }
 
@@ -99,8 +101,8 @@ impl RefStore for MemoryRefStore {
         RefStorageFormat::Memory
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
-        Ok(self.lock().state.refs.get(name).cloned())
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
+        Ok(self.lock().state.refs.get(name.as_str()).cloned())
     }
 
     fn for_each_ref(
@@ -119,7 +121,7 @@ impl RefStore for MemoryRefStore {
                 RawRef::Symbolic(_) => resolve_symbolic(&state.refs, name).ok(),
             };
             let entry = RefEntry {
-                name: name.clone(),
+                name: RefName::from_trusted(name.clone()),
                 value: value.clone(),
                 peeled,
             };
@@ -143,7 +145,7 @@ impl RefStore for MemoryRefStore {
         wait: LockWait,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         let lock_name = txn.lock_name();
-        let ticket = self.gate.acquire(wait, &lock_name)?;
+        let ticket = self.gate.acquire(wait, lock_name.as_str())?;
         match self.prepare_locked(txn) {
             Ok(mut prepared) => {
                 prepared._ticket = Some(ticket);
@@ -156,18 +158,18 @@ impl RefStore for MemoryRefStore {
         }
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
-        Ok(self.lock().state.reflogs.contains_key(name))
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
+        Ok(self.lock().state.reflogs.contains_key(name.as_str()))
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         let state = self.snapshot();
-        let Some(entries) = state.reflogs.get(name) else {
+        let Some(entries) = state.reflogs.get(name.as_str()) else {
             return Ok(());
         };
         if reverse {
@@ -186,45 +188,53 @@ impl RefStore for MemoryRefStore {
         Ok(())
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
         let mut inner = self.lock();
-        if !inner.state.reflogs.contains_key(name) {
+        if !inner.state.reflogs.contains_key(name.as_str()) {
             inner
                 .state_mut()
                 .reflogs
-                .insert(name.to_owned(), Vec::new());
+                .insert(name.as_str().to_owned(), Vec::new());
         }
         Ok(())
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
         let mut inner = self.lock();
-        if inner.state.reflogs.contains_key(name) {
-            inner.state_mut().reflogs.remove(name);
+        if inner.state.reflogs.contains_key(name.as_str()) {
+            inner.state_mut().reflogs.remove(name.as_str());
         }
         Ok(())
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
         self.rewrite_reflog(name, &mut |_| Ok(entries.clone()))
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         let mut inner = self.lock();
-        let current = inner.state.reflogs.get(name).cloned().unwrap_or_default();
+        let current = inner
+            .state
+            .reflogs
+            .get(name.as_str())
+            .cloned()
+            .unwrap_or_default();
         let rewritten = transform(current)?;
-        inner.state_mut().reflogs.insert(name.to_owned(), rewritten);
+        inner
+            .state_mut()
+            .reflogs
+            .insert(name.as_str().to_owned(), rewritten);
         Ok(())
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         let state = self.snapshot();
         for name in state.reflogs.keys() {
-            if f(name).is_break() {
+            if f(RefNameRef::from_trusted(name)).is_break() {
                 break;
             }
         }
@@ -238,7 +248,7 @@ impl MemoryRefStore {
         let mut inner = self.lock();
         if inner.prepared.is_some() {
             return Err(RefStoreError::LockHeld {
-                name: txn.lock_name(),
+                name: txn.lock_name().as_str().to_owned(),
             });
         }
 
@@ -282,12 +292,12 @@ impl MemoryRefStore {
 struct MemoryPrepared<'a> {
     store: &'a MemoryRefStore,
     committed: bool,
-    rejections: Vec<(String, RefStoreError)>,
+    rejections: Vec<(RefName, RefStoreError)>,
     _ticket: Option<SingleWriterTicket<'a>>,
 }
 
 impl PreparedRefTransaction for MemoryPrepared<'_> {
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         &self.rejections
     }
 
@@ -402,8 +412,10 @@ mod tests {
             let mut seen = Vec::new();
             store
                 .for_each_ref("refs/", &mut |entry| {
-                    let raw = store.read_raw(&entry.name).expect("read_raw");
-                    let resolved = store.resolve(&entry.name).expect("resolve");
+                    let raw = store.read_raw(entry.name.as_ref()).expect("read_raw");
+                    let resolved = store
+                        .resolve(RefNameRef::from_trusted(entry.name.as_str()))
+                        .expect("resolve");
                     let mut nested = 0usize;
                     store
                         .for_each_ref("refs/heads/", &mut |_| {
@@ -419,13 +431,13 @@ mod tests {
                 seen,
                 vec![
                     (
-                        "refs/heads/alias".to_owned(),
+                        RefName::from_trusted("refs/heads/alias"),
                         Some(RawRef::Symbolic("refs/heads/main".into())),
                         oid(1),
                         2,
                     ),
                     (
-                        "refs/heads/main".to_owned(),
+                        RefName::from_trusted("refs/heads/main"),
                         Some(RawRef::Direct(oid(1))),
                         oid(1),
                         2,
@@ -440,10 +452,13 @@ mod tests {
         finishes_promptly(|| {
             let store = MemoryRefStore::new();
             store
-                .replace_reflog("HEAD", sample_reflog(1))
+                .replace_reflog_str(RefNameRef::from_trusted("HEAD"), sample_reflog(1))
                 .expect("HEAD log");
             store
-                .replace_reflog("refs/heads/main", sample_reflog(2))
+                .replace_reflog_str(
+                    RefNameRef::from_trusted("refs/heads/main"),
+                    sample_reflog(2),
+                )
                 .expect("main log");
 
             let mut dump = Vec::new();
@@ -451,11 +466,15 @@ mod tests {
                 .for_each_reflog_ref(&mut |name| {
                     assert!(store.reflog_exists(name).expect("reflog_exists"));
                     store
-                        .for_each_reflog_entry(name, false, &mut |entry| {
-                            assert!(store.read_raw(name).expect("read_raw").is_none());
-                            dump.push((name.to_owned(), entry.new_oid));
-                            ControlFlow::Continue(())
-                        })
+                        .for_each_reflog_entry_str(
+                            RefNameRef::from_trusted(name.as_str()),
+                            false,
+                            &mut |entry| {
+                                assert!(store.read_raw(name).expect("read_raw").is_none());
+                                dump.push((name.as_str().to_owned(), entry.new_oid));
+                                ControlFlow::Continue(())
+                            },
+                        )
                         .expect("for_each_reflog_entry");
                     ControlFlow::Continue(())
                 })
@@ -481,7 +500,7 @@ mod tests {
                 .set_ref("refs/heads/b", RawRef::Direct(oid(2)))
                 .expect("b");
             store
-                .replace_reflog("refs/heads/a", sample_reflog(1))
+                .replace_reflog_str(RefNameRef::from_trusted("refs/heads/a"), sample_reflog(1))
                 .expect("log");
 
             let mut names = Vec::new();
@@ -494,21 +513,33 @@ mod tests {
                     ControlFlow::Continue(())
                 })
                 .expect("for_each_ref");
-            assert_eq!(names, vec!["refs/heads/a", "refs/heads/b"]);
             assert_eq!(
-                store.read_raw("refs/heads/added").expect("read"),
+                names.iter().map(|n| n.as_str()).collect::<Vec<_>>(),
+                vec!["refs/heads/a", "refs/heads/b"]
+            );
+            assert_eq!(
+                store
+                    .read_raw(RefNameRef::from_trusted("refs/heads/added"))
+                    .expect("read"),
                 Some(RawRef::Direct(oid(3)))
             );
 
             let mut entries = 0usize;
             store
-                .for_each_reflog_entry("refs/heads/a", true, &mut |_| {
-                    store
-                        .replace_reflog("refs/heads/a", Vec::new())
-                        .expect("replace_reflog from callback");
-                    entries += 1;
-                    ControlFlow::Continue(())
-                })
+                .for_each_reflog_entry_str(
+                    RefNameRef::from_trusted("refs/heads/a"),
+                    true,
+                    &mut |_| {
+                        store
+                            .replace_reflog_str(
+                                RefNameRef::from_trusted("refs/heads/a"),
+                                Vec::new(),
+                            )
+                            .expect("replace_reflog from callback");
+                        entries += 1;
+                        ControlFlow::Continue(())
+                    },
+                )
                 .expect("for_each_reflog_entry");
             assert_eq!(entries, 1);
 
@@ -518,14 +549,20 @@ mod tests {
                     store
                         .delete_reflog(name)
                         .expect("delete_reflog from callback");
-                    store.create_reflog("refs/heads/zz").expect("create_reflog");
-                    logged.push(name.to_owned());
+                    store
+                        .create_reflog(RefNameRef::from_trusted("refs/heads/zz"))
+                        .expect("create_reflog");
+                    logged.push(name.as_str().to_owned());
                     ControlFlow::Continue(())
                 })
                 .expect("for_each_reflog_ref");
             assert_eq!(logged, vec!["refs/heads/a"]);
-            assert!(!store.reflog_exists("refs/heads/a").expect("exists"));
-            assert!(store.reflog_exists("refs/heads/zz").expect("exists"));
+            assert!(!store
+                .reflog_exists(RefNameRef::from_trusted("refs/heads/a"))
+                .expect("exists"));
+            assert!(store
+                .reflog_exists(RefNameRef::from_trusted("refs/heads/zz"))
+                .expect("exists"));
         });
     }
 }

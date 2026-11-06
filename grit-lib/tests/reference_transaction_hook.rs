@@ -18,7 +18,9 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{Expected, MemoryRefStore, RawRef, RefUpdate, RefUpdateFlags};
+use grit_lib::refs::store::{
+    Expected, MemoryRefStore, RawRef, RefNameRef, RefUpdate, RefUpdateFlags,
+};
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit_on_store, BranchCommitRefUpdate,
 };
@@ -117,7 +119,7 @@ fn prepared_refusal_leaves_ref_unchanged_and_logs_aborted() {
     assert!(matches!(err, Error::Hook(_)), "{err}");
     assert!(repo
         .refs()
-        .read_raw("refs/heads/blocked")
+        .read_raw(RefNameRef::from_trusted("refs/heads/blocked"))
         .expect("read")
         .is_none());
     let text = read_log(&log);
@@ -149,7 +151,7 @@ fn files_backend_commit_emits_head_and_branch_lines() {
     update_branch_for_commit_on_store(
         repo.refs(),
         &BranchCommitRefUpdate {
-            branch_ref: "refs/heads/main",
+            branch_ref: RefNameRef::from_trusted("refs/heads/main"),
             expected_old: Some(old),
             new_oid: new_commit,
             identity: "T <t@e.x> 1700000000 +0000",
@@ -263,7 +265,7 @@ fn branch_lock_held_during_prepared_blocks_nested_ref_update() {
     update_branch_for_commit_on_store(
         repo.refs(),
         &BranchCommitRefUpdate {
-            branch_ref: "refs/heads/main",
+            branch_ref: RefNameRef::from_trusted("refs/heads/main"),
             expected_old: Some(old_oid),
             new_oid,
             identity: "T <t@e.x> 1700000000 +0000",

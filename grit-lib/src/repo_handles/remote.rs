@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::error::Result;
 use crate::fetch::Progress;
 use crate::fetch_request::FetchRefspecError;
-use crate::refs::store::{Expected, RefUpdate, RefUpdateFlags};
+use crate::refs::store::{Expected, RefName, RefNameRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
 use crate::refspec::{fetch_specs_bind_local_ref, parse_fetch_refspec, RefspecItem};
 use crate::remote::{
@@ -456,7 +456,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         let updates: Vec<RefUpdate> = refs
             .iter()
             .map(|refname| RefUpdate {
-                name: refname.clone(),
+                name: RefName::from_trusted(refname.as_str()),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,
@@ -495,7 +495,10 @@ impl<'repo> RepositoryRemotes<'repo> {
 
         let target = match mode {
             SetHead::Delete => {
-                let exists = !matches!(store.read_raw(&head_ref), Ok(None));
+                let exists = !matches!(
+                    store.read_raw(RefNameRef::from_trusted(head_ref.as_str())),
+                    Ok(None)
+                );
                 if !dry_run && exists {
                     crate::refs::delete_ref_on_store(store, &head_ref)
                         .map_err(RemoteError::from)?;
@@ -628,7 +631,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         let updates: Vec<RefUpdate> = refs_to_delete
             .iter()
             .map(|refname| RefUpdate {
-                name: refname.clone(),
+                name: RefName::from_trusted(refname.as_str()),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,

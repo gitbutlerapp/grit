@@ -14,7 +14,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::prepare_with_lock_wait;
 use grit_lib::refs::store::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::ExpireOptions;
@@ -85,10 +85,14 @@ fn race_on_repo(repo: Arc<Repository>) {
 
     let mut kept = 0usize;
     repo.refs()
-        .for_each_reflog_entry("refs/heads/race", false, &mut |_| {
-            kept += 1;
-            std::ops::ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::from_trusted("refs/heads/race"),
+            false,
+            &mut |_| {
+                kept += 1;
+                std::ops::ControlFlow::Continue(())
+            },
+        )
         .expect("read log");
     assert_eq!(
         kept,

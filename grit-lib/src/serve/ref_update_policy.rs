@@ -3,6 +3,7 @@
 use crate::hide_refs;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use crate::refs::store::RefNameRef;
 use crate::repo::Repository;
 
 use super::receive_pack::{ReceivePolicy, RefCommand, RefUpdateRefusal};
@@ -60,7 +61,10 @@ pub(crate) fn validate_ref_update(
     if hide_refs::ref_is_hidden(&cmd.refname, &cmd.refname, hidden_refs) {
         return Ok(Some(RefUpdateRefusal::HiddenRef));
     }
-    let current = repo.refs().resolve(&cmd.refname).ok();
+    let current = repo
+        .refs()
+        .resolve(RefNameRef::from_trusted(&cmd.refname))
+        .ok();
     if current != cmd.old {
         return Ok(Some(RefUpdateRefusal::StaleInfo));
     }

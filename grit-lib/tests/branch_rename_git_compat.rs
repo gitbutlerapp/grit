@@ -10,8 +10,8 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{list_branches, rename_branch, BranchError, RenameBranchOptions};
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-    ReflogUpdate,
+    Expected, MemoryRefStore, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -356,18 +356,33 @@ fn rename_on_injected_memory_ref_store() {
     )
     .unwrap();
     assert_eq!(
-        store.read_raw("refs/heads/renamed").unwrap(),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/renamed"))
+            .unwrap(),
         Some(RawRef::Direct(tip))
     );
-    assert_eq!(store.read_raw("refs/heads/topic").unwrap(), None);
-    assert!(store.reflog_exists("refs/heads/renamed").unwrap());
-    assert!(!store.reflog_exists("refs/heads/topic").unwrap());
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .unwrap(),
+        None
+    );
+    assert!(store
+        .reflog_exists(RefNameRef::from_trusted("refs/heads/renamed"))
+        .unwrap());
+    assert!(!store
+        .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
+        .unwrap());
     let mut last_message = None;
     store
-        .for_each_reflog_entry("refs/heads/renamed", true, &mut |entry| {
-            last_message = Some(entry.message.clone());
-            std::ops::ControlFlow::Break(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::from_trusted("refs/heads/renamed"),
+            true,
+            &mut |entry| {
+                last_message = Some(entry.message.clone());
+                std::ops::ControlFlow::Break(())
+            },
+        )
         .unwrap();
     assert_eq!(
         last_message.as_deref(),
@@ -425,7 +440,7 @@ fn rename_retargets_head_on_injected_store_when_branch_checked_out() {
     )
     .unwrap();
     assert_eq!(
-        store.read_raw("HEAD").unwrap(),
+        store.read_raw(RefNameRef::from_trusted("HEAD")).unwrap(),
         Some(RawRef::Symbolic("refs/heads/renamed".to_owned()))
     );
 }

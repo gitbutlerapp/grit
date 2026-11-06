@@ -11,7 +11,7 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    MemoryRefStore, PreparedRefTransaction, RawRef, RefName, RefStore, RefStoreError,
+    MemoryRefStore, PreparedRefTransaction, RawRef, RefName, RefNameRef, RefStore, RefStoreError,
     RefTransaction,
 };
 use grit_lib::repo::{InitOptions, Repository};
@@ -43,7 +43,7 @@ impl RefStore for Slow {
         self.inner.format()
     }
 
-    fn read_raw(&self, name: &str) -> grit_lib::error::Result<Option<RawRef>> {
+    fn read_raw(&self, name: &RefNameRef) -> grit_lib::error::Result<Option<RawRef>> {
         self.inner.read_raw(name)
     }
 
@@ -74,34 +74,38 @@ impl RefStore for Slow {
         }))
     }
 
-    fn reflog_exists(&self, name: &str) -> grit_lib::error::Result<bool> {
+    fn reflog_exists(&self, name: &RefNameRef) -> grit_lib::error::Result<bool> {
         self.inner.reflog_exists(name)
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> grit_lib::error::Result<()> {
         self.inner.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> grit_lib::error::Result<()> {
+    fn create_reflog(&self, name: &RefNameRef) -> grit_lib::error::Result<()> {
         self.inner.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> grit_lib::error::Result<()> {
+    fn delete_reflog(&self, name: &RefNameRef) -> grit_lib::error::Result<()> {
         self.inner.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> grit_lib::error::Result<()> {
+    fn replace_reflog(
+        &self,
+        name: &RefNameRef,
+        entries: Vec<ReflogEntry>,
+    ) -> grit_lib::error::Result<()> {
         self.inner.replace_reflog(name, entries)
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> grit_lib::error::Result<Vec<ReflogEntry>>,
     ) -> grit_lib::error::Result<()> {
         self.inner.rewrite_reflog(name, transform)
@@ -109,7 +113,7 @@ impl RefStore for Slow {
 
     fn for_each_reflog_ref(
         &self,
-        f: &mut dyn FnMut(&str) -> ControlFlow<()>,
+        f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>,
     ) -> grit_lib::error::Result<()> {
         self.inner.for_each_reflog_ref(f)
     }

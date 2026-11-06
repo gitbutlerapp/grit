@@ -1,8 +1,6 @@
 //! Comparison bases for a branch (its upstream or the repository's target branch) and
 //! remote-tracking ref updates after a push.
 
-use std::path::Path;
-
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
 use crate::environment::Environment;
 use crate::error::Result;
@@ -11,7 +9,7 @@ use crate::merge_base::ahead_behind_of_target_commits;
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
-use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+use crate::refs::store::{Expected, RawRef, RefName, RefNameRef, RefUpdate, RefUpdateFlags};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
@@ -19,6 +17,7 @@ use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision_for_range
 use crate::state::{resolve_head, HeadState, InProgressOperation, WtStatusState};
 use crate::transfer::PushRefSpec;
 use crate::transfer::{match_positive, ref_excluded};
+use std::path::Path;
 
 /// The `remote.<name>.fetch` refspecs of one remote, split by polarity.
 struct FetchRefspecs {
@@ -230,7 +229,7 @@ fn commit_push_tracking_updates(
         .filter(|result| matches!(result.status, PushRefStatus::Ok | PushRefStatus::UpToDate))
         .filter_map(|result| {
             let name = refspecs.tracking_ref(remote_name, &result.remote_ref)?;
-            let current = store.resolve(&name).ok();
+            let current = store.resolve(RefNameRef::from_trusted(name.as_str())).ok();
             let new_value = match result.new_oid {
                 Some(oid) if current == Some(oid) => return None,
                 Some(oid) => Some(RawRef::Direct(oid)),
@@ -238,7 +237,7 @@ fn commit_push_tracking_updates(
                 None => None,
             };
             Some(RefUpdate {
-                name,
+                name: RefName::from_trusted(name),
                 new_value,
                 expected: Expected::Any,
                 reflog: None,
@@ -362,7 +361,7 @@ pub struct TargetComparison {
 /// Resolve `refname` through the repository's ref store; refs that are missing or cannot be
 /// resolved (dangling symrefs, unreadable files) count as absent.
 fn resolve_optional(repo: &Repository, refname: &str) -> Option<ObjectId> {
-    repo.refs().resolve(refname).ok()
+    repo.refs().resolve(RefNameRef::from_trusted(refname)).ok()
 }
 
 fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {

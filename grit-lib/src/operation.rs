@@ -20,11 +20,10 @@
 //! assert_eq!(ConflictKind::DeletedByUs.as_str(), "deleted_by_us");
 //! ```
 
-use std::collections::{BTreeMap, HashMap};
-
 use crate::diff::merge_trees::{DirectoryRenameConflict, TreeMergeOutput};
 use crate::index::Index;
 use crate::state::NextStep;
+use std::collections::{BTreeMap, HashMap};
 
 /// How the two sides of a merge collided on one path.
 ///

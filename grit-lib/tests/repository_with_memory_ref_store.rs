@@ -11,7 +11,8 @@ use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::merge::{resolve_merge_source, MergeSourceKind};
 use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate, ReflogUpdate,
+    Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    ReflogUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
@@ -177,7 +178,7 @@ fn injected_ref_updates_never_write_head_or_refs_directory() {
     );
     assert_eq!(
         repo.refs()
-            .read_raw("HEAD")
+            .read_raw(RefNameRef::from_trusted("HEAD"))
             .expect("HEAD")
             .and_then(|raw| match raw {
                 RawRef::Symbolic(target) => Some(target),

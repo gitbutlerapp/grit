@@ -8,7 +8,9 @@ use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryError, RefQueryOptions};
 use crate::refs::on_store::reflog_wanted;
-use crate::refs::store::{Expected, RawRef, RefName, RefUpdate, RefUpdateFlags, ReflogUpdate};
+use crate::refs::store::{
+    Expected, RawRef, RefName, RefNameRef, RefUpdate, RefUpdateFlags, ReflogUpdate,
+};
 use crate::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store_with_wait,
     ensure_refname_safe_for_storage, list_refs_for_repository,
@@ -55,7 +57,7 @@ impl<'repo> References<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
-    /// use grit_lib::refs::store::RefName;
+    /// use grit_lib::refs::store::{RefName, RefNameRef};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// use grit_lib::ident::Signature;
     /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -74,8 +76,8 @@ impl<'repo> References<'repo> {
     /// # }
     /// ```
     #[inline]
-    pub fn resolve(&self, name: &RefName) -> Result<ObjectId> {
-        self.repo.resolve_ref_oid(name.as_str())
+    pub fn resolve(&self, name: impl AsRef<RefNameRef>) -> Result<ObjectId> {
+        self.repo.resolve_ref_oid(name.as_ref().as_str())
     }
 
     /// Read `name` when it exists: its stored value and the object it resolves to.
@@ -84,12 +86,13 @@ impl<'repo> References<'repo> {
     /// so read and corruption failures stay distinguishable from absence. A direct ref is
     /// read once; only a symbolic ref is followed.
     pub(crate) fn read_existing(&self, name: &str) -> Result<Option<ExistingRef>> {
+        let name = RefNameRef::from_trusted(name);
         let Some(raw) = self.repo.refs().read_raw(name)? else {
             return Ok(None);
         };
         let oid = match &raw {
             RawRef::Direct(oid) => *oid,
-            RawRef::Symbolic(_) => self.repo.resolve_ref_oid(name)?,
+            RawRef::Symbolic(_) => self.repo.resolve_ref_oid(name.as_str())?,
         };
         Ok(Some(ExistingRef { raw, oid }))
     }
@@ -107,15 +110,19 @@ impl<'repo> References<'repo> {
     /// target.
     pub(crate) fn delete_verified(&self, name: &str, existing: &ExistingRef) -> Result<()> {
         ensure_refname_safe_for_storage(name)?;
+        let name_ref = RefNameRef::from_trusted(name);
         let (expected, no_deref) = match &existing.raw {
-            RawRef::Symbolic(target) => (Expected::Symref(target.clone()), true),
+            RawRef::Symbolic(target) => (
+                Expected::Symref(RefName::from_trusted(target.clone())),
+                true,
+            ),
             RawRef::Direct(oid) => (Expected::Oid(*oid), false),
         };
         let store = self.repo.refs();
         commit_ref_update_on_store(
             store,
             RefUpdate {
-                name: name.to_owned(),
+                name: RefName::from_trusted(name.to_owned()),
                 new_value: None,
                 expected,
                 reflog: None,
@@ -125,7 +132,7 @@ impl<'repo> References<'repo> {
                 },
             },
         )?;
-        store.delete_reflog(name)
+        store.delete_reflog(name_ref)
     }
 
     /// List refs under `prefix` (for example `"refs/heads/"`), sorted by name.
@@ -134,8 +141,11 @@ impl<'repo> References<'repo> {
     ///
     /// Propagates ref store iteration errors.
     #[inline]
-    pub fn list(&self, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
-        list_refs_for_repository(self.repo, prefix)
+    pub fn list(&self, prefix: &str) -> Result<Vec<(RefName, ObjectId)>> {
+        Ok(list_refs_for_repository(self.repo, prefix)?
+            .into_iter()
+            .map(|(name, oid)| (RefName::from_trusted(name), oid))
+            .collect())
     }
 
     /// List refs matching `query` (patterns, sort, limit) through this repository's ref store.
@@ -185,7 +195,7 @@ impl<'repo> References<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
-    /// use grit_lib::refs::store::RefName;
+    /// use grit_lib::refs::store::{RefName, RefNameRef};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// use grit_lib::ident::Signature;
     /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
@@ -284,7 +294,7 @@ impl<'repo> References<'repo> {
         // Peeling `HEAD` must not attach one reflog decision to both `HEAD` and the target
         // branch: Git evaluates existing logs independently when log-all-ref-updates is off.
         let peeled_head_target = if !flags.no_deref && refname == "HEAD" {
-            match store.read_raw("HEAD")? {
+            match store.read_raw(RefNameRef::from_trusted("HEAD"))? {
                 Some(RawRef::Symbolic(target)) => Some(target),
                 _ => None,
             }
@@ -293,18 +303,19 @@ impl<'repo> References<'repo> {
         };
 
         if let Some(branch) = peeled_head_target {
+            let branch_for_reflog = branch.clone();
             updates.push(RefUpdate {
-                name: branch.clone(),
+                name: RefName::from_trusted(branch),
                 new_value: Some(RawRef::Direct(*oid)),
                 expected,
-                reflog: reflog_for(branch.as_str())?,
+                reflog: reflog_for(branch_for_reflog.as_str())?,
                 flags: RefUpdateFlags::default(),
             });
             if let Some(mut head_reflog) = reflog_for("HEAD")? {
                 head_reflog.old_oid = old_tip;
                 head_reflog.new_oid = Some(*oid);
                 updates.push(RefUpdate {
-                    name: "HEAD".to_owned(),
+                    name: RefName::from_trusted("HEAD"),
                     new_value: Some(RawRef::Direct(*oid)),
                     expected: Expected::Any,
                     reflog: Some(head_reflog),
@@ -317,7 +328,7 @@ impl<'repo> References<'repo> {
             }
         } else {
             updates.push(RefUpdate {
-                name: refname.to_owned(),
+                name: RefName::from_trusted(refname.to_owned()),
                 new_value: Some(RawRef::Direct(*oid)),
                 expected,
                 reflog: reflog_for(refname)?,
@@ -327,15 +338,15 @@ impl<'repo> References<'repo> {
             let mirror_head = !flags.no_deref
                 && refname.starts_with("refs/heads/")
                 && matches!(
-                    store.read_raw("HEAD")?,
-                    Some(RawRef::Symbolic(head_branch)) if head_branch == refname
+                    store.read_raw(RefNameRef::from_trusted("HEAD"))?,
+                    Some(RawRef::Symbolic(head_branch)) if head_branch.as_str() == refname
                 );
             if mirror_head {
                 if let Some(mut head_reflog) = reflog_for("HEAD")? {
                     head_reflog.old_oid = old_tip;
                     head_reflog.new_oid = Some(*oid);
                     updates.push(RefUpdate {
-                        name: "HEAD".to_owned(),
+                        name: RefName::from_trusted("HEAD"),
                         new_value: Some(RawRef::Direct(*oid)),
                         expected: Expected::Any,
                         reflog: Some(head_reflog),
@@ -364,7 +375,7 @@ impl<'repo> References<'repo> {
         let mut entries = Vec::new();
         self.repo
             .refs()
-            .for_each_reflog_entry(name.as_str(), false, &mut |entry| {
+            .for_each_reflog_entry(name.as_ref(), false, &mut |entry| {
                 entries.push(entry.clone());
                 ControlFlow::Continue(())
             })?;

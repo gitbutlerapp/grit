@@ -13,6 +13,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::RawRef;
+use grit_lib::refs::store::RefNameRef;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, resolve_head_for_repository, HeadState};
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
@@ -53,13 +54,17 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
         let target = format!("refs/heads/{branch}");
         assert_eq!(git(path, &["symbolic-ref", "HEAD"]).trim(), target);
         assert_eq!(
-            repo.refs().read_raw("HEAD").unwrap(),
+            repo.refs()
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .unwrap(),
             Some(RawRef::Symbolic(target.clone()))
         );
         assert!(row.contains(&format!("branch {target}")), "{row}");
     } else {
         assert_eq!(
-            repo.refs().read_raw("HEAD").unwrap(),
+            repo.refs()
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .unwrap(),
             Some(RawRef::Direct(oid))
         );
         assert!(!std::process::Command::new("git")

@@ -7,7 +7,6 @@ use crate::branch_tracking::{
     remote_tracking_ref_is_mapped, upstream_branch, upstream_config_for_branch_ref,
     write_branch_upstream_config,
 };
-use crate::check_ref_format::RefName;
 use crate::config::{parse_git_config_maybe_bool, ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
 use crate::git_path::path_for_error_message;
@@ -19,8 +18,8 @@ use crate::porcelain::checkout_reflog::{
 };
 use crate::refs;
 use crate::refs::store::{
-    Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefStorageFormat, RefUpdate,
-    RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefCaseOnlyRename, RefName, RefNameRef, RefReflogRename, RefStorageFormat,
+    RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use crate::repo::Repository;
 use crate::rev_parse::peel_to_commit_for_merge_base;
@@ -260,8 +259,9 @@ pub fn list_branches(repo: &Repository) -> Result<BranchList> {
         .into_iter()
         .map(|(refname, oid)| {
             let name = refname
+                .as_str()
                 .strip_prefix(HEADS_PREFIX)
-                .unwrap_or(&refname)
+                .unwrap_or(refname.as_str())
                 .to_owned();
             let current = current.as_deref() == Some(name.as_str());
             LocalBranch { name, oid, current }
@@ -452,8 +452,8 @@ pub fn rename_branch(repo: &Repository, opts: &RenameBranchOptions) -> Result<Re
                 &[],
                 &[reflog_rename],
                 &[RefCaseOnlyRename {
-                    from: old_ref.clone(),
-                    to: new_ref.clone(),
+                    from: RefName::from_trusted(old_ref.clone()),
+                    to: RefName::from_trusted(new_ref.clone()),
                 }],
             )?;
         } else {
@@ -497,8 +497,8 @@ fn branch_rename_reflog_update(
     tip: ObjectId,
 ) -> RefReflogRename {
     RefReflogRename {
-        from: old_ref.to_owned(),
-        to: new_ref.to_owned(),
+        from: RefName::from_trusted(old_ref.to_owned()),
+        to: RefName::from_trusted(new_ref.to_owned()),
         append: ReflogUpdate {
             identity: checkout_reflog_identity(repo),
             message: format!("Branch: renamed {old_ref} to {new_ref}"),
@@ -522,7 +522,7 @@ fn rename_existing_branch_ref(
     if let Some(new_existing) = new_existing {
         let (expected, no_deref) = expected_for_existing(new_existing);
         updates.push(RefUpdate {
-            name: new_ref.to_owned(),
+            name: RefName::from_trusted(new_ref.to_owned()),
             new_value: Some(RawRef::Direct(old_existing.oid)),
             expected,
             reflog: None,
@@ -533,7 +533,7 @@ fn rename_existing_branch_ref(
         });
     } else {
         updates.push(RefUpdate {
-            name: new_ref.to_owned(),
+            name: RefName::from_trusted(new_ref.to_owned()),
             new_value: Some(RawRef::Direct(old_existing.oid)),
             expected: Expected::Missing,
             reflog: None,
@@ -543,7 +543,7 @@ fn rename_existing_branch_ref(
 
     let (expected, no_deref) = expected_for_existing(old_existing);
     updates.push(RefUpdate {
-        name: old_ref.to_owned(),
+        name: RefName::from_trusted(old_ref.to_owned()),
         new_value: None,
         expected,
         reflog: None,
@@ -559,7 +559,10 @@ fn rename_existing_branch_ref(
 
 fn expected_for_existing(existing: &crate::refs::handle::ExistingRef) -> (Expected, bool) {
     match &existing.raw {
-        RawRef::Symbolic(target) => (Expected::Symref(target.clone()), true),
+        RawRef::Symbolic(target) => (
+            Expected::Symref(RefName::from_trusted(target.clone())),
+            true,
+        ),
         RawRef::Direct(oid) => (Expected::Oid(*oid), false),
     }
 }
@@ -568,9 +571,9 @@ fn retarget_branch_head_symrefs(repo: &Repository, old_short: &str, new_ref: &st
     let old_ref = branch_ref(old_short);
     let current_admin = worktree_admin_dir(repo);
     let head_update = RefUpdate {
-        name: "HEAD".to_owned(),
+        name: RefName::from_trusted("HEAD"),
         new_value: Some(RawRef::Symbolic(new_ref.to_owned())),
-        expected: Expected::Symref(old_ref.clone()),
+        expected: Expected::Symref(RefName::from_trusted(old_ref.clone())),
         reflog: None,
         flags: RefUpdateFlags {
             no_deref: true,
@@ -597,7 +600,7 @@ fn retarget_branch_head_symrefs(repo: &Repository, old_short: &str, new_ref: &st
 
 fn repository_head_points_at(repo: &Repository, refname: &str) -> Result<bool> {
     Ok(matches!(
-        repo.refs().read_raw("HEAD")?,
+        repo.refs().read_raw(RefNameRef::from_trusted("HEAD"))?,
         Some(RawRef::Symbolic(target)) if target == refname
     ))
 }

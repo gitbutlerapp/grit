@@ -7,7 +7,8 @@ use std::thread;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReftableRefStore,
+    Expected, RawRef, RefName, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+    ReftableRefStore,
 };
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -30,7 +31,7 @@ fn empty_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     let store = ReftableRefStore::open(git_dir.clone()).expect("open");
     let txn = RefTransaction::new()
         .update(RefUpdate {
-            name: "refs/heads/main".to_owned(),
+            name: RefName::from_trusted("refs/heads/main"),
             new_value: None,
             expected: Expected::Any,
             reflog: None,
@@ -49,7 +50,7 @@ fn empty_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
 fn missing_create_txn() -> RefTransaction {
     RefTransaction::new()
         .update(RefUpdate {
-            name: "refs/heads/cas-race".to_owned(),
+            name: RefName::from_trusted("refs/heads/cas-race"),
             new_value: Some(RawRef::Direct(oid(1))),
             expected: Expected::Missing,
             reflog: None,
@@ -103,7 +104,7 @@ fn concurrent_reftable_missing_create_single_winner_per_race() {
 
         let cleanup = RefTransaction::new()
             .update(RefUpdate {
-                name: "refs/heads/cas-race".to_owned(),
+                name: RefName::from_trusted("refs/heads/cas-race"),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,

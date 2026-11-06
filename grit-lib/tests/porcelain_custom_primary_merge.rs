@@ -15,7 +15,7 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
@@ -142,7 +142,9 @@ fn integrate_branch_disjoint_files_on_custom_primary() {
     };
 
     assert_eq!(
-        ref_store.read_raw("refs/heads/main").expect("main ref"),
+        ref_store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main ref"),
         Some(RawRef::Direct(merge_oid))
     );
     assert_merge_commit_in_store(&store, merge_oid, main_tip, topic_tip);
@@ -184,7 +186,9 @@ fn integrate_branch_clean_content_merge_on_custom_primary() {
     };
 
     assert_eq!(
-        ref_store.read_raw("refs/heads/main").expect("main ref"),
+        ref_store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main ref"),
         Some(RawRef::Direct(merge_oid))
     );
     assert_merge_commit_in_store(&store, merge_oid, main_tip, topic_tip);

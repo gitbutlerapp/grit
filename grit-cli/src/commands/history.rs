@@ -302,8 +302,8 @@ impl HistoryRewriteOutcome {
                 .ref_updates
                 .iter()
                 .map(|u| RefPair {
-                    ref_name: u.name.clone(),
-                    name: u.name.clone(),
+                    ref_name: u.name.to_string(),
+                    name: u.name.to_string(),
                     old: u.old.to_hex(),
                     new: u.new.to_hex(),
                 })
@@ -1381,8 +1381,8 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
             .overwritten
             .iter()
             .map(|update| RefPair {
-                ref_name: update.name.clone(),
-                name: update.name.clone(),
+                ref_name: update.name.to_string(),
+                name: update.name.to_string(),
                 old: update.old.to_hex(),
                 new: update.new.to_hex(),
             })
@@ -1710,8 +1710,8 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryUndoOutcome> {
             .ref_updates
             .iter()
             .map(|u| RefPair {
-                ref_name: u.name.clone(),
-                name: u.name.clone(),
+                ref_name: u.name.to_string(),
+                name: u.name.to_string(),
                 old: u.old.to_hex(),
                 new: u.new.to_hex(),
             })

@@ -11,8 +11,8 @@ use crate::refs::SYMREF_MAXDEPTH;
 use super::apply::{apply_update, ref_change_target, simulate_batch_apply, RefBatchState};
 use super::{
     Expected, FilesRefStore, FilesRefStoreConfig, PreparedRefTransaction, RawRef, RefEntry,
-    RefStorageFormat, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
-    ReflogUpdate, StoreResult,
+    RefName, RefNameRef, RefStorageFormat, RefStore, RefStoreError, RefTransaction, RefUpdate,
+    RefUpdateFlags, ReflogUpdate, StoreResult,
 };
 
 /// A linked worktree's `HEAD` and `HEAD` reflog, kept in its admin directory, over the
@@ -56,7 +56,10 @@ impl LinkedWorktreeRefStore {
         update: RefUpdate,
     ) -> StoreResult<(Option<RefUpdate>, Option<RefUpdate>)> {
         let mut state = RefBatchState::default();
-        let head = self.head.read_raw("HEAD").map_err(store_error)?;
+        let head = self
+            .head
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .map_err(store_error)?;
         let mut next = match &head {
             Some(RawRef::Symbolic(target)) => Some(target.clone()),
             _ => None,
@@ -66,7 +69,11 @@ impl LinkedWorktreeRefStore {
         }
         for _ in 0..SYMREF_MAXDEPTH {
             let Some(name) = next.take() else { break };
-            if let Some(value) = self.shared.read_raw(&name).map_err(store_error)? {
+            if let Some(value) = self
+                .shared
+                .read_raw(RefNameRef::from_trusted(&name))
+                .map_err(store_error)?
+            {
                 if let RawRef::Symbolic(target) = &value {
                     next = Some(target.clone());
                 }
@@ -89,18 +96,20 @@ impl LinkedWorktreeRefStore {
         let observed = |name: &str| match before.get(name) {
             None => Expected::Missing,
             Some(RawRef::Direct(oid)) => Expected::Oid(*oid),
-            Some(RawRef::Symbolic(target)) => Expected::Symref(target.clone()),
+            Some(RawRef::Symbolic(target)) => {
+                Expected::Symref(RefName::from_trusted(target.clone()))
+            }
         };
         let head_expected = observed("HEAD");
 
-        let Some(branch) = target.filter(|name| name != "HEAD") else {
+        let Some(branch) = target.filter(|name| name.as_str() != "HEAD") else {
             // `HEAD` itself changes, or only its reflog does.
             let log_only = update.flags.log_only;
             if log_only && reflog.is_none() {
                 return Ok((None, None));
             }
             let head_update = RefUpdate {
-                name: "HEAD".to_owned(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: update.new_value,
                 expected: head_expected,
                 reflog,
@@ -115,7 +124,7 @@ impl LinkedWorktreeRefStore {
 
         let branch_logged = matches!(update.new_value, Some(RawRef::Direct(_)));
         let head_update = reflog.clone().map(|log| RefUpdate {
-            name: "HEAD".to_owned(),
+            name: RefName::from_trusted("HEAD"),
             new_value: log.new_oid.map(RawRef::Direct),
             expected: head_expected,
             reflog: Some(log),
@@ -127,7 +136,7 @@ impl LinkedWorktreeRefStore {
         });
         let branch_update = RefUpdate {
             expected: observed(&branch),
-            name: branch,
+            name: RefName::from_trusted(branch),
             new_value: update.new_value,
             reflog: reflog.filter(|_| branch_logged),
             flags: RefUpdateFlags {
@@ -181,8 +190,8 @@ impl RefStore for LinkedWorktreeRefStore {
         self.shared.format()
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
-        if name == "HEAD" {
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
+        if name.as_str() == "HEAD" {
             return self.head.read_raw(name);
         }
         self.shared.read_raw(name)
@@ -194,7 +203,7 @@ impl RefStore for LinkedWorktreeRefStore {
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
         self.shared.for_each_ref(prefix, &mut |entry| {
-            if entry.name == "HEAD" {
+            if entry.name.as_str() == "HEAD" {
                 ControlFlow::Continue(())
             } else {
                 f(entry)
@@ -214,7 +223,11 @@ impl RefStore for LinkedWorktreeRefStore {
         txn: RefTransaction,
         wait: crate::lockfile::LockWait,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
-        if !txn.updates().iter().any(|update| update.name == "HEAD") {
+        if !txn
+            .updates()
+            .iter()
+            .any(|update| update.name.as_str() == "HEAD")
+        {
             return self.shared.prepare_for(txn, wait);
         }
         txn.validate()?;
@@ -222,7 +235,7 @@ impl RefStore for LinkedWorktreeRefStore {
         let mut shared_updates = Vec::with_capacity(updates.len());
         let mut head_update = None;
         for update in updates {
-            if update.name == "HEAD" {
+            if update.name.as_str() == "HEAD" {
                 let (head, branch) = self.split_head_update(update)?;
                 head_update = head;
                 shared_updates.extend(branch);
@@ -263,8 +276,8 @@ impl RefStore for LinkedWorktreeRefStore {
         Ok(Box::new(SplitPrepared { shared, head }))
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
-        if name == "HEAD" {
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
+        if name.as_str() == "HEAD" {
             return self.head.reflog_exists(name);
         }
         self.shared.reflog_exists(name)
@@ -272,32 +285,32 @@ impl RefStore for LinkedWorktreeRefStore {
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
-        if name == "HEAD" {
+        if name.as_str() == "HEAD" {
             return self.head.for_each_reflog_entry(name, reverse, f);
         }
         self.shared.for_each_reflog_entry(name, reverse, f)
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
-        if name == "HEAD" {
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
+        if name.as_str() == "HEAD" {
             return self.head.create_reflog(name);
         }
         self.shared.create_reflog(name)
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
-        if name == "HEAD" {
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
+        if name.as_str() == "HEAD" {
             return self.head.delete_reflog(name);
         }
         self.shared.delete_reflog(name)
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
-        if name == "HEAD" {
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
+        if name.as_str() == "HEAD" {
             return self.head.replace_reflog(name, entries);
         }
         self.shared.replace_reflog(name, entries)
@@ -305,29 +318,29 @@ impl RefStore for LinkedWorktreeRefStore {
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
-        if name == "HEAD" {
+        if name.as_str() == "HEAD" {
             return self.head.rewrite_reflog(name, transform);
         }
         self.shared.rewrite_reflog(name, transform)
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         let mut names = Vec::new();
         self.shared.for_each_reflog_ref(&mut |name| {
-            if name != "HEAD" {
-                names.push(name.to_owned());
+            if name.as_str() != "HEAD" {
+                names.push(name.as_str().to_owned());
             }
             ControlFlow::Continue(())
         })?;
-        if self.head.reflog_exists("HEAD")? {
+        if self.head.reflog_exists(RefNameRef::from_trusted("HEAD"))? {
             let at = names.partition_point(|name| name.as_str() < "HEAD");
             names.insert(at, "HEAD".to_owned());
         }
         for name in &names {
-            if f(name).is_break() {
+            if f(RefNameRef::from_trusted(name)).is_break() {
                 break;
             }
         }
@@ -386,7 +399,7 @@ mod tests {
 
     fn update(name: &str, value: RawRef, expected: Expected, flags: RefUpdateFlags) -> RefUpdate {
         RefUpdate {
-            name: name.into(),
+            name: RefName::from_trusted(name),
             new_value: Some(value),
             expected,
             reflog: None,
@@ -410,7 +423,7 @@ mod tests {
     fn reflog(store: &dyn RefStore, name: &str) -> Vec<(ObjectId, ObjectId, String)> {
         let mut entries = Vec::new();
         store
-            .for_each_reflog_entry(name, false, &mut |entry| {
+            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
                 entries.push((entry.old_oid, entry.new_oid, entry.message.clone()));
                 ControlFlow::Continue(())
             })
@@ -422,7 +435,7 @@ mod tests {
         let mut names = Vec::new();
         store
             .for_each_reflog_ref(&mut |name| {
-                names.push(name.to_owned());
+                names.push(name.as_str().to_owned());
                 ControlFlow::Continue(())
             })
             .expect("reflog refs");
@@ -433,11 +446,20 @@ mod tests {
     fn head_comes_from_the_admin_dir_and_branches_from_the_shared_store() {
         let (_dir, _shared, view) = setup(Some("ref: refs/heads/linked\n"));
         assert_eq!(
-            view.read_raw("HEAD").expect("HEAD"),
+            view.read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
             Some(RawRef::Symbolic("refs/heads/linked".into()))
         );
-        assert_eq!(view.resolve("HEAD").expect("resolve"), oid(2));
-        assert_eq!(view.resolve("refs/heads/main").expect("main"), oid(1));
+        assert_eq!(
+            view.resolve(RefNameRef::from_trusted("HEAD"))
+                .expect("resolve"),
+            oid(2)
+        );
+        assert_eq!(
+            view.resolve(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("main"),
+            oid(1)
+        );
         assert_eq!(view.format(), RefStorageFormat::Memory);
 
         let mut names = Vec::new();
@@ -446,24 +468,34 @@ mod tests {
             ControlFlow::Continue(())
         })
         .expect("list");
-        assert_eq!(names, vec!["refs/heads/linked", "refs/heads/main"]);
+        assert_eq!(
+            names.iter().map(|n| n.as_str()).collect::<Vec<_>>(),
+            vec!["refs/heads/linked", "refs/heads/main"]
+        );
     }
 
     #[test]
     fn detached_and_missing_head() {
         let (_dir, _shared, view) = setup(Some(&format!("{}\n", oid(3))));
         assert_eq!(
-            view.read_raw("HEAD").expect("HEAD"),
+            view.read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
             Some(RawRef::Direct(oid(3)))
         );
         let (_dir, _shared, view) = setup(None);
-        assert_eq!(view.read_raw("HEAD").expect("HEAD"), None);
+        assert_eq!(
+            view.read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
+            None
+        );
     }
 
     #[test]
     fn a_commit_moves_the_linked_branch_and_logs_head_in_the_admin_dir() {
         let (dir, shared, view) = setup(Some("ref: refs/heads/linked\n"));
-        assert!(!view.reflog_exists("HEAD").expect("exists"));
+        assert!(!view
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("exists"));
         for (old, new) in [(2, 5), (5, 6)] {
             let mut head = update(
                 "HEAD",
@@ -491,18 +523,26 @@ mod tests {
         }
 
         assert_eq!(
-            shared.read_raw("refs/heads/linked").expect("linked"),
+            shared
+                .read_raw(RefNameRef::from_trusted("refs/heads/linked"))
+                .expect("linked"),
             Some(RawRef::Direct(oid(6)))
         );
         assert_eq!(
-            shared.read_raw("refs/heads/main").expect("main"),
+            shared
+                .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("main"),
             Some(RawRef::Direct(oid(1)))
         );
         assert_eq!(
-            shared.read_raw("HEAD").expect("main HEAD"),
+            shared
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("main HEAD"),
             Some(RawRef::Symbolic("refs/heads/main".into()))
         );
-        assert!(!shared.reflog_exists("HEAD").expect("shared HEAD reflog"));
+        assert!(!shared
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("shared HEAD reflog"));
         assert_eq!(
             fs::read_to_string(dir.path().join("HEAD")).expect("HEAD"),
             "ref: refs/heads/linked\n"
@@ -511,7 +551,9 @@ mod tests {
             (oid(2), oid(5), "commit".to_owned()),
             (oid(5), oid(6), "commit".to_owned()),
         ];
-        assert!(view.reflog_exists("HEAD").expect("exists"));
+        assert!(view
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("exists"));
         assert_eq!(reflog(&view, "HEAD"), expected);
         assert_eq!(reflog(shared.as_ref(), "refs/heads/linked"), expected);
         assert_eq!(
@@ -530,7 +572,7 @@ mod tests {
         let mut head = update(
             "HEAD",
             RawRef::Direct(oid(7)),
-            Expected::Symref("refs/heads/linked".into()),
+            Expected::Symref(RefName::from_trusted("refs/heads/linked")),
             no_deref(),
         );
         head.reflog = Some(ReflogUpdate {
@@ -545,15 +587,20 @@ mod tests {
             format!("{}\n", oid(7))
         );
         assert_eq!(
-            view.read_raw("HEAD").expect("HEAD"),
+            view.read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
             Some(RawRef::Direct(oid(7)))
         );
         assert_eq!(
-            shared.read_raw("HEAD").expect("main HEAD"),
+            shared
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("main HEAD"),
             Some(RawRef::Symbolic("refs/heads/main".into()))
         );
         assert_eq!(
-            shared.read_raw("refs/heads/linked").expect("linked"),
+            shared
+                .read_raw(RefNameRef::from_trusted("refs/heads/linked"))
+                .expect("linked"),
             Some(RawRef::Direct(oid(2)))
         );
         assert_eq!(
@@ -573,12 +620,18 @@ mod tests {
             ..log("checkout: main")
         });
         commit(&view, vec![back]).expect("switch");
-        assert_eq!(view.resolve("HEAD").expect("HEAD"), oid(1));
+        assert_eq!(
+            view.resolve(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
+            oid(1)
+        );
         assert_eq!(
             reflog(&view, "HEAD")[1],
             (oid(7), oid(1), "checkout: main".to_owned())
         );
-        assert!(!shared.reflog_exists("HEAD").expect("shared HEAD reflog"));
+        assert!(!shared
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("shared HEAD reflog"));
     }
 
     #[test]
@@ -594,7 +647,9 @@ mod tests {
         commit(&view, vec![head.clone()]).expect("reset");
 
         assert_eq!(
-            shared.read_raw("refs/heads/linked").expect("linked"),
+            shared
+                .read_raw(RefNameRef::from_trusted("refs/heads/linked"))
+                .expect("linked"),
             Some(RawRef::Direct(oid(8)))
         );
         assert_eq!(
@@ -604,7 +659,9 @@ mod tests {
         let expected = vec![(oid(2), oid(8), "reset: moving".to_owned())];
         assert_eq!(reflog(&view, "HEAD"), expected);
         assert_eq!(reflog(shared.as_ref(), "refs/heads/linked"), expected);
-        assert!(!shared.reflog_exists("HEAD").expect("shared HEAD reflog"));
+        assert!(!shared
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("shared HEAD reflog"));
 
         let err = commit(&view, vec![head]).expect_err("stale expectation");
         assert!(
@@ -634,9 +691,13 @@ mod tests {
             "ref: refs/heads/linked\n"
         );
         assert!(!dir.path().join("HEAD.lock").exists());
-        assert!(!view.reflog_exists("HEAD").expect("exists"));
+        assert!(!view
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("exists"));
         assert_eq!(
-            shared.read_raw("refs/heads/main").expect("main"),
+            shared
+                .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("main"),
             Some(RawRef::Direct(oid(1)))
         );
 
@@ -646,7 +707,11 @@ mod tests {
         assert!(dir.path().join("HEAD.lock").exists());
         aborted.abort().expect("abort");
         assert!(!dir.path().join("HEAD.lock").exists());
-        assert_eq!(view.resolve("HEAD").expect("HEAD"), oid(2));
+        assert_eq!(
+            view.resolve(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
+            oid(2)
+        );
     }
 
     #[test]
@@ -679,13 +744,18 @@ mod tests {
         assert!(!dir.path().join("HEAD.lock").exists());
         holder.commit().expect("release");
         commit(&view, vec![head]).expect("commit once free");
-        assert_eq!(view.resolve("HEAD").expect("HEAD"), oid(4));
+        assert_eq!(
+            view.resolve(RefNameRef::from_trusted("HEAD"))
+                .expect("HEAD"),
+            oid(4)
+        );
     }
 
     #[test]
     fn head_reflog_maintenance_stays_in_the_admin_dir() {
         let (dir, shared, view) = setup(Some("ref: refs/heads/linked\n"));
-        view.create_reflog("HEAD").expect("create");
+        view.create_reflog(RefNameRef::from_trusted("HEAD"))
+            .expect("create");
         assert!(dir.path().join("logs/HEAD").is_file());
         let entry = ReflogEntry {
             old_oid: oid(1),
@@ -693,13 +763,19 @@ mod tests {
             identity: "T <t@example.com> 1700000000 +0000".into(),
             message: "kept".into(),
         };
-        view.replace_reflog("HEAD", vec![entry]).expect("replace");
+        view.replace_reflog_str(RefNameRef::from_trusted("HEAD"), vec![entry])
+            .expect("replace");
         assert_eq!(
             reflog(&view, "HEAD"),
             vec![(oid(1), oid(2), "kept".to_owned())]
         );
-        view.delete_reflog("HEAD").expect("delete");
-        assert!(!view.reflog_exists("HEAD").expect("exists"));
-        assert!(!shared.reflog_exists("HEAD").expect("shared HEAD reflog"));
+        view.delete_reflog(RefNameRef::from_trusted("HEAD"))
+            .expect("delete");
+        assert!(!view
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("exists"));
+        assert!(!shared
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))
+            .expect("shared HEAD reflog"));
     }
 }

@@ -17,7 +17,7 @@ use grit_lib::refs::reftable::{
     ReftableError, ReftableReader, ReftableStack, ReftableTransactionUpdate, ReftableWriter,
     WriteOptions,
 };
-use grit_lib::refs::store::{RefStore, ReftableRefStore};
+use grit_lib::refs::store::{RefNameRef, RefStore, ReftableRefStore};
 
 fn oid(byte: u8) -> ObjectId {
     ObjectId::from_bytes(&[byte; 20]).expect("oid")
@@ -623,7 +623,7 @@ fn reftable_stack_write_resolve_list_and_delete() {
         .expect("sym");
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.resolve("refs/heads/main"))
+            .and_then(|store| store.resolve(RefNameRef::from_trusted("refs/heads/main")))
             .expect("resolve"),
         oid
     );
@@ -737,19 +737,21 @@ fn reftable_reflog_create_append_replace_and_list() {
     );
 
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.create_reflog("refs/heads/empty"))
+        .and_then(|store| store.create_reflog(RefNameRef::from_trusted("refs/heads/empty")))
         .expect("create marker");
     let listed = list_reflog_refs(&git_dir).expect("list reflogs");
     assert!(listed.iter().any(|r| r == "refs/heads/main"));
 
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.replace_reflog("refs/heads/main", Vec::new()))
+        .and_then(|store| {
+            store.replace_reflog(RefNameRef::from_trusted("refs/heads/main"), Vec::new())
+        })
         .expect("clear");
     assert!(read_reflog(&git_dir, "refs/heads/main")
         .expect("read cleared")
         .is_empty());
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.delete_reflog("refs/heads/empty"))
+        .and_then(|store| store.delete_reflog(RefNameRef::from_trusted("refs/heads/empty")))
         .expect("delete marker");
 }
 
@@ -777,7 +779,7 @@ fn reftable_write_transaction_batch() {
         .expect("txn");
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.resolve("refs/heads/a"))
+            .and_then(|store| store.resolve(RefNameRef::from_trusted("refs/heads/a")))
             .expect("a"),
         o1
     );

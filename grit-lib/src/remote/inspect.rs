@@ -300,7 +300,7 @@ fn remote_head_branch_names(
 ) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for entry in remote_refs {
-        if !entry.name.starts_with("refs/heads/") {
+        if !entry.name.as_str().starts_with("refs/heads/") {
             continue;
         }
         if ref_excluded(&entry.name, &refspecs.negative) {

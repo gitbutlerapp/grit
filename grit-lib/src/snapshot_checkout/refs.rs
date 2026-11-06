@@ -5,7 +5,7 @@
 use crate::error::Error;
 use crate::ident::Signature;
 use crate::objects::ObjectId;
-use crate::refs::store::{Expected, RawRef, RefStoreError, ReflogUpdate};
+use crate::refs::store::{Expected, RawRef, RefNameRef, RefStoreError, ReflogUpdate};
 use crate::repo::Repository;
 
 use super::Result;
@@ -73,7 +73,9 @@ pub(crate) fn log_head_move_as(
 ) -> Result<()> {
     let config = repo.config().snapshot()?;
     if !crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD")
-        && !repo.refs().reflog_exists("HEAD")?
+        && !repo
+            .refs()
+            .reflog_exists(RefNameRef::from_trusted("HEAD"))?
     {
         return Ok(());
     }
@@ -107,7 +109,9 @@ pub(crate) fn swap_ref_as(
     let config = repo.config().snapshot()?;
     let logged =
         crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), refname)
-            || repo.refs().reflog_exists(refname)?;
+            || repo
+                .refs()
+                .reflog_exists(RefNameRef::from_trusted(refname))?;
     let reflog = logged.then(|| ReflogUpdate {
         identity: identity.to_owned(),
         message: message.to_owned(),

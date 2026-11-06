@@ -9,7 +9,8 @@ use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::store::{
-    Expected, RawRef, RefName, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
+    Expected, RawRef, RefName, RefNameRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
+    RefUpdateFlags,
 };
 use grit_lib::repo::Repository;
 
@@ -290,7 +291,7 @@ fn branch_commit_writer_to_a_missing_object_is_refused_and_git_fsck_stays_clean(
         let err = grit_lib::refs::update_branch_for_commit_on_store(
             grit.refs(),
             &grit_lib::refs::BranchCommitRefUpdate {
-                branch_ref: "refs/heads/main",
+                branch_ref: RefNameRef::from_trusted("refs/heads/main"),
                 expected_old: Some(commit),
                 new_oid: bogus(),
                 identity: "Ref Verify <verify@example.com> 1700000000 +0000",

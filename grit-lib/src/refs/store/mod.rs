@@ -39,8 +39,8 @@ pub use reftable::ReftableRefStore;
 pub(crate) use semantics::format_reflog_identity;
 pub use transaction::RefTransaction;
 pub use types::{
-    Expected, RawRef, RefCaseOnlyRename, RefEntry, RefName, RefReflogRename, RefStorageFormat,
-    RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefCaseOnlyRename, RefEntry, RefName, RefNameRef, RefReflogRename,
+    RefStorageFormat, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 pub(crate) use validation::{
     validate_reflog_identity_string, validate_reflog_message, validate_reflog_update,
@@ -79,7 +79,7 @@ pub trait PreparedRefTransaction: Send {
     /// Updates [`RefTransaction::allowing_failures`] skipped during [`Self::commit`]'s prepare.
     ///
     /// Empty when the transaction was not prepared with [`RefTransaction::allowing_failures`].
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         &[]
     }
 
@@ -121,7 +121,15 @@ pub trait RefStore: Send + Sync + Debug {
     /// Read the stored value for `name` without resolving symbolic targets.
     ///
     /// A missing ref returns `Ok(None)` without allocating a new name string.
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>>;
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>>;
+
+    /// [`Self::read_raw`] with a trusted UTF-8 name string (from the caller or storage).
+    ///
+    /// Default implementation delegates to [`Self::read_raw`]. Prefer
+    /// [`Self::read_raw`] when you already hold a [`RefName`] / [`RefNameRef`].
+    fn read_raw_str(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
+        self.read_raw(name)
+    }
 
     /// Resolve `name` to an object id, following symbolic refs.
     ///
@@ -132,7 +140,12 @@ pub trait RefStore: Send + Sync + Debug {
     ///
     /// Returns [`RefStoreError::SymrefLoop`] when the chain is too deep and
     /// [`RefStoreError::NotFound`] when `name` or a symbolic target is missing.
-    fn resolve(&self, name: &str) -> Result<ObjectId> {
+    fn resolve(&self, name: &RefNameRef) -> Result<ObjectId> {
+        resolve_store(self, name)
+    }
+
+    /// [`Self::resolve`] for a trusted UTF-8 ref name string.
+    fn resolve_str(&self, name: &RefNameRef) -> Result<ObjectId> {
         resolve_store(self, name)
     }
 
@@ -259,26 +272,56 @@ pub trait RefStore: Send + Sync + Debug {
     }
 
     /// Whether a reflog is present for `name`.
-    fn reflog_exists(&self, name: &str) -> Result<bool>;
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool>;
+
+    /// [`Self::reflog_exists`] for a trusted UTF-8 ref name string.
+    fn reflog_exists_str(&self, name: &RefNameRef) -> Result<bool> {
+        self.reflog_exists(name)
+    }
 
     /// Iterate reflog entries for `name` (oldest first unless `reverse`).
     ///
     /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()>;
 
+    /// [`Self::for_each_reflog_entry`] for a trusted UTF-8 ref name string.
+    fn for_each_reflog_entry_str(
+        &self,
+        name: &RefNameRef,
+        reverse: bool,
+        f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        self.for_each_reflog_entry(name, reverse, f)
+    }
+
     /// Create an empty reflog file/record for `name`.
-    fn create_reflog(&self, name: &str) -> Result<()>;
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()>;
+
+    /// [`Self::create_reflog`] for a trusted UTF-8 ref name string.
+    fn create_reflog_str(&self, name: &RefNameRef) -> Result<()> {
+        self.create_reflog(name)
+    }
 
     /// Remove the reflog for `name`.
-    fn delete_reflog(&self, name: &str) -> Result<()>;
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()>;
+
+    /// [`Self::delete_reflog`] for a trusted UTF-8 ref name string.
+    fn delete_reflog_str(&self, name: &RefNameRef) -> Result<()> {
+        self.delete_reflog(name)
+    }
 
     /// Replace the entire reflog (used by expire/delete-entries).
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()>;
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()>;
+
+    /// [`Self::replace_reflog`] for a trusted UTF-8 ref name string.
+    fn replace_reflog_str(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
+        self.replace_reflog(name, entries)
+    }
 
     /// Read a reflog under the backend writer lock, transform it, and write it back atomically.
     ///
@@ -295,14 +338,23 @@ pub trait RefStore: Send + Sync + Debug {
     /// matches (retry the outer operation).
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()>;
+
+    /// [`Self::rewrite_reflog`] for a trusted UTF-8 ref name string.
+    fn rewrite_reflog_str(
+        &self,
+        name: &RefNameRef,
+        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
+    ) -> Result<()> {
+        self.rewrite_reflog(name, transform)
+    }
 
     /// Invoke `f` for each ref name that has a reflog, in sorted order.
     ///
     /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()>;
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()>;
 
     /// The files backend behind this store, when it is one.
     ///
@@ -326,13 +378,13 @@ pub trait RefStore: Send + Sync + Debug {
 }
 
 /// Resolve `name` through `store`, following symbolic refs.
-pub fn resolve_store<S: RefStore + ?Sized>(store: &S, name: &str) -> Result<ObjectId> {
+pub fn resolve_store<S: RefStore + ?Sized>(store: &S, name: &RefNameRef) -> Result<ObjectId> {
     resolve_via_raw(store, name, 0).map_err(Into::into)
 }
 
 fn resolve_via_raw<S: RefStore + ?Sized>(
     store: &S,
-    name: &str,
+    name: &RefNameRef,
     depth: usize,
 ) -> StoreResult<ObjectId> {
     if depth >= SYMREF_MAXDEPTH {
@@ -342,8 +394,10 @@ fn resolve_via_raw<S: RefStore + ?Sized>(
         crate::error::Error::RefStore(err) => err,
         other => RefStoreError::Corrupt(other.to_string()),
     })? {
-        None => Err(RefStoreError::not_found(name)),
+        None => Err(RefStoreError::not_found(name.as_str())),
         Some(RawRef::Direct(oid)) => Ok(oid),
-        Some(RawRef::Symbolic(target)) => resolve_via_raw(store, &target, depth + 1),
+        Some(RawRef::Symbolic(target)) => {
+            resolve_via_raw(store, RefNameRef::from_trusted(&target), depth + 1)
+        }
     }
 }

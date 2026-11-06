@@ -13,7 +13,9 @@ use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
-use crate::refs::store::{open_ref_store, RawRef, RefEntry, RefStorageFormat, RefStore};
+use crate::refs::store::{
+    open_ref_store, RawRef, RefEntry, RefNameRef, RefStorageFormat, RefStore,
+};
 use crate::repo::Repository;
 use std::ops::ControlFlow;
 
@@ -320,7 +322,7 @@ fn fsck_reftable_store(
 
     let mut backend_err: Option<crate::error::Error> = None;
     let mut visit = |entry: &RefEntry| -> ControlFlow<()> {
-        let path = display(&entry.name);
+        let path = display(entry.name.as_str());
         check_ref_file_name(&path, config, strict, issues);
         if let Err(e) = fsck_stored_ref(&path, &entry.value, odb, config, strict, issues) {
             backend_err = Some(e);
@@ -338,7 +340,7 @@ fn fsck_reftable_store(
         return Err(e);
     }
 
-    if let Some(head) = store.read_raw("HEAD")? {
+    if let Some(head) = store.read_raw(RefNameRef::from_trusted("HEAD"))? {
         let path = display("HEAD");
         fsck_stored_ref(&path, &head, odb, config, strict, issues)?;
     }

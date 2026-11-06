@@ -3,7 +3,7 @@
 use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::diagnostics::Warning;
 use crate::error::{Error, Result};
-use crate::refs::store::RawRef;
+use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::SYMREF_MAXDEPTH;
 use crate::repo::Repository;
 use crate::worktree_ref::DWIM_RULES;
@@ -38,7 +38,10 @@ fn expand_rule(rule_index: usize, short: &str) -> String {
 }
 
 fn ref_exists(repo: &Repository, name: &str) -> Result<bool> {
-    Ok(repo.refs().read_raw(name)?.is_some())
+    Ok(repo
+        .refs()
+        .read_raw(RefNameRef::from_trusted(name))?
+        .is_some())
 }
 
 /// Follow symbolic refs from `start` to the terminal ref name Git uses for DWIM output.
@@ -46,7 +49,7 @@ pub fn peel_symref_to_terminal_ref(repo: &Repository, start: &str) -> Result<Str
     let refname_opts = RefFormatOptions::default();
     let mut name = start.to_owned();
     for _ in 0..SYMREF_MAXDEPTH {
-        let Some(raw) = repo.refs().read_raw(&name)? else {
+        let Some(raw) = repo.refs().read_raw(RefNameRef::from_trusted(&name))? else {
             return Ok(name);
         };
         match raw {
@@ -91,7 +94,7 @@ pub fn expand_ref_dwim_full_name(repo: &Repository, spec: &str) -> Result<(usize
     let mut first = None;
     for rule in DWIM_RULES {
         let candidate = rule.replace("{0}", spec);
-        let Some(raw) = repo.refs().read_raw(&candidate)? else {
+        let Some(raw) = repo.refs().read_raw(RefNameRef::from_trusted(&candidate))? else {
             continue;
         };
         let valid = match raw {

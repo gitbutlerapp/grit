@@ -20,6 +20,7 @@ use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
+use grit_lib::refs::store::RefNameRef;
 use grit_lib::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
@@ -173,7 +174,7 @@ fn commit_staged_without_index_stat_refresh(
     update_branch_for_commit_with_config(
         repo.git_dir(),
         &BranchCommitRefUpdate {
-            branch_ref: &refname,
+            branch_ref: RefNameRef::from_trusted(refname.as_str()),
             expected_old: parent,
             new_oid: oid,
             identity: &commit_data.committer,

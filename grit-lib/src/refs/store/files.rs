@@ -6,20 +6,11 @@
 //! refs that were already written remain allowed so grit can remove broken entries. Reftable
 //! and other backends are unchanged.
 
-use crate::git_path::CanonicalizeExt;
-use std::borrow::Cow;
-use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::fs;
-use std::io;
-use std::ops::ControlFlow;
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
-
 use crate::error::{Error, Result};
 use crate::git_dir::io_error::{
     io_with_ref_store_path, map_ref_store_path_io, GitDirPathOperation,
 };
+use crate::git_path::CanonicalizeExt;
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
@@ -30,6 +21,14 @@ use crate::refs::{
     remove_packed_refs_under_lock, restore_packed_records_under_lock, PackedPeel,
     PackedRecordFilter, Ref,
 };
+use std::borrow::Cow;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::fs;
+use std::io;
+use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use super::apply::{
     apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_change_target,
@@ -46,7 +45,10 @@ use super::validation::{
     verify_create_casefold_against_existing, verify_create_casefold_conflicts,
     verify_create_casefold_with_lookup, verify_create_conflicts, verify_name_available_for_create,
 };
-use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
+use super::{
+    PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef, RefStorageFormat, RefStore,
+    RefUpdate,
+};
 use crate::refs::RefnameUnavailable;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
@@ -435,7 +437,9 @@ impl FilesRefStore {
     ) -> Result<()> {
         let creates: Vec<&str> = updates
             .iter()
-            .filter(|u| u.new_value.is_some() && !u.flags.log_only && !refs.contains_key(&u.name))
+            .filter(|u| {
+                u.new_value.is_some() && !u.flags.log_only && !refs.contains_key(u.name.as_str())
+            })
             .map(|u| u.name.as_str())
             .collect();
         let packed = self.packed_refs_view()?;
@@ -624,7 +628,7 @@ impl FilesRefStore {
     ) -> Result<()> {
         let mut name = start.to_owned();
         for _ in 0..crate::refs::SYMREF_MAXDEPTH {
-            let Some(raw) = self.read_raw(&name)? else {
+            let Some(raw) = self.read_raw(RefNameRef::from_trusted(&name))? else {
                 refs.remove(&name);
                 break;
             };
@@ -656,7 +660,7 @@ impl FilesRefStore {
                 }
                 continue;
             }
-            let Some(raw) = self.read_raw(&name)? else {
+            let Some(raw) = self.read_raw(RefNameRef::from_trusted(&name))? else {
                 break;
             };
             let advance = match &raw {
@@ -680,23 +684,23 @@ impl FilesRefStore {
     ) -> Result<RefBatchState> {
         let mut refs = BTreeMap::new();
         for update in updates {
-            if let Some(raw) = self.read_raw(&update.name)? {
-                refs.insert(update.name.clone(), raw);
+            if let Some(raw) = self.read_raw(RefNameRef::from_trusted(update.name.as_str()))? {
+                refs.insert(update.name.as_str().to_owned(), raw);
             }
         }
         for rename in case_only_renames {
-            if refs.contains_key(&rename.from) {
+            if refs.contains_key(rename.from.as_str()) {
                 continue;
             }
-            if let Some(raw) = self.read_raw(&rename.from)? {
-                refs.insert(rename.from.clone(), raw);
+            if let Some(raw) = self.read_raw(RefNameRef::from_trusted(rename.from.as_str()))? {
+                refs.insert(rename.from.as_str().to_owned(), raw);
             }
         }
         self.insert_head_for_batch_state(&mut refs)?;
 
         for update in updates {
-            if matches!(refs.get(&update.name), Some(RawRef::Symbolic(_))) {
-                self.insert_symref_peel_chain(&mut refs, &update.name)?;
+            if matches!(refs.get(update.name.as_str()), Some(RawRef::Symbolic(_))) {
+                self.insert_symref_peel_chain(&mut refs, update.name.as_str())?;
             }
         }
         if matches!(refs.get("HEAD"), Some(RawRef::Symbolic(_))) {
@@ -705,12 +709,12 @@ impl FilesRefStore {
 
         let mut reflogs = self.load_reflogs_for_updates(&refs, updates)?;
         for rename in reflog_renames {
-            if reflogs.contains_key(&rename.from) {
+            if reflogs.contains_key(rename.from.as_str()) {
                 continue;
             }
-            let entries = read_reflog_at_path(&self.reflog_path(&rename.from))?;
+            let entries = read_reflog_at_path(&self.reflog_path(rename.from.as_str()))?;
             if !entries.is_empty() {
-                reflogs.insert(rename.from.clone(), entries);
+                reflogs.insert(rename.from.as_str().to_owned(), entries);
             }
         }
         Ok(RefBatchState { refs, reflogs })
@@ -727,27 +731,30 @@ impl FilesRefStore {
         case_only_renames: &[super::RefCaseOnlyRename],
     ) -> Result<()> {
         for update in updates {
-            match self.read_raw(&update.name)? {
+            match self.read_raw(RefNameRef::from_trusted(update.name.as_str()))? {
                 Some(raw) => {
-                    state.refs.insert(update.name.clone(), raw);
+                    state.refs.insert(update.name.as_str().to_owned(), raw);
                 }
                 None => {
-                    state.refs.remove(&update.name);
+                    state.refs.remove(update.name.as_str());
                 }
             }
         }
         for rename in case_only_renames {
-            if state.refs.contains_key(&rename.from) {
+            if state.refs.contains_key(rename.from.as_str()) {
                 continue;
             }
-            if let Some(raw) = self.read_raw(&rename.from)? {
-                state.refs.insert(rename.from.clone(), raw);
+            if let Some(raw) = self.read_raw(RefNameRef::from_trusted(rename.from.as_str()))? {
+                state.refs.insert(rename.from.as_str().to_owned(), raw);
             }
         }
         self.insert_head_for_batch_state(&mut state.refs)?;
         for update in updates {
-            if matches!(state.refs.get(&update.name), Some(RawRef::Symbolic(_))) {
-                self.reload_symref_peel_chain(&mut state.refs, &update.name)?;
+            if matches!(
+                state.refs.get(update.name.as_str()),
+                Some(RawRef::Symbolic(_))
+            ) {
+                self.reload_symref_peel_chain(&mut state.refs, update.name.as_str())?;
             }
         }
         if matches!(state.refs.get("HEAD"), Some(RawRef::Symbolic(_))) {
@@ -852,10 +859,10 @@ impl FilesRefStore {
     ) -> RefEntry {
         let peeled = match &value {
             RawRef::Direct(_) => packed_peel,
-            RawRef::Symbolic(target) => self.resolve(target).ok(),
+            RawRef::Symbolic(target) => self.resolve(RefNameRef::from_trusted(target)).ok(),
         };
         RefEntry {
-            name,
+            name: RefName::from_trusted(name),
             value,
             peeled,
         }
@@ -1087,21 +1094,21 @@ impl FilesRefStore {
             if update.new_value.is_none() && !update.flags.log_only {
                 continue;
             }
-            if !storage_ok(&update.name) {
+            if !storage_ok(update.name.as_str()) {
                 return Err(RefStoreError::InvalidRefName {
                     name: update.name.clone(),
                 });
             }
         }
         for rename in txn.reflog_renames() {
-            if !storage_ok(&rename.to) {
+            if !storage_ok(rename.to.as_str()) {
                 return Err(RefStoreError::InvalidRefName {
                     name: rename.to.clone(),
                 });
             }
         }
         for rename in txn.case_only_renames() {
-            if !storage_ok(&rename.to) {
+            if !storage_ok(rename.to.as_str()) {
                 return Err(RefStoreError::InvalidRefName {
                     name: rename.to.clone(),
                 });
@@ -1164,8 +1171,8 @@ impl FilesRefStore {
             {
                 return Ok(None);
             }
-            let route = self.route(&update.name);
-            if route.storage_dir != self.common_dir || route.storage_name != update.name {
+            let route = self.route(update.name.as_str());
+            if route.storage_dir != self.common_dir || route.storage_name != update.name.as_str() {
                 return Ok(None);
             }
             creates.push((update.name.as_str(), oid));
@@ -1173,7 +1180,10 @@ impl FilesRefStore {
         let existing = self
             .load_raw_map_prefix("", None)
             .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-        if updates.iter().any(|u| existing.contains_key(&u.name)) {
+        if updates
+            .iter()
+            .any(|u| existing.contains_key(u.name.as_str()))
+        {
             return Ok(None);
         }
         verify_create_conflicts(&existing, updates)?;
@@ -1227,7 +1237,7 @@ impl FilesRefStore {
             if u.new_value.is_some() || u.flags.log_only {
                 return false;
             }
-            let storage = self.route(&u.name).storage_name;
+            let storage = self.route(u.name.as_str()).storage_name;
             self.lookup_packed_oid(&storage).ok().flatten().is_some()
         })
     }
@@ -1245,7 +1255,7 @@ impl FilesRefStore {
     /// The failure of [`Self::lock_ref`]; every lock in `ref_locks` is released first.
     fn take_prepare_locks<'a>(
         &self,
-        names: impl IntoIterator<Item = &'a String>,
+        names: impl IntoIterator<Item = &'a str>,
         carried: Option<&str>,
         wait: LockWait,
         ref_locks: &mut HashMap<String, PathBuf>,
@@ -1262,7 +1272,7 @@ impl FilesRefStore {
                 fs::symlink_metadata(&lock),
                 Err(err) if err.kind() == io::ErrorKind::NotFound
             );
-            if carried != Some(name.as_str()) && absent {
+            if carried != Some(name) && absent {
                 continue;
             }
             if let Err(err) = self.lock_ref(name, &lock, wait) {
@@ -1271,7 +1281,7 @@ impl FilesRefStore {
                 }
                 return Err(Self::ref_store_error_from_lib(err));
             }
-            ref_locks.insert(name.clone(), lock);
+            ref_locks.insert(name.to_owned(), lock);
         }
         Ok(())
     }
@@ -1513,29 +1523,29 @@ impl FilesRefStore {
         after: &RefBatchState,
         ctx: CommitContext<'_>,
     ) -> Result<()> {
-        let Some(value) = after.refs.get(&rename.to) else {
+        let Some(value) = after.refs.get(rename.to.as_str()) else {
             return Err(Error::Message(format!(
                 "case-only rename missing destination ref '{}'",
                 rename.to
             )));
         };
-        let (_, from_path, from_lock) = self.ref_lock_paths(&rename.from);
+        let (_, from_path, from_lock) = self.ref_lock_paths(rename.from.as_str());
         if let Some(parent) = from_lock.parent() {
             fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        self.acquire_ref_lock_mapped(&from_lock, &rename.from, ctx.ref_lock_wait)?;
+        self.acquire_ref_lock_mapped(&from_lock, rename.from.as_str(), ctx.ref_lock_wait)?;
         if !from_path.is_file() {
-            self.remove_packed_record(&rename.from, ctx)?;
+            self.remove_packed_record(rename.from.as_str(), ctx)?;
             FilesRefStore::write_loose_value(
                 &self.common_dir,
                 &self.git_dir,
-                &rename.from,
+                rename.from.as_str(),
                 &from_path,
                 &from_lock,
                 value,
             )?;
         }
-        let (_, to_path, _) = self.ref_lock_paths(&rename.to);
+        let (_, to_path, _) = self.ref_lock_paths(rename.to.as_str());
         if from_path != to_path {
             if let Some(parent) = to_path.parent() {
                 fs::create_dir_all(parent).map_err(Error::Io)?;
@@ -1583,7 +1593,7 @@ impl FilesRefStore {
             if after.refs.contains_key(name) {
                 continue;
             }
-            let route = self.route(name);
+            let route = self.route(name.as_str());
             let (storage_names, checked_names) = by_dir.entry(route.storage_dir).or_default();
             if checked.contains(name.as_str()) {
                 checked_names.insert(route.storage_name.clone(), name.clone());
@@ -1618,7 +1628,7 @@ impl FilesRefStore {
     ) -> Result<()> {
         let mut unprocessed: HashMap<PathBuf, HashSet<String>> = HashMap::new();
         for name in pruned.names.difference(persisted) {
-            let route = self.route(name);
+            let route = self.route(name.as_str());
             unprocessed
                 .entry(route.storage_dir)
                 .or_default()
@@ -1646,7 +1656,7 @@ impl FilesRefStore {
         remove_empty_ref_directory(&path);
         let _ = fs::remove_file(&path);
         let _ = fs::remove_file(lock);
-        self.delete_reflog(refname)?;
+        self.delete_reflog(RefNameRef::from_trusted(refname))?;
         if let Some(parent) = path.parent() {
             ctx.emptied_dirs
                 .borrow_mut()
@@ -1736,7 +1746,7 @@ impl FilesRefStore {
     fn peel_ref_to_oid(&self, start: &str) -> Result<Option<ObjectId>> {
         let mut name = start.to_owned();
         for _ in 0..crate::refs::SYMREF_MAXDEPTH {
-            match self.read_raw(&name)? {
+            match self.read_raw(RefNameRef::from_trusted(&name))? {
                 Some(RawRef::Direct(oid)) => return Ok(Some(oid)),
                 Some(RawRef::Symbolic(next)) => name = next,
                 None => return Ok(None),
@@ -1759,24 +1769,24 @@ impl FilesRefStore {
         if update.flags.log_only {
             return Ok(());
         }
-        let batch_differs =
-            batch_start.refs.get(&update.name) != state_before.refs.get(&update.name);
+        let batch_differs = batch_start.refs.get(update.name.as_str())
+            != state_before.refs.get(update.name.as_str());
         if !super::apply::expected_matches_for_update(state_before, update) {
             return Err(RefStoreError::ExpectedMismatch {
-                name: update.name.clone(),
+                name: update.name.as_str().to_owned(),
                 expected: update.expected.clone(),
-                actual: state_before.refs.get(&update.name).cloned(),
+                actual: state_before.refs.get(update.name.as_str()).cloned(),
             });
         }
         if !batch_differs && update.new_value.is_none() && update.expected == Expected::Any {
             return Ok(());
         }
         let actual = if batch_differs {
-            state_before.refs.get(&update.name).cloned()
+            state_before.refs.get(update.name.as_str()).cloned()
         } else {
-            self.read_raw(&update.name)
+            self.read_raw(update.name.as_ref())
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
-                .or_else(|| ctx.removed.get(&update.name).cloned())
+                .or_else(|| ctx.removed.get(update.name.as_str()).cloned())
         };
         let actual_ref = actual.as_ref();
         if !batch_differs {
@@ -1786,7 +1796,7 @@ impl FilesRefStore {
                         && matches!(update.new_value.as_ref(), Some(RawRef::Direct(_)))
                         && !update.flags.no_deref =>
                 {
-                    self.peel_ref_to_oid(&update.name)
+                    self.peel_ref_to_oid(update.name.as_str())
                         .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
                         .is_some_and(|got| got == *want)
                 }
@@ -1794,14 +1804,14 @@ impl FilesRefStore {
             };
             if !disk_ok {
                 return Err(RefStoreError::ExpectedMismatch {
-                    name: update.name.clone(),
+                    name: update.name.as_str().to_owned(),
                     expected: update.expected.clone(),
                     actual,
                 });
             }
         }
         if update.new_value.is_some() && actual_ref.is_none() && !batch_differs {
-            self.verify_create_available(&update.name, batch_extras, held_lock)?;
+            self.verify_create_available(update.name.as_str(), batch_extras, held_lock)?;
         }
         Ok(())
     }
@@ -1875,12 +1885,14 @@ impl FilesRefStore {
             }
         };
         let mut targets: Vec<String> = touched
-            .filter(|t| *t != update.name && running.refs.get(*t) != update.new_value.as_ref())
+            .filter(|t| {
+                *t != update.name.as_str() && running.refs.get(*t) != update.new_value.as_ref()
+            })
             .map(str::to_owned)
             .into_iter()
             .collect();
         if writes_ref {
-            targets.push(update.name.clone());
+            targets.push(update.name.as_str().to_owned());
         }
 
         let mut held: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -1889,7 +1901,8 @@ impl FilesRefStore {
                 let _ = fs::remove_file(lock);
             }
         };
-        let verify_name = (!matches!(update.expected, Expected::Any)).then_some(&update.name);
+        let verify_name =
+            (!matches!(update.expected, Expected::Any)).then_some(update.name.as_str().to_owned());
         let reflog_lock_names = if update.reflog.is_some() {
             Self::reflog_appends_for_update(running, update)?
                 .into_iter()
@@ -1900,7 +1913,7 @@ impl FilesRefStore {
         };
         for name in targets
             .iter()
-            .chain(verify_name)
+            .chain(verify_name.iter())
             .chain(reflog_lock_names.iter())
         {
             if held.contains_key(name) {
@@ -1918,7 +1931,7 @@ impl FilesRefStore {
             held.insert(name.clone(), lock_path);
         }
 
-        let held_lock = held.get(&update.name).map(PathBuf::as_path);
+        let held_lock = held.get(update.name.as_str()).map(PathBuf::as_path);
         if let Err(err) =
             self.recheck_update_at_commit(update, batch_extras, before, running, held_lock, ctx)
         {
@@ -1958,7 +1971,7 @@ impl FilesRefStore {
         let packed_lock_held = batch.packed_lock.is_some();
         let batch_extras: BTreeSet<&str> = updates.iter().map(|u| u.name.as_str()).collect();
         if updates.iter().any(|u| {
-            u.new_value.is_some() && !u.flags.log_only && !before.refs.contains_key(&u.name)
+            u.new_value.is_some() && !u.flags.log_only && !before.refs.contains_key(u.name.as_str())
         }) {
             self.forget_packed_cache();
         }
@@ -2014,7 +2027,7 @@ impl FilesRefStore {
             let write_result = (|| -> Result<()> {
                 let Some(new) = new else {
                     if old.is_some() {
-                        self.delete_reflog(name)?;
+                        self.delete_reflog(RefNameRef::from_trusted(name))?;
                     }
                     return Ok(());
                 };
@@ -2053,8 +2066,8 @@ impl FilesRefStore {
         let updates = batch.updates.as_slice();
         for rename in &batch.case_only_renames {
             self.persist_case_only_loose_ref(rename, after, ctx)?;
-            persisted_refs.insert(rename.from.clone());
-            persisted_refs.insert(rename.to.clone());
+            persisted_refs.insert(rename.from.as_str().to_owned());
+            persisted_refs.insert(rename.to.as_str().to_owned());
         }
         let mut running = before.clone();
         for (idx, update) in updates.iter().enumerate() {
@@ -2076,7 +2089,7 @@ impl FilesRefStore {
             }
             let touched = ref_change_target(&running, update).map_err(Error::from)?;
             let name = &update.name;
-            let b = running.refs.get(name);
+            let b = running.refs.get(name.as_str());
             let a = if touched.as_deref() == Some(name.as_str()) {
                 update.new_value.as_ref()
             } else {
@@ -2086,7 +2099,7 @@ impl FilesRefStore {
                 && a.is_some()
                 && b == a
                 && !self
-                    .loose_ref_file_exists(name)
+                    .loose_ref_file_exists(name.as_str())
                     .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             let writes_ref = b != a || materialize_loose;
 
@@ -2202,8 +2215,8 @@ impl RefStore for FilesRefStore {
         RefStorageFormat::Files
     }
 
-    fn read_raw(&self, name: &str) -> Result<Option<RawRef>> {
-        self.read_raw_at_route(&self.route(name))
+    fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
+        self.read_raw_at_route(&self.route(name.as_str()))
     }
 
     fn for_each_ref(
@@ -2278,10 +2291,10 @@ impl RefStore for FilesRefStore {
             updates
         };
         for rename in &reflog_renames {
-            self.ensure_reflog_path_writable(&rename.to)?;
+            self.ensure_reflog_path_writable(rename.to.as_str())?;
         }
         for rename in &case_only_renames {
-            self.ensure_reflog_path_writable(&rename.to)?;
+            self.ensure_reflog_path_writable(rename.to.as_str())?;
         }
         let lock_names = ref_lock_names_for_updates(&preliminary, &updates);
         let ref_lock_wait = LockWait::files_ref_lock_for_git_dir(&self.common_dir);
@@ -2294,7 +2307,12 @@ impl RefStore for FilesRefStore {
         tests::run_after_prepare_load_hook();
 
         let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
-        self.take_prepare_locks(&lock_names, carried, ref_lock_wait, &mut ref_locks)?;
+        self.take_prepare_locks(
+            lock_names.iter().map(|s| s.as_str()),
+            carried,
+            ref_lock_wait,
+            &mut ref_locks,
+        )?;
 
         if let Err(err) = self
             .refresh_batch_ref_snapshot_under_lock(&mut preliminary, &updates, &case_only_renames)
@@ -2324,14 +2342,14 @@ impl RefStore for FilesRefStore {
                 available_updates.push(update.clone());
                 continue;
             }
-            if preliminary.refs.contains_key(&update.name) {
+            if preliminary.refs.contains_key(update.name.as_str()) {
                 available_updates.push(update.clone());
                 continue;
             }
             if let Err(err) = self.verify_create_available_in(
-                &update.name,
+                update.name.as_str(),
                 &extras,
-                ref_locks.get(&update.name).map(PathBuf::as_path),
+                ref_locks.get(update.name.as_str()).map(PathBuf::as_path),
                 packed.as_ref(),
                 &mut ancestors,
             ) {
@@ -2364,12 +2382,12 @@ impl RefStore for FilesRefStore {
             if update.flags.log_only || update.new_value.is_none() {
                 continue;
             }
-            if before_commit.refs.contains_key(&update.name)
+            if before_commit.refs.contains_key(update.name.as_str())
                 && !self
-                    .loose_ref_file_exists(&update.name)
+                    .loose_ref_file_exists(update.name.as_str())
                     .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
             {
-                changed.insert(&update.name);
+                changed.insert(update.name.as_str().to_owned());
             }
         }
         // Each update appends its reflog only after its commit-time recheck; still verify
@@ -2386,7 +2404,12 @@ impl RefStore for FilesRefStore {
             }
         }
 
-        self.take_prepare_locks(changed, carried, ref_lock_wait, &mut ref_locks)?;
+        self.take_prepare_locks(
+            changed.iter().map(|s| s.as_str()),
+            carried,
+            ref_lock_wait,
+            &mut ref_locks,
+        )?;
 
         let mut packed_lock = None;
         if self.needs_packed_lock(&updates) {
@@ -2418,17 +2441,17 @@ impl RefStore for FilesRefStore {
         }))
     }
 
-    fn reflog_exists(&self, name: &str) -> Result<bool> {
-        Ok(self.reflog_path(name).is_file())
+    fn reflog_exists(&self, name: &RefNameRef) -> Result<bool> {
+        Ok(self.reflog_path(name.as_str()).is_file())
     }
 
     fn for_each_reflog_entry(
         &self,
-        name: &str,
+        name: &RefNameRef,
         reverse: bool,
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()> {
-        let path = self.reflog_path(name);
+        let path = self.reflog_path(name.as_str());
         if reverse {
             // Newest-first readers usually stop early, so read the log backwards in chunks.
             let Some(mut reader) = reflog::ReverseReflogLineReader::open(&path)? else {
@@ -2452,9 +2475,9 @@ impl RefStore for FilesRefStore {
         Ok(())
     }
 
-    fn create_reflog(&self, name: &str) -> Result<()> {
-        validate_storable_refname(name).map_err(|e| Error::Message(e.to_string()))?;
-        let path = self.reflog_path(name);
+    fn create_reflog(&self, name: &RefNameRef) -> Result<()> {
+        validate_storable_refname(name.as_str()).map_err(|e| Error::Message(e.to_string()))?;
+        let path = self.reflog_path(name.as_str());
         if let Some(parent) = path.parent() {
             self.io_ref_store(
                 parent,
@@ -2470,8 +2493,8 @@ impl RefStore for FilesRefStore {
         Ok(())
     }
 
-    fn delete_reflog(&self, name: &str) -> Result<()> {
-        let route = self.route(name);
+    fn delete_reflog(&self, name: &RefNameRef) -> Result<()> {
+        let route = self.route(name.as_str());
         let logs_root = route.storage_dir.join("logs");
         let path = logs_root.join(&route.storage_name);
         let _ = fs::remove_file(&path);
@@ -2487,28 +2510,28 @@ impl RefStore for FilesRefStore {
         Ok(())
     }
 
-    fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()> {
+    fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
         self.rewrite_reflog(name, &mut |_| Ok(entries.clone()))
     }
 
     fn rewrite_reflog(
         &self,
-        name: &str,
+        name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()> {
         let wait = LockWait::files_ref_lock_for_git_dir(&self.common_dir);
-        let (_, _, lock_path) = self.ref_lock_paths(name);
-        self.lock_ref(name, &lock_path, wait)?;
+        let (_, _, lock_path) = self.ref_lock_paths(name.as_str());
+        self.lock_ref(name.as_str(), &lock_path, wait)?;
         let result = (|| -> Result<()> {
-            let entries = self.read_reflog_entries(name)?;
+            let entries = self.read_reflog_entries(name.as_str())?;
             let rewritten = transform(entries)?;
-            self.persist_reflog_atomic(name, &rewritten)
+            self.persist_reflog_atomic(name.as_str(), &rewritten)
         })();
         let _ = fs::remove_file(&lock_path);
         result
     }
 
-    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()> {
+    fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         let mut names = BTreeSet::new();
         for base in self.store_bases() {
             let logs = base.join("logs");
@@ -2517,7 +2540,7 @@ impl RefStore for FilesRefStore {
             }
         }
         for name in names {
-            if f(&name).is_break() {
+            if f(RefNameRef::from_trusted(&name)).is_break() {
                 break;
             }
         }
@@ -2533,11 +2556,11 @@ struct FilesPrepared<'a> {
     store: &'a FilesRefStore,
     committed: bool,
     batch: Option<PreparedFilesBatch>,
-    rejections: Vec<(String, RefStoreError)>,
+    rejections: Vec<(RefName, RefStoreError)>,
 }
 
 impl PreparedRefTransaction for FilesPrepared<'_> {
-    fn rejected_updates(&self) -> &[(String, RefStoreError)] {
+    fn rejected_updates(&self) -> &[(RefName, RefStoreError)] {
         &self.rejections
     }
 
@@ -2569,7 +2592,7 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
             .updates
             .iter()
             .find(|u| !u.flags.log_only)
-            .and_then(|u| ref_locks.remove_entry(&u.name));
+            .and_then(|u| ref_locks.remove_entry(u.name.as_str()));
         for lock in ref_locks.values() {
             let _ = fs::remove_file(lock);
         }
@@ -2875,14 +2898,17 @@ fn utf8_or_lossy(bytes: &[u8]) -> Cow<'_, str> {
     }
 }
 
-fn changed_ref_names<'a>(
-    before: &'a BTreeMap<String, RawRef>,
-    after: &'a BTreeMap<String, RawRef>,
-) -> BTreeSet<&'a String> {
+fn changed_ref_names(
+    before: &BTreeMap<String, RawRef>,
+    after: &BTreeMap<String, RawRef>,
+) -> BTreeSet<String> {
     before
         .keys()
         .chain(after.keys())
-        .filter(|name| before.get(*name) != after.get(*name))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|name| before.get(name.as_str()) != after.get(name.as_str()))
+        .cloned()
         .collect()
 }
 
@@ -2916,7 +2942,7 @@ mod tests {
     use std::cell::RefCell;
 
     use super::*;
-    use crate::refs::store::RefUpdateFlags;
+    use crate::refs::store::{RefName, RefUpdateFlags};
 
     // hygiene: test-only commit interleaving hook
     thread_local! {
@@ -2971,7 +2997,7 @@ mod tests {
         expected: Expected,
     ) -> StoreResult<()> {
         let txn = RefTransaction::new().update(RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name),
             new_value: Some(RawRef::Direct(value)),
             expected,
             reflog: None,
@@ -3002,7 +3028,7 @@ mod tests {
         let mut names = Vec::new();
         store
             .for_each_ref(prefix, &mut |entry| {
-                names.push(entry.name.clone());
+                names.push(entry.name.as_str().to_owned());
                 ControlFlow::Continue(())
             })
             .expect("list");
@@ -3014,7 +3040,7 @@ mod tests {
         store
             .for_each_ref(prefix, &mut |entry| {
                 if let RawRef::Direct(oid) = entry.value {
-                    out.push((entry.name.clone(), oid));
+                    out.push((entry.name.as_str().to_owned(), oid));
                 }
                 ControlFlow::Continue(())
             })
@@ -3115,7 +3141,7 @@ mod tests {
         store
             .for_each_ref("refs/", &mut |entry| {
                 calls.set(calls.get() + 1);
-                if entry.name == "refs/heads/bb" {
+                if entry.name.as_str() == "refs/heads/bb" {
                     ControlFlow::Break(())
                 } else {
                     ControlFlow::Continue(())
@@ -3266,7 +3292,9 @@ mod tests {
             "racing writer must not commit while the ref is locked: {racer:?}"
         );
         assert_eq!(
-            writer.read_raw(name).expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted(name))
+                .expect("read"),
             Some(RawRef::Direct(oid(3)))
         );
         assert!(
@@ -3310,11 +3338,15 @@ mod tests {
             "a direct writer of the HEAD target must be locked out: {racer:?}"
         );
         assert_eq!(
-            writer.read_raw("refs/heads/main").expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("read"),
             Some(RawRef::Direct(oid(3)))
         );
         assert_eq!(
-            writer.read_raw("HEAD").expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .expect("read"),
             Some(RawRef::Symbolic("refs/heads/main".to_owned()))
         );
         for lock in ["HEAD.lock", "refs/heads/main.lock"] {
@@ -3385,15 +3417,21 @@ mod tests {
         assert!(fs::metadata(path.join("packed-refs")).expect("meta").len() > 8192);
         let refs = store(path);
         assert_eq!(
-            refs.read_raw("refs/tags/t0499").expect("read"),
+            refs.read_raw(RefNameRef::from_trusted("refs/tags/t0499"))
+                .expect("read"),
             Some(RawRef::Direct(oid(1)))
         );
         let mut replaced = records(oid(2));
         replaced.truncate(10);
         crate::refs::write_packed_refs_file(path, &replaced).expect("repack");
-        assert_eq!(refs.read_raw("refs/tags/t0499").expect("read"), None);
         assert_eq!(
-            refs.read_raw("refs/tags/t0009").expect("read"),
+            refs.read_raw(RefNameRef::from_trusted("refs/tags/t0499"))
+                .expect("read"),
+            None
+        );
+        assert_eq!(
+            refs.read_raw(RefNameRef::from_trusted("refs/tags/t0009"))
+                .expect("read"),
             Some(RawRef::Direct(oid(2)))
         );
     }
@@ -3442,7 +3480,9 @@ mod tests {
         .expect("packed-refs");
         let writer = store(path);
         assert_eq!(
-            writer.read_raw("refs/heads/blocked-child").expect("prime"),
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/heads/blocked-child"))
+                .expect("prime"),
             Some(RawRef::Direct(oid(1)))
         );
         replace_packed_refs_keeping_len_and_mtime(
@@ -3493,7 +3533,7 @@ mod tests {
 
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: name.to_owned(),
+                name: RefName::from_trusted(name),
                 new_value: Some(RawRef::Direct(oid(2))),
                 expected: Expected::Oid(oid(1)),
                 reflog: Some(super::super::ReflogUpdate {
@@ -3513,7 +3553,9 @@ mod tests {
             .expect("commit");
 
         assert_eq!(
-            writer.read_raw(name).expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted(name))
+                .expect("read"),
             Some(RawRef::Direct(oid(2)))
         );
         let bytes = fs::read(&log).expect("log");
@@ -3531,7 +3573,7 @@ mod tests {
         );
         let mut messages = Vec::new();
         writer
-            .for_each_reflog_entry(name, false, &mut |entry| {
+            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
                 messages.push(entry.message.clone());
                 ControlFlow::Continue(())
             })
@@ -3549,7 +3591,7 @@ mod tests {
         fs::write(path.join("logs/refs/heads/a"), "").expect("log");
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: "refs/heads/a/b".to_owned(),
+                name: RefName::from_trusted("refs/heads/a/b"),
                 new_value: Some(RawRef::Direct(oid(2))),
                 expected: Expected::Missing,
                 reflog: Some(super::super::ReflogUpdate {
@@ -3589,7 +3631,7 @@ mod tests {
 
         let delete = RefTransaction::new()
             .update(RefUpdate {
-                name: "refs/heads/a".to_owned(),
+                name: RefName::from_trusted("refs/heads/a"),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,
@@ -3618,7 +3660,7 @@ mod tests {
     fn create_with_reflog(name: &str, value: ObjectId) -> RefTransaction {
         RefTransaction::new()
             .update(RefUpdate {
-                name: name.to_owned(),
+                name: RefName::from_trusted(name),
                 new_value: Some(RawRef::Direct(value)),
                 expected: Expected::Missing,
                 reflog: Some(super::super::ReflogUpdate {
@@ -3650,7 +3692,12 @@ mod tests {
             ),
             "{err:?}"
         );
-        assert_eq!(writer.read_raw("refs/heads/rel").expect("read"), None);
+        assert_eq!(
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/heads/rel"))
+                .expect("read"),
+            None
+        );
         assert!(!path.join("refs/heads/rel.lock").exists());
         assert!(!path.join("logs/refs/heads/rel").is_file());
     }
@@ -3709,7 +3756,9 @@ mod tests {
             .commit()
             .expect("commit");
         assert_eq!(
-            writer.read_raw("refs/heads/rel").expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/heads/rel"))
+                .expect("read"),
             Some(RawRef::Direct(oid(2)))
         );
         assert_eq!(
@@ -3738,14 +3787,16 @@ mod tests {
         assert!(!dir.path().join("refs/heads/main.lock").exists());
         set(&writer, name, oid(3), Expected::Oid(oid(2))).expect("retry against current value");
         assert_eq!(
-            writer.read_raw(name).expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted(name))
+                .expect("read"),
             Some(RawRef::Direct(oid(3)))
         );
     }
 
     fn delete(name: &str, expected: Expected) -> RefUpdate {
         RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name),
             new_value: None,
             expected,
             reflog: None,
@@ -3796,7 +3847,13 @@ mod tests {
 
         for i in 0..20 {
             let name = format!("refs/remotes/o/x{i}");
-            assert_eq!(writer.read_raw(&name).expect("read"), None, "{name}");
+            assert_eq!(
+                writer
+                    .read_raw(RefNameRef::from_trusted(&name))
+                    .expect("read"),
+                None,
+                "{name}"
+            );
         }
         let packed = fs::read_to_string(path.join("packed-refs")).expect("packed");
         assert_eq!(
@@ -3876,9 +3933,16 @@ mod tests {
         let writer = store(path);
         commit_all(&writer, vec![delete("refs/remotes/o/HEAD", Expected::Any)])
             .expect("deref delete");
-        assert_eq!(writer.read_raw("refs/remotes/o/x3").expect("read"), None);
         assert_eq!(
-            writer.read_raw("refs/remotes/o/HEAD").expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/remotes/o/x3"))
+                .expect("read"),
+            None
+        );
+        assert_eq!(
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/remotes/o/HEAD"))
+                .expect("read"),
             Some(RawRef::Symbolic("refs/remotes/o/x3".to_owned()))
         );
         let packed = fs::read_to_string(path.join("packed-refs")).expect("packed");
@@ -3915,20 +3979,26 @@ mod tests {
         for i in 0..9 {
             let name = format!("refs/remotes/o/x{i}");
             assert_eq!(
-                writer.read_raw(&name).expect("read"),
+                writer
+                    .read_raw(RefNameRef::from_trusted(&name))
+                    .expect("read"),
                 None,
                 "{name} was deleted"
             );
         }
         assert_eq!(
-            writer.read_raw("refs/remotes/o/x9").expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/remotes/o/x9"))
+                .expect("read"),
             Some(RawRef::Direct(oid(7))),
             "the concurrent value survives"
         );
         for i in 10..20 {
             let name = format!("refs/remotes/o/x{i}");
             assert_eq!(
-                writer.read_raw(&name).expect("read"),
+                writer
+                    .read_raw(RefNameRef::from_trusted(&name))
+                    .expect("read"),
                 Some(RawRef::Direct(oid(1))),
                 "{name} was never processed"
             );
@@ -4050,7 +4120,7 @@ mod tests {
 
     fn create(name: &str, value: ObjectId) -> RefUpdate {
         RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name),
             new_value: Some(RawRef::Direct(value)),
             expected: Expected::Missing,
             reflog: None,
@@ -4103,7 +4173,9 @@ mod tests {
         assert_eq!(names.len(), 502);
         assert!(names.contains(&"refs/tags/kept"));
         assert_eq!(
-            store.read_raw("refs/remotes/origin/b/n42").expect("read"),
+            store
+                .read_raw(RefNameRef::from_trusted("refs/remotes/origin/b/n42"))
+                .expect("read"),
             Some(RawRef::Direct(oid(1)))
         );
         assert_eq!(
@@ -4217,7 +4289,7 @@ mod tests {
     fn reflog_chain_intact(store: &FilesRefStore, name: &str) -> bool {
         let mut entries = Vec::new();
         store
-            .for_each_reflog_entry(name, false, &mut |entry| {
+            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
                 entries.push(entry.clone());
                 ControlFlow::Continue(())
             })
@@ -4230,7 +4302,7 @@ mod tests {
     fn reflog_new_oids(store: &FilesRefStore, name: &str) -> Vec<ObjectId> {
         let mut oids = Vec::new();
         store
-            .for_each_reflog_entry(name, false, &mut |entry| {
+            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
                 oids.push(entry.new_oid);
                 ControlFlow::Continue(())
             })
@@ -4340,7 +4412,7 @@ mod tests {
 
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: name.to_owned(),
+                name: RefName::from_trusted(name),
                 new_value: Some(RawRef::Direct(c2)),
                 expected: Expected::Oid(c1),
                 reflog: Some(sample_reflog()),
@@ -4356,7 +4428,9 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(
-            store(path).read_raw(name).expect("read"),
+            store(path)
+                .read_raw(RefNameRef::from_trusted(name))
+                .expect("read"),
             Some(RawRef::Direct(c3))
         );
         let reader = store(path);
@@ -4386,7 +4460,7 @@ mod tests {
 
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: "HEAD".to_owned(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Direct(c2)),
                 expected: Expected::Oid(c1),
                 reflog: Some(sample_reflog()),
@@ -4402,7 +4476,9 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(
-            store(path).read_raw(main).expect("read main"),
+            store(path)
+                .read_raw(RefNameRef::from_trusted(main))
+                .expect("read main"),
             Some(RawRef::Direct(c3))
         );
         assert_git_reflog_matches_history(path, main);
@@ -4425,7 +4501,7 @@ mod tests {
 
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: "HEAD".to_owned(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Direct(oid(2))),
                 expected: Expected::Any,
                 reflog: Some(sample_reflog()),
@@ -4447,7 +4523,9 @@ mod tests {
             "mirrored branch reflog must be written under the peeled target lock: {racer:?}"
         );
         assert_eq!(
-            writer.read_raw("refs/heads/main").expect("read"),
+            writer
+                .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("read"),
             Some(RawRef::Direct(oid(1)))
         );
         assert_eq!(reflog_new_oids(&writer, "HEAD"), vec![oid(2)]);
@@ -4469,14 +4547,14 @@ mod tests {
 
         let txn = RefTransaction::from_updates(vec![
             RefUpdate {
-                name: "refs/heads/main".to_owned(),
+                name: RefName::from_trusted("refs/heads/main"),
                 new_value: Some(RawRef::Direct(oid(2))),
                 expected: Expected::Oid(oid(1)),
                 reflog: Some(sample_reflog()),
                 flags: RefUpdateFlags::default(),
             },
             RefUpdate {
-                name: "refs/heads/topic".to_owned(),
+                name: RefName::from_trusted("refs/heads/topic"),
                 new_value: Some(RawRef::Direct(oid(12))),
                 expected: Expected::Oid(oid(10)),
                 reflog: Some(sample_reflog()),
@@ -4494,11 +4572,15 @@ mod tests {
             "{err:?}"
         );
         assert_eq!(
-            store(path).read_raw("refs/heads/main").expect("read"),
+            store(path)
+                .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+                .expect("read"),
             Some(RawRef::Direct(oid(2)))
         );
         assert_eq!(
-            store(path).read_raw("refs/heads/topic").expect("read"),
+            store(path)
+                .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+                .expect("read"),
             Some(RawRef::Direct(oid(11)))
         );
         let reader = store(path);

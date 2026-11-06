@@ -12,7 +12,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::serve::{
     receive_pack, ProtocolVersion, ReceivePolicy, RefUpdateRefusal, ServeOptions, UnpackError,
 };
@@ -195,7 +195,7 @@ fn receive_pack_publishes_push_into_custom_primary() {
     git(export.path(), &["fsck", "--full", "--strict"]);
 
     let main = refs
-        .read_raw("refs/heads/main")
+        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
         .expect("read ref")
         .expect("main set");
     assert_eq!(
@@ -252,7 +252,7 @@ fn non_fast_forward_leaves_custom_store_unchanged() {
     ));
     assert!(count_store_objects(store.as_ref()) > 0);
     let kept = refs
-        .read_raw("refs/heads/main")
+        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
         .expect("read")
         .expect("main");
     assert_eq!(
@@ -290,5 +290,8 @@ fn truncated_pack_leaves_custom_store_empty() {
         Some(UnpackError::Truncated) | Some(UnpackError::Ingest(_))
     ));
     assert_eq!(count_store_objects(store.as_ref()), 0);
-    assert!(refs.read_raw("refs/heads/main").expect("read").is_none());
+    assert!(refs
+        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+        .expect("read")
+        .is_none());
 }

@@ -2,7 +2,8 @@
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{
-    Expected, FilesRefStore, RawRef, RefStore, RefTransaction, RefUpdate, ReflogUpdate,
+    Expected, FilesRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    ReflogUpdate,
 };
 use std::collections::BTreeMap;
 use std::fs;
@@ -43,9 +44,9 @@ fn files_store_git_roundtrip() {
     let mut txn = RefTransaction::new();
     for i in 0..1000 {
         let name = if i == 0 {
-            "refs/heads/main".to_owned()
+            RefName::from_trusted("refs/heads/main")
         } else {
-            format!("refs/heads/branch-{i:04}")
+            RefName::from_trusted(format!("refs/heads/branch-{i:04}"))
         };
         txn = txn
             .update(RefUpdate {
@@ -74,7 +75,7 @@ fn files_store_git_roundtrip() {
         .for_each_ref("refs/", &mut |entry| {
             let oid = match &entry.value {
                 RawRef::Direct(o) => *o,
-                RawRef::Symbolic(t) => store.resolve(t).expect("resolve"),
+                RawRef::Symbolic(t) => store.resolve(RefNameRef::from_trusted(t)).expect("resolve"),
             };
             grit_map.insert(entry.name.clone(), oid);
             ControlFlow::Continue(())
@@ -104,11 +105,15 @@ fn files_store_git_roundtrip() {
 
     let store2 = FilesRefStore::from_git_dir(&git_dir).expect("reopen");
     assert_eq!(
-        store2.read_raw("refs/heads/from-git").expect("read"),
+        store2
+            .read_raw(RefNameRef::from_trusted("refs/heads/from-git"))
+            .expect("read"),
         Some(RawRef::Direct(tip))
     );
     assert_eq!(
-        store2.read_raw("refs/heads/sym-git").expect("sym"),
+        store2
+            .read_raw(RefNameRef::from_trusted("refs/heads/sym-git"))
+            .expect("sym"),
         Some(RawRef::Symbolic("refs/heads/from-git".to_owned()))
     );
 }

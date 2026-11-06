@@ -14,7 +14,7 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{MemoryRefStore, RefName, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RefName, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, ReflogQuery};
 
@@ -80,7 +80,7 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) -> Vec<ObjectId> {
 fn store_count(store: &dyn RefStore, name: &str) -> usize {
     let mut n = 0;
     store
-        .for_each_reflog_entry(name, false, &mut |_| {
+        .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |_| {
             n += 1;
             ControlFlow::Continue(())
         })

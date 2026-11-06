@@ -1659,7 +1659,7 @@ fn receive_command_store_update(cmd: &RefCommand) -> crate::refs::store::RefUpda
         flags.no_deref = true;
     }
     crate::refs::store::RefUpdate {
-        name: cmd.refname.clone(),
+        name: crate::refs::store::RefName::from_trusted(cmd.refname.clone()),
         new_value: cmd.new.map(crate::refs::store::RawRef::Direct),
         expected: match cmd.old {
             Some(oid) => crate::refs::store::Expected::Oid(oid),
@@ -2295,7 +2295,7 @@ mod tests {
         use crate::config::environment::RepositoryOptions;
         use crate::objects::ObjectKind;
         use crate::refs::store::{
-            Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+            Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
         };
         use crate::repo::{InitOptions, Repository};
 
@@ -2330,7 +2330,7 @@ mod tests {
             .prepare(
                 RefTransaction::new()
                     .update(RefUpdate {
-                        name: "refs/heads/master".into(),
+                        name: RefName::from_trusted("refs/heads/master"),
                         new_value: Some(RawRef::Direct(commit)),
                         expected: Expected::Missing,
                         reflog: None,

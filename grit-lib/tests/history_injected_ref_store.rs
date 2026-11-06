@@ -18,7 +18,7 @@ use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     apply_rewrite, drop, read_history_last, reword, squash, start_rebase, undo_last_rewrite,
@@ -137,7 +137,10 @@ fn three_commits(repo: &Repository, wt: &Path) -> Vec<ObjectId> {
 }
 
 fn main_tip(refs: &MemoryRefStore) -> ObjectId {
-    match refs.read_raw("refs/heads/main").expect("main") {
+    match refs
+        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+        .expect("main")
+    {
         Some(RawRef::Direct(oid)) => oid,
         other => panic!("refs/heads/main should be direct, got {other:?}"),
     }
@@ -362,7 +365,8 @@ fn rebase_exec_detaches_and_restores_head_in_the_store() {
     assert_eq!(report.runs.len(), 2);
     assert!(report.runs.iter().all(|run| run.exit_code == 0));
     assert_eq!(
-        refs.read_raw("HEAD").expect("HEAD"),
+        refs.read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into())),
         "exec restores the symbolic HEAD in the store"
     );
@@ -390,7 +394,8 @@ fn head_moved_in_store_after_plan_fails_before_any_ref_moves() {
     );
     assert_eq!(main_tip(&refs), tips[2], "no ref may move");
     assert_eq!(
-        refs.read_raw("HEAD").expect("HEAD"),
+        refs.read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Direct(tips[2]))
     );
     assert!(read_history_last(&repo).expect("read").is_none());

@@ -2,9 +2,6 @@
 
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
-use std::io::Write;
-
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
 #[cfg(windows)]
@@ -15,6 +12,9 @@ use crate::objects::{
     ObjectId, ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::odb::Odb;
+use crate::refs::store::RefNameRef;
+use std::collections::{HashMap, HashSet};
+use std::io::Write;
 
 const SIGNATURE: &[u8; 4] = b"CGPH";
 const VERSION: u8 = 1;
@@ -639,7 +639,7 @@ fn walk_reachable_commit_infos(
 /// `HEAD` and every ref under `refs/`, through the repository's ref store.
 fn ref_tips_for_repository(repo: &crate::repo::Repository) -> crate::error::Result<Vec<ObjectId>> {
     let mut stack: Vec<ObjectId> = Vec::new();
-    if let Ok(oid) = repo.refs().resolve("HEAD") {
+    if let Ok(oid) = repo.refs().resolve(RefNameRef::from_trusted("HEAD")) {
         stack.push(oid);
     }
     for (_, oid) in crate::refs::list_refs_for_repository(repo, "refs/")? {

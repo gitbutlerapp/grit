@@ -27,7 +27,7 @@ use crate::objects::{
     parse_commit, parse_tag, parse_tree, CommitData, Object, ObjectId, ObjectInfo, ObjectKind,
     TagData, TreeEntry,
 };
-use crate::refs::store::RawRef;
+use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::{
     expand_ref_dwim_full_name, shorten_unambiguous, warn_ambiguous_refs_from_config,
 };
@@ -224,13 +224,20 @@ impl Repository {
                 }));
         }
 
-        if self.refs().resolve(&format!("refs/heads/{spec}")).is_ok() {
+        if self
+            .refs()
+            .resolve(RefNameRef::from_trusted(&format!("refs/heads/{spec}")))
+            .is_ok()
+        {
             return Ok(Some(RevisionLabel::Branch {
                 name: spec.to_owned(),
             }));
         }
 
-        let Ok(oid) = self.refs().resolve(&format!("refs/tags/{spec}")) else {
+        let Ok(oid) = self
+            .refs()
+            .resolve(RefNameRef::from_trusted(&format!("refs/tags/{spec}")))
+        else {
             return Ok(None);
         };
         let object = self.odb().read(&oid)?;
@@ -416,7 +423,7 @@ impl Repository {
             if spec == "HEAD" {
                 match self
                     .refs()
-                    .read_raw("HEAD")
+                    .read_raw(RefNameRef::from_trusted("HEAD"))
                     .map_err(map_resolve_ref_error)?
                 {
                     Some(RawRef::Direct(_)) => {
@@ -669,6 +676,7 @@ fn looks_like_abbrev_hex(base: &str, repo: &Repository) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::refs::store::RefName;
 
     #[test]
     fn resolve_error_from_path_not_in_revision() {
@@ -802,7 +810,7 @@ mod tests {
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
         let dangling = crate::refs::store::RefTransaction::new()
             .update(crate::refs::store::RefUpdate {
-                name: "refs/tags/missing".to_owned(),
+                name: RefName::from_trusted("refs/tags/missing"),
                 new_value: Some(RawRef::Direct(missing)),
                 expected: crate::refs::store::Expected::Any,
                 reflog: None,

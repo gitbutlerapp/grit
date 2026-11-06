@@ -24,7 +24,8 @@ use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+    Expected, MemoryRefStore, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    RefUpdateFlags,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
@@ -372,19 +373,35 @@ fn porcelain_battery_keeps_refs_head_and_reflogs_in_injected_store() {
     let result = battery(&repo, dir.path());
 
     assert_eq!(
-        store.read_raw("HEAD").expect("HEAD"),
+        store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into()))
     );
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("main"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main"),
         Some(RawRef::Direct(result.merged))
     );
-    assert_eq!(store.read_raw("refs/heads/topic").expect("topic"), None);
     assert_eq!(
-        store.read_raw("refs/tags/v1").expect("tag"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .expect("topic"),
+        None
+    );
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/tags/v1"))
+            .expect("tag"),
         Some(RawRef::Direct(result.merged))
     );
-    assert_eq!(store.read_raw("refs/stash").expect("stash"), None);
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/stash"))
+            .expect("stash"),
+        None
+    );
     assert_eq!(
         repo.rev_walk().resolve("HEAD").expect("HEAD"),
         result.merged
@@ -493,15 +510,29 @@ fn porcelain_battery_on_reftable_repository_keeps_refs_and_reflogs_in_reftable()
 
     let store = repo.refs();
     assert_eq!(
-        store.read_raw("HEAD").expect("HEAD"),
+        store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into()))
     );
     assert_eq!(
-        store.read_raw("refs/heads/main").expect("main"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main"),
         Some(RawRef::Direct(result.merged))
     );
-    assert_eq!(store.read_raw("refs/heads/topic").expect("topic"), None);
-    assert_eq!(store.read_raw("refs/stash").expect("stash"), None);
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .expect("topic"),
+        None
+    );
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/stash"))
+            .expect("stash"),
+        None
+    );
     let main_log = reflog(store, "refs/heads/main");
     assert_eq!(
         main_log.first().map(String::as_str),
@@ -590,7 +621,9 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
     .expect("switch");
     assert_eq!(outcome.commit, tip);
     assert_eq!(
-        store.read_raw("HEAD").expect("HEAD"),
+        store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/topic".into()))
     );
     assert_eq!(head_branch(&repo).as_deref(), Some("topic"));
@@ -616,7 +649,9 @@ fn detached_switch_installs_head_when_store_has_none() {
     )
     .expect("detach");
     assert_eq!(
-        store.read_raw("HEAD").expect("HEAD"),
+        store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Direct(tip))
     );
     assert_eq!(

@@ -222,10 +222,14 @@ fn check_divergent_branch_tips(
             continue;
         }
         if is_ancestor(repo, branch_tip, tip)? && selected.contains(&branch_tip) {
-            return Err(HistoryError::DivergentBranch { name });
+            return Err(HistoryError::DivergentBranch {
+                name: name.as_str().to_owned(),
+            });
         }
         if !is_ancestor(repo, branch_tip, tip)? {
-            return Err(HistoryError::DivergentBranch { name });
+            return Err(HistoryError::DivergentBranch {
+                name: name.as_str().to_owned(),
+            });
         }
     }
     if let Ok(crate::state::HeadState::Detached { oid }) = resolve_head_for_repository(repo) {

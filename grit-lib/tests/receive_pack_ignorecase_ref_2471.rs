@@ -4,8 +4,8 @@
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{
-    Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefStore, RefStoreError, RefTransaction,
-    RefUpdate,
+    Expected, FilesRefStore, FilesRefStoreConfig, RawRef, RefNameRef, RefStore, RefStoreError,
+    RefTransaction, RefUpdate,
 };
 use grit_lib::refs::{write_packed_refs_file, PackedRefRecord};
 use grit_lib::remote::serve::{
@@ -101,7 +101,10 @@ fn store_rejects_casefold_create_against_packed_ref() {
         "rejected create must not write a loose ref"
     );
     assert_eq!(
-        store.read_raw("refs/heads/Foo").expect("read").unwrap(),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/Foo"))
+            .expect("read")
+            .unwrap(),
         RawRef::Direct(tip)
     );
 }

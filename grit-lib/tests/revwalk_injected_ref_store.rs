@@ -17,7 +17,7 @@ use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{collect_revision_specs_from_stdin_lines, tag_targets};
 use grit_lib::revwalk::{RefSelection, RevWalkListOptions};
@@ -282,11 +282,15 @@ fn assert_nothing_on_disk(git_dir: &Path) {
 
 fn assert_store(store: &MemoryRefStore, observed: &Observed) {
     assert_eq!(
-        store.read_raw("refs/heads/linked").expect("linked"),
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/linked"))
+            .expect("linked"),
         Some(RawRef::Direct(observed.hello))
     );
     assert_eq!(
-        store.read_raw("HEAD").expect("HEAD"),
+        store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into())),
         "adding a linked worktree must not move the main worktree's HEAD"
     );

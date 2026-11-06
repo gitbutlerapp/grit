@@ -18,7 +18,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
@@ -138,12 +138,12 @@ fn two_worktrees() -> Fixture {
 }
 
 fn stored(refs: &MemoryRefStore, name: &str) -> Option<RawRef> {
-    refs.read_raw(name).expect("read")
+    refs.read_raw(RefNameRef::from_trusted(name)).expect("read")
 }
 
 fn shared_head_reflog(refs: &MemoryRefStore) -> Vec<(ObjectId, ObjectId)> {
     let mut entries = Vec::new();
-    refs.for_each_reflog_entry("HEAD", false, &mut |entry| {
+    refs.for_each_reflog_entry(RefNameRef::from_trusted("HEAD"), false, &mut |entry| {
         entries.push((entry.old_oid, entry.new_oid));
         ControlFlow::Continue(())
     })

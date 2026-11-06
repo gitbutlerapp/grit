@@ -13,6 +13,7 @@ use std::path::{Component, Path, PathBuf};
 use crate::index::IndexLock;
 use crate::lockfile::{LockFile, LockHolder, LockWait};
 use crate::objects::ObjectId;
+use crate::refs::store::RefName;
 use crate::repo::Repository;
 
 use super::{
@@ -322,11 +323,11 @@ fn refs_match_plan(
     expect_new: bool,
 ) -> Result<bool, HistoryError> {
     for planned in updates {
-        let current = repo
-            .resolve_ref_oid(&planned.name)
-            .map_err(|e| HistoryError::RefApply {
-                message: e.to_string(),
-            })?;
+        let current =
+            repo.resolve_ref_oid(planned.name.as_str())
+                .map_err(|e| HistoryError::RefApply {
+                    message: e.to_string(),
+                })?;
         let expected = if expect_new { planned.new } else { planned.old };
         if current != expected {
             return Ok(false);
@@ -386,7 +387,7 @@ fn serialize_meta(plan: &RewritePlan, opts: &ApplyOptions, apply_kind: RewriteAp
     for u in &plan.ref_updates {
         out.push_str(&format!(
             "ref {} {} {}\n",
-            u.name,
+            u.name.as_str(),
             u.old.to_hex(),
             u.new.to_hex()
         ));
@@ -457,7 +458,11 @@ fn parse_meta(text: &str) -> Result<RewriteApplyJournal, HistoryError> {
                     .to_owned();
                 let old = parse_oid(parts.next(), line_no, "ref old")?;
                 let new = parse_oid(parts.next(), line_no, "ref new")?;
-                ref_updates.push(PlannedRefUpdate { name, old, new });
+                ref_updates.push(PlannedRefUpdate {
+                    name: RefName::from_trusted(name),
+                    old,
+                    new,
+                });
             }
             "head" => {
                 let _mode = parts.next();

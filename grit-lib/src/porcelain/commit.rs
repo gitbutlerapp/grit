@@ -50,6 +50,7 @@ use crate::porcelain::merge::squash_conflict_merge_in_progress;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::replay_sequence::finish_replay_commit_state;
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
+use crate::refs::store::RefNameRef;
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -1931,7 +1932,7 @@ fn create_commit_with_index(
         update_branch_for_commit_on_store(
             repo.refs(),
             &BranchCommitRefUpdate {
-                branch_ref: &refname,
+                branch_ref: RefNameRef::from_trusted(refname.as_str()),
                 expected_old,
                 new_oid: oid,
                 identity: &committer,

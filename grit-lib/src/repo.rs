@@ -33,7 +33,6 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::change_id::ChangeIdGenerator;
-use crate::check_ref_format::RefName;
 use crate::command_runner::CommandRunner;
 use crate::config::{
     config_file_stamps, stamp_for_path, ConfigCacheKey, ConfigFile, ConfigScope, ConfigSet,
@@ -49,6 +48,7 @@ use crate::index::{Index, IndexError, IndexResult};
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::refs::store::{RefName, RefNameRef};
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;
@@ -232,11 +232,11 @@ fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> R
     use crate::refs::store::{Expected, RawRef, RefStoreError, RefTransaction, RefUpdate};
 
     RefName::branch(branch).map_err(|e| Error::InvalidRef(e.to_string()))?;
-    if store.read_raw("HEAD")?.is_some() {
+    if store.read_raw(RefNameRef::from_trusted("HEAD"))?.is_some() {
         return Ok(());
     }
     let txn = RefTransaction::new().update(RefUpdate {
-        name: "HEAD".to_owned(),
+        name: RefName::from_trusted("HEAD"),
         new_value: Some(RawRef::Symbolic(format!("refs/heads/{branch}"))),
         expected: Expected::Missing,
         reflog: None,
@@ -1273,7 +1273,8 @@ impl Repository {
     ///
     /// Propagates [`crate::refs::store::RefStoreError`] as [`Error::RefStore`].
     pub(crate) fn resolve_ref_oid(&self, refname: &str) -> Result<crate::objects::ObjectId> {
-        self.refs().resolve(refname)
+        self.refs()
+            .resolve(crate::refs::store::RefNameRef::from_trusted(refname))
     }
 
     /// Replace the ref store (embedders injecting [`crate::refs::store::MemoryRefStore`]).

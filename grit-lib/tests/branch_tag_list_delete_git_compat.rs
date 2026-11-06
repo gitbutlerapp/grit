@@ -21,8 +21,8 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-    ReflogUpdate,
+    Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    RefUpdateFlags, ReflogUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, git_cmd};
@@ -544,14 +544,28 @@ fn list_and_delete_use_injected_memory_ref_store() {
 
     assert_current_branch_deletion_refused(&repo, "main");
 
-    assert!(store.reflog_exists("refs/heads/topic").unwrap());
+    assert!(store
+        .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
+        .unwrap());
     let deleted = delete_branch(&repo, "topic", DeleteMode::Safe, false).unwrap();
     assert_eq!(deleted.oid, tip);
-    assert_eq!(store.read_raw("refs/heads/topic").unwrap(), None);
-    assert!(!store.reflog_exists("refs/heads/topic").unwrap());
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .unwrap(),
+        None
+    );
+    assert!(!store
+        .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
+        .unwrap());
 
     assert_eq!(delete_tag(&repo, "injected", false).unwrap(), tip);
-    assert_eq!(store.read_raw("refs/tags/injected").unwrap(), None);
+    assert_eq!(
+        store
+            .read_raw(RefNameRef::from_trusted("refs/tags/injected"))
+            .unwrap(),
+        None
+    );
     assert!(list_tags(
         &repo,
         &RefQuery {
@@ -590,8 +604,16 @@ fn delete_current_branch_uses_injected_head_when_disk_differs() {
     store.prepare(txn).unwrap().commit().unwrap();
 
     assert_current_branch_deletion_refused(&repo, "topic");
-    assert_eq!(store.resolve("HEAD").unwrap(), tip);
-    assert_eq!(store.resolve("refs/heads/main").unwrap(), tip);
+    assert_eq!(
+        store.resolve(RefNameRef::from_trusted("HEAD")).unwrap(),
+        tip
+    );
+    assert_eq!(
+        store
+            .resolve(RefNameRef::from_trusted("refs/heads/main"))
+            .unwrap(),
+        tip
+    );
     assert_eq!(std::fs::read(dir.join(".git/HEAD")).unwrap(), disk_head);
     assert_eq!(for_each_ref(&dir, "refs/"), disk_refs);
     assert_eq!(

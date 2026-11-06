@@ -29,6 +29,7 @@ use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::fs_publish::publish_no_clobber;
 use crate::objects::ObjectId;
+use crate::refs::store::RefNameRef;
 use crate::refs::store::{RefStore as _, RefStoreError};
 use memmap2::Mmap;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -3784,7 +3785,7 @@ fn push_list_ref_entry(git_dir: &Path, rec: &RefRecord, out: &mut Vec<(String, O
         RefValue::Val2(oid, _) => out.push((rec.name.clone(), *oid)),
         RefValue::Symref(target) => {
             let resolved = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
-                .and_then(|store| store.resolve(target));
+                .and_then(|store| store.resolve(RefNameRef::from_trusted(target)));
             if let Ok(oid) = resolved {
                 out.push((rec.name.clone(), oid));
             }
@@ -3808,7 +3809,7 @@ fn reftable_should_write_log(git_dir: &Path, storage_refname: &str) -> bool {
     let mode = crate::refs::effective_log_refs_config(git_dir);
     crate::refs::should_autocreate_reflog_for_mode(storage_refname, mode)
         || crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.reflog_exists(storage_refname))
+            .and_then(|store| store.reflog_exists(RefNameRef::from_trusted(storage_refname)))
             .unwrap_or(false)
 }
 
@@ -4339,7 +4340,7 @@ mod tests {
         let (_dir, git_dir) = reftable_repo_with_config("[core]\n\tlogAllRefUpdates = false\n");
         assert!(!reftable_should_write_log(&git_dir, "refs/heads/topic"));
         crate::refs::store::ReftableRefStore::open(git_dir.clone())
-            .and_then(|store| store.create_reflog("refs/heads/topic"))
+            .and_then(|store| store.create_reflog(RefNameRef::from_trusted("refs/heads/topic")))
             .expect("create reflog");
         assert!(reftable_should_write_log(&git_dir, "refs/heads/topic"));
     }

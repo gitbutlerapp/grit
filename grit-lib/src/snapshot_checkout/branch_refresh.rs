@@ -175,7 +175,7 @@ pub fn refresh_branch(
             info.projected
         ),
     })?;
-    let fetched = crate::refs::resolve_ref(repo.git_dir(), &upstream_ref(name)).ok();
+    let fetched = crate::refs::resolve_ref(repo.git_dir(), upstream_ref(name)).ok();
     if fetched != Some(projected) {
         return Err(CheckoutError::BranchMoved {
             name: name.to_owned(),

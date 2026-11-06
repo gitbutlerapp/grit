@@ -6,7 +6,8 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
+    open_ref_store, Expected, RawRef, RefName, RefNameRef, RefStore, RefStoreError, RefTransaction,
+    RefUpdate, RefUpdateFlags,
 };
 use grit_lib::repo::Repository;
 
@@ -17,7 +18,7 @@ use support::{
 
 fn put(store: &dyn RefStore, name: &str, value: RawRef) -> Result<(), RefStoreError> {
     let txn = RefTransaction::new().update(RefUpdate {
-        name: name.to_owned(),
+        name: RefName::from_trusted(name),
         new_value: Some(value),
         expected: Expected::Any,
         reflog: None,
@@ -81,7 +82,9 @@ fn rejected_updates_keep_repository_clean_for_git() {
 
         put(store.as_ref(), "refs/heads/kept", RawRef::Direct(commit)).expect("valid update");
         assert_eq!(
-            store.read_raw("refs/heads/z").expect("read z"),
+            store
+                .read_raw(RefNameRef::from_trusted("refs/heads/z"))
+                .expect("read z"),
             None,
             "{backend:?}"
         );

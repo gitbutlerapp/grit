@@ -128,11 +128,14 @@ On every backend, a missing ref fails with [`RefStoreError::NotFound`](rustdoc:g
 
 ```rust
 use grit_lib::error::Error;
-use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::store::{RefName, RefStoreError};
 
-match repo.refs().resolve("refs/heads/topic") {
+let topic = RefName::try_from("refs/heads/topic")?;
+match repo.refs().resolve(&topic) {
     Ok(oid) => println!("topic is at {oid}"),
-    Err(Error::RefStore(RefStoreError::NotFound { name })) => println!("{name} does not exist"),
+    Err(Error::RefStore(RefStoreError::NotFound { name })) => {
+        println!("{} does not exist", name.as_str());
+    }
     Err(err) => return Err(err.into()),
 }
 ```

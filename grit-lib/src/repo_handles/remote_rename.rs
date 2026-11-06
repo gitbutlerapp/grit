@@ -1,15 +1,14 @@
 //! Rename a configured remote: tracking refs, then config (see [`RepositoryRemotes::rename`]).
-use std::collections::BTreeSet;
-use std::ops::ControlFlow;
-
 use crate::config::{canonical_key, ConfigFile, ConfigScope, ConfigSet};
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::refs::commit_ref_batch_on_store;
 use crate::refs::store::{
-    Expected, RawRef, RefEntry, RefReflogRename, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefEntry, RefName, RefReflogRename, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 use crate::remote::RemoteError;
 use crate::repo::Repository;
+use std::collections::BTreeSet;
+use std::ops::ControlFlow;
 
 use super::remote::{
     has_local_remote_section, has_remote_section, is_valid_remote_name, RepositoryRemotes,
@@ -134,7 +133,7 @@ fn count_remote_tracking_refs(repo: &Repository, old: &str) -> Result<usize, Rem
     let mut count = 0usize;
     repo.refs()
         .for_each_ref(&prefix, &mut |entry: &RefEntry| {
-            if entry.name.starts_with(&prefix) {
+            if entry.name.as_str().starts_with(&prefix) {
                 count += 1;
             }
             ControlFlow::Continue(())
@@ -148,7 +147,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
     let mut entries = Vec::new();
     repo.refs()
         .for_each_ref(&prefix, &mut |entry: &RefEntry| {
-            if entry.name.starts_with(&prefix) {
+            if entry.name.as_str().starts_with(&prefix) {
                 entries.push(entry.clone());
             }
             ControlFlow::Continue(())
@@ -161,7 +160,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
     let mut reflog_renames = Vec::with_capacity(entries.len());
 
     for entry in entries {
-        let Some(new_name) = rename_remote_ref(old, new, &entry.name) else {
+        let Some(new_name) = rename_remote_ref(old, new, entry.name.as_str()) else {
             continue;
         };
         let (new_value, delete_expected, symref) = match &entry.value {
@@ -171,7 +170,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
                     rename_remote_ref(old, new, target).unwrap_or_else(|| target.clone());
                 (
                     Some(RawRef::Symbolic(new_target)),
-                    Expected::Symref(target.clone()),
+                    Expected::Symref(RefName::from_trusted(target.clone())),
                     true,
                 )
             }
@@ -182,7 +181,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
         });
 
         updates.push(RefUpdate {
-            name: new_name.clone(),
+            name: RefName::from_trusted(new_name.clone()),
             new_value,
             expected: Expected::Missing,
             reflog: None,
@@ -204,7 +203,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
 
         reflog_renames.push(RefReflogRename {
             from: entry.name.clone(),
-            to: new_name.clone(),
+            to: RefName::from_trusted(new_name.clone()),
             append: ReflogUpdate {
                 identity: identity.clone(),
                 message: format!("remote: renamed {} to {new_name}", entry.name),

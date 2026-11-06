@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use super::error::RefStoreError;
-use super::types::{Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefUpdate};
+use super::types::{Expected, RawRef, RefCaseOnlyRename, RefName, RefReflogRename, RefUpdate};
 use super::validation::{
     validate_reflog_update, validate_storable_refname, validate_symref_target,
 };
@@ -12,7 +12,7 @@ use super::validation::{
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RefTransaction {
     updates: Vec<RefUpdate>,
-    names: HashSet<String>,
+    names: HashSet<RefName>,
     reflog_renames: Vec<RefReflogRename>,
     case_only_renames: Vec<RefCaseOnlyRename>,
     initial: bool,
@@ -42,7 +42,7 @@ impl RefTransaction {
         for update in &updates {
             if !names.insert(update.name.clone()) {
                 return Err(RefStoreError::DuplicateUpdate {
-                    name: update.name.clone(),
+                    name: update.name.as_str().to_owned(),
                 });
             }
         }
@@ -71,7 +71,7 @@ impl RefTransaction {
     pub fn push_update(&mut self, update: RefUpdate) -> Result<(), RefStoreError> {
         if !self.names.insert(update.name.clone()) {
             return Err(RefStoreError::DuplicateUpdate {
-                name: update.name.clone(),
+                name: update.name.as_str().to_owned(),
             });
         }
         self.updates.push(update);
@@ -178,13 +178,13 @@ impl RefTransaction {
 
     /// The ref a lock failure on this transaction is reported under: the first update, else
     /// the source of the first reflog or case-only rename, else `refs`.
-    pub(crate) fn lock_name(&self) -> String {
+    pub(crate) fn lock_name(&self) -> RefName {
         self.updates
             .first()
             .map(|u| &u.name)
             .or_else(|| self.reflog_renames.first().map(|r| &r.from))
             .or_else(|| self.case_only_renames.first().map(|r| &r.from))
-            .map_or_else(|| "refs".to_owned(), Clone::clone)
+            .map_or_else(|| RefName::from_trusted("refs"), Clone::clone)
     }
 
     /// Backend-independent checks every [`super::RefStore::prepare`] runs before taking locks.
@@ -193,19 +193,19 @@ impl RefTransaction {
     /// [`Self::from_updates`] reject them.
     pub(crate) fn validate(&self) -> Result<(), RefStoreError> {
         for update in &self.updates {
-            validate_storable_refname(&update.name)?;
+            validate_storable_refname(update.name.as_str())?;
             if !update.flags.log_only
                 && matches!(&update.new_value, Some(RawRef::Direct(oid)) if oid.is_zero())
             {
                 return Err(RefStoreError::NullOid {
-                    name: update.name.clone(),
+                    name: update.name.as_str().to_owned(),
                 });
             }
             if let Some(ref log) = update.reflog {
                 validate_reflog_update(log)?;
             }
             if let Some(RawRef::Symbolic(target)) = &update.new_value {
-                validate_symref_target(&update.name, target)?;
+                validate_symref_target(update.name.as_str(), target)?;
             }
         }
         for rename in &self.reflog_renames {
@@ -217,8 +217,8 @@ impl RefTransaction {
             .map(|r| (&r.from, &r.to))
             .chain(self.case_only_renames.iter().map(|r| (&r.from, &r.to)));
         for (from, to) in renames {
-            validate_storable_refname(from)?;
-            validate_storable_refname(to)?;
+            validate_storable_refname(from.as_str())?;
+            validate_storable_refname(to.as_str())?;
         }
         Ok(())
     }
@@ -232,7 +232,9 @@ pub fn expected_matches(actual: Option<&RawRef>, expected: &Expected) -> bool {
         Expected::Missing => actual.is_none(),
         Expected::Exists => actual.is_some(),
         Expected::Oid(want) => matches!(actual, Some(RawRef::Direct(got)) if got == want),
-        Expected::Symref(want) => matches!(actual, Some(RawRef::Symbolic(got)) if got == want),
+        Expected::Symref(want) => {
+            matches!(actual, Some(RawRef::Symbolic(got)) if got == want.as_str())
+        }
     }
 }
 
@@ -251,7 +253,7 @@ mod tests {
     #[test]
     fn duplicate_names_rejected() {
         let txn = RefTransaction::new().update(RefUpdate {
-            name: "refs/heads/a".to_owned(),
+            name: RefName::from_trusted("refs/heads/a"),
             new_value: Some(RawRef::Direct(oid(1))),
             expected: Expected::Any,
             reflog: None,
@@ -261,7 +263,7 @@ mod tests {
         let err = txn
             .unwrap()
             .update(RefUpdate {
-                name: "refs/heads/a".to_owned(),
+                name: RefName::from_trusted("refs/heads/a"),
                 new_value: Some(RawRef::Direct(oid(2))),
                 expected: Expected::Any,
                 reflog: None,
@@ -276,7 +278,7 @@ mod tests {
 
     fn direct(name: &str, value: ObjectId) -> RefUpdate {
         RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name.to_owned()),
             new_value: Some(RawRef::Direct(value)),
             expected: Expected::Any,
             reflog: None,
@@ -320,8 +322,8 @@ mod tests {
     #[test]
     fn validate_rejects_unsafe_rename_sides() {
         let reflog = RefTransaction::new().with_reflog_rename(RefReflogRename {
-            from: "refs/heads/ok".to_owned(),
-            to: "refs/heads/x.lock".to_owned(),
+            from: RefName::from_trusted("refs/heads/ok"),
+            to: RefName::from_trusted("refs/heads/x.lock"),
             append: sample_log(),
         });
         assert_eq!(
@@ -331,8 +333,8 @@ mod tests {
             }
         );
         let case_only = RefTransaction::new().with_case_only_rename(RefCaseOnlyRename {
-            from: "refs/heads//x".to_owned(),
-            to: "refs/heads/X".to_owned(),
+            from: RefName::from_trusted("refs/heads//x"),
+            to: RefName::from_trusted("refs/heads/X"),
         });
         assert_eq!(
             case_only.validate().unwrap_err(),
@@ -404,8 +406,8 @@ mod tests {
         ));
 
         let txn = RefTransaction::new().with_reflog_rename(RefReflogRename {
-            from: "refs/heads/a".to_owned(),
-            to: "refs/heads/b".to_owned(),
+            from: RefName::from_trusted("refs/heads/a"),
+            to: RefName::from_trusted("refs/heads/b"),
             append: super::super::ReflogUpdate {
                 identity: "Evil <a@b>\nforged".to_owned(),
                 message: "rename".to_owned(),
@@ -426,7 +428,7 @@ mod tests {
             .update(direct("ORIG_HEAD", oid(1)))
             .unwrap()
             .update(RefUpdate {
-                name: "HEAD".to_owned(),
+                name: RefName::from_trusted("HEAD"),
                 new_value: Some(RawRef::Symbolic("refs/heads/main".to_owned())),
                 expected: Expected::Any,
                 reflog: None,
@@ -434,7 +436,7 @@ mod tests {
             })
             .unwrap()
             .update(RefUpdate {
-                name: "refs/heads/alias".to_owned(),
+                name: RefName::from_trusted("refs/heads/alias"),
                 new_value: Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
                 expected: Expected::Any,
                 reflog: None,
@@ -442,7 +444,7 @@ mod tests {
             })
             .unwrap()
             .update(RefUpdate {
-                name: "FETCH_HEAD".to_owned(),
+                name: RefName::from_trusted("FETCH_HEAD"),
                 new_value: Some(RawRef::Symbolic("ORIG_HEAD".to_owned())),
                 expected: Expected::Any,
                 reflog: None,
@@ -450,7 +452,7 @@ mod tests {
             })
             .unwrap()
             .update(RefUpdate {
-                name: "refs/heads/gone".to_owned(),
+                name: RefName::from_trusted("refs/heads/gone"),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,
@@ -462,7 +464,7 @@ mod tests {
 
     fn symref(name: &str, target: &str) -> RefUpdate {
         RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name.to_owned()),
             new_value: Some(RawRef::Symbolic(target.to_owned())),
             expected: Expected::Any,
             reflog: None,
@@ -515,7 +517,7 @@ mod tests {
     #[test]
     fn from_updates_rejects_a_name_queued_twice() {
         let update = |name: &str| RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name.to_owned()),
             new_value: None,
             expected: Expected::Any,
             reflog: None,
@@ -549,7 +551,7 @@ mod tests {
     #[test]
     fn from_updates_then_push_update_rejects_duplicate_name() {
         let update = |name: &str| RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name.to_owned()),
             new_value: Some(RawRef::Direct(oid(1))),
             expected: Expected::Any,
             reflog: None,
@@ -573,7 +575,7 @@ mod tests {
         let start = std::time::Instant::now();
         for i in 0..n {
             txn.push_update(RefUpdate {
-                name: format!("refs/heads/b{i:07}"),
+                name: RefName::from_trusted(format!("refs/heads/b{i:07}")),
                 new_value: Some(RawRef::Direct(oid((i % 256) as u8))),
                 expected: Expected::Missing,
                 reflog: None,

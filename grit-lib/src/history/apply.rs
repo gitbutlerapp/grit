@@ -1455,7 +1455,7 @@ fn commit_planned_ref_updates(
         let reflog = reflog_for_update(
             config.as_ref().map(|c| c.as_ref()),
             git_dir,
-            &planned.name,
+            planned.name.as_str(),
             opts,
         );
         if head_target.as_deref() == Some(planned.name.as_str()) {
@@ -1472,11 +1472,11 @@ fn commit_planned_ref_updates(
             new_value: Some(RawRef::Direct(planned.new)),
             expected: Expected::Oid(planned.old),
             reflog,
-            flags: ref_update_flags(&planned.name),
+            flags: ref_update_flags(planned.name.as_str()),
         };
         txn = txn
             .update(update)
-            .map_err(|e| map_ref_store_error(e, &planned.name))?;
+            .map_err(|e| map_ref_store_error(e, planned.name.as_str()))?;
     }
     repo.odb()
         .flush_for_publish()
@@ -1559,7 +1559,7 @@ fn head_log_update(
     reflog.old_oid = Some(branch.old);
     reflog.new_oid = Some(branch.new);
     Some(RefUpdate {
-        name: "HEAD".into(),
+        name: crate::refs::store::RefName::from_trusted("HEAD"),
         new_value: Some(RawRef::Direct(branch.new)),
         expected: Expected::Any,
         reflog: Some(reflog),
@@ -1613,7 +1613,7 @@ fn head_commit_after(
         HeadState::Branch { refname, .. } => refname.as_str(),
         HeadState::Detached { .. } | HeadState::Invalid => "HEAD",
     };
-    if let Some(update) = updates.iter().find(|u| u.name == head_name) {
+    if let Some(update) = updates.iter().find(|u| u.name.as_str() == head_name) {
         return Ok(update.new);
     }
     match head {
@@ -2164,7 +2164,8 @@ mod inject_and_apply_tests {
     use crate::objects::{parse_commit, ObjectKind};
     use crate::reflog::ReflogEntry;
     use crate::refs::store::{
-        MemoryRefStore, PreparedRefTransaction, RawRef, RefStore, RefStoreError, RefTransaction,
+        MemoryRefStore, PreparedRefTransaction, RawRef, RefNameRef, RefStore, RefStoreError,
+        RefTransaction,
     };
     use crate::repo::init_repository;
     use crate::RefStorageFormat;
@@ -2181,7 +2182,7 @@ mod inject_and_apply_tests {
             self.inner.format()
         }
 
-        fn read_raw(&self, name: &str) -> crate::error::Result<Option<RawRef>> {
+        fn read_raw(&self, name: &RefNameRef) -> crate::error::Result<Option<RawRef>> {
             self.inner.read_raw(name)
         }
 
@@ -2200,30 +2201,30 @@ mod inject_and_apply_tests {
             Err(RefStoreError::Corrupt("injected ref apply failure".into()))
         }
 
-        fn reflog_exists(&self, name: &str) -> crate::error::Result<bool> {
+        fn reflog_exists(&self, name: &RefNameRef) -> crate::error::Result<bool> {
             self.inner.reflog_exists(name)
         }
 
         fn for_each_reflog_entry(
             &self,
-            name: &str,
+            name: &RefNameRef,
             reverse: bool,
             f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
         ) -> crate::error::Result<()> {
             self.inner.for_each_reflog_entry(name, reverse, f)
         }
 
-        fn create_reflog(&self, name: &str) -> crate::error::Result<()> {
+        fn create_reflog(&self, name: &RefNameRef) -> crate::error::Result<()> {
             self.inner.create_reflog(name)
         }
 
-        fn delete_reflog(&self, name: &str) -> crate::error::Result<()> {
+        fn delete_reflog(&self, name: &RefNameRef) -> crate::error::Result<()> {
             self.inner.delete_reflog(name)
         }
 
         fn replace_reflog(
             &self,
-            name: &str,
+            name: &RefNameRef,
             entries: Vec<ReflogEntry>,
         ) -> crate::error::Result<()> {
             self.inner.replace_reflog(name, entries)
@@ -2231,7 +2232,7 @@ mod inject_and_apply_tests {
 
         fn rewrite_reflog(
             &self,
-            name: &str,
+            name: &RefNameRef,
             transform: &mut dyn FnMut(Vec<ReflogEntry>) -> crate::error::Result<Vec<ReflogEntry>>,
         ) -> crate::error::Result<()> {
             self.inner.rewrite_reflog(name, transform)
@@ -2239,7 +2240,7 @@ mod inject_and_apply_tests {
 
         fn for_each_reflog_ref(
             &self,
-            f: &mut dyn FnMut(&str) -> ControlFlow<()>,
+            f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>,
         ) -> crate::error::Result<()> {
             self.inner.for_each_reflog_ref(f)
         }
@@ -3890,6 +3891,7 @@ mod inject_and_apply_tests {
 #[cfg(test)]
 mod ref_update_lines_tests {
     use super::*;
+    use crate::refs::store::RefName;
     fn oid(byte: u8) -> ObjectId {
         let mut bytes = [0u8; 20];
         bytes[19] = byte;
@@ -3901,7 +3903,7 @@ mod ref_update_lines_tests {
         let plan = RewritePlan {
             commits: Vec::new(),
             ref_updates: vec![PlannedRefUpdate {
-                name: "refs/heads/main".into(),
+                name: RefName::from_trusted("refs/heads/main"),
                 old: oid(1),
                 new: oid(2),
             }],

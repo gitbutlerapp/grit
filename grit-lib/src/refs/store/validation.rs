@@ -10,14 +10,14 @@ use crate::refs::RefnameUnavailable;
 
 use super::error::RefStoreError;
 use super::semantics::reflog_identity_has_timestamp;
-use super::RawRef;
-use super::RefUpdate;
-use super::ReflogUpdate;
+use super::{RawRef, RefUpdate, ReflogUpdate};
 
 /// Reject ref names that must not touch the filesystem (path traversal, illegal `refs/` shape).
-pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
-    crate::refs::ensure_refname_safe_for_storage(name).map_err(|_| RefStoreError::InvalidRefName {
-        name: name.to_owned(),
+pub fn validate_storable_refname(ref_name: &str) -> Result<(), RefStoreError> {
+    crate::refs::ensure_refname_safe_for_storage(ref_name).map_err(|_| {
+        RefStoreError::InvalidRefName {
+            name: ref_name.to_owned(),
+        }
     })
 }
 
@@ -30,15 +30,15 @@ pub fn validate_storable_refname(name: &str) -> Result<(), RefStoreError> {
 /// # Errors
 ///
 /// Returns [`RefStoreError::InvalidSymrefTarget`] naming the ref and target.
-pub fn validate_symref_target(name: &str, target: &str) -> Result<(), RefStoreError> {
+pub fn validate_symref_target(ref_name: &str, target: &str) -> Result<(), RefStoreError> {
     let err = || RefStoreError::InvalidSymrefTarget {
-        name: name.to_owned(),
+        name: ref_name.to_owned(),
         target: target.to_owned(),
     };
-    if target == name {
+    if target == ref_name {
         return Err(err());
     }
-    if name == "HEAD" {
+    if ref_name == "HEAD" {
         if !target.starts_with("refs/")
             || crate::refs::ensure_refname_safe_for_storage(target).is_err()
         {
@@ -148,10 +148,10 @@ pub fn verify_create_conflicts(
         if update.new_value.is_none() || update.flags.log_only {
             continue;
         }
-        if existing.contains_key(&update.name) {
+        if existing.contains_key(update.name.as_str()) {
             continue;
         }
-        verify_name_available_for_create_in_map(&update.name, existing, &extras)?;
+        verify_name_available_for_create_in_map(update.name.as_str(), existing, &extras)?;
     }
     Ok(())
 }
@@ -202,7 +202,7 @@ pub fn verify_create_casefold_against_existing(
         if update.new_value.is_none() || update.flags.log_only {
             continue;
         }
-        if existing.contains_key(&update.name) {
+        if existing.contains_key(update.name.as_str()) {
             continue;
         }
         let name = update.name.as_str();
@@ -211,7 +211,7 @@ pub fn verify_create_casefold_against_existing(
             .any(|other| other.as_str() != name && other.eq_ignore_ascii_case(name))
         {
             return Err(RefStoreError::CreateExists {
-                name: update.name.clone(),
+                name: update.name.as_str().to_owned(),
             });
         }
     }
@@ -257,7 +257,7 @@ pub fn verify_create_casefold_same_batch(updates: &[RefUpdate]) -> Result<(), Re
             .find(|other| *other != name && other.eq_ignore_ascii_case(name))
         {
             return Err(RefStoreError::CaseConflict {
-                name: update.name.clone(),
+                name: update.name.as_str().to_owned(),
                 other: other.to_owned(),
             });
         }
@@ -284,13 +284,13 @@ pub fn verify_create_casefold_with_lookup(
         if update.new_value.is_none() || update.flags.log_only {
             continue;
         }
-        if skip_exact.contains_key(&update.name) {
+        if skip_exact.contains_key(update.name.as_str()) {
             continue;
         }
         let name = update.name.as_str();
         if existing(name)?.is_some() {
             return Err(RefStoreError::CreateExists {
-                name: update.name.clone(),
+                name: update.name.as_str().to_owned(),
             });
         }
     }
@@ -408,7 +408,7 @@ where
 mod tests {
     use super::*;
     use crate::objects::ObjectId;
-    use crate::refs::store::{Expected, RefUpdateFlags};
+    use crate::refs::store::{Expected, RefName, RefUpdateFlags};
 
     fn oid(byte: u8) -> ObjectId {
         ObjectId::from_bytes(&[byte; 20]).expect("oid")
@@ -416,7 +416,7 @@ mod tests {
 
     fn create(name: &str) -> RefUpdate {
         RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name.to_owned()),
             new_value: Some(RawRef::Direct(oid(1))),
             expected: Expected::Missing,
             reflog: None,

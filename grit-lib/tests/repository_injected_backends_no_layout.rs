@@ -11,7 +11,8 @@ use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+    Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
+    RefUpdateFlags,
 };
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
@@ -55,7 +56,7 @@ fn commit(repo: &Repository, parent: Option<ObjectId>, message: &str) -> ObjectI
 fn advance_head(refs: &dyn RefStore, old: Option<ObjectId>, new: ObjectId) {
     let txn = RefTransaction::new()
         .update(RefUpdate {
-            name: "HEAD".to_owned(),
+            name: RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Direct(new)),
             expected: old.map_or(Expected::Any, Expected::Oid),
             reflog: None,
@@ -70,7 +71,8 @@ fn advance_head(refs: &dyn RefStore, old: Option<ObjectId>, new: ObjectId) {
 
 fn exercise(repo: &Repository, refs: &MemoryRefStore) {
     assert_eq!(
-        refs.read_raw("HEAD").expect("read HEAD"),
+        refs.read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("read HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned())),
         "initial_branch seeds HEAD in the injected store"
     );
@@ -139,7 +141,9 @@ fn initial_branch_keeps_an_existing_head() {
     )
     .expect("open");
     assert_eq!(
-        repo.refs().read_raw("HEAD").expect("HEAD"),
+        repo.refs()
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/trunk".to_owned()))
     );
 }

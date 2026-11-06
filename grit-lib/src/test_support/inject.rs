@@ -36,8 +36,8 @@ pub fn test_pause_injection_serial_guard() -> PauseInjectionTestScope {
 }
 
 /// Alias for [`set_reflog_fail`].
-pub fn set_test_inject_reflog_fail(refname: Option<&str>) {
-    set_reflog_fail(refname);
+pub fn set_test_inject_reflog_fail(failed_ref: Option<&str>) {
+    set_reflog_fail(failed_ref);
 }
 
 /// Alias for [`set_branch_ref_pause_before_commit`].

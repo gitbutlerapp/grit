@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use crate::change_id::ChangeId;
 use crate::ident::Signature;
 use crate::objects::ObjectId;
+use crate::refs::store::RefName;
 
 /// Description of a new commit to insert immediately before an existing one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,7 +156,7 @@ pub struct RewrittenCommit {
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct PlannedRefUpdate {
     /// Full ref name (for example `refs/heads/main`).
-    pub name: String,
+    pub name: RefName,
     /// Previous tip OID.
     pub old: ObjectId,
     /// New tip OID after rewrite.
@@ -330,7 +331,7 @@ mod tests {
             ref_updates: ref_updates
                 .iter()
                 .map(|&(old, new)| PlannedRefUpdate {
-                    name: "refs/heads/main".into(),
+                    name: RefName::from_trusted("refs/heads/main"),
                     old: oid(old),
                     new: oid(new),
                 })

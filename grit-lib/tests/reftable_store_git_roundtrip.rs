@@ -8,7 +8,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::reftable::ReftableStack;
 use grit_lib::refs::store::ReftableRefStore;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 
 use support::{
@@ -157,10 +157,14 @@ fn reftable_store_git_roundtrip() {
     );
     let mut git_written_log = 0;
     store2
-        .for_each_reflog_entry("refs/heads/from-git", false, &mut |_| {
-            git_written_log += 1;
-            std::ops::ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::from_trusted("refs/heads/from-git"),
+            false,
+            &mut |_| {
+                git_written_log += 1;
+                std::ops::ControlFlow::Continue(())
+            },
+        )
         .expect("read git reflog");
     assert!(git_written_log >= 1, "git reflog visible in store");
 
@@ -238,10 +242,14 @@ fn reftable_reflog_identity_with_digits_in_name_visible_to_git() {
     );
     let mut identity_line = String::new();
     store
-        .for_each_reflog_entry("refs/heads/digit-name", false, &mut |e| {
-            identity_line = e.identity.clone();
-            std::ops::ControlFlow::Break(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::from_trusted("refs/heads/digit-name"),
+            false,
+            &mut |e| {
+                identity_line = e.identity.clone();
+                std::ops::ControlFlow::Break(())
+            },
+        )
         .expect("read grit reflog");
     assert!(
         identity_line.contains("Alice2"),

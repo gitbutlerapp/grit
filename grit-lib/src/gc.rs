@@ -464,7 +464,7 @@ fn ref_transaction_item_to_store_update(item: &RefTransactionItem) -> RefUpdate 
         flags.no_deref = true;
     }
     RefUpdate {
-        name: item.name.clone(),
+        name: crate::refs::store::RefName::from_trusted(item.name.clone()),
         new_value: item.new_oid.map(RawRef::Direct),
         expected: match item.expected_old {
             Some(oid) => Expected::Oid(oid),

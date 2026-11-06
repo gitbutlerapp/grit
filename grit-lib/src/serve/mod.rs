@@ -44,7 +44,7 @@ use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use crate::objects::ObjectId;
-use crate::refs::store::RawRef;
+use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 
@@ -440,7 +440,9 @@ pub(crate) fn for_each_advertised_ref(
                 }
                 let oid = match &entry.value {
                     RawRef::Direct(oid) => Some(*oid),
-                    RawRef::Symbolic(_) => entry.peeled.or_else(|| store.resolve(name).ok()),
+                    RawRef::Symbolic(_) => entry
+                        .peeled
+                        .or_else(|| store.resolve(RefNameRef::from_trusted(name)).ok()),
                 };
                 let Some(oid) = oid else {
                     return ControlFlow::Continue(());
@@ -781,7 +783,7 @@ mod tests {
         use std::sync::Arc;
 
         use crate::refs::store::{
-            Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+            Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
         };
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -815,7 +817,7 @@ mod tests {
             .prepare(
                 RefTransaction::new()
                     .update(RefUpdate {
-                        name: "refs/heads/master".into(),
+                        name: RefName::from_trusted("refs/heads/master"),
                         new_value: Some(RawRef::Direct(commit)),
                         expected: Expected::Missing,
                         reflog: None,

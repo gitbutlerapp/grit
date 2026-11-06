@@ -9,7 +9,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
+    Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeError, ServeOptions};
 use grit_lib::repo::{InitOptions, Repository};
@@ -262,7 +262,7 @@ fn memory_serve_repo(
         .prepare(
             RefTransaction::new()
                 .update(RefUpdate {
-                    name: "refs/heads/master".into(),
+                    name: RefName::from_trusted("refs/heads/master"),
                     new_value: Some(RawRef::Direct(commit)),
                     expected: Expected::Missing,
                     reflog: None,

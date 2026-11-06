@@ -11,7 +11,7 @@ use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
-use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneIntoOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
@@ -101,7 +101,9 @@ fn clone_into_injected_ref_store_keeps_clone_reflogs_in_store() {
         "branch reflog must not be written under git_dir/logs"
     );
     assert_eq!(
-        ref_store.read_raw("HEAD").expect("HEAD"),
+        ref_store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
     let repo = Repository::open(

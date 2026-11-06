@@ -10,8 +10,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::reftable::ReftableStack;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
-    ReftableRefStore,
+    Expected, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+    ReflogUpdate, ReftableRefStore,
 };
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -43,7 +43,7 @@ fn commit(store: &dyn RefStore, update: RefUpdate) {
 fn newest(store: &dyn RefStore, name: &str) -> Option<ReflogEntry> {
     let mut last = None;
     store
-        .for_each_reflog_entry(name, true, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted(name), true, &mut |e| {
             last = Some(e.clone());
             ControlFlow::Break(())
         })
@@ -65,7 +65,7 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
     commit(
         &common_store,
         RefUpdate {
-            name: "refs/heads/main".to_owned(),
+            name: RefName::from_trusted("refs/heads/main"),
             new_value: Some(RawRef::Direct(oid(1))),
             expected: Expected::Missing,
             reflog: None,
@@ -87,7 +87,7 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
     commit(
         &wt_store,
         RefUpdate {
-            name: "HEAD".into(),
+            name: RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Symbolic("refs/heads/main".into())),
             expected: Expected::Missing,
             reflog: None,
@@ -110,7 +110,7 @@ fn head_update_in_linked_worktree_writes_and_logs_branch_in_common_stack() {
     commit(
         &wt_store,
         RefUpdate {
-            name: "HEAD".to_owned(),
+            name: RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Direct(oid(2))),
             expected: Expected::Oid(oid(1)),
             reflog: log("commit: two"),
@@ -119,12 +119,16 @@ fn head_update_in_linked_worktree_writes_and_logs_branch_in_common_stack() {
     );
 
     assert_eq!(
-        wt_store.read_raw("HEAD").expect("HEAD"),
+        wt_store
+            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
     let common_store = ReftableRefStore::open(common.clone()).expect("common store");
     assert_eq!(
-        common_store.read_raw("refs/heads/main").expect("main"),
+        common_store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main"),
         Some(RawRef::Direct(oid(2)))
     );
     let wt_stack = ReftableStack::open(&wt_git_dir).expect("worktree stack");
@@ -150,7 +154,7 @@ fn stale_head_update_in_linked_worktree_is_rejected() {
     let wt_store = ReftableRefStore::open(wt_git_dir).expect("worktree store");
     let txn = RefTransaction::new()
         .update(RefUpdate {
-            name: "HEAD".to_owned(),
+            name: RefName::from_trusted("HEAD"),
             new_value: Some(RawRef::Direct(oid(3))),
             expected: Expected::Oid(oid(9)),
             reflog: log("stale"),
@@ -160,7 +164,9 @@ fn stale_head_update_in_linked_worktree_is_rejected() {
     assert!(wt_store.prepare(txn).is_err(), "stale compare-and-swap");
     let common_store = ReftableRefStore::open(common).expect("common store");
     assert_eq!(
-        common_store.read_raw("refs/heads/main").expect("main"),
+        common_store
+            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .expect("main"),
         Some(RawRef::Direct(oid(1)))
     );
 }

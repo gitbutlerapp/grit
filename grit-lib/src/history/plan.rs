@@ -26,6 +26,7 @@ use super::types::{
     CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, PlannedRefUpdate, RefScope, RewriteOptions,
     RewritePlan, RewrittenCommit,
 };
+use crate::refs::store::RefName;
 use crate::replay_merge_session::ReplayMergeSession;
 
 // hygiene: resumable replay control (thread-local for parallel tests)
@@ -914,7 +915,7 @@ fn plan_ref_updates_reordered(
         };
         if new_tip != *old_tip {
             updates.push(PlannedRefUpdate {
-                name: name.clone(),
+                name: RefName::from_trusted(name.clone()),
                 old: *old_tip,
                 new: new_tip,
             });
@@ -1016,7 +1017,7 @@ pub(crate) fn collect_scoped_refs(
                     continue;
                 }
                 if is_ancestor(repo, oldest, oid).map_err(library_err)? {
-                    out.push((name, oid));
+                    out.push((name.as_str().to_owned(), oid));
                 }
             }
             if let crate::state::HeadState::Detached { oid } = head {
@@ -1850,7 +1851,7 @@ pub(crate) fn plan_ref_updates(
         let new_tip = resolve_mapped_tip(*old_tip, mapping);
         if new_tip != *old_tip {
             updates.push(PlannedRefUpdate {
-                name: name.clone(),
+                name: RefName::from_trusted(name.clone()),
                 old: *old_tip,
                 new: new_tip,
             });

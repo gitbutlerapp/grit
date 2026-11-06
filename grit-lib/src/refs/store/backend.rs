@@ -31,9 +31,9 @@ use super::apply::{
 use super::error::{BackendError, RefStoreError};
 use super::transaction::RefTransaction;
 use super::validation::validate_storable_refname as validate_name;
-use super::{RawRef, RefUpdate};
+use super::{RawRef, RefName, RefUpdate};
 
-type PartitionUpdatesResult = (Vec<RefUpdate>, Vec<(String, RefStoreError)>);
+type PartitionUpdatesResult = (Vec<RefUpdate>, Vec<(RefName, RefStoreError)>);
 
 pub(crate) type CasefoldLookup<'a> =
     Option<&'a dyn Fn(&str) -> std::result::Result<Option<String>, RefStoreError>>;
@@ -133,7 +133,7 @@ pub(crate) fn verify_direct_targets(
             continue;
         }
         for oid in oids_to_verify_for_update(update) {
-            verify_stored_oid_for_ref(&update.name, oid, &mut kind_of, &mut kind_cache)?;
+            verify_stored_oid_for_ref(update.name.as_str(), oid, &mut kind_of, &mut kind_cache)?;
         }
     }
     Ok(())
@@ -310,9 +310,9 @@ pub fn apply_transaction(
 /// [`SYMREF_MAXDEPTH`] hops.
 pub fn resolve_symbolic(
     refs: &BTreeMap<String, RawRef>,
-    name: &str,
+    starting_ref: &str,
 ) -> Result<ObjectId, RefStoreError> {
-    let mut current = name;
+    let mut current = starting_ref;
     for _ in 0..SYMREF_MAXDEPTH {
         match refs.get(current) {
             None => return Err(RefStoreError::not_found(current)),
@@ -337,7 +337,7 @@ mod tests {
 
     fn put(name: &str, value: RawRef, expected: Expected) -> RefUpdate {
         RefUpdate {
-            name: name.to_owned(),
+            name: RefName::from_trusted(name.to_owned()),
             new_value: Some(value),
             expected,
             reflog: None,
@@ -392,7 +392,7 @@ mod tests {
         let txn = |i: u32| {
             RefTransaction::new()
                 .update(RefUpdate {
-                    name: format!("refs/heads/new{i}"),
+                    name: RefName::from_trusted(format!("refs/heads/new{i}")),
                     new_value: Some(RawRef::Direct(oid_n(i))),
                     expected: Expected::Missing,
                     reflog: None,
@@ -611,7 +611,7 @@ mod tests {
     #[test]
     fn verify_direct_targets_checks_log_only_explicit_reflog_oids_without_new_value() {
         let log_only = RefUpdate {
-            name: "refs/heads/main".to_owned(),
+            name: RefName::from_trusted("refs/heads/main"),
             new_value: None,
             expected: Expected::Any,
             reflog: Some(super::super::ReflogUpdate {
@@ -634,7 +634,7 @@ mod tests {
             })
         );
         let ok = RefUpdate {
-            name: "refs/heads/main".to_owned(),
+            name: RefName::from_trusted("refs/heads/main"),
             new_value: None,
             expected: Expected::Any,
             reflog: Some(super::super::ReflogUpdate {

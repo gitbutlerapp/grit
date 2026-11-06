@@ -17,7 +17,6 @@
 
 use crate::environment::RepositoryOptions;
 use crate::partial_clone::ObjectFilterSpec;
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
@@ -30,6 +29,7 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, Ob
 use crate::odb::Odb;
 use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
+use crate::refs::store::{RefName, RefNameRef};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::remote::RemoteError;
 use std::num::NonZeroU32;
@@ -3081,7 +3081,7 @@ fn push_store_ref_update(
     observed_old: Option<ObjectId>,
 ) -> crate::refs::store::RefUpdate {
     crate::refs::store::RefUpdate {
-        name: refname.to_owned(),
+        name: RefName::from_trusted(refname.to_owned()),
         new_value: new_oid.map(crate::refs::store::RawRef::Direct),
         expected: match observed_old {
             Some(oid) => crate::refs::store::Expected::Oid(oid),
@@ -4269,7 +4269,7 @@ pub(crate) fn apply_fetch_ref_updates(
         } else if let Some(ctx) = fetch_reflog {
             let Some((mode, old_oid, new_oid)) = mode_by_local.get(name).copied() else {
                 return Ok(crate::refs::store::RefUpdate {
-                    name: name.clone(),
+                    name: RefName::from_trusted(name.clone()),
                     new_value: Some(value.clone()),
                     expected: crate::refs::store::Expected::Any,
                     reflog: None,
@@ -4278,7 +4278,7 @@ pub(crate) fn apply_fetch_ref_updates(
             };
             let Some(reason) = mode.fetch_reflog_reason() else {
                 return Ok(crate::refs::store::RefUpdate {
-                    name: name.clone(),
+                    name: RefName::from_trusted(name.clone()),
                     new_value: Some(value.clone()),
                     expected: crate::refs::store::Expected::Any,
                     reflog: None,
@@ -4287,7 +4287,7 @@ pub(crate) fn apply_fetch_ref_updates(
             };
             if !crate::refs::reflog_wanted(store, &config, name)? {
                 return Ok(crate::refs::store::RefUpdate {
-                    name: name.clone(),
+                    name: RefName::from_trusted(name.clone()),
                     new_value: Some(value.clone()),
                     expected: crate::refs::store::Expected::Any,
                     reflog: None,
@@ -4311,7 +4311,7 @@ pub(crate) fn apply_fetch_ref_updates(
             None
         };
         Ok(crate::refs::store::RefUpdate {
-            name: name.clone(),
+            name: RefName::from_trusted(name.clone()),
             new_value: Some(value.clone()),
             expected: crate::refs::store::Expected::Any,
             reflog,
@@ -4394,7 +4394,7 @@ pub(crate) fn prune_tracking_refs(
         pruned_names.push(name.clone());
         if !dry_run {
             batch.push(crate::refs::store::RefUpdate {
-                name: name.clone(),
+                name: RefName::from_trusted(name.clone()),
                 new_value: None,
                 expected: crate::refs::store::Expected::Any,
                 reflog: None,
@@ -4414,7 +4414,7 @@ pub(crate) fn prune_tracking_refs(
     crate::refs::commit_owned_ref_updates_on_store(store, batch)?;
     if !dry_run {
         for name in pruned_names {
-            store.delete_reflog(&name)?;
+            store.delete_reflog(RefNameRef::from_trusted(&name))?;
         }
     }
     Ok(())

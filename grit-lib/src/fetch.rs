@@ -16,6 +16,7 @@ use crate::fetch_negotiator::SkippingNegotiator;
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::protocol_v2;
+use crate::refs::store::RefNameRef;
 use crate::refspec::RefspecItem;
 use crate::repo::Repository;
 
@@ -2789,7 +2790,10 @@ pub(crate) fn tags_already_local(
 ) -> HashSet<String> {
     remote_refs
         .iter()
-        .filter(|(name, _)| name.starts_with("refs/tags/") && local_refs.resolve(name).is_ok())
+        .filter(|(name, _)| {
+            name.starts_with("refs/tags/")
+                && local_refs.resolve(RefNameRef::from_trusted(name)).is_ok()
+        })
         .map(|(name, _)| name.clone())
         .collect()
 }

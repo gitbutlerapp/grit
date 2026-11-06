@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use crate::lockfile::{LockFile, LockWait};
 use crate::objects::ObjectId;
+use crate::refs::store::RefName;
 use crate::repo::Repository;
 
 use super::error::HistoryError;
@@ -242,7 +243,11 @@ fn parse_record(bytes: &[u8]) -> Result<HistoryLastRecord, HistoryError> {
                     .to_owned();
                 let old = parse_oid(parts.next(), line_no, "ref old")?;
                 let new = parse_oid(parts.next(), line_no, "ref new")?;
-                ref_updates.push(PlannedRefUpdate { name, old, new });
+                ref_updates.push(PlannedRefUpdate {
+                    name: RefName::from_trusted(name),
+                    old,
+                    new,
+                });
             }
             other => return Err(parse_err(line_no, &format!("unknown keyword {other}"))),
         }
@@ -307,7 +312,7 @@ mod tests {
             head_old_tree: Some(oid(3)),
             head_new_tree: Some(oid(4)),
             ref_updates: vec![PlannedRefUpdate {
-                name: "refs/heads/main".into(),
+                name: RefName::from_trusted("refs/heads/main"),
                 old: oid(1),
                 new: oid(2),
             }],

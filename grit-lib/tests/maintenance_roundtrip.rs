@@ -637,7 +637,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     use grit_lib::porcelain::commit::{create_commit, CommitRequest};
     use grit_lib::progress::NullProgress;
     use grit_lib::refs;
-    use grit_lib::refs::store::{MemoryRefStore, RawRef};
+    use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef};
     use grit_lib::repo::{InitOptions, Repository};
 
     let dir = tempfile::tempdir().expect("tempdir");
