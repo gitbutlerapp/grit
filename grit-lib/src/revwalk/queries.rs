@@ -795,7 +795,6 @@ impl<'repo> RevWalk<'repo> {
         // left and right sets even when a list limit is also set.
         opts.max_count = None;
         opts.left_right = true;
-        let _extent = RevWalkRetainedCommitExtentGuard::push(options.retained_commit_extent);
         let left_count = {
             let mut left_opts = opts.clone();
             left_opts.left_only = true;

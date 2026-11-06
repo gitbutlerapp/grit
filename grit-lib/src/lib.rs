@@ -150,7 +150,6 @@ pub mod progress;
 /// use grit_lib::repo::InitOptions;
 ///
 /// # fn main() -> Result<()> {
-/// use grit_lib::refs::store::RefNameRef;
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 /// let _cfg = repo.config().snapshot()?;

@@ -4,7 +4,6 @@
 //! ordering (`--topo-order`, `--date-order`, `--reverse`), path simplification,
 //! object walks with `--filter`, and counting (`--count`).
 
-use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::Path;
