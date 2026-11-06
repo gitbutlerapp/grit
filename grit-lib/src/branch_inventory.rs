@@ -124,9 +124,6 @@ pub fn list_branches(
     query: &BranchListQuery,
     detail: BranchDetail,
 ) -> Result<Vec<BranchSummary>> {
-    if detail == BranchDetail::Names && matches!(query.refs.sort.key, SortKey::Date) {
-        return Err(Error::BranchListNamesDateSort);
-    }
     let config = repo.config().snapshot()?;
     let listings = query_refs_peeling(
         repo,

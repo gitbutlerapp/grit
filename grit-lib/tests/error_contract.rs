@@ -36,6 +36,8 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "invalid_tree_entry",
     "invalid_signature",
     "unexpected_object_kind",
+    "unrelated_histories",
+    "invalid_ref",
     "commit_graph_parent_missing",
     "delta_chain_too_deep",
     "unknown_object_type",
