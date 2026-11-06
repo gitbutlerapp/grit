@@ -5,7 +5,6 @@
 use crate::support;
 
 use std::fs;
-use std::io::Cursor;
 use std::path::Path;
 use std::sync::Arc;
 

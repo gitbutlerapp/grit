@@ -1812,8 +1812,7 @@ mod tests {
 
     #[test]
     fn delayed_info_refs_404_uses_one_connection() {
-        use std::io::{Read, Write};
-        use std::net::{TcpListener, TcpStream};
+        use std::net::TcpListener;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
         use std::thread;
@@ -1853,8 +1852,7 @@ mod tests {
 
     #[test]
     fn response_body_arriving_after_20ms_succeeds() {
-        use std::io::{Read, Write};
-        use std::net::{TcpListener, TcpStream};
+        use std::net::TcpListener;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
         use std::thread;
@@ -1886,8 +1884,7 @@ mod tests {
 
     #[test]
     fn delayed_receive_pack_report_uses_one_connection() {
-        use std::io::{Read, Write};
-        use std::net::{TcpListener, TcpStream};
+        use std::net::TcpListener;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::Arc;
         use std::thread;

@@ -1124,8 +1124,7 @@ mod tests {
 
     #[test]
     fn auth_failure_does_not_retry_the_download() {
-        use crate::error::{AuthFailure, Error};
-        use crate::remote::RemoteError;
+        use crate::error::AuthFailure;
 
         struct AuthClient;
         impl HttpClient for AuthClient {

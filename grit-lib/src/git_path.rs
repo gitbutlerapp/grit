@@ -1202,7 +1202,6 @@ mod git_path_component_tests {
 
     #[test]
     fn library_error_messages_use_user_display_paths() {
-        use crate::error::Error;
         use crate::remote::RemoteError;
         use std::path::PathBuf;
 

@@ -5,7 +5,7 @@ use std::process::Command;
 
 use grit_lib::bundle::{Bundle, BundleError};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::error::{Error, RemoteUnreadableReason};
+use grit_lib::error::RemoteUnreadableReason;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;

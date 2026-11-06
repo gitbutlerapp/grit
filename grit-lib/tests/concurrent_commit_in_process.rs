@@ -9,7 +9,7 @@ use grit_lib::porcelain::commit::create_commit;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::lock_path_for_ref;
-use grit_lib::repo::{InitOptions, Repository, RepositoryError};
+use grit_lib::repo::{InitOptions, Repository};
 
 struct Harness {
     _dir: tempfile::TempDir,

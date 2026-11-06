@@ -6,7 +6,6 @@ mod interrupt_common;
 
 use std::fs;
 use std::path::Path;
-use std::process::Child;
 use std::time::{Duration, Instant};
 
 use grit_test_support::grit_cmd;
