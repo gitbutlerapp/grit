@@ -9,7 +9,7 @@
 //! credential, and retries once. On the retry, `reject` runs only when the
 //! server still answers `401` (Git's `credential_reject`); a working credential
 //! that gets 403, 404, 429 or 5xx is left alone — neither `approve` nor
-//! `reject` — and the request fails with [`Error::RemoteUnreadable`].
+//! `reject` — and the request fails with [`RemoteError::Unreadable`].
 //! Successful retries call `approve` and cache the auth header (Git's
 //! `credential_approve`).
 //!
@@ -78,7 +78,7 @@ fn repository_url_for_display(url: &str) -> String {
 }
 
 fn auth_error(url: &str, reason: AuthFailure) -> Error {
-    Error::Auth {
+    RemoteError::Auth {
         url: repository_url_for_display(url),
         reason,
     }
@@ -1196,9 +1196,10 @@ impl HttpClient for UreqHttpClient {
             .map(|settings| settings.window)
     }
 
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
         self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, _)| body)
+            .map_err(crate::remote::RemoteError::from)
     }
 
     fn post(
@@ -1208,11 +1209,12 @@ impl HttpClient for UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Vec<u8>> {
+    ) -> crate::remote::RemoteResult<Vec<u8>> {
         self.with_auth_retry(url, |target, auth| {
             self.do_post(target, content_type, accept, body, git_protocol, auth)
         })
         .map(|(body, _)| body)
+        .map_err(crate::remote::RemoteError::from)
     }
 
     fn post_into_reader(
@@ -1222,7 +1224,7 @@ impl HttpClient for UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> crate::remote::RemoteResult<Box<dyn Read + Send>> {
         Ok(Box::new(self.with_auth_retry_post_stream(
             url,
             content_type,
@@ -1820,7 +1822,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::RemoteUnreadable {
+                RemoteError::Unreadable {
                     reason: RemoteUnreadableReason::HttpStatus { status: 404 },
                     ..
                 }
@@ -2305,7 +2307,7 @@ mod tests {
             assert!(
                 matches!(
                     &err,
-                    Error::RemoteUnreadable {
+                    RemoteError::Unreadable {
                         url: Some(u),
                         reason: RemoteUnreadableReason::HttpStatus { status: 404 },
                     } if u == "https://github.com/o/r.git"
@@ -2326,7 +2328,7 @@ mod tests {
             let err = super::auth_error(endpoint, AuthFailure::Rejected);
             assert!(matches!(
                 &err,
-                Error::Auth { url, reason: AuthFailure::Rejected }
+                RemoteError::Auth { url, reason: AuthFailure::Rejected }
                     if url == "https://example.com/team/r.git"
             ));
             assert_eq!(
@@ -2485,7 +2487,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::Auth {
+                RemoteError::Auth {
                     reason: AuthFailure::Rejected,
                     ..
                 }
@@ -2525,7 +2527,7 @@ mod tests {
             assert!(
                 matches!(
                     err,
-                    Error::Auth {
+                    RemoteError::Auth {
                         reason: AuthFailure::Rejected,
                         ..
                     }

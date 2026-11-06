@@ -25,7 +25,8 @@ type LsRefsAdvertised = (
     std::collections::HashMap<String, ObjectId>,
     Option<ObjectId>,
 );
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::progress::{mirror_stack_cancel, poll_cancel, Cancel, ProgressSink};
+use crate::remote::RemoteError;
 use crate::transfer::{
     classify_update, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
     validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
@@ -226,9 +227,11 @@ fn read_final_ack(reader: &mut dyn Read) -> Result<()> {
     let mut reader = reader;
     loop {
         match pkt_line::read_packet(&mut reader)? {
-            None => return Err(Error::Message("unexpected EOF after done".to_owned())),
+            None => return Err(Error::CorruptObject("unexpected EOF after done".to_owned())),
             Some(pkt_line::Packet::Flush) => {
-                return Err(Error::Message("unexpected flush after done".to_owned()))
+                return Err(Error::CorruptObject(
+                    "unexpected flush after done".to_owned(),
+                ))
             }
             Some(pkt_line::Packet::Data(ln)) => {
                 let ln = ln.trim_end();
@@ -333,7 +336,7 @@ fn append_shallow_request_v0(
             .is_some_and(|s| !s.trim().is_empty())
         || opts.deepen_not.iter().any(|s| !s.trim().is_empty());
     if sends_shallow && !server_caps.contains("shallow") {
-        return Err(Error::FetchShallowUnsupported);
+        return Err(RemoteError::FetchShallowUnsupported.into());
     }
     for oid in local_shallow {
         pkt_line::write_line_to_vec(req, &format!("shallow {}", oid.to_hex()))?;
@@ -342,7 +345,7 @@ fn append_shallow_request_v0(
     // line; Git's upload-pack rejects it as a standalone request line.
     if let Some((depth, relative)) = opts.wire_deepen() {
         if relative && !server_caps.contains("deepen-relative") {
-            return Err(Error::FetchDeepenRelativeUnsupported);
+            return Err(RemoteError::FetchDeepenRelativeUnsupported.into());
         }
         pkt_line::write_line_to_vec(req, &format!("deepen {depth}"))?;
     }
@@ -429,7 +432,7 @@ fn negotiate_pack(
     };
     if opts.wire_deepen().is_some_and(|(_, relative)| relative) {
         if !server_caps.contains("deepen-relative") {
-            return Err(Error::FetchDeepenRelativeUnsupported);
+            return Err(RemoteError::FetchDeepenRelativeUnsupported.into());
         }
         caps.push_str(" deepen-relative");
     }
@@ -1364,7 +1367,7 @@ pub(crate) fn read_v2_acknowledgments(
         // would be lost; for the streaming fetch we only reach here after a
         // first round of haves, where servers always emit `acknowledgments`
         // first. Reaching a different header is therefore unexpected.
-        return Err(Error::Message(format!(
+        return Err(Error::CorruptObject(format!(
             "unexpected v2 fetch section before acknowledgments: {hdr}"
         )));
     }
@@ -1384,7 +1387,7 @@ pub(crate) fn read_v2_acknowledgments(
                 }
                 if let Some(hex) = ln.strip_prefix("ACK ") {
                     let oid = ObjectId::from_hex(hex.trim()).map_err(|_| {
-                        Error::Message(format!("unexpected acknowledgment line: '{ln}'"))
+                        Error::CorruptObject(format!("unexpected acknowledgment line: '{ln}'"))
                     })?;
                     common.push(oid);
                     continue;
@@ -1393,7 +1396,7 @@ pub(crate) fn read_v2_acknowledgments(
                     ready = true;
                     continue;
                 }
-                return Err(Error::Message(format!(
+                return Err(Error::CorruptObject(format!(
                     "unexpected acknowledgment line: '{ln}'"
                 )));
             }
@@ -1446,14 +1449,15 @@ pub(crate) fn read_v2_fetch_pack_response(
                 // A response to a request with wants ends with the packfile section;
                 // a stream that just stops was cut short (a server that died, say).
                 None => {
-                    return Err(Error::RemoteUnreadable {
+                    return Err(RemoteError::Unreadable {
                         url: None,
                         reason: crate::error::RemoteUnreadableReason::ResponseTruncated,
-                    })
+                    }
+                    .into())
                 }
                 Some(pkt_line::Packet::Delim) => continue,
                 Some(other) => {
-                    return Err(Error::Message(format!(
+                    return Err(Error::CorruptObject(format!(
                         "unexpected v2 fetch response: {other:?}"
                     )))
                 }
@@ -1492,7 +1496,7 @@ pub(crate) fn read_v2_fetch_pack_response(
                 // `wanted-refs` payload line (some servers omit the section header).
             }
             other => {
-                return Err(Error::Message(format!(
+                return Err(Error::CorruptObject(format!(
                     "unexpected v2 fetch section: {other}"
                 )))
             }
@@ -1712,10 +1716,11 @@ pub fn fetch_remote_into(
         && remote_refs.is_empty()
         && !crate::transport::connection_handshake_complete(conn)
     {
-        return Err(Error::RemoteUnreadable {
+        return Err(RemoteError::Unreadable {
             url: None,
             reason: crate::error::RemoteUnreadableReason::NoHandshake,
-        });
+        }
+        .into());
     }
 
     let conn_caps: Vec<String> = conn.capabilities().to_vec();
@@ -3015,10 +3020,10 @@ mod fetch_advertised_ref_tests {
         assert!(
             matches!(
                 err,
-                Error::RemoteUnreadable {
+                Error::Remote(RemoteError::Unreadable {
                     reason: crate::error::RemoteUnreadableReason::ResponseTruncated,
                     ..
-                }
+                })
             ),
             "{err:?}"
         );
@@ -3977,8 +3982,8 @@ mod remote_fatal_fetch_tests {
 
     fn remote_fatal_message(err: crate::error::Error) -> String {
         match err {
-            crate::error::Error::RemoteFatal { message } => message,
-            other => panic!("expected Error::RemoteFatal, got {other:?}"),
+            crate::error::Error::Remote(crate::remote::RemoteError::Fatal { message }) => message,
+            other => panic!("expected RemoteError::Fatal, got {other:?}"),
         }
     }
 

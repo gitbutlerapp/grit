@@ -161,7 +161,7 @@ pub fn resolve_remote_argument(
     if looks_like_path_or_url(remote_or_url) || remote_or_url.contains(':') {
         return Remote::from_url(remote_or_url);
     }
-    Err(RemoteError::UnknownRemote(remote_or_url.to_owned()))
+    Err(RemoteError::UnknownRemote(remote_or_url.to_owned())).into()
 }
 
 /// `branch.<branch>.remote`, trimmed; `None` when unset, blank, or `branch` is `None`.

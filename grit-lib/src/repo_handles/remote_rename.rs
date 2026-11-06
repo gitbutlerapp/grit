@@ -47,7 +47,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// - [`RemoteError::UnknownRemote`] when `old` has no local `remote.<old>.*` section.
     /// - [`RemoteError::RemoteExists`] when `new` is already configured.
     /// - [`RemoteError::InvalidRemoteName`] when `new` is not a valid remote name.
-    /// - [`RemoteError::Library`] for config, ref, or I/O failures.
+    /// - [`RemoteError::from`] for config, ref, or I/O failures.
     pub fn rename(
         &self,
         old: &str,
@@ -58,7 +58,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             return Err(RemoteError::InvalidRemoteName(new.to_owned()));
         }
         let repo = self.repository();
-        let config = repo.config().snapshot().map_err(RemoteError::Library)?;
+        let config = repo.config().snapshot().map_err(RemoteError::from)?;
         if !has_local_remote_section(config.as_ref(), old) {
             return Err(RemoteError::UnknownRemote(old.to_owned()));
         }
@@ -139,7 +139,7 @@ fn count_remote_tracking_refs(repo: &Repository, old: &str) -> Result<usize, Rem
             }
             ControlFlow::Continue(())
         })
-        .map_err(RemoteError::Library)?;
+        .map_err(RemoteError::from)?;
     Ok(count)
 }
 
@@ -153,7 +153,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
             }
             ControlFlow::Continue(())
         })
-        .map_err(RemoteError::Library)?;
+        .map_err(RemoteError::from)?;
 
     let identity = checkout_reflog_identity(repo);
     let time = repo.identity_now();
@@ -216,7 +216,7 @@ fn rename_remote_tracking_refs(repo: &Repository, old: &str, new: &str) -> Resul
     }
 
     commit_ref_batch_on_store(repo.refs(), &updates, &reflog_renames, &[])
-        .map_err(RemoteError::Library)
+        .map_err(RemoteError::from)
 }
 
 fn plan_config_updates(
@@ -270,11 +270,11 @@ fn apply_remote_rename_config(
     let path = crate::repo::common_git_dir_for_config(repo.git_dir()).join("config");
     let content = std::fs::read_to_string(&path).map_err(crate::error::Error::Io)?;
     let mut file =
-        ConfigFile::parse(&path, &content, ConfigScope::Local).map_err(RemoteError::Library)?;
+        ConfigFile::parse(&path, &content, ConfigScope::Local).map_err(RemoteError::from)?;
     let old_section = format!("remote.{old}");
     let new_section = format!("remote.{new}");
     if !file.rename_section(&old_section, &new_section)? {
-        return Err(RemoteError::Library(crate::error::Error::Message(format!(
+        return Err(RemoteError::from(crate::error::Error::Message(format!(
             "could not rename config section {old_section} to {new_section}"
         ))));
     }
@@ -309,8 +309,8 @@ fn apply_remote_rename_config(
         file.set("remote.pushDefault", new)?;
     }
 
-    file.write().map_err(RemoteError::Library)?;
-    repo.reload_config().map_err(RemoteError::Library)?;
+    file.write().map_err(RemoteError::from)?;
+    repo.reload_config().map_err(RemoteError::from)?;
     Ok(())
 }
 

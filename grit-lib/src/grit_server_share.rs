@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 use crate::grit_server_auth::{not_grit_server_or_http, ServerAuthError, ServerUrl};
+use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
 
 /// Path, under the server root, of the share endpoint: `POST
@@ -454,7 +455,7 @@ fn post_json(
 ) -> std::result::Result<Vec<u8>, ServerAuthError> {
     http.post(url, JSON_CONTENT_TYPE, JSON_CONTENT_TYPE, body, None)
         .map_err(|e| match e {
-            Error::Auth { .. } => ServerAuthError::TokenRejected,
+            RemoteError::Auth { .. } => ServerAuthError::TokenRejected,
             other => not_grit_server_or_http(server, other),
         })
 }

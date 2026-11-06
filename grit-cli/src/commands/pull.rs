@@ -83,9 +83,8 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         }
         None => {}
     }
-    let mut options =
-        PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
-            .map_err(|err| crate::error_map::map_pull_options_error(&repo, err))?;
+    let mut options = PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
+        .map_err(|err| crate::error_map::map_pull_options_error(&repo, err))?;
     let head = resolve_head_for_repository(&repo)?;
     let invocation = resolve_pull_invocation(
         &config,

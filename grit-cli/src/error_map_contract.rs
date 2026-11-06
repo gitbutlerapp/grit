@@ -317,18 +317,18 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "auth_required_github",
         build: || {
-            Error::new(LibError::Auth {
+            Error::new(LibError::Remote(RemoteError::Auth {
                 url: "https://github.com/o/r.git".into(),
                 reason: AuthFailure::CredentialsUnavailable {
                     detail: "none".into(),
                     helpers: Vec::new(),
                 },
-            })
+            }))
         },
         kind: Some(ErrorKind::AuthRequired),
         exit: ExitStatus::Failure,
         human: || {
-            LibError::Auth {
+            RemoteError::Auth {
                 url: "https://github.com/o/r.git".into(),
                 reason: AuthFailure::CredentialsUnavailable {
                     detail: "none".into(),
@@ -576,9 +576,9 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "remote_library_object_not_found",
         build: || {
-            map_remote_error(RemoteError::Library(LibError::ObjectNotFound(
+            map_remote_error(RemoteError::Nested(Box::new(LibError::ObjectNotFound(
                 "deadbeef".into(),
-            )))
+            ))))
         },
         kind: None,
         exit: ExitStatus::Failure,
@@ -968,15 +968,15 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "auth_rejected",
         build: || {
-            Error::new(LibError::Auth {
+            Error::new(LibError::Remote(RemoteError::Auth {
                 url: "https://git.example.com/o/r.git".into(),
                 reason: AuthFailure::Rejected,
-            })
+            }))
         },
         kind: Some(ErrorKind::AuthRejected),
         exit: ExitStatus::Failure,
         human: || {
-            LibError::Auth {
+            RemoteError::Auth {
                 url: "https://git.example.com/o/r.git".into(),
                 reason: AuthFailure::Rejected,
             }
@@ -1001,12 +1001,10 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "clone_remote_unreadable_wrapped",
         build: || {
-            Error::new(CloneError::Remote(RemoteError::Library(
-                LibError::remote_unreadable(
-                    "https://example.com/x.git",
-                    RemoteUnreadableReason::HttpStatus { status: 404 },
-                ),
-            )))
+            Error::new(CloneError::Remote(RemoteError::Unreadable {
+                url: Some("https://example.com/x.git".to_owned()),
+                reason: RemoteUnreadableReason::HttpStatus { status: 404 },
+            }))
             .context("clone failed")
         },
         kind: Some(ErrorKind::RemoteUnreadable),

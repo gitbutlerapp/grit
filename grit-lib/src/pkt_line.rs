@@ -6,6 +6,7 @@
 use std::io::{self, Read, Write};
 
 use crate::error::{Error, Result};
+use crate::remote::RemoteError;
 
 /// Special packet type: flush packet (`0000`).
 pub const FLUSH: &str = "0000";
@@ -214,28 +215,30 @@ pub(crate) fn parse_hex_len(prefix: &[u8]) -> io::Result<usize> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("invalid length: {e}")))
 }
 
-/// Fail with [`Error::RemoteFatal`] when `line` is an `ERR <message>` data line.
+/// Fail with [`RemoteError::Fatal`] when `line` is an `ERR <message>` data line.
 ///
 /// A server may send `ERR` in place of any line it would otherwise send; call this on
 /// each data line before interpreting it.
 ///
 /// # Errors
 ///
-/// [`Error::RemoteFatal`] carrying the message, trailing whitespace trimmed.
+/// [`RemoteError::Fatal`] carrying the message, trailing whitespace trimmed.
 pub(crate) fn reject_err_line(line: &str) -> Result<()> {
     match line.strip_prefix("ERR ") {
-        Some(message) => Err(Error::RemoteFatal {
+        Some(message) => Err(RemoteError::Fatal {
             message: message.trim_end().to_owned(),
-        }),
+        }
+        .into()),
         None => Ok(()),
     }
 }
 
-/// [`Error::RemoteFatal`] for the payload of a side-band channel-3 packet (band byte removed).
+/// [`RemoteError::Fatal`] for the payload of a side-band channel-3 packet (band byte removed).
 pub(crate) fn sideband_fatal(payload: &[u8]) -> Error {
-    Error::RemoteFatal {
+    RemoteError::Fatal {
         message: String::from_utf8_lossy(payload).trim_end().to_owned(),
     }
+    .into()
 }
 
 #[cfg(test)]
@@ -244,7 +247,7 @@ mod tests {
 
     fn fatal_message(err: Error) -> String {
         match err {
-            Error::RemoteFatal { message } => message,
+            RemoteError::Fatal { message } => message,
             other => panic!("expected RemoteFatal, got {other:?}"),
         }
     }

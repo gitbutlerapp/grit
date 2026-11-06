@@ -46,6 +46,7 @@ use crate::command_runner::{
 use crate::config::{parse_bool, parse_path, ConfigSet};
 use crate::environment::Environment;
 use crate::error::{Error, Result};
+use crate::remote::RemoteError;
 
 /// How [`Error::CredentialsUnavailable`] displays: credentials are required but
 /// no configured helper could supply a complete username/password and no
@@ -569,9 +570,10 @@ impl CredentialProvider for HelperCredentialProvider {
             }
         }
         let Some(askpass) = self.askpass.as_deref().filter(|_| self.prompts_allowed()) else {
-            return Err(Error::CredentialsUnavailable {
+            return Err(RemoteError::CredentialsUnavailable {
                 helpers: helper_list,
-            });
+            }
+            .into());
         };
         let sanitize =
             credential_config_value(&self.config, target_url.as_deref(), "sanitizePrompt")
@@ -1788,7 +1790,7 @@ mod tests {
             .fill(&input)
             .expect_err("no helper");
         assert!(
-            matches!(&err, Error::CredentialsUnavailable { helpers } if helpers.is_empty()),
+            matches!(&err, RemoteError::CredentialsUnavailable { helpers } if helpers.is_empty()),
             "{err:?}"
         );
 

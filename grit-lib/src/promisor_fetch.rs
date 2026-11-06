@@ -171,14 +171,21 @@ pub(crate) enum PromisorAttemptError {
 
 impl From<crate::remote::RemoteError> for PromisorAttemptError {
     fn from(e: crate::remote::RemoteError) -> Self {
-        match e {
-            crate::remote::RemoteError::Library(err)
-                if err.is_remote_unreadable() || matches!(err, Error::Auth { .. }) =>
-            {
-                Self::RemoteUnusable(err)
-            }
-            crate::remote::RemoteError::Library(err) => Self::RequestFailed(err),
-            other => Self::RemoteUnusable(other.into()),
+        let unusable = matches!(
+            &e,
+            crate::remote::RemoteError::Unreadable { .. } | crate::remote::RemoteError::Auth { .. }
+        ) || matches!(
+            &e,
+            crate::remote::RemoteError::Nested(err)
+                if err.is_remote_unreadable()
+                    || matches!(err.as_ref(), crate::error::Error::Remote(
+                        crate::remote::RemoteError::Auth { .. }
+                    ))
+        );
+        if unusable {
+            Self::RemoteUnusable(e.into())
+        } else {
+            Self::RequestFailed(e.into())
         }
     }
 }

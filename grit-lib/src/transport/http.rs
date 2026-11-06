@@ -37,6 +37,7 @@ use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::progress::{Cancel, NeverCancel};
+use crate::remote::{RemoteError, RemoteResult};
 use crate::transfer::{FetchOptions, FetchOutcome};
 use crate::transport::pending_http::PendingHttp;
 use crate::transport::stateless_http::StatelessHttpConnection;
@@ -62,7 +63,7 @@ pub trait HttpClient: Send + Sync {
     /// # Errors
     ///
     /// Returns an error on a transport failure or a non-success HTTP status.
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>>;
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> RemoteResult<Vec<u8>>;
 
     /// Issue a `POST` to `url` with the given `content_type`, `accept` header,
     /// and request `body`, returning the response body bytes.
@@ -77,7 +78,7 @@ pub trait HttpClient: Send + Sync {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Vec<u8>>;
+    ) -> RemoteResult<Vec<u8>>;
 
     /// Issue a `POST` and return the response body as a readable stream.
     ///
@@ -94,7 +95,7 @@ pub trait HttpClient: Send + Sync {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         Ok(Box::new(Cursor::new(self.post(
             url,
             content_type,
@@ -129,7 +130,7 @@ pub trait HttpClient: Send + Sync {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         let mut buffered = Vec::new();
         body.read_to_end(&mut buffered).map_err(Error::Io)?;
         self.post_into_reader(url, content_type, accept, &buffered, git_protocol)
@@ -355,7 +356,7 @@ impl std::fmt::Debug for HttpResponse {
 /// Forward [`HttpClient`] through a shared [`std::sync::Arc`], so one client can
 /// back several transports (and be observed by the caller) without moving it.
 impl HttpClient for std::sync::Arc<dyn HttpClient> {
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> RemoteResult<Vec<u8>> {
         (**self).get(url, git_protocol)
     }
 
@@ -366,7 +367,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Vec<u8>> {
+    ) -> RemoteResult<Vec<u8>> {
         (**self).post(url, content_type, accept, body, git_protocol)
     }
 
@@ -377,7 +378,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         (**self).post_into_reader(url, content_type, accept, body, git_protocol)
     }
 
@@ -388,7 +389,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         (**self).post_streaming(url, content_type, accept, body, git_protocol)
     }
 
@@ -430,7 +431,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
 }
 
 impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
-    fn get(&self, url: &str, git_protocol: Option<&str>) -> Result<Vec<u8>> {
+    fn get(&self, url: &str, git_protocol: Option<&str>) -> RemoteResult<Vec<u8>> {
         (**self).get(url, git_protocol)
     }
 
@@ -441,7 +442,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Vec<u8>> {
+    ) -> RemoteResult<Vec<u8>> {
         (**self).post(url, content_type, accept, body, git_protocol)
     }
 
@@ -452,7 +453,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         (**self).post_into_reader(url, content_type, accept, body, git_protocol)
     }
 
@@ -463,7 +464,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         (**self).post_streaming(url, content_type, accept, body, git_protocol)
     }
 
@@ -547,13 +548,14 @@ pub(crate) fn not_git_server_error(
     status: u16,
     content_type: Option<String>,
 ) -> Error {
-    Error::RemoteUnreadable {
+    RemoteError::Unreadable {
         url,
         reason: RemoteUnreadableReason::NotGitServer {
             status,
             content_type,
         },
     }
+    .into()
 }
 
 fn reject_non_git_discovery_http(http: &InfoRefsDiscoveryHttp, body: &[u8]) -> Result<()> {
@@ -830,7 +832,7 @@ fn upload_pack_discovery_from_body_with_http(
 ///
 /// # Errors
 ///
-/// [`Error::RemoteFatal`] when the server answers with an `ERR` packet instead of an
+/// [`RemoteError::Fatal`] when the server answers with an `ERR` packet instead of an
 /// advertisement; other malformed advertisements fail with parse errors.
 #[allow(dead_code)]
 pub(crate) fn discover_upload_pack_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {

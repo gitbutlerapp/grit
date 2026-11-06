@@ -25,7 +25,7 @@ use grit_lib::repo::{InitOptions, Repository};
 
 fn unreadable_reason(err: &RemoteError) -> &RemoteUnreadableReason {
     match err {
-        RemoteError::Library(Error::RemoteUnreadable { reason, .. }) => reason,
+        RemoteError::Unreadable { reason, .. } => reason,
         other => panic!("expected RemoteUnreadable, got {other:?}"),
     }
 }
@@ -164,7 +164,7 @@ fn list_refs_over_refused_http_port_is_transport_failure() {
         "{err:?}"
     );
     match &err {
-        RemoteError::Library(Error::RemoteUnreadable { url: Some(u), .. }) => {
+        RemoteError::Unreadable { url: Some(u), .. } => {
             assert!(u.starts_with(&url), "url {u} should name {url}");
         }
         other => panic!("expected a url, got {other:?}"),
@@ -450,21 +450,21 @@ fn wrapper_helpers_classify_only_remote_unreadable() {
     assert!(unreadable().is_remote_unreadable());
     assert!(!Error::NothingToCommit.is_remote_unreadable());
 
-    assert!(RemoteError::Library(unreadable()).is_remote_unreadable());
+    assert!(RemoteError::from(unreadable()).is_remote_unreadable());
     assert!(!RemoteError::NoUrl { remote: None }.is_remote_unreadable());
-    assert!(!RemoteError::Library(Error::Auth {
+    assert!(!RemoteError::Auth {
         url: "https://example.com/r.git".into(),
         reason: grit_lib::error::AuthFailure::Rejected,
-    })
+    }
     .is_remote_unreadable());
 
-    assert!(CloneError::Library(unreadable()).is_remote_unreadable());
-    assert!(CloneError::Remote(RemoteError::Library(unreadable())).is_remote_unreadable());
+    assert!(CloneError::Nested(Box::new(unreadable())).is_remote_unreadable());
+    assert!(CloneError::Remote(RemoteError::from(unreadable())).is_remote_unreadable());
     assert!(!CloneError::InvalidCloneDepth.is_remote_unreadable());
     assert!(!CloneError::RemoteRefNotFound("x".into()).is_remote_unreadable());
 
-    assert!(PullError::Remote(RemoteError::Library(unreadable())).is_remote_unreadable());
-    assert!(PullError::Repository(unreadable()).is_remote_unreadable());
+    assert!(PullError::Remote(RemoteError::from(unreadable())).is_remote_unreadable());
+    assert!(PullError::Nested(Box::new(unreadable())).is_remote_unreadable());
     assert!(!PullError::DetachedHead.is_remote_unreadable());
 }
 

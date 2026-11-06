@@ -25,12 +25,21 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::{NoProgress, Progress};
+use crate::fetch_request::FetchRefspecError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
+use crate::remote::RemoteError;
 use std::num::NonZeroU32;
+
+fn serve_err(e: crate::serve::ServeError) -> Error {
+    match e {
+        crate::serve::ServeError::Repository(err) => err,
+        other => Error::Remote(RemoteError::LocalUploadPack(Box::new(other))),
+    }
+}
 
 /// How a single reference resolved during a fetch (or would resolve in a push).
 ///
@@ -468,13 +477,13 @@ impl FetchOptions {
 ///
 /// # Errors
 ///
-/// Returns [`Error::FetchUnshallowNotShallow`] when [`FetchDepth::Unshallow`] is
+/// Returns [`RemoteError::FetchUnshallowNotShallow`] when [`FetchDepth::Unshallow`] is
 /// requested but the repository has no shallow boundaries.
 pub(crate) fn validate_fetch_depth_local(local_git_dir: &Path, opts: &FetchOptions) -> Result<()> {
     if matches!(opts.fetch_depth, Some(FetchDepth::Unshallow)) {
         let local = crate::shallow::load_shallow_oids(local_git_dir)?;
         if local.is_empty() {
-            return Err(Error::FetchUnshallowNotShallow);
+            return Err(RemoteError::FetchUnshallowNotShallow.into());
         }
     }
     Ok(())
@@ -498,14 +507,14 @@ pub(crate) fn validate_fetch_depth_server(
     }
     if let Some(caps) = v0_caps {
         if !caps.contains("shallow") {
-            return Err(Error::FetchShallowUnsupported);
+            return Err(RemoteError::FetchShallowUnsupported.into());
         }
         if opts.wire_deepen().is_some_and(|(_, rel)| rel) && !caps.contains("deepen-relative") {
-            return Err(Error::FetchDeepenRelativeUnsupported);
+            return Err(RemoteError::FetchDeepenRelativeUnsupported.into());
         }
     } else if let Some(caps) = v2_caps {
         if !crate::protocol_v2::fetch_supports_feature(caps, "shallow") {
-            return Err(Error::FetchShallowUnsupported);
+            return Err(RemoteError::FetchShallowUnsupported.into());
         }
     }
     Ok(())
@@ -900,7 +909,7 @@ pub struct PushOptions {
     /// Apply all updates atomically (all-or-nothing), including remote hook rejections.
     ///
     /// Wire pushes require the server's `atomic` capability. If it is absent,
-    /// returns [`crate::error::Error::PushAtomicUnsupported`] before sending any
+    /// returns [`crate::remote::RemoteError::PushAtomicUnsupported`] before sending any
     /// ref-update commands or objects, including with [`Self::dry_run`]. There
     /// is no fallback to a non-atomic push.
     pub atomic: bool,
@@ -918,7 +927,7 @@ pub struct PushOptions {
     ///
     /// If this is non-empty but the remote `git-receive-pack` does not advertise
     /// the `push-options` capability, the push fails with
-    /// [`crate::error::Error::PushOptionsUnsupported`] (matching Git). A local-path or
+    /// [`crate::remote::RemoteError::PushOptionsUnsupported`] (matching Git). A local-path or
     /// `file://` push ([`push_local`]) accepts them only when the destination repository
     /// sets `receive.advertisePushOptions`, and passes them to its `pre-receive` and
     /// `post-receive` hooks. Either check runs before anything is written, dry runs included.
@@ -1914,8 +1923,14 @@ pub(crate) fn build_fetch_matched_set(
         }
     };
     for spec in &opts.negative_refspecs {
-        let item = parse_fetch_refspec(spec)
-            .map_err(|e| Error::Message(format!("invalid negative refspec '{spec}': {e}")))?;
+        let item = parse_fetch_refspec(spec).map_err(|e| {
+            Error::Remote(RemoteError::FetchRefspec(
+                FetchRefspecError::InvalidRefspec {
+                    spec: spec.clone(),
+                    message: e.to_string(),
+                },
+            ))
+        })?;
         negatives.push(item);
     }
 
@@ -1986,9 +2001,10 @@ pub(crate) fn enforce_fetch_ref_update(
                 if crate::worktree::find_worktree_with_branch_checked_out(repo, short, None)?
                     .is_some()
                 {
-                    return Err(Error::FetchIntoCheckedOutBranch {
+                    return Err(RemoteError::FetchIntoCheckedOutBranch {
                         branch: short.to_owned(),
-                    });
+                    }
+                    .into());
                 }
             }
         }
@@ -1997,7 +2013,7 @@ pub(crate) fn enforce_fetch_ref_update(
     Ok(())
 }
 
-/// Fail with [`Error::RemoteUnreadable`] unless `remote_git_dir` is a Git directory.
+/// Fail with [`RemoteError::Unreadable`] unless `remote_git_dir` is a Git directory.
 ///
 /// A missing or non-repository path must not read as an empty remote.
 pub(crate) fn ensure_local_remote_repository(remote_git_dir: &Path) -> Result<()> {
@@ -2523,7 +2539,7 @@ pub(crate) fn fetch_local_into(
 ///
 /// Returns an error if either repository cannot be opened, if a source object is
 /// missing from the local odb, or on I/O failure while writing objects or refs.
-/// Returns [`Error::PushOptionsUnsupported`] when `opts.push_options` is non-empty and
+/// Returns [`RemoteError::PushOptionsUnsupported`] when `opts.push_options` is non-empty and
 /// the remote does not set `receive.advertisePushOptions`.
 //
 // TODO(phase: remote transports): `git://`, `http(s)`, and `ssh` push
@@ -2573,7 +2589,7 @@ pub(crate) fn push_local_from(
     if !opts.push_options.is_empty()
         && !remote_cfg.bool_with_default("receive.advertisepushoptions", false)
     {
-        return Err(Error::PushOptionsUnsupported);
+        return Err(RemoteError::PushOptionsUnsupported.into());
     }
 
     let local_odb = local.odb();
@@ -2793,7 +2809,7 @@ pub(crate) fn push_local_from(
                 &receive_policy,
                 &mut no_sideband,
             )
-            .map_err(|e| Error::Message(e.to_string()))?
+            .map_err(serve_err)?
             {
                 d.refuse(&reason);
             }
@@ -2973,7 +2989,7 @@ fn push_receiver_tips(repo: &crate::repo::Repository) -> Result<HashSet<ObjectId
         receiver_tips.insert(r.peeled.unwrap_or(r.oid));
         Ok(std::ops::ControlFlow::Continue(()))
     })
-    .map_err(|e| Error::Message(e.to_string()))?;
+    .map_err(serve_err)?;
     receiver_tips.extend(crate::refs::resolve_ref(repo.git_dir(), "HEAD").ok());
     Ok(receiver_tips)
 }
@@ -3034,8 +3050,7 @@ fn apply_remote_receive_policy(
             branches,
         ) {
             Ok(r) => r,
-            Err(crate::serve::ServeError::Repository(e)) => return Err(e),
-            Err(e) => return Err(Error::Message(e.to_string())),
+            Err(e) => return Err(serve_err(e)),
         };
         if let Some(reason) = refusal {
             d.result.status = match (&reason, cmd.old) {
@@ -3327,13 +3342,13 @@ fn decide_push(
 
     // Non-delete updates require a source object that exists locally.
     let Some(src) = spec.src else {
-        return Err(Error::Message(format!(
+        return Err(Error::InvalidRef(format!(
             "push to '{}' has no source object and is not a deletion",
             spec.dst
         )));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::Message(format!(
+        return Err(Error::ObjectNotFound(format!(
             "source object {src} for '{}' is missing from the local object store",
             spec.dst
         )));
@@ -3549,7 +3564,7 @@ pub(crate) fn sync_empty_destination_object_format(
         return Ok(false);
     }
     if local_odb.approximate_object_count()? > 0 || local_odb.count_loose_objects()? > 0 {
-        return Err(Error::Message(format!(
+        return Err(Error::PathError(format!(
             "unsupported object format: destination uses {} but remote uses {}; re-clone into an empty directory with a matching format",
             local_odb.hash_algo().name(),
             remote_algo.name()

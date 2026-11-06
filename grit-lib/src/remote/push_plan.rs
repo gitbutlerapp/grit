@@ -132,7 +132,7 @@ pub struct PushPlanContext {
 }
 
 /// Errors while planning a push (typed; no stringly matching in callers).
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error)]
 pub enum PushPlanError {
     /// Detached `HEAD` with no refspec on the command line.
     #[error("HEAD is detached; specify a refspec (for example HEAD:refs/heads/<name>)")]
@@ -197,12 +197,27 @@ pub enum PushPlanError {
     /// A delete push named no ref to delete.
     #[error("--delete needs at least one ref to delete")]
     DeleteWithoutRefs,
-    /// Other planning failure.
-    #[error("{0}")]
-    Message(String),
+    /// `HEAD` could not be interpreted for push planning.
+    #[error("HEAD is in an unknown state")]
+    InvalidHead,
+    /// `push.default = upstream` but the branch has no `branch.<name>.merge`.
+    #[error("branch '{branch}' has no upstream for push.default upstream")]
+    NoUpstreamForPushDefault {
+        /// Local branch short name.
+        branch: String,
+    },
+    /// Repository failure while planning the push.
+    #[error(transparent)]
+    Nested(#[from] Box<crate::error::Error>),
 }
 
 type PlanResult<T> = std::result::Result<T, PushPlanError>;
+
+impl From<crate::error::Error> for PushPlanError {
+    fn from(e: crate::error::Error) -> Self {
+        Self::Nested(Box::new(e))
+    }
+}
 
 /// Parse `--force` / `--force-with-lease[=<rev>]` into [`ForceMode`].
 pub fn parse_force_mode(
@@ -712,7 +727,7 @@ fn tag_reachable_from_push_tips(
         if peeled == tip {
             return Ok(true);
         }
-        if is_ancestor(repo, peeled, tip).map_err(|e| PushPlanError::Message(e.to_string()))? {
+        if is_ancestor(repo, peeled, tip).map_err(|e| PushPlanError::Nested(Box::new(e)))? {
             return Ok(true);
         }
     }
@@ -762,7 +777,7 @@ fn resolve_tags_push(
     let remote = configured_remote_for_push(repo, config, request.remote.as_deref())?;
     validate_remote(config, &remote)?;
     let entries = refs::list_refs(repo.git_dir(), "refs/tags/")
-        .map_err(|e| PushPlanError::Message(e.to_string()))?;
+        .map_err(|e| PushPlanError::Nested(Box::new(e)))?;
     if entries.is_empty() {
         return Err(PushPlanError::NoTags);
     }
@@ -876,7 +891,7 @@ fn resolve_matching_default_push(
 }
 
 fn current_branch_oid(repo: &Repository) -> PlanResult<(String, ObjectId)> {
-    match resolve_head(repo.git_dir()).map_err(|e| PushPlanError::Message(e.to_string()))? {
+    match resolve_head(repo.git_dir()).map_err(|e| PushPlanError::Nested(Box::new(e)))? {
         HeadState::Branch {
             short_name,
             oid: Some(oid),
@@ -884,7 +899,7 @@ fn current_branch_oid(repo: &Repository) -> PlanResult<(String, ObjectId)> {
         } => Ok((short_name, oid)),
         HeadState::Branch { .. } => Err(PushPlanError::NoCommits),
         HeadState::Detached { .. } => Err(PushPlanError::DetachedHeadNoRefspec),
-        HeadState::Invalid => Err(PushPlanError::Message("HEAD is in an unknown state".into())),
+        HeadState::Invalid => Err(PushPlanError::InvalidHead),
     }
 }
 
@@ -1137,10 +1152,8 @@ fn default_push_destination(
         let merge = config
             .value(&format!("branch.{branch_short}.merge"))
             .filter(|m| m.starts_with("refs/"));
-        return merge.ok_or_else(|| {
-            PushPlanError::Message(format!(
-                "branch '{branch_short}' has no upstream for push.default upstream"
-            ))
+        return merge.ok_or(PushPlanError::NoUpstreamForPushDefault {
+            branch: branch_short.to_owned(),
         });
     }
 
@@ -1701,7 +1714,7 @@ impl LocalPushRefs {
 }
 
 fn list_local_refs(git_dir: &Path, prefix: &str) -> PlanResult<Vec<(String, ObjectId)>> {
-    refs::list_refs(git_dir, prefix).map_err(|e| PushPlanError::Message(e.to_string()))
+    refs::list_refs(git_dir, prefix).map_err(|e| PushPlanError::Nested(Box::new(e)))
 }
 
 /// Port of Git `count_refspec_match` / `refname_match` for local refs.

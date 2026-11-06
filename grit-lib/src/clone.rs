@@ -45,9 +45,9 @@ pub enum CloneError {
     /// [`CloneOptions::depth`] was zero (`git clone --depth 0` is invalid).
     #[error("depth 0 is not a positive number")]
     InvalidCloneDepth,
-    /// Underlying library failure.
+    /// Non-remote library failure during clone.
     #[error(transparent)]
-    Library(#[from] Error),
+    Nested(#[from] Box<Error>),
     /// Remote resolution or transport failure.
     #[error(transparent)]
     Remote(#[from] crate::remote::RemoteError),
@@ -56,7 +56,7 @@ pub enum CloneError {
     ///
     /// As with Git, the repository is kept so the checkout can be retried (for example
     /// with a hard reset to `HEAD`); [`Self::should_cleanup_failed_clone`] is `false`. A
-    /// checkout cancelled part way is [`CloneError::Library`] with [`Error::Cancelled`]
+    /// checkout cancelled part way is [`CloneError::Nested`] with [`Error::Cancelled`]
     /// instead, and is cleaned up like any other cancelled clone.
     #[error("cloned into '{}', but checking out {commit} failed: {source}", .path.display())]
     CheckoutFailed {
@@ -68,6 +68,12 @@ pub enum CloneError {
         #[source]
         source: Box<Error>,
     },
+}
+
+impl From<Error> for CloneError {
+    fn from(e: Error) -> Self {
+        Self::Nested(Box::new(e))
+    }
 }
 
 impl CloneError {
@@ -82,7 +88,7 @@ impl CloneError {
             Self::DestNotEmpty(_) | Self::InvalidCloneDepth | Self::CheckoutFailed { .. } => false,
             Self::Remote(RemoteError::InvalidRemoteName(_)) => false,
             Self::RemoteRefNotFound(_) => true,
-            Self::Library(_) | Self::Remote(_) => true,
+            Self::Nested(_) | Self::Remote(_) => true,
         }
     }
 
@@ -92,12 +98,12 @@ impl CloneError {
         matches!(self, Self::RemoteRefNotFound(_))
     }
 
-    /// Whether the source could not be read at all ([`Error::RemoteUnreadable`]), as opposed to
+    /// Whether the source could not be read at all ([`RemoteError::Unreadable`]), as opposed to
     /// an empty remote with no branches or a local failure.
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
         match self {
-            Self::Library(e) => e.is_remote_unreadable(),
+            Self::Nested(e) => e.is_remote_unreadable(),
             Self::Remote(e) => e.is_remote_unreadable(),
             Self::DestNotEmpty(_)
             | Self::RemoteRefNotFound(_)
@@ -112,7 +118,7 @@ impl CloneError {
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         match self {
-            Self::Library(e) => e.is_cancelled(),
+            Self::Nested(e) => e.is_cancelled(),
             Self::Remote(e) => e.is_cancelled(),
             Self::DestNotEmpty(_)
             | Self::RemoteRefNotFound(_)
@@ -431,7 +437,7 @@ impl CloneDestinationGuard {
         let label = dest
             .to_str()
             .ok_or_else(|| {
-                CloneError::Library(Error::Message("non-UTF-8 destination path".into()))
+                CloneError::from(Error::InvalidPath("non-UTF-8 destination path".into()))
             })?
             .to_owned();
         if bare {
@@ -448,19 +454,13 @@ impl CloneDestinationGuard {
 
         if !dest.is_dir() {
             if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    CloneError::Library(Error::Message(format!(
-                        "could not create clone destination parent: {e}"
-                    )))
-                })?;
+                fs::create_dir_all(parent).map_err(|e| CloneError::from(Error::Io(e)))?;
             }
             match fs::create_dir(dest) {
                 Ok(()) => {}
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(source) => {
-                    return Err(CloneError::Library(Error::Message(format!(
-                        "could not create clone destination: {source}"
-                    ))));
+                    return Err(CloneError::from(Error::Io(source)));
                 }
             }
         }
@@ -478,10 +478,7 @@ impl CloneDestinationGuard {
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
                 Err(CloneError::DestNotEmpty(label))
             }
-            Err(source) => Err(CloneError::Library(Error::Message(format!(
-                "could not create '{}/.git': {source}",
-                dest.display()
-            )))),
+            Err(source) => Err(CloneError::from(Error::Io(source))),
         }
     }
 
@@ -492,19 +489,13 @@ impl CloneDestinationGuard {
 
         if !dest.is_dir() {
             if let Some(parent) = dest.parent() {
-                fs::create_dir_all(parent).map_err(|e| {
-                    CloneError::Library(Error::Message(format!(
-                        "could not create clone destination parent: {e}"
-                    )))
-                })?;
+                fs::create_dir_all(parent).map_err(|e| CloneError::from(Error::Io(e)))?;
             }
             match fs::create_dir(dest) {
                 Ok(()) => {}
                 Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(source) => {
-                    return Err(CloneError::Library(Error::Message(format!(
-                        "could not create clone destination: {source}"
-                    ))));
+                    return Err(CloneError::from(Error::Io(source)));
                 }
             }
         }
@@ -523,10 +514,7 @@ impl CloneDestinationGuard {
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
                 Err(CloneError::DestNotEmpty(label))
             }
-            Err(source) => Err(CloneError::Library(Error::Message(format!(
-                "could not create '{}/objects': {source}",
-                dest.display()
-            )))),
+            Err(source) => Err(CloneError::from(Error::Io(source))),
         }
     }
 }
@@ -743,7 +731,7 @@ pub fn clone(
     let dir = opts
         .dest
         .to_str()
-        .ok_or_else(|| CloneError::Library(Error::Message("non-UTF-8 destination path".into())))?;
+        .ok_or_else(|| CloneError::from(Error::InvalidPath("non-UTF-8 destination path".into())))?;
     if opts.dest.is_dir()
         && opts
             .dest
@@ -779,9 +767,7 @@ pub fn clone(
         crate::init_filesystem::InitFilesystemConfigOptions::default(),
         &Environment::empty(),
     )
-    .map_err(|e| {
-        CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
-    })?;
+    .map_err(CloneError::from)?;
     let git_dir = if bare {
         opts.dest.clone()
     } else {
@@ -794,7 +780,7 @@ pub fn clone(
         &opts.environment,
         opts.promisor_fetcher.clone(),
     )
-    .map_err(CloneError::Library)?;
+    .map_err(CloneError::from)?;
     populate_repo_from_remote(repo, opts, progress, cancel, http_factory)
 }
 
@@ -823,7 +809,7 @@ fn ensure_clone_remote_object_format(
     };
     let local = repo.odb().hash_algo();
     if local != remote_algo {
-        return Err(CloneError::Library(Error::ObjectFormatMismatch {
+        return Err(CloneError::from(Error::ObjectFormatMismatch {
             repository: local,
             store: remote_algo,
         }));
@@ -857,7 +843,7 @@ fn clone_after_claim(
         Some(repo.git_dir()),
         &crate::config::LoadConfigOptions::standard(&opts.environment, Some(repo.git_dir())),
     )
-    .map_err(CloneError::Library)?;
+    .map_err(CloneError::from)?;
     let mut remote = Remote::from_config(&config, &opts.remote_name)?;
     if bare {
         // Bare clones have no `remote.*.fetch` refspec; avoid synthesizing tracking refspecs
@@ -892,7 +878,7 @@ fn clone_after_claim(
 
     let clone_message = format!("clone: from {}", opts.url);
     let identity =
-        fetch_operation_identity(&opts.environment, repo.git_dir()).map_err(CloneError::Library)?;
+        fetch_operation_identity(&opts.environment, repo.git_dir()).map_err(CloneError::from)?;
     let clone_reflog = CloneReflog {
         identity: identity.clone(),
         message: clone_message.clone(),
@@ -926,18 +912,18 @@ fn clone_after_claim(
         _ => crate::bundle_uri::BundleSeed::NotOffered,
     };
     if cancel.is_cancelled() {
-        return Err(CloneError::Library(Error::Cancelled));
+        return Err(CloneError::from(Error::Cancelled));
     }
     if let crate::bundle_uri::BundleSeed::Failed { reason, .. } = &bundle {
         if crate::transport::pending_http::is_low_speed_transport_message(reason) {
-            return Err(CloneError::Remote(RemoteError::Library(Error::Message(
+            return Err(CloneError::Remote(RemoteError::HttpLowSpeedStall(
                 reason.clone(),
-            ))));
+            )));
         }
     }
     let mut fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
     if let crate::bundle_uri::BundleSeed::Seeded(seeded) = &bundle {
-        crate::bundle_uri::remove_bundle_refs(&repo).map_err(CloneError::Library)?;
+        crate::bundle_uri::remove_bundle_refs(&repo).map_err(CloneError::from)?;
         fetch_outcome.transfer += seeded.transfer;
     }
     if !preserve_injected_store {
@@ -950,18 +936,18 @@ fn clone_after_claim(
             &opts.environment,
             opts.promisor_fetcher.clone(),
         )
-        .map_err(CloneError::Library)?;
+        .map_err(CloneError::from)?;
     }
 
     let used_filter = match opts.filter {
         Some(spec) => {
             PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)
-                .map_err(CloneError::Library)?;
+                .map_err(CloneError::from)?;
             Some(spec)
         }
         None if opts.auto_filter => {
             PartialCloneConfig::write_auto(repo.git_dir(), &opts.remote_name)
-                .map_err(CloneError::Library)?;
+                .map_err(CloneError::from)?;
             fetch_outcome
                 .promisor
                 .as_ref()
@@ -1011,7 +997,7 @@ fn clone_after_claim(
             ) = perform_clone_checkout(&repo, checkout_oid, progress, cancel).map_err(
                 |source| {
                     if source.is_cancelled() {
-                        CloneError::Library(source)
+                        CloneError::from(source)
                     } else {
                         CloneError::CheckoutFailed {
                             path: opts.dest.clone(),
@@ -1112,7 +1098,7 @@ fn resolve_clone_ref(repo: &Repository, refname: &str) -> ObjectId {
 
 fn write_clone_head_symref(repo: &Repository, target: &str) -> std::result::Result<(), CloneError> {
     refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", target)
-        .map_err(CloneError::Library)
+        .map_err(CloneError::from)
 }
 
 fn local_branch_names_with_commits(repo: &Repository) -> Vec<String> {
@@ -1313,9 +1299,9 @@ fn setup_clone_head(
         CloneRequestedRef::Tag { name, peel } => {
             if !peel.is_zero() {
                 refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", peel)
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
                 append_clone_reflog_on_store(repo, "HEAD", &zero, peel, identity, clone_message)
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
             }
             Ok((
                 CloneHead::Detached {
@@ -1339,7 +1325,7 @@ fn setup_clone_head(
                         &branch_ref,
                         &oid,
                     )
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
                     append_clone_reflog_on_store(
                         repo,
                         &branch_ref,
@@ -1348,14 +1334,14 @@ fn setup_clone_head(
                         identity,
                         clone_message,
                     )
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
                 }
                 oid
             };
             write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
                 append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
             }
             if !opts.bare {
                 set_local_config(
@@ -1393,7 +1379,7 @@ fn setup_clone_head(
                         &branch_ref,
                         &oid,
                     )
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
                     append_clone_reflog_on_store(
                         repo,
                         &branch_ref,
@@ -1402,14 +1388,14 @@ fn setup_clone_head(
                         identity,
                         clone_message,
                     )
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
                 }
                 oid
             };
             write_clone_head_symref(repo, &branch_ref)?;
             if !oid.is_zero() {
                 append_clone_reflog_on_store(repo, "HEAD", &zero, &oid, identity, clone_message)
-                    .map_err(CloneError::Library)?;
+                    .map_err(CloneError::from)?;
             }
             if !opts.bare {
                 set_local_config(
@@ -1611,13 +1597,13 @@ fn ensure_local_clone_source_readable(
     }
     let discovery_cwd = environment.discovery_cwd();
     let source_path =
-        resolve_local_clone_source_path(url, &discovery_cwd).map_err(CloneError::Library)?;
+        resolve_local_clone_source_path(url, &discovery_cwd).map_err(CloneError::from)?;
     if crate::bundle_remote::is_bundle_path(&source_path) {
         return Ok(());
     }
     let probe_git = discovery_cwd.join(".git");
     let remote_git = resolve_local_remote_git_dir(url, &probe_git, Some(&discovery_cwd));
-    crate::transfer::ensure_local_remote_repository(&remote_git).map_err(CloneError::Library)
+    crate::transfer::ensure_local_remote_repository(&remote_git).map_err(CloneError::from)
 }
 
 /// When cloning from a local path, match the source repository's object hash up front.
@@ -1689,7 +1675,7 @@ mod tests {
             !CloneError::Remote(RemoteError::InvalidRemoteName("bad".into()))
                 .should_cleanup_failed_clone()
         );
-        assert!(CloneError::Library(Error::Message("x".into())).should_cleanup_failed_clone());
+        assert!(CloneError::from(Error::PathError("x".into())).should_cleanup_failed_clone());
     }
 
     #[cfg_attr(

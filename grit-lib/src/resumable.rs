@@ -449,7 +449,12 @@ fn download_attempt(
     }
     let response = match client.send(&request) {
         Ok(r) => r,
-        Err(e) if matches!(e, crate::error::Error::Auth { .. }) => {
+        Err(e)
+            if matches!(
+                e,
+                crate::error::Error::Remote(crate::remote::RemoteError::Auth { .. })
+            ) =>
+        {
             return Err(ResumableError::Http(Box::new(e)));
         }
         Err(e) => return Ok(AttemptOutcome::Dropped(e.to_string())),
@@ -701,7 +706,12 @@ impl TusUpload {
                 Ok(r) if r.status == 409 => format!("offset {offset} was out of date"),
                 Ok(r) if (400..500).contains(&r.status) => return Err(gone(r.status)),
                 Ok(r) => format!("HTTP {}", r.status),
-                Err(e) if matches!(e, crate::error::Error::Auth { .. }) => {
+                Err(e)
+                    if matches!(
+                        e,
+                        crate::error::Error::Remote(crate::remote::RemoteError::Auth { .. })
+                    ) =>
+                {
                     return Err(ResumableError::Http(Box::new(e)));
                 }
                 Err(e) => e.to_string(),
@@ -1095,7 +1105,7 @@ mod tests {
                 unreachable!()
             }
             fn send(&self, _: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
-                Err(Error::Auth {
+                Err(RemoteError::Auth {
                     url: "http://h/b".to_owned(),
                     reason: AuthFailure::Rejected,
                 })

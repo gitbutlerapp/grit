@@ -33,6 +33,7 @@ use crate::config::ConfigSet;
 use crate::credentials::{Credential, CredentialProvider};
 use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::github_auth::PollClock;
+use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
 
 /// Path, relative to the server root, of the endpoint that names the user a
@@ -340,7 +341,7 @@ pub fn fetch_identity(
 ) -> std::result::Result<ServerIdentity, ServerAuthError> {
     let url = server.identity_url();
     let body = http.get(&url, None).map_err(|e| match e {
-        Error::Auth { .. } => ServerAuthError::TokenRejected,
+        RemoteError::Auth { .. } => ServerAuthError::TokenRejected,
         other => not_grit_server_or_http(server, other),
     })?;
     serde_json::from_slice(&body).map_err(|_| ServerAuthError::NotGritServer(server.root_url()))
@@ -349,13 +350,16 @@ pub fn fetch_identity(
 /// [`ServerAuthError::NotGritServer`] when `err` is a client-error status (`404`,
 /// `405`, `422`, …) from one of the `.grit/` endpoints, which every `grit serve`
 /// host answers; otherwise [`ServerAuthError::Http`].
-pub(crate) fn not_grit_server_or_http(server: &ServerUrl, err: Error) -> ServerAuthError {
+pub(crate) fn not_grit_server_or_http(
+    server: &ServerUrl,
+    err: crate::remote::RemoteError,
+) -> ServerAuthError {
     match err {
-        Error::RemoteUnreadable {
+        RemoteError::Unreadable {
             reason: RemoteUnreadableReason::HttpStatus { status },
             ..
         } if (400..500).contains(&status) => ServerAuthError::NotGritServer(server.root_url()),
-        other => ServerAuthError::Http(other),
+        other => ServerAuthError::Http(other.into()),
     }
 }
 
@@ -387,7 +391,7 @@ impl<'a> LoginFlow<'a> {
             .http
             .post(&url, JSON_CONTENT_TYPE, JSON_CONTENT_TYPE, b"{}", None)
             .map_err(|e| match e {
-                Error::Auth { .. } => ServerAuthError::NotGritServer(self.server.root_url()),
+                RemoteError::Auth { .. } => ServerAuthError::NotGritServer(self.server.root_url()),
                 other => not_grit_server_or_http(self.server, other),
             })?;
         serde_json::from_slice(&body)
@@ -410,7 +414,7 @@ impl<'a> LoginFlow<'a> {
         let body = self
             .http
             .post(&url, JSON_CONTENT_TYPE, JSON_CONTENT_TYPE, &request, None)
-            .map_err(ServerAuthError::Http)?;
+            .map_err(|e| ServerAuthError::Http(e.into()))?;
         serde_json::from_slice(&body)
             .map_err(|_| ServerAuthError::NotGritServer(self.server.root_url()))
     }
@@ -598,7 +602,7 @@ mod tests {
     fn identity_failures_are_typed() {
         let server = ServerUrl::parse("http://127.0.0.1:8080").unwrap();
 
-        let rejected = Canned::new(Err(Error::Auth {
+        let rejected = Canned::new(Err(RemoteError::Auth {
             url: "http://127.0.0.1:8080".to_owned(),
             reason: crate::error::AuthFailure::Rejected,
         }));
@@ -792,7 +796,7 @@ mod tests {
             );
         }
 
-        let challenged = Scripted::new(vec![Err(Error::Auth {
+        let challenged = Scripted::new(vec![Err(RemoteError::Auth {
             url: "https://gitlab.example.com".to_owned(),
             reason: crate::error::AuthFailure::NoCredentialProvider,
         })]);

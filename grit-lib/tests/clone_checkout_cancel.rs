@@ -119,7 +119,7 @@ fn clone_returns_cancelled_when_checkout_progress_requests_abort() {
     )
     .expect_err("cancel during checkout");
     assert!(
-        matches!(err, CloneError::Library(Error::Cancelled)),
+        matches!(err, CloneError::Nested(e) if matches!(e.as_ref(), Error::Cancelled)),
         "expected cancelled clone, got {err:?}"
     );
     let checkout_incs = progress.checkout_incs.load(Ordering::Relaxed);

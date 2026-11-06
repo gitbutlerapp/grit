@@ -911,9 +911,10 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     assert!(
         matches!(
             pull_err,
-            grit_lib::porcelain::pull::PullError::Repository(Error::OperationInProgress(
-                InProgressOperation::Rebase
-            ))
+            grit_lib::porcelain::pull::PullError::Nested(e) if matches!(
+                e.as_ref(),
+                Error::OperationInProgress(InProgressOperation::Rebase)
+            )
         ),
         "pull: {pull_err:?}"
     );

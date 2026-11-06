@@ -230,7 +230,10 @@ impl RemoteUnreadableReason {
     }
 }
 
-fn remote_unreadable_message(url: Option<&str>, reason: &RemoteUnreadableReason) -> String {
+pub(crate) fn remote_unreadable_message(
+    url: Option<&str>,
+    reason: &RemoteUnreadableReason,
+) -> String {
     let target = url.map_or_else(|| "the remote".to_owned(), |u| format!("'{u}'"));
     match reason {
         RemoteUnreadableReason::RepositoryNotFound => {
@@ -319,7 +322,9 @@ impl AuthFailure {
     #[must_use]
     pub fn from_fill_error(err: Error) -> Self {
         let helpers = match &err {
-            Error::CredentialsUnavailable { helpers } => helpers.clone(),
+            Error::Remote(crate::remote::RemoteError::CredentialsUnavailable { helpers }) => {
+                helpers.clone()
+            }
             _ => Vec::new(),
         };
         Self::CredentialsUnavailable {
@@ -1642,80 +1647,6 @@ pub enum Error {
     #[error("{0}")]
     Signing(String),
 
-    /// HTTP authentication failed: the server required credentials (`401`) and
-    /// either no credential provider was wired, the provider could not supply a
-    /// usable username/password, the server demanded an unsupported auth scheme,
-    /// or the supplied credentials were rejected.
-    ///
-    /// Distinct from [`Error::Message`] so embedders can detect an authentication
-    /// failure (and e.g. fall back to an interactive/subprocess path) rather than
-    /// string-matching, and so the failure surfaces typed instead of hanging.
-    #[error("authentication failed for {url}: {reason}")]
-    Auth {
-        /// Repository URL with credentials redacted and smart-HTTP endpoint suffixes
-        /// (`/info/refs?service=…`, `/git-upload-pack`, `/git-receive-pack`) removed.
-        url: String,
-        /// What went wrong.
-        reason: AuthFailure,
-    },
-
-    /// A credential provider could not supply a complete username and password:
-    /// no helper had them and no askpass program could be asked.
-    ///
-    /// Returned by [`HelperCredentialProvider`](crate::credentials::HelperCredentialProvider)
-    /// instead of prompting on a terminal; transports surface it as
-    /// [`AuthFailure::CredentialsUnavailable`].
-    #[error("{}", crate::credentials::NON_INTERACTIVE_MESSAGE)]
-    CredentialsUnavailable {
-        /// The `credential.helper` programs that were asked, in order (empty when none
-        /// is configured for the URL).
-        helpers: Vec<String>,
-    },
-
-    /// An atomic wire push was requested, but the remote did not advertise the
-    /// `atomic` capability. No ref-update commands or pack data were sent.
-    #[error("the remote does not support atomic pushes")]
-    PushAtomicUnsupported,
-
-    /// A push carried `--push-option` values but the remote `git-receive-pack`
-    /// did not advertise the `push-options` capability, so the options cannot be
-    /// transmitted.
-    ///
-    /// Distinct from [`Error::Message`] so embedders can detect this specific
-    /// negotiation failure (and e.g. fall back to a subprocess push) rather than
-    /// string-matching. The message matches Git's
-    /// `fatal: the receiving end does not support push options`.
-    #[error("the receiving end does not support push options")]
-    PushOptionsUnsupported,
-
-    /// `git fetch --unshallow` on a repository that is not shallow.
-    #[error("repository is not shallow")]
-    FetchUnshallowNotShallow,
-
-    /// A deepen/shallow fetch was requested but the remote did not advertise the
-    /// `shallow` capability.
-    #[error("the remote does not support shallow fetches")]
-    FetchShallowUnsupported,
-
-    /// A `--deepen` fetch was requested but the remote did not advertise
-    /// `deepen-relative`.
-    #[error("the remote does not support deepen-relative")]
-    FetchDeepenRelativeUnsupported,
-
-    /// A bundle fetch or verify found prerequisite commits missing from history.
-    #[error("repository lacks these prerequisite commits")]
-    BundleMissingPrerequisites,
-
-    /// Streaming fetch/clone temp pack disappeared before index-pack (often real-time antivirus).
-    #[error(
-        "received pack file missing: {}. If this persists, check real-time antivirus or disk cleanup for quarantined pack temp files.",
-        crate::git_path::user_display_path(.path)
-    )]
-    ReceivedPackTempMissing {
-        /// Path to the temp pack that was expected on disk.
-        path: std::path::PathBuf,
-    },
-
     /// A pathspec's `:(attr:...)` magic is malformed.
     #[error("invalid attr magic in pathspec '{spec}': {reason}")]
     InvalidAttrPathspec {
@@ -1913,57 +1844,6 @@ pub enum Error {
         path: String,
     },
 
-    /// The remote could not be read or written: a missing repository, a failed connection, an
-    /// HTTP error status, or no Git handshake.
-    ///
-    /// Use [`Error::is_remote_unreadable`] to test for it through wrapper errors.
-    ///
-    /// Not used for cancellation; see [`Error::is_cancelled`].
-    #[error("{}", remote_unreadable_message(url.as_deref(), reason))]
-    RemoteUnreadable {
-        /// Remote URL or resolved local path, with credentials redacted. `None` when the
-        /// failing layer only had a connection, not the URL it was opened from.
-        url: Option<String>,
-        /// What went wrong.
-        reason: RemoteUnreadableReason,
-    },
-
-    /// The remote was reached but aborted the conversation with its own error text: an
-    /// `ERR <message>` pkt-line (for example upload-pack declining a ref it does not
-    /// serve) or a packet on side-band channel 3.
-    ///
-    /// The text is the server's, not grit's: show it to the user, but do not parse it.
-    #[error("remote error: {message}")]
-    RemoteFatal {
-        /// The server's message, without the `ERR ` prefix or trailing whitespace.
-        message: String,
-    },
-
-    /// The upload-pack serving a local path or `file://` URL in this process failed
-    /// (for example it was asked for an object it does not have). Repository errors
-    /// of the served side are returned as themselves instead.
-    #[error("local upload-pack: {0}")]
-    LocalUploadPack(Box<crate::serve::ServeError>),
-
-    /// The thread serving a local path or `file://` URL panicked.
-    #[error("local upload-pack stopped unexpectedly")]
-    LocalUploadPackPanicked,
-
-    /// A resumable bundle download or upload failed.
-    #[error(transparent)]
-    Resumable(#[from] Box<crate::resumable::ResumableError>),
-
-    /// Explicit fetch refspec resolution failed (missing or ambiguous source).
-    #[error("{0}")]
-    FetchRefspec(#[from] crate::fetch_request::FetchRefspecError),
-
-    /// Fetch refused to update the branch checked out in this or a linked worktree.
-    #[error("cannot fetch into checked-out branch '{branch}'")]
-    FetchIntoCheckedOutBranch {
-        /// Short branch name under `refs/heads/`.
-        branch: String,
-    },
-
     /// Checkout or switch would overwrite local or untracked worktree content.
     #[error("{message}")]
     WouldOverwrite {
@@ -2014,6 +1894,10 @@ pub enum Error {
     /// ([`crate::repo::Repository::identity`]).
     #[error(transparent)]
     Identity(#[from] crate::config::ident_resolve::IdentityError),
+
+    /// Remote transport, fetch, push, or clone failure.
+    #[error(transparent)]
+    Remote(#[from] crate::remote::RemoteError),
 
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
@@ -2449,15 +2333,7 @@ impl Error {
             Self::Apply(..) => "apply",
             Self::PathOutsideRepo(..) => "path_outside_repo",
             Self::Signing(..) => "signing",
-            Self::Auth { .. } => "auth",
-            Self::CredentialsUnavailable { .. } => "credentials_unavailable",
-            Self::PushAtomicUnsupported => "push_atomic_unsupported",
-            Self::PushOptionsUnsupported => "push_options_unsupported",
-            Self::FetchUnshallowNotShallow => "fetch_unshallow_not_shallow",
-            Self::FetchShallowUnsupported => "fetch_shallow_unsupported",
-            Self::FetchDeepenRelativeUnsupported => "fetch_deepen_relative_unsupported",
-            Self::BundleMissingPrerequisites => "bundle_missing_prerequisites",
-            Self::ReceivedPackTempMissing { .. } => "received_pack_temp_missing",
+            Self::Remote(remote) => remote.kind_name(),
             Self::InvalidAttrPathspec { .. } => "invalid_attr_pathspec",
             Self::PathspecNoMatch { .. } => "pathspec_no_match",
             Self::RestoreConflictWithStaged => "restore_conflict_with_staged",
@@ -2488,13 +2364,6 @@ impl Error {
             Self::MoveDuplicateDestination { .. } => "move_duplicate_destination",
             Self::MoveBadSource { .. } => "move_bad_source",
             Self::MoveMissingIndexEntry { .. } => "move_missing_index_entry",
-            Self::RemoteUnreadable { .. } => "remote_unreadable",
-            Self::RemoteFatal { .. } => "remote_fatal",
-            Self::LocalUploadPack(..) => "local_upload_pack",
-            Self::LocalUploadPackPanicked => "local_upload_pack_panicked",
-            Self::Resumable(..) => "resumable",
-            Self::FetchRefspec(..) => "fetch_refspec",
-            Self::FetchIntoCheckedOutBranch { .. } => "fetch_into_checked_out_branch",
             Self::WouldOverwrite { .. } => "would_overwrite",
             Self::DirtyWorktree { .. } => "dirty_worktree",
             Self::InvalidIdentity(..) => "invalid_identity",
@@ -2589,20 +2458,19 @@ impl Error {
         }
     }
 
-    /// Build [`Error::RemoteUnreadable`] for `url`.
+    /// Build [`RemoteError::Unreadable`] for `url`.
     #[must_use]
     pub fn remote_unreadable(url: impl Into<String>, reason: RemoteUnreadableReason) -> Self {
-        Self::RemoteUnreadable {
-            url: Some(url.into()),
-            reason,
-        }
+        Self::Remote(crate::remote::RemoteError::unreadable(url, reason))
     }
 
-    /// Whether this is [`Error::RemoteUnreadable`]: the remote could not be read or written
-    /// at all (as opposed to a rejected update or an empty remote).
+    /// Whether this is an unreadable remote failure (see [`RemoteError::is_remote_unreadable`]).
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
-        matches!(self, Self::RemoteUnreadable { .. })
+        match self {
+            Self::Remote(e) => e.is_remote_unreadable(),
+            _ => false,
+        }
     }
 
     /// When this is [`Error::LockHeld`], returns the structured lock failure.
@@ -2667,6 +2535,7 @@ impl Error {
     pub fn is_cancelled(&self) -> bool {
         match self {
             Self::Cancelled => true,
+            Self::Remote(e) => e.is_cancelled(),
             Self::History(e) => e.is_cancelled(),
             Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
             Self::Io(err)
@@ -2933,6 +2802,18 @@ impl serde::Serialize for Error {
                 out.end()
             }
         }
+    }
+}
+
+impl From<crate::fetch_request::FetchRefspecError> for Error {
+    fn from(e: crate::fetch_request::FetchRefspecError) -> Self {
+        Self::Remote(crate::remote::RemoteError::FetchRefspec(e))
+    }
+}
+
+impl From<Box<crate::resumable::ResumableError>> for Error {
+    fn from(e: Box<crate::resumable::ResumableError>) -> Self {
+        Self::Remote(crate::remote::RemoteError::Resumable(e))
     }
 }
 

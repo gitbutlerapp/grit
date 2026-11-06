@@ -140,7 +140,9 @@ impl StreamingPost {
                 chunk: Vec::new(),
                 pos: 0,
             };
-            Ok(client.post_streaming(&url, &content_type, &accept, &mut body, None))
+            Ok(client
+                .post_streaming(&url, &content_type, &accept, &mut body, None)
+                .map_err(Into::into))
         })?;
         Ok(Self { chunks, response })
     }
@@ -388,7 +390,9 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         );
         let git_protocol = self.git_protocol.clone();
         let pending = PendingHttp::spawn("grit-http-post", move || {
-            client.post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
+            client
+                .post_into_reader(&url, &content_type, &accept, &body, git_protocol.as_deref())
+                .map_err(Into::into)
         })
         .map_err(Error::Io)?;
         self.in_flight_upload = Some(pending);
@@ -415,6 +419,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
                 PendingReportPost::spawn("grit-http-post", move || {
                     client
                         .post_into_reader(&url, &content_type, &accept, &body, None)
+                        .map_err(Into::into)
                         .map(ReadResponse::read_from)
                 })
                 .map_err(Error::Io)
@@ -475,7 +480,9 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         );
         let cancel = self.operation_cancel();
         let mut reply = PendingHttp::spawn("grit-http-post", move || {
-            client.post_into_reader(&url, &content_type, &accept, b"0000", None)
+            client
+                .post_into_reader(&url, &content_type, &accept, b"0000", None)
+                .map_err(Into::into)
         })
         .map_err(Error::Io)
         .and_then(|pending| self.wait_http(pending, Self::cancel_ref(&cancel), None))?;

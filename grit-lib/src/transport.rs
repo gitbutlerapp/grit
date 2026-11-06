@@ -36,6 +36,7 @@ use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::progress::Cancel;
+use crate::remote::RemoteError;
 
 pub mod http;
 pub(crate) mod pending_http;
@@ -342,7 +343,7 @@ fn verify_ssh_child_after_advertisement(
 ///
 /// # Errors
 ///
-/// Returns an error on I/O failure, or [`Error::RemoteFatal`] if the server sends an
+/// Returns an error on I/O failure, or [`RemoteError::Fatal`] if the server sends an
 /// `ERR` packet.
 pub fn read_advertisement(reader: &mut dyn Read) -> Result<Advertisement> {
     let mut adv = Advertisement {
@@ -1283,10 +1284,11 @@ pub(crate) fn connect_local_upload_pack(
             match (served, other) {
                 (Err(err), _) => Err(err),
                 (Ok(()), Err(err)) => Err(err),
-                (Ok(()), Ok(_)) => Err(Error::RemoteUnreadable {
+                (Ok(()), Ok(_)) => Err(RemoteError::Unreadable {
                     url: Some(remote_git_dir.display().to_string()),
                     reason: RemoteUnreadableReason::NoHandshake,
-                }),
+                }
+                .into()),
             }
         }
     }
@@ -1323,8 +1325,8 @@ impl LocalUploadPackConnection {
             Ok(Ok(())) => Ok(()),
             Ok(Err(err)) if stopped_by_closed_pipe(&err) => Ok(()),
             Ok(Err(crate::serve::ServeError::Repository(err))) => Err(err),
-            Ok(Err(err)) => Err(Error::LocalUploadPack(Box::new(err))),
-            Err(_) => Err(Error::LocalUploadPackPanicked),
+            Ok(Err(err)) => Err(RemoteError::LocalUploadPack(Box::new(err)).into()),
+            Err(_) => Err(RemoteError::LocalUploadPackPanicked.into()),
         }
     }
 }
@@ -1934,10 +1936,10 @@ mod tests {
             err.to_string(),
             "remote error: access denied or repository not exported: /srv/x.git"
         );
-        assert!(matches!(err, Error::RemoteFatal { .. }));
+        assert!(matches!(err, RemoteError::Fatal { .. }));
         assert_eq!(
             match err {
-                Error::RemoteFatal { message } => message,
+                RemoteError::Fatal { message } => message,
                 other => panic!("expected RemoteFatal, got {other:?}"),
             },
             "access denied or repository not exported: /srv/x.git"
@@ -1953,7 +1955,7 @@ mod tests {
         pkt_line::write_line_to_vec(&mut wire, "ERR service not enabled").unwrap();
         wire.extend_from_slice(b"0000");
         let err = read_advertisement(&mut std::io::Cursor::new(wire)).expect_err("v2 ERR");
-        assert!(matches!(err, Error::RemoteFatal { message } if message == "service not enabled"));
+        assert!(matches!(err, RemoteError::Fatal { message } if message == "service not enabled"));
     }
 
     #[test]
@@ -1996,7 +1998,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::RemoteUnreadable {
+                RemoteError::Unreadable {
                     reason: RemoteUnreadableReason::NoHandshake,
                     ..
                 }
@@ -2097,7 +2099,7 @@ eval "$cmd"
             )
             .expect_err("git refuses a want for an object it does not have");
             match err {
-                Error::RemoteFatal { message } => assert!(
+                RemoteError::Fatal { message } => assert!(
                     message.contains("not our ref") && message.contains(&missing),
                     "v{protocol_version}: {message}"
                 ),

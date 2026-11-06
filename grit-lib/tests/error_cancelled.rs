@@ -23,16 +23,16 @@ fn wrapper_helpers_classify_only_cancelled() {
     assert!(cancelled().is_cancelled());
     assert!(!Error::NothingToCommit.is_cancelled());
 
-    assert!(RemoteError::Library(cancelled()).is_cancelled());
+    assert!(RemoteError::Cancelled.is_cancelled());
     assert!(!RemoteError::NoUrl { remote: None }.is_cancelled());
 
-    assert!(CloneError::Library(cancelled()).is_cancelled());
-    assert!(CloneError::Remote(RemoteError::Library(cancelled())).is_cancelled());
+    assert!(CloneError::Nested(Box::new(cancelled())).is_cancelled());
+    assert!(CloneError::Remote(RemoteError::Cancelled).is_cancelled());
     assert!(!CloneError::InvalidCloneDepth.is_cancelled());
     assert!(!CloneError::RemoteRefNotFound("x".into()).is_cancelled());
 
-    assert!(PullError::Remote(RemoteError::Library(cancelled())).is_cancelled());
-    assert!(PullError::Repository(cancelled()).is_cancelled());
+    assert!(PullError::Remote(RemoteError::Cancelled).is_cancelled());
+    assert!(PullError::Nested(Box::new(cancelled())).is_cancelled());
     assert!(!PullError::DetachedHead.is_cancelled());
 
     assert!(HistoryError::Library(Box::new(cancelled())).is_cancelled());
@@ -94,7 +94,7 @@ fn clone_cancelled_at_start_is_classified_and_needs_cleanup() {
     let err = clone(opts, &mut NoProgress, &flag, None).expect_err("cancelled before clone");
     assert!(matches!(
         err,
-        CloneError::Remote(RemoteError::Library(Error::Cancelled))
+        CloneError::Remote(RemoteError::Cancelled)
     ));
     assert!(err.is_cancelled(), "{err:?}");
     assert!(err.should_cleanup_failed_clone(), "{err:?}");

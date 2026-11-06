@@ -8,8 +8,6 @@ use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use thiserror::Error;
-
 use crate::config::ConfigSet;
 #[cfg(feature = "http-ureq")]
 use crate::credentials::{
@@ -25,6 +23,7 @@ use crate::push::push_remote_from;
 use crate::refs::listing::{
     compare_version_names, patterns_match_ls_remote, RefQueryOptions, RefSort, SortKey,
 };
+use crate::remote::error::{RemoteError, RemoteResult};
 use crate::repo::Repository;
 use crate::transfer::{
     fetch_local_into, push_local_from, FetchOptions, FetchOutcome, PrePushGate, PushOptions,
@@ -47,9 +46,6 @@ pub mod http_client {
     pub use crate::transport::http::HttpClient;
 }
 
-/// Result of a remote operation ([`RemoteError`] on failure).
-pub type RemoteResult<T> = std::result::Result<T, RemoteError>;
-
 /// Default remote name when none is configured (`origin`, matching Git).
 pub const DEFAULT_REMOTE: &str = "origin";
 
@@ -63,65 +59,6 @@ pub(crate) fn is_valid_remote_name(name: &str) -> bool {
             &RefFormatOptions::default(),
         )
         .is_ok()
-}
-
-/// Errors specific to remote URL resolution and dispatch.
-#[derive(Debug, Error)]
-pub enum RemoteError {
-    /// A remote has no URL: `remote.<name>.url` is unset or blank, or a literal URL was empty.
-    #[error("{}", match remote {
-        Some(name) => format!("remote '{name}' has no URL configured"),
-        None => "remote URL is empty".to_owned(),
-    })]
-    NoUrl {
-        /// The configured remote's name; `None` when an empty literal URL was given.
-        remote: Option<String>,
-    },
-    /// The URL uses a scheme grit does not support for remotes.
-    #[error("unsupported remote URL scheme")]
-    UnsupportedScheme,
-    /// A URL or path failed to parse.
-    #[error("{0}")]
-    InvalidUrl(String),
-    /// Smart HTTP requires the `http-ureq` feature or an injected HTTP client factory.
-    #[error("HTTP remotes require the http-ureq feature or an HttpClientFactory")]
-    HttpUnavailable,
-    /// The argument is neither a configured remote name nor a URL or path.
-    #[error("unknown remote '{0}'")]
-    UnknownRemote(String),
-    /// [`RepositoryRemotes::add`](crate::repo_handles::RepositoryRemotes::add) found an
-    /// existing `remote.<name>.*` section.
-    #[error("remote '{0}' already exists")]
-    RemoteExists(String),
-    /// The name cannot be used for a remote (`refs/remotes/<name>/…` would not be a valid ref).
-    #[error("'{0}' is not a valid remote name")]
-    InvalidRemoteName(String),
-    /// An underlying library error.
-    #[error(transparent)]
-    Library(#[from] Error),
-}
-
-impl RemoteError {
-    /// Whether the remote could not be read or written at all ([`Error::RemoteUnreadable`]).
-    #[must_use]
-    pub fn is_remote_unreadable(&self) -> bool {
-        matches!(self, Self::Library(e) if e.is_remote_unreadable())
-    }
-
-    /// Whether the operation was cancelled ([`Error::Cancelled`]).
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Library(e) if e.is_cancelled())
-    }
-}
-
-impl From<RemoteError> for Error {
-    fn from(e: RemoteError) -> Self {
-        match e {
-            RemoteError::Library(err) => err,
-            other => Error::Message(other.to_string()),
-        }
-    }
 }
 
 /// A parsed remote URL by transport kind.
@@ -772,7 +709,7 @@ impl Remote {
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git = local_git_dir_from_url(url, repo.git_dir(), repo.work_tree())?;
                 let refs =
-                    crate::refs::list_refs(&remote_git, "refs/").map_err(RemoteError::Library)?;
+                    crate::refs::list_refs(&remote_git, "refs/").map_err(RemoteError::from)?;
                 Ok(refs
                     .into_iter()
                     .map(|(name, oid)| RemoteRef {
@@ -818,7 +755,7 @@ impl Remote {
                         Some(repo.git_dir()),
                     ),
                 )
-                .map_err(RemoteError::Library)?;
+                .map_err(RemoteError::from)?;
                 if opts.filter.is_none() {
                     if let Some(name) = opts.remote_name.as_deref().or(self.name.as_deref()) {
                         opts.filter = crate::partial_clone::stored_remote_filter(&cfg, name);
@@ -849,12 +786,12 @@ impl Remote {
                         client_env,
                         repo.caches().promisor_fetcher(),
                     )
-                    .map_err(RemoteError::Library)?;
+                    .map_err(RemoteError::from)?;
                     let fetched = fetch_remote_into(repo, &mut *conn, opts, progress, cancel);
                     // A serving side that failed knows why (the client may only have
                     // seen the stream end early, or even taken it as an empty pack), so
                     // its error comes first.
-                    conn.finish().map_err(RemoteError::Library)?;
+                    conn.finish().map_err(RemoteError::from)?;
                     return Ok(fetched?);
                 }
                 Ok(fetch_local_into(repo, &remote_git, opts, progress, cancel)?)
@@ -999,12 +936,13 @@ fn upload_pack_protocol_version(explicit: Option<u8>, repo: &Repository) -> Remo
         return Ok(v);
     }
     crate::protocol::try_effective_client_protocol_version_from_config(
-        repo.config()
+        repo
+            .config()
             .snapshot()
-            .map_err(RemoteError::Library)?
+            .map_err(RemoteError::from)?
             .as_ref(),
     )
-    .map_err(RemoteError::Library)
+    .map_err(RemoteError::from)
 }
 
 fn list_refs_protocol_version(explicit: Option<u8>, repo: Option<&Repository>) -> RemoteResult<u8> {
@@ -1102,7 +1040,7 @@ fn http_client(
     factory: Option<&dyn HttpClientFactory>,
     repo: &Repository,
 ) -> RemoteResult<Box<dyn HttpClient>> {
-    let config = repo.config().snapshot().map_err(RemoteError::Library)?;
+    let config = repo.config().snapshot().map_err(RemoteError::from)?;
     if let Some(f) = factory {
         return f.create(config.as_ref());
     }
@@ -1127,7 +1065,7 @@ fn list_refs_http(
     repo: Option<&Repository>,
 ) -> RemoteResult<Vec<RemoteRef>> {
     let config: Arc<ConfigSet> = if let Some(r) = repo {
-        r.config().snapshot().map_err(RemoteError::Library)?
+        r.config().snapshot().map_err(RemoteError::from)?
     } else {
         Arc::new(ConfigSet::new())
     };
@@ -1161,9 +1099,7 @@ fn list_refs_http(
 
     let info_url = crate::transport::http::smart_info_refs_discovery_url(repo_url);
     let want_v2 = opts.protocol_version.unwrap_or(2) >= 2;
-    let (body, final_url) = client
-        .get_with_final_url_exact(&info_url, git_protocol)
-        .map_err(RemoteError::Library)?;
+    let (body, final_url) = client.get_with_final_url_exact(&info_url, git_protocol)?;
     let effective_base =
         crate::transport::http::rebased_base_from_redirect(repo_url, final_url.as_deref())
             .unwrap_or_else(|| repo_url.to_owned());
@@ -1175,26 +1111,23 @@ fn list_refs_http(
                 &effective_base,
                 git_protocol,
             )
-            .map_err(RemoteError::Library)?
+            .map_err(RemoteError::from)?
         } else {
             crate::transport::http::discover_upload_pack_for_list_refs_from_body(&body)
-                .map_err(RemoteError::Library)?
+                .map_err(RemoteError::from)?
         };
 
     if protocol_version >= 2 && want_v2 {
         let local_odb = odb.cloned().unwrap_or_else(|| open_odb(local_git_dir));
         let req = build_list_refs_v2_request(&caps, &local_odb, opts)?;
         let post_url = format!("{}/git-upload-pack", effective_base.trim_end_matches('/'));
-        let body = client
-            .as_ref()
-            .post(
-                &post_url,
-                "application/x-git-upload-pack-request",
-                "application/x-git-upload-pack-result",
-                &req,
-                git_protocol,
-            )
-            .map_err(RemoteError::Library)?;
+        let body = client.as_ref().post(
+            &post_url,
+            "application/x-git-upload-pack-request",
+            "application/x-git-upload-pack-result",
+            &req,
+            git_protocol,
+        )?;
         let mut cur = Cursor::new(body);
         parse_list_refs_v2_response(&mut cur, opts, head_symref)
     } else {
@@ -1214,7 +1147,7 @@ fn list_refs_from_connection(
     } else {
         let out =
             list_refs_v0_advertisement(conn.advertised_refs(), conn.head_symref(), odb, opts)?;
-        crate::transport::send_client_flush(conn).map_err(RemoteError::Library)?;
+        crate::transport::send_client_flush(conn).map_err(RemoteError::from)?;
         Ok(out)
     }
 }
@@ -1538,7 +1471,7 @@ pub(crate) fn ref_matches_ls_remote_patterns(refname: &str, patterns: &[String])
 /// # Errors
 fn list_refs_from_bundle(path: &Path, opts: &ListRefsOptions) -> RemoteResult<Vec<RemoteRef>> {
     let bundle = crate::bundle::Bundle::open(path)
-        .map_err(|e| RemoteError::Library(Error::Message(e.to_string())))?;
+        .map_err(|e| RemoteError::from(Error::Message(e.to_string())))?;
     let mut out = Vec::new();
     for (name, oid) in &bundle.header().refs {
         if !ref_matches_list_opts(name, opts) {
@@ -1575,7 +1508,7 @@ pub(crate) fn list_refs_from_git_dir_for_fetch(
 }
 
 ///
-/// Returns [`RemoteError::Library`] on I/O or ref resolution failures.
+/// Returns [`RemoteError::from`] on I/O or ref resolution failures.
 pub fn list_refs_from_git_dir(
     git_dir: &Path,
     odb: Option<&Odb>,
@@ -1621,7 +1554,7 @@ fn list_refs_from_git_dir_with_scan_prefixes(
     }
 
     for prefix in scan_prefixes {
-        let listed = crate::refs::list_refs(git_dir, prefix).map_err(RemoteError::Library)?;
+        let listed = crate::refs::list_refs(git_dir, prefix).map_err(RemoteError::from)?;
         for (name, oid) in listed {
             if let Some(branch_tail) = name.strip_prefix("refs/heads/") {
                 if branch_tail.starts_with("refs/") {

@@ -15,6 +15,7 @@ use crate::config::ident_resolve::IdentRole;
 use crate::config::parse_git_config_maybe_bool;
 use crate::config::ConfigSet;
 use crate::error::{Error, OverwriteReason};
+
 use crate::fetch_request::{configured_remote_for_pull, resolve_remote_argument};
 use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor};
 use crate::objects::ObjectId;
@@ -258,18 +259,24 @@ pub enum PullError {
     /// Remote resolution or transport failure.
     #[error(transparent)]
     Remote(#[from] RemoteError),
-    /// Other repository failures.
+    /// Non-remote repository failures.
     #[error(transparent)]
-    Repository(#[from] Error),
+    Nested(#[from] Box<Error>),
+}
+
+impl From<Error> for PullError {
+    fn from(e: Error) -> Self {
+        Self::Nested(Box::new(e))
+    }
 }
 
 impl PullError {
-    /// Whether the remote could not be read at all ([`Error::RemoteUnreadable`]).
+    /// Whether the remote could not be read at all ([`RemoteError::Unreadable`]).
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
         match self {
             Self::Remote(e) => e.is_remote_unreadable(),
-            Self::Repository(e) => e.is_remote_unreadable(),
+            Self::Nested(e) => e.is_remote_unreadable(),
             Self::DetachedHead
             | Self::InvalidHead
             | Self::NoUpstream { .. }
@@ -283,7 +290,7 @@ impl PullError {
     pub fn is_cancelled(&self) -> bool {
         match self {
             Self::Remote(e) => e.is_cancelled(),
-            Self::Repository(e) => e.is_cancelled(),
+            Self::Nested(e) => e.is_cancelled(),
             Self::Rebase(e) => e.is_cancelled(),
             Self::DetachedHead
             | Self::InvalidHead
@@ -374,20 +381,17 @@ impl PullOptions {
         environment: Environment,
         cli_mode: Option<PullMode>,
     ) -> std::result::Result<Self, PullError> {
-        if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())
-            .map_err(PullError::Repository)?
-        {
-            return Err(PullError::Repository(Error::OperationInProgress(op)));
+        if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
+            return Err(PullError::from(Error::OperationInProgress(op)));
         }
-        let short_name = match resolve_head_for_repository(repo).map_err(PullError::Repository)? {
+        let short_name = match resolve_head_for_repository(repo)? {
             HeadState::Branch { short_name, .. } => short_name,
             HeadState::Detached { .. } => return Err(PullError::DetachedHead),
             HeadState::Invalid => return Err(PullError::InvalidHead),
         };
-        let config = repo.config().snapshot().map_err(PullError::Repository)?;
+        let config = repo.config().snapshot().map_err(PullError::from)?;
         let remote_name = configured_remote_for_pull(config.as_ref(), Some(&short_name));
-        let prune = resolve_fetch_prune(config.as_ref(), &remote_name, None)
-            .map_err(PullError::Repository)?;
+        let prune = resolve_fetch_prune(config.as_ref(), &remote_name, None)?;
         Ok(Self {
             remote: None,
             branch: None,
@@ -475,7 +479,7 @@ where
     P: Progress,
 {
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
-        return Err(PullError::Repository(Error::OperationInProgress(op)));
+        return Err(PullError::from(Error::OperationInProgress(op)));
     }
     let (refname, short_name, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
@@ -487,7 +491,7 @@ where
         HeadState::Invalid => return Err(PullError::InvalidHead),
     };
 
-    let config = repo.config().snapshot().map_err(PullError::Repository)?;
+    let config = repo.config().snapshot().map_err(PullError::from)?;
     let remote_name = options
         .remote
         .clone()
@@ -513,8 +517,7 @@ where
         || crate::state::read_merge_heads(repo.git_dir()).is_ok_and(|heads| !heads.is_empty());
     let merge_was_in_progress = merge_in_progress();
     let stash_oid = if autostash && head_oid.is_some() {
-        push_operation_autostash(repo, &checkout_reflog_identity(repo))
-            .map_err(PullError::Repository)?
+        push_operation_autostash(repo, &checkout_reflog_identity(repo))?
     } else {
         None
     };
@@ -529,7 +532,7 @@ where
                 .fetch(repo, fetch_opts, progress, cancel, http_factory)
                 .map_err(PullError::Remote)?;
             if fetch_outcome.has_rejections() {
-                return Err(PullError::Repository(Error::Message(
+                return Err(PullError::from(Error::Message(
                     "some ref updates from the remote were rejected".into(),
                 )));
             }
@@ -609,7 +612,7 @@ where
             // waits in MERGE_AUTOSTASH, as with Git, so `merge --continue` does not auto-stage it.
             match stash_oid.as_ref() {
                 Some(oid) if !merge_was_in_progress && merge_in_progress() => {
-                    record_merge_autostash(repo, oid).map_err(PullError::Repository)?;
+                    record_merge_autostash(repo, oid)?;
                 }
                 _ => restore_autostash_after_abort(repo, stash_oid.as_ref()),
             }
@@ -681,7 +684,7 @@ fn apply_autostash_after_pull(
         return Ok(outcome);
     }
     if let Some(stash_oid) = stash_oid {
-        if apply_operation_autostash(repo, stash_oid).map_err(PullError::Repository)? {
+        if apply_operation_autostash(repo, stash_oid)? {
             outcome.result = PullResult::AutostashConflict;
             outcome.autostash = Some(*stash_oid);
         }
@@ -701,8 +704,7 @@ fn pull_check_outcome(
     let (ahead, behind, would, fast_forward_possible) = match head_oid {
         None => (0, 0, PullResult::SetUpstream, true),
         Some(head_oid) => {
-            let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)
-                .map_err(PullError::Repository)?;
+            let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)?;
             let would = if landed == Some(head_oid) && diverged(repo, head_oid, upstream_oid)? {
                 PullResult::Landed
             } else {
@@ -716,8 +718,7 @@ fn pull_check_outcome(
                 )?
             };
             let up_to_date = head_oid == upstream_oid || is_ancestor(repo, upstream_oid, head_oid)?;
-            let fast_forward = !up_to_date
-                && is_ancestor(repo, head_oid, upstream_oid).map_err(PullError::Repository)?;
+            let fast_forward = !up_to_date && is_ancestor(repo, head_oid, upstream_oid)?;
             (ahead, behind, would, up_to_date || fast_forward)
         }
     };
@@ -790,9 +791,7 @@ fn predict_pull_result(
                     theirs_label: "upstream".into(),
                     ..Default::default()
                 },
-            )
-            .map_err(PullError::Repository)?
-            {
+            )? {
                 MergePrediction::UpToDate => Ok(PullResult::UpToDate),
                 MergePrediction::FastForward => Ok(PullResult::FastForward),
                 MergePrediction::Clean { .. } => Ok(PullResult::Merged),
@@ -813,8 +812,8 @@ fn adopt_unborn_upstream(
 ) -> std::result::Result<PullOutcome, PullError> {
     ensure_branch_tip(repo, refname, None)?;
     let upstream_tree = repo.odb().commit_tree(&upstream_oid)?;
-    prepare_tree_checkout(repo, None, &upstream_tree).map_err(PullError::Repository)?;
-    checkout_between_trees(repo, None, &upstream_tree).map_err(PullError::Repository)?;
+    prepare_tree_checkout(repo, None, &upstream_tree)?;
+    checkout_between_trees(repo, None, &upstream_tree)?;
     update_checked_out_branch(repo, refname, None, upstream_oid, INITIAL_PULL_REFLOG)?;
     Ok(PullOutcome {
         upstream: Some(label.to_owned()),
@@ -829,8 +828,8 @@ fn diverged(
     upstream_oid: ObjectId,
 ) -> std::result::Result<bool, PullError> {
     Ok(head_oid != upstream_oid
-        && !is_ancestor(repo, upstream_oid, head_oid).map_err(PullError::Repository)?
-        && !is_ancestor(repo, head_oid, upstream_oid).map_err(PullError::Repository)?)
+        && !is_ancestor(repo, upstream_oid, head_oid)?
+        && !is_ancestor(repo, head_oid, upstream_oid)?)
 }
 
 /// The upstream a pull integrates.
@@ -880,8 +879,7 @@ fn integrate_fetched_upstream(
     if diverged {
         match integration.mode {
             PullMode::FfOnly => {
-                let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)
-                    .map_err(PullError::Repository)?;
+                let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)?;
                 return Ok(PullOutcome {
                     ahead: Some(ahead),
                     behind: Some(behind),
@@ -914,8 +912,7 @@ fn integrate_fetched_upstream(
         },
         progress,
         cancel,
-    )
-    .map_err(PullError::Repository)?;
+    )?;
     Ok(map_integrate_outcome(integrate, label))
 }
 
@@ -950,9 +947,7 @@ fn rebase_fetched_upstream(
         request,
         rebase,
         apply: ApplyOptions {
-            identity: repo
-                .identity(IdentRole::Committer, repo.identity_now())
-                .map_err(PullError::Repository)?,
+            identity: repo.identity(IdentRole::Committer, repo.identity_now())?,
             reflog_message: format!("pull: rebase onto {label}"),
             record_operation: Some("rebase".into()),
             hooks: crate::hooks::PostOperationHooks::Run,
@@ -994,8 +989,7 @@ fn rebase_fetched_upstream(
                 },
                 progress,
                 cancel,
-            )
-            .map_err(PullError::Repository)?;
+            )?;
             Ok(map_integrate_outcome(integrate, label))
         }
     }
@@ -1003,9 +997,7 @@ fn rebase_fetched_upstream(
 
 /// Replay options shared by the rebase pull and its `--check` prediction.
 fn pull_rebase_options(repo: &Repository) -> std::result::Result<RebaseOntoOptions, PullError> {
-    let committer = repo
-        .identity(IdentRole::Committer, repo.identity_now())
-        .map_err(PullError::Repository)?;
+    let committer = repo.identity(IdentRole::Committer, repo.identity_now())?;
     let mut opts = RebaseOntoOptions::new(RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
@@ -1074,17 +1066,17 @@ fn local_changes_would_be_overwritten(paths: Vec<String>) -> Error {
 
 fn map_history_error(err: HistoryError) -> PullError {
     match err {
-        HistoryError::Library(e) => PullError::Repository(*e),
+        HistoryError::Library(e) => PullError::from(*e),
         HistoryError::LocalChangesWouldBeOverwritten { paths } => {
-            PullError::Repository(local_changes_would_be_overwritten(paths))
+            PullError::from(local_changes_would_be_overwritten(paths))
         }
-        other => PullError::Repository(Error::Message(other.to_string())),
+        other => PullError::from(Error::Message(other.to_string())),
     }
 }
 
 fn map_rebase_session_error(err: RebaseSessionError) -> PullError {
     match err {
-        RebaseSessionError::Library(e) => PullError::Repository(e),
+        RebaseSessionError::Library(e) => PullError::from(e),
         RebaseSessionError::History(e) => map_history_error(e),
         other => PullError::Rebase(other),
     }
@@ -1284,7 +1276,7 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                PullError::Repository(Error::WouldOverwrite { paths, .. }) if paths == &["a.txt"]
+                PullError::Nested(e) if matches!(e.as_ref(), Error::WouldOverwrite { paths, .. } if paths == &["a.txt"])
             ),
             "{err:?}"
         );
@@ -1522,7 +1514,7 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                PullError::Repository(Error::WouldOverwrite { paths, .. }) if paths == &["a.txt"]
+                PullError::Nested(e) if matches!(e.as_ref(), Error::WouldOverwrite { paths, .. } if paths == &["a.txt"])
             ),
             "{err:?}"
         );
@@ -1667,8 +1659,8 @@ mod tests {
         );
         assert!(
             matches!(
-                refused,
-                Err(PullError::Repository(Error::DirtyWorktree { .. }))
+                refused.as_ref(),
+                Err(PullError::Nested(e)) if matches!(e.as_ref(), Error::DirtyWorktree { .. })
             ),
             "{refused:?}"
         );
@@ -1703,7 +1695,7 @@ mod tests {
             None,
         )
         .expect_err("pull fails when branch reflog cannot be written");
-        assert!(matches!(err, PullError::Repository(_)), "{err:?}");
+        assert!(matches!(err, PullError::Nested(_)), "{err:?}");
         assert_eq!(git(&clone, &["rev-parse", "main"]), before);
     }
 
@@ -1820,7 +1812,7 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                PullError::Repository(Error::WouldOverwrite { paths, .. }) if paths == &["b.txt"]
+                PullError::Nested(e) if matches!(e.as_ref(), Error::WouldOverwrite { paths, .. } if paths == &["b.txt"])
             ),
             "{err:?}"
         );

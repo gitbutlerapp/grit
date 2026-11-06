@@ -106,14 +106,14 @@ impl FetchRefspecs {
 ///
 /// - [`RemoteError::UnknownRemote`] when no `remote.<name>.*` section exists.
 /// - [`RemoteError::NoUrl`] when the remote has no URL.
-/// - Propagates transport, config, and ref I/O failures as [`RemoteError::Library`].
+/// - Propagates transport, config, and ref I/O failures as [`RemoteError::from`].
 pub fn inspect_remote(
     repo: &Repository,
     name: &str,
     options: &InspectOptions,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> std::result::Result<RemoteSummary, RemoteError> {
-    let config = repo.config().snapshot().map_err(RemoteError::Library)?;
+    let config = repo.config().snapshot().map_err(RemoteError::from)?;
     if !has_remote_section(config.as_ref(), name) {
         return Err(RemoteError::UnknownRemote(name.to_owned()));
     }

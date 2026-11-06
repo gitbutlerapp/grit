@@ -4,8 +4,10 @@ use std::collections::{BTreeSet, HashSet};
 
 use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+use crate::error::Error;
 use crate::error::Result;
 use crate::fetch::Progress;
+use crate::fetch_request::FetchRefspecError;
 use crate::refs::store::{Expected, RefUpdate, RefUpdateFlags};
 use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
 use crate::refspec::{fetch_specs_bind_local_ref, parse_fetch_refspec, RefspecItem};
@@ -80,7 +82,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Errors
     ///
     /// - [`RemoteError::UnknownRemote`] when no `remote.<name>.*` section exists.
-    /// - [`RemoteError::Library`] when config cannot be read or written.
+    /// - [`RemoteError::from`] when config cannot be read or written.
     pub fn set_url(
         &self,
         name: &str,
@@ -92,7 +94,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             .repo
             .config()
             .snapshot()
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -144,7 +146,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// - [`RemoteError::InvalidRemoteName`] when `refs/remotes/<name>/…` would not be a valid ref.
     /// - [`RemoteError::RemoteExists`] when any `remote.<name>.*` key is already configured.
-    /// - [`RemoteError::Library`] when the config cannot be read, parsed, or written.
+    /// - [`RemoteError::from`] when the config cannot be read, parsed, or written.
     pub fn add(&self, name: &str, url: &str) -> std::result::Result<(), RemoteError> {
         if !crate::remote::is_valid_remote_name(name) {
             return Err(RemoteError::InvalidRemoteName(name.to_owned()));
@@ -209,7 +211,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             .repo
             .config()
             .snapshot()
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?
         Remote::from_config(config.as_ref(), name)
     }
 
@@ -342,11 +344,8 @@ impl<'repo> RepositoryRemotes<'repo> {
             let outcome = self
                 .get(&name)
                 .and_then(|remote| self.fetch(&remote, opts, progress, cancel, http_factory));
-            if matches!(
-                &outcome,
-                Err(RemoteError::Library(crate::error::Error::Cancelled))
-            ) {
-                return Err(crate::error::Error::Cancelled);
+            if matches!(&outcome, Err(RemoteError::Cancelled)) {
+                return Err(RemoteError::Cancelled.into());
             }
             results.push((name, outcome));
             crate::progress::poll_cancel(progress, cancel)?;
@@ -402,7 +401,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// - [`RemoteError::UnknownRemote`] when `name` is not configured.
     /// - [`RemoteError::NoUrl`] when the remote has no URL.
-    /// - Propagates transport and ref errors as [`RemoteError::Library`].
+    /// - Propagates transport and ref errors as [`RemoteError::from`].
     pub fn inspect(
         &self,
         name: &str,
@@ -423,7 +422,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Errors
     ///
     /// - [`RemoteError::UnknownRemote`] when `name` is not configured.
-    /// - Propagates transport and ref-update failures as [`RemoteError::Library`].
+    /// - Propagates transport and ref-update failures as [`RemoteError::from`].
     pub fn prune(
         &self,
         name: &str,
@@ -434,7 +433,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             .repo
             .config()
             .snapshot()
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -452,7 +451,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         let remote_pairs: Vec<(String, crate::objects::ObjectId)> =
             advertised.iter().map(|r| (r.name.clone(), r.oid)).collect();
         let stale = tracking_refs_gone_in(self.repo, &positive, &remote_pairs)
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?;
         let mut refs: Vec<String> = stale
             .into_iter()
             .filter(|(local_ref, _)| fetch_specs_bind_local_ref(&specs, local_ref).is_some())
@@ -489,7 +488,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Errors
     ///
     /// - [`RemoteError::UnknownRemote`] when `name` is not configured.
-    /// - [`RemoteError::Library`] when the target ref is missing or ref updates fail.
+    /// - [`RemoteError::from`] when the target ref is missing or ref updates fail.
     pub fn set_head(
         &self,
         name: &str,
@@ -501,21 +500,21 @@ impl<'repo> RepositoryRemotes<'repo> {
             .repo
             .config()
             .snapshot()
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
         let head_ref = format!("refs/remotes/{name}/HEAD");
         let store = self.repo.refs();
         let previous_target = crate::refs::read_symbolic_ref_for_repository(self.repo, &head_ref)
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?;
 
         let target = match mode {
             SetHead::Delete => {
                 let exists = !matches!(store.read_raw(&head_ref), Ok(None));
                 if !dry_run && exists {
                     crate::refs::delete_ref_on_store(store, &head_ref)
-                        .map_err(RemoteError::Library)?;
+                        .map_err(RemoteError::from)?;
                 }
                 return Ok(SetHeadOutcome {
                     target: None,
@@ -526,9 +525,9 @@ impl<'repo> RepositoryRemotes<'repo> {
             SetHead::Branch(branch) => {
                 let branch = branch.trim().to_owned();
                 if branch.is_empty() {
-                    return Err(RemoteError::Library(crate::error::Error::Message(
+                    return Err(RemoteError::Nested(Box::new(Error::InvalidRef(
                         "branch name required".to_owned(),
-                    )));
+                    ))));
                 }
                 format!("refs/remotes/{name}/{branch}")
             }
@@ -543,18 +542,18 @@ impl<'repo> RepositoryRemotes<'repo> {
                     http_factory,
                 )?;
                 let branch = head_branch_from_advertisement(&advertised).ok_or_else(|| {
-                    RemoteError::Library(crate::error::Error::Message(
-                        "remote HEAD is not a symref".to_owned(),
-                    ))
+                    RemoteError::Fatal {
+                        message: "remote HEAD is not a symref".to_owned(),
+                    }
                 })?;
                 format!("refs/remotes/{name}/{branch}")
             }
         };
 
         if crate::refs::resolve_ref_in(self.repo, &target).is_err() {
-            return Err(RemoteError::Library(crate::error::Error::Message(format!(
+            return Err(RemoteError::Nested(Box::new(Error::InvalidRef(format!(
                 "Not a valid ref: {target}"
-            ))));
+            )))));
         }
         if !dry_run {
             crate::refs::write_symbolic_ref_on_store(
@@ -563,7 +562,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                 &head_ref,
                 &target,
             )
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?;
         }
         Ok(SetHeadOutcome {
             target: Some(target),
@@ -579,7 +578,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Errors
     ///
     /// - [`RemoteError::UnknownRemote`] when no `remote.<name>.*` section exists.
-    /// - [`RemoteError::Library`] when config or ref updates fail.
+    /// - [`RemoteError::from`] when config or ref updates fail.
     pub fn remove(
         &self,
         name: &str,
@@ -589,7 +588,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             .repo
             .config()
             .snapshot()
-            .map_err(RemoteError::Library)?;
+            .map_err(RemoteError::from)?
         if !has_remote_section(config.as_ref(), name) {
             return Err(RemoteError::UnknownRemote(name.to_owned()));
         }
@@ -659,9 +658,9 @@ impl<'repo> RepositoryRemotes<'repo> {
         crate::refs::commit_owned_ref_updates_on_store(self.repo.refs(), updates)?;
 
         if !file.remove_section(&format!("remote.{name}"))? {
-            return Err(RemoteError::Library(crate::error::Error::Message(format!(
+            return Err(RemoteError::Nested(Box::new(Error::PathError(format!(
                 "could not remove config section remote.{name}"
-            ))));
+            )))));
         }
         file.write()?;
         self.repo.reload_config()?;
@@ -791,15 +790,23 @@ fn load_remote_fetch_specs(
     raw.retain(|s| !s.trim().is_empty());
     let mut specs = Vec::new();
     for line in raw {
-        specs.push(
-            parse_fetch_refspec(&line)
-                .map_err(|e| RemoteError::Library(crate::error::Error::Message(e.to_string())))?,
-        );
+        specs.push(parse_fetch_refspec(&line).map_err(|e| {
+            RemoteError::FetchRefspec(FetchRefspecError::InvalidRefspec {
+                spec: line.clone(),
+                message: e.to_string(),
+            })
+        })?);
     }
     if !had_fetch_keys && specs.is_empty() {
         specs.push(
-            parse_fetch_refspec(&format!("+refs/heads/*:refs/remotes/{remote}/*"))
-                .map_err(|e| RemoteError::Library(crate::error::Error::Message(e.to_string())))?,
+            parse_fetch_refspec(&format!("+refs/heads/*:refs/remotes/{remote}/*")).map_err(
+                |e| {
+                    RemoteError::FetchRefspec(FetchRefspecError::InvalidRefspec {
+                        spec: format!("+refs/heads/*:refs/remotes/{remote}/*"),
+                        message: e.to_string(),
+                    })
+                },
+            )?,
         );
     }
     Ok(specs)
@@ -822,7 +829,7 @@ fn refs_to_delete_for_remote(
         .filter_map(|name| load_remote_fetch_specs(config, &name).ok())
         .collect();
 
-    let all_refs = list_refs_for_repository(repo, "refs/").map_err(RemoteError::Library)?;
+    let all_refs = list_refs_for_repository(repo, "refs/").map_err(RemoteError::from)?;
     let mut refs_to_delete = BTreeSet::new();
     for (refname, _) in all_refs {
         if !refname.starts_with("refs/remotes/") {

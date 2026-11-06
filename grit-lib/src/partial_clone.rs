@@ -28,9 +28,15 @@ pub enum PartialCloneError {
     /// The filter string is not a supported partial-clone spec.
     #[error("{0}")]
     InvalidFilter(String),
-    /// Underlying I/O or config failure.
+    /// Non-filter repository failure.
     #[error(transparent)]
-    Library(#[from] Error),
+    Nested(#[from] Box<Error>),
+}
+
+impl From<Error> for PartialCloneError {
+    fn from(e: Error) -> Self {
+        Self::Nested(Box::new(e))
+    }
 }
 
 impl ObjectFilterSpec {

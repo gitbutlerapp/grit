@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::error::{Error, RemoteUnreadableReason};
+use crate::remote::RemoteError;
 
 #[test]
 fn rebase_redirect_strips_info_refs_and_query() {
@@ -71,7 +72,7 @@ fn html_info_refs_body_is_not_git_server() {
     let err = discover_upload_pack_from_body(body).expect_err("html must fail");
     assert!(matches!(
         err,
-        Error::RemoteUnreadable {
+        RemoteError::Unreadable {
             url: None,
             reason: RemoteUnreadableReason::NotGitServer { status: 200, .. },
         }
@@ -213,8 +214,8 @@ fn sample_smart_advertisement() -> Vec<u8> {
 
 fn remote_fatal_message(err: crate::error::Error) -> String {
     match err {
-        crate::error::Error::RemoteFatal { message } => message,
-        other => panic!("expected Error::RemoteFatal, got {other:?}"),
+        crate::error::RemoteError::Fatal { message } => message,
+        other => panic!("expected RemoteError::Fatal, got {other:?}"),
     }
 }
 

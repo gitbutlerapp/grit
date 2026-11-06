@@ -37,6 +37,7 @@ use crate::pack_objects::PackStats;
 use crate::pkt_line::{self, Packet};
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
+use crate::remote::RemoteError;
 use crate::repo::Repository;
 use crate::sideband_lines::{RemoteLine, SidebandLines};
 use crate::transfer::{PackBuildOptions, PrePushGate, PushOptions, PushOutcome, PushRefSpec};
@@ -179,7 +180,7 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 /// Returns an error if the connection is protocol v2, if a source object is
 /// missing from the local odb, if the pack build fails, or on wire/parse I/O
 /// failure. An atomic push to a server without `atomic` support returns
-/// [`Error::PushAtomicUnsupported`] before sending updates or objects.
+/// [`RemoteError::PushAtomicUnsupported`] before sending updates or objects.
 pub fn push_remote(
     local_git_dir: &Path,
     conn: &mut dyn Connection,
@@ -506,7 +507,7 @@ pub(crate) fn push_remote_with(
 /// Returns an error if discovery fails, the advertisement is protocol v2, a
 /// source object is missing from the local odb, the pack build fails, or on
 /// wire/parse I/O failure. An atomic push to a server without `atomic` support
-/// returns [`Error::PushAtomicUnsupported`] before sending updates or objects.
+/// returns [`RemoteError::PushAtomicUnsupported`] before sending updates or objects.
 pub fn push_http(
     client: std::sync::Arc<dyn crate::transport::http::HttpClient>,
     local_git_dir: &Path,
@@ -653,10 +654,10 @@ fn plan_push(
 /// any commands or pack data, including for dry-run and no-op pushes.
 fn require_push_capabilities(adv: &AdvertisedState, opts: &PushOptions) -> Result<()> {
     if opts.atomic && !adv.server_atomic {
-        return Err(Error::PushAtomicUnsupported);
+        return Err(RemoteError::PushAtomicUnsupported.into());
     }
     if !opts.push_options.is_empty() && !adv.server_push_options {
-        return Err(Error::PushOptionsUnsupported);
+        return Err(RemoteError::PushOptionsUnsupported.into());
     }
     Ok(())
 }
@@ -1456,7 +1457,7 @@ mod tests {
                         &crate::progress::NeverCancel,
                     )
                     .unwrap_err();
-                    assert!(matches!(err, Error::PushAtomicUnsupported), "{err:?}");
+                    assert!(matches!(err, RemoteError::PushAtomicUnsupported), "{err:?}");
                     assert!(
                         conn.output.is_empty(),
                         "unsupported atomic push wrote bytes"
@@ -1774,7 +1775,7 @@ mod tests {
         // Server did NOT advertise push-options: typed error, not Message.
         let err = require_push_capabilities(&adv_state(true, true, false), &opts).unwrap_err();
         assert!(
-            matches!(err, Error::PushOptionsUnsupported),
+            matches!(err, RemoteError::PushOptionsUnsupported),
             "expected PushOptionsUnsupported, got {err:?}"
         );
         assert_eq!(

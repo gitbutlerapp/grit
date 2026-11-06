@@ -11,6 +11,7 @@ use crate::bundle::{plan_bundle_create, Bundle, BundleCreatePlan, BundleError, B
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::progress::{NullProgress, ProgressSink};
+use crate::remote::RemoteError;
 use crate::repo::Repository;
 use crate::transfer::{
     apply_tag_mode, classify_update, prune_tracking_refs, FetchOptions, FetchOutcome, RefUpdate,
@@ -635,10 +636,13 @@ fn preflight_bundle_fetch_refspecs(bundle: &Bundle, opts: &FetchOptions) -> Resu
 
     if implicit_head_fetch {
         if crate::transfer::remote_head_oid_from_advertised(header_refs).is_none() {
-            return Err(Error::FetchRefspec(FetchRefspecError::SourceNotFound {
-                ref_name: "HEAD".to_owned(),
-                spec: "HEAD".to_owned(),
-            }));
+            return Err(
+                RemoteError::FetchRefspec(FetchRefspecError::SourceNotFound {
+                    ref_name: "HEAD".to_owned(),
+                    spec: "HEAD".to_owned(),
+                })
+                .into(),
+            );
         }
         return Ok(());
     }
@@ -661,8 +665,8 @@ fn map_bundle_err(e: BundleError) -> Error {
     match e {
         BundleError::Cancelled => Error::Cancelled,
         BundleError::ObjectNotFound(id) => Error::ObjectNotFound(id),
-        BundleError::MissingPrerequisites { .. } | BundleError::PrerequisitesNotConnected => {
-            Error::BundleMissingPrerequisites
+        e @ (BundleError::MissingPrerequisites { .. } | BundleError::PrerequisitesNotConnected) => {
+            Error::Message(e.to_string())
         }
         other => Error::Message(other.to_string()),
     }

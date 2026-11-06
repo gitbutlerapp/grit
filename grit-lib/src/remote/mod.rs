@@ -16,8 +16,11 @@
 //! # }
 //! ```
 mod core;
+mod error;
 mod inspect;
 pub mod push_plan;
+
+pub use error::{RemoteError, RemoteResult};
 
 pub(crate) use core::is_valid_remote_name;
 pub use core::*;

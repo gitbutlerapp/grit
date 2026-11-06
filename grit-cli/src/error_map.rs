@@ -333,25 +333,25 @@ pub fn map_switch_lib_error(repo: &grit_lib::repo::Repository, err: LibError) ->
     map_lib_error(err)
 }
 
-/// Map [`PullError::Repository`] failures during `grit pull`.
+/// Map [`PullError`] after the remote reauth path during `grit pull`.
 #[must_use]
 pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
     match err {
         PullError::Remote(remote) => map_remote_error(remote),
-        PullError::Repository(hook @ LibError::Hook(_)) => {
-            if repo.git_dir().join("MERGE_HEAD").is_file() {
-                crate::json_error::hook_failed_with_hint(
-                    hook,
-                    "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
-                )
-            } else {
-                Error::new(hook)
+        PullError::Nested(boxed) => match *boxed {
+            LibError::OperationInProgress(kind) => operation_in_progress_for_repo(repo, "pull", kind),
+            hook @ LibError::Hook(_) => {
+                if repo.git_dir().join("MERGE_HEAD").is_file() {
+                    crate::json_error::hook_failed_with_hint(
+                        hook,
+                        "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
+                    )
+                } else {
+                    Error::new(hook)
+                }
             }
-        }
-        PullError::Repository(LibError::OperationInProgress(kind)) => {
-            operation_in_progress_for_repo(repo, "pull", kind)
-        }
-        PullError::Repository(lib) => map_lib_error(lib),
+            lib => map_lib_error(lib),
+        },
         rest => Error::new(rest),
     }
 }
@@ -360,8 +360,12 @@ pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullErr
 #[must_use]
 pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
     match err {
-        PullError::Repository(LibError::OperationInProgress(kind)) => {
-            operation_in_progress_for_repo(repo, "pull", kind)
+        PullError::Nested(boxed) => {
+            if let LibError::OperationInProgress(kind) = *boxed {
+                operation_in_progress_for_repo(repo, "pull", kind)
+            } else {
+                Error::new(PullError::Nested(boxed))
+            }
         }
         other => Error::new(other),
     }
@@ -418,7 +422,7 @@ pub fn integrate_failure_text(err: &Error) -> String {
     let text = format!("{err:#}");
     let paths = err.chain().find_map(|cause| {
         let lib = match cause.downcast_ref::<PullError>() {
-            Some(PullError::Repository(lib)) => Some(lib),
+            Some(PullError::Nested(e)) => Some(e.as_ref()),
             _ => cause.downcast_ref::<LibError>(),
         };
         match lib {
@@ -625,17 +629,19 @@ fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
 fn would_overwrite_classified_from_cause(
     cause: &(dyn StdError + 'static),
 ) -> Option<ClassifiedError> {
-    if let Some(PullError::Repository(LibError::WouldOverwrite {
-        reason,
-        paths,
-        message,
-    })) = cause.downcast_ref::<PullError>()
-    {
-        return Some(classified_from_structured_error(&would_overwrite_error(
-            *reason,
-            paths.clone(),
-            message.clone(),
-        )));
+    if let Some(PullError::Nested(e)) = cause.downcast_ref::<PullError>() {
+        if let LibError::WouldOverwrite {
+            reason,
+            paths,
+            message,
+        } = e.as_ref()
+        {
+            return Some(classified_from_structured_error(&would_overwrite_error(
+                *reason,
+                paths.clone(),
+                message.clone(),
+            )));
+        }
     }
     match cause.downcast_ref::<LibError>()? {
         LibError::WouldOverwrite {
@@ -698,19 +704,16 @@ pub fn map_remote_error(err: RemoteError) -> Error {
         return guided;
     }
     match err {
-        RemoteError::Library(LibError::BundleMissingPrerequisites) => {
-            Error::new(crate::commands::bundle::MissingPrerequisites {
-                commits: Vec::new(),
-            })
+        RemoteError::Nested(lib) if matches!(*lib, LibError::HashCollision { .. }) => {
+            crate::json_error::map_lib_error(*lib)
         }
-        RemoteError::Library(LibError::HashCollision { oid }) => {
-            crate::json_error::map_lib_error(LibError::HashCollision { oid })
+        RemoteError::Nested(boxed) if matches!(boxed.as_ref(), LibError::Hook(_)) => {
+            Error::new(*boxed)
         }
-        RemoteError::Library(hook @ LibError::Hook(_)) => Error::new(hook),
-        RemoteError::Library(lib) if lib.is_cancelled() => Error::new(lib),
-        RemoteError::Library(lib) if lib.is_remote_unreadable() => Error::new(lib),
-        RemoteError::Library(lib) => Error::msg(RemoteError::Library(lib).to_string()),
-        other => Error::msg(other.to_string()),
+        RemoteError::Nested(lib) if lib.is_cancelled() || lib.is_remote_unreadable() => {
+            Error::new(*lib)
+        }
+        other => Error::new(other),
     }
 }
 
@@ -782,7 +785,20 @@ pub fn guide_remote(err: &RemoteError) -> Option<Error> {
             Some(format!("set it with `grit remote set-url {name} <url>`")),
             None,
         )),
-        RemoteError::Library(lib) => guide_lib(lib),
+        RemoteError::Auth { url, reason } => Some(auth_error(err.to_string(), url, reason)),
+        RemoteError::Unreadable {
+            reason:
+                RemoteUnreadableReason::RepositoryNotFound
+                | RemoteUnreadableReason::HttpStatus { status: 404 }
+                | RemoteUnreadableReason::NotGitServer { .. },
+            ..
+        } => Some(guided(
+            ErrorKind::RemoteUnreadable,
+            err.to_string(),
+            Some("check the URL, and that you have access to the repository".to_owned()),
+            None,
+        )),
+        RemoteError::Nested(lib) => guide_lib(lib),
         _ => None,
     }
 }
@@ -838,7 +854,7 @@ fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
     }
     if let Some(err) = cause.downcast_ref::<CloneError>() {
         return match err {
-            CloneError::Library(lib) => guide_lib(lib),
+            CloneError::Nested(lib) => guide_lib(lib),
             CloneError::Remote(remote) => guide_remote(remote),
             CloneError::CheckoutFailed { .. } => Some(clone_checkout_failed(err)),
             _ => None,
@@ -873,7 +889,7 @@ fn guide_pull(err: &PullError) -> Option<Error> {
             None,
         )),
         PullError::Remote(remote) => guide_remote(remote),
-        PullError::Repository(lib) => guide_lib(lib),
+        PullError::Nested(lib) => guide_lib(lib.as_ref()),
         _ => None,
     }
 }
@@ -923,6 +939,7 @@ fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
 
 fn guide_lib(err: &LibError) -> Option<Error> {
     match err {
+        LibError::Remote(remote) => guide_remote(remote),
         LibError::NotARepository(_) => Some(guided(
             ErrorKind::NotARepository,
             err.to_string(),
@@ -983,19 +1000,6 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             ErrorKind::PathNotFound,
             err.to_string(),
             None,
-            None,
-        )),
-        LibError::Auth { url, reason } => Some(auth_error(err, url, reason)),
-        LibError::RemoteUnreadable {
-            reason:
-                RemoteUnreadableReason::RepositoryNotFound
-                | RemoteUnreadableReason::HttpStatus { status: 404 }
-                | RemoteUnreadableReason::NotGitServer { .. },
-            ..
-        } => Some(guided(
-            ErrorKind::RemoteUnreadable,
-            err.to_string(),
-            Some("check the URL, and that you have access to the repository".to_owned()),
             None,
         )),
         LibError::WouldOverwrite {
@@ -1191,7 +1195,7 @@ fn looks_like_rev_syntax(name: &str) -> bool {
         || (name.starts_with('-') && name != "-")
 }
 
-fn auth_error(err: &LibError, url: &str, reason: &AuthFailure) -> Error {
+fn auth_error(message: String, url: &str, reason: &AuthFailure) -> Error {
     let github = is_github_https_url(url);
     let store = format!("`grit auth {url} --username <user> --token <token>`");
     let (kind, hint) = match reason {
@@ -1231,7 +1235,7 @@ fn auth_error(err: &LibError, url: &str, reason: &AuthFailure) -> Error {
             )),
         ),
     };
-    guided(kind, err.to_string(), hint, None)
+    guided(kind, message, hint, None)
 }
 
 fn remote_not_found(name: &str) -> Error {
@@ -1449,10 +1453,12 @@ mod tests {
     #[test]
     fn auth_hints_depend_on_host_and_failure() {
         let auth = |url: &str, reason| {
-            payload(Error::new(LibError::Auth {
-                url: url.to_owned(),
-                reason,
-            }))
+            payload(Error::new(LibError::Remote(
+                grit_lib::remote::RemoteError::Auth {
+                    url: url.to_owned(),
+                    reason,
+                },
+            )))
         };
         let unavailable = || AuthFailure::CredentialsUnavailable {
             detail: "none".into(),
@@ -1564,11 +1570,11 @@ mod tests {
 
     #[test]
     fn would_overwrite_from_pull_repository_is_guided() {
-        let err = Error::new(PullError::Repository(LibError::WouldOverwrite {
+        let err = Error::new(PullError::Nested(Box::new(LibError::WouldOverwrite {
             reason: OverwriteReason::LocalChanges,
             paths: strings(&["f"]),
             message: "local changes would be overwritten by merge".into(),
-        }));
+        })));
         let p = payload(err);
         assert_eq!(p.kind, ErrorKind::WouldOverwrite);
         assert_eq!(
@@ -1619,12 +1625,10 @@ mod tests {
 
     #[test]
     fn errors_inside_wrappers_are_found() {
-        let wrapped = Error::new(CloneError::Remote(RemoteError::Library(
-            LibError::remote_unreadable(
-                "https://example.com/x.git",
-                RemoteUnreadableReason::HttpStatus { status: 404 },
-            ),
-        )))
+        let wrapped = Error::new(CloneError::Remote(RemoteError::Unreadable {
+            url: Some("https://example.com/x.git".to_owned()),
+            reason: RemoteUnreadableReason::HttpStatus { status: 404 },
+        }))
         .context("clone failed");
         let p = payload(wrapped);
         assert_eq!(p.kind, ErrorKind::RemoteUnreadable);

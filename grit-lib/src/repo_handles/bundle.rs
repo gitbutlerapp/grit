@@ -220,7 +220,6 @@ impl<'repo> RepositoryBundles<'repo> {
 
 fn lib_error_to_bundle_error(err: crate::error::Error) -> BundleError {
     match err {
-        crate::error::Error::BundleMissingPrerequisites => BundleError::PrerequisitesNotConnected,
         crate::error::Error::ObjectNotFound(id) => BundleError::ObjectNotFound(id),
         other => BundleError::Io(other.to_string()),
     }

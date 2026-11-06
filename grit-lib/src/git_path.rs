@@ -8,6 +8,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::path_icase::worktree_path_for_index_entry;
 use crate::pathspec::has_glob_chars;
+use crate::remote::RemoteError;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// Errors returned by Git-compatible path helper routines.
@@ -1206,7 +1207,7 @@ mod git_path_component_tests {
         use std::path::PathBuf;
 
         let verbatim = PathBuf::from(r"\\?\C:\Users\x\pack.tmp");
-        let temp_missing = Error::ReceivedPackTempMissing {
+        let temp_missing = RemoteError::ReceivedPackTempMissing {
             path: verbatim.clone(),
         };
         assert!(

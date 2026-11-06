@@ -218,13 +218,15 @@ pub(crate) fn fetch_bundle_list(
     let url = format!("{}/git-upload-pack", repo_url.trim_end_matches('/'));
     let client_post = Arc::clone(&client);
     let body = run_interruptible("grit-http-post", cancel, stall, move || {
-        client_post.post(
-            &url,
-            "application/x-git-upload-pack-request",
-            "application/x-git-upload-pack-result",
-            &request,
-            Some("version=2"),
-        )
+        client_post
+            .post(
+                &url,
+                "application/x-git-upload-pack-request",
+                "application/x-git-upload-pack-result",
+                &request,
+                Some("version=2"),
+            )
+            .map_err(Into::into)
     })?;
     let mut lines = Vec::new();
     let mut cursor = Cursor::new(body);

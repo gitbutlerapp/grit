@@ -21,6 +21,7 @@ use crate::objects::HashAlgo;
 use crate::pack_stream_scan::PackStreamScanner;
 use crate::pkt_line;
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, ReceivedObjects};
+use crate::remote::RemoteError;
 
 /// Where demuxed pack bytes are stored.
 pub enum PackReceiveTarget<'a> {
@@ -687,9 +688,10 @@ fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
             Err(e) => return Err(Error::Io(e)),
         };
         if !meta.is_file() {
-            return Err(Error::ReceivedPackTempMissing {
+            return Err(RemoteError::ReceivedPackTempMissing {
                 path: path.to_path_buf(),
-            });
+            }
+            .into());
         }
         if meta.len() != expected_len {
             if attempt + 1 < MAX_ATTEMPTS {
@@ -718,9 +720,10 @@ fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
         }
         return Ok(());
     }
-    Err(Error::ReceivedPackTempMissing {
+    Err(RemoteError::ReceivedPackTempMissing {
         path: path.to_path_buf(),
-    })
+    }
+    .into())
 }
 
 impl TempPackReceive {
@@ -1169,7 +1172,7 @@ mod tests {
             )
             .expect_err("remote side-band error");
         assert!(
-            matches!(&err, Error::RemoteFatal { message } if message == "network interrupted"),
+            matches!(&err, RemoteError::Fatal { message } if message == "network interrupted"),
             "{err:?}"
         );
         drop(recv);
@@ -1205,6 +1208,6 @@ mod tests {
         let len = std::fs::metadata(&path).expect("meta").len();
         std::fs::remove_file(&path).expect("remove");
         let err = assert_received_pack_durable(&path, len).expect_err("missing pack");
-        assert!(matches!(err, Error::ReceivedPackTempMissing { .. }));
+        assert!(matches!(err, RemoteError::ReceivedPackTempMissing { .. }));
     }
 }

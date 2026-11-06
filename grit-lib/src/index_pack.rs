@@ -22,6 +22,7 @@ use crate::pack::{verify_pack_and_collect, write_v2_pack_index_sorting};
 use crate::pack_index_build::{build_mapped_pack_index, RESIDENT_PACK_BYTES};
 use crate::pack_map::{PackData, ResidentBudget};
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::remote::RemoteError;
 use crate::unpack_objects::{IngestedObjects, PackIndexRecord};
 
 pub use crate::pack_index_build::build_pack_index_records;
@@ -339,7 +340,7 @@ fn wait_for_received_pack_path(path: PathBuf) -> Result<PathBuf> {
             Err(e) => return Err(Error::Io(e)),
         }
     }
-    Err(Error::ReceivedPackTempMissing { path })
+    Err(RemoteError::ReceivedPackTempMissing { path }.into())
 }
 
 /// Like [`ingest_received_pack_path`], reporting pack indexing progress on `progress` when set.
@@ -1696,7 +1697,7 @@ mod tests {
         let err = ingest_received_pack_path(missing.clone(), &odb, &IngestPackOptions::default())
             .expect_err("missing spool");
         assert!(
-            matches!(err, Error::ReceivedPackTempMissing { .. }),
+            matches!(err, RemoteError::ReceivedPackTempMissing { .. }),
             "expected typed missing-pack error, got {err:?}"
         );
     }

@@ -639,7 +639,7 @@ fn clone_times_out_on_low_speed_stall_without_cancel() {
         stop.store(true, Ordering::Relaxed);
         drop(listener);
         assert!(
-            matches!(err, CloneError::Remote(_) | CloneError::Library(_)),
+            matches!(err, CloneError::Remote(_) | CloneError::Nested(_)),
             "expected transport failure, got {err:?}"
         );
         assert!(
@@ -859,7 +859,7 @@ fn clone_aborts_on_silent_stall_with_low_speed_env_and_bundle_cache() {
             .expect_err("silent clone stall must fail");
             stop.store(true, Ordering::Relaxed);
             assert!(
-                matches!(err, CloneError::Remote(_) | CloneError::Library(_)),
+                matches!(err, CloneError::Remote(_) | CloneError::Nested(_)),
                 "expected transport failure, got {err:?}"
             );
             assert!(!err.is_cancelled());

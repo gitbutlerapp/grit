@@ -26,6 +26,7 @@ use thiserror::Error;
 
 use crate::credentials::Credential;
 use crate::error::Error;
+use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
 
 /// Host name of GitHub's web and Git endpoints.
@@ -305,7 +306,10 @@ impl<'a> DeviceFlow<'a> {
                 body.as_bytes(),
                 None,
             )
-            .map_err(|source| DeviceFlowError::Http { step, source })?;
+            .map_err(|source| DeviceFlowError::Http {
+                step,
+                source: source.into(),
+            })?;
         Ok(parse_form(&String::from_utf8_lossy(&response)))
     }
 }
@@ -635,7 +639,7 @@ mod tests {
     #[test]
     fn transport_errors_name_the_failing_step() {
         let http = ScriptedHttp::new(vec![
-            Err(Error::Auth {
+            Err(RemoteError::Auth {
                 url: "https://github.com".to_owned(),
                 reason: crate::error::AuthFailure::Rejected,
             }),
@@ -646,7 +650,7 @@ mod tests {
             flow.request_device_code(),
             Err(DeviceFlowError::Http {
                 step: DeviceFlowStep::RequestDeviceCode,
-                source: Error::Auth { .. },
+                source: RemoteError::Auth { .. },
             })
         ));
         assert!(matches!(
