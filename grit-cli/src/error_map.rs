@@ -212,7 +212,7 @@ pub fn classify(err: &Error) -> ClassifiedError {
             return ClassifiedError::from_structured_cli(structured);
         }
         if first_lib.is_none() {
-            first_lib = cause.downcast_ref::<LibError>();
+            first_lib = peel_lib_error(cause);
         }
         if first_guided.is_none() {
             first_guided = guide_cause(cause);
@@ -288,9 +288,28 @@ fn classified_from_structured_error(err: &Error) -> ClassifiedError {
         })
 }
 
+/// [`std::error::Error::source`] chains may surface [`CommitError::Library`] /
+/// [`MergeError::Library`] without an outer [`LibError`] wrapper, or
+/// [`LibError::Commit`]/[`LibError::Merge`] carrying the same. Peel so the CLI classifies the
+/// inner umbrella error's stable `kind` (for example `lock_held`).
+fn peel_lib_error<'a>(cause: &'a (dyn StdError + 'static)) -> Option<&'a LibError> {
+    if let Some(LibError::Commit(CommitError::Library(boxed))) = cause.downcast_ref::<LibError>() {
+        return peel_lib_error(boxed.as_ref());
+    }
+    if let Some(LibError::Merge(MergeError::Library(boxed))) = cause.downcast_ref::<LibError>() {
+        return peel_lib_error(boxed.as_ref());
+    }
+    if let Some(CommitError::Library(boxed)) = cause.downcast_ref::<CommitError>() {
+        return peel_lib_error(boxed.as_ref());
+    }
+    if let Some(MergeError::Library(boxed)) = cause.downcast_ref::<MergeError>() {
+        return peel_lib_error(boxed.as_ref());
+    }
+    cause.downcast_ref::<LibError>()
+}
+
 fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
-    let hook = cause
-        .downcast_ref::<LibError>()
+    let hook = peel_lib_error(cause)
         .and_then(|lib| match lib {
             LibError::Hook(h) => Some(h),
             _ => None,
@@ -316,7 +335,7 @@ fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Structure
 }
 
 fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
-    match cause.downcast_ref::<LibError>()? {
+    match peel_lib_error(cause)? {
         LibError::LockHeld(lock) => Some(classified_from_structured_error(&lock_held(
             &lock.path,
             lock.holder,
@@ -326,7 +345,7 @@ fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<Classi
 }
 
 fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
-    match cause.downcast_ref::<LibError>()? {
+    match peel_lib_error(cause)? {
         LibError::HashCollision { oid } => Some(*oid),
         _ => None,
     }
@@ -347,7 +366,7 @@ fn would_overwrite_classified_from_cause(
             message.clone(),
         )));
     }
-    match cause.downcast_ref::<LibError>()? {
+    match peel_lib_error(cause)? {
         LibError::WouldOverwrite {
             reason,
             paths,
@@ -362,7 +381,7 @@ fn would_overwrite_classified_from_cause(
 }
 
 fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
-    let lib = cause.downcast_ref::<LibError>()?;
+    let lib = peel_lib_error(cause)?;
     match lib {
         LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             Some(StructuredJsonError::new(
@@ -388,9 +407,7 @@ fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Struc
 }
 
 fn cause_is_remote_unreadable(cause: &(dyn StdError + 'static)) -> bool {
-    cause
-        .downcast_ref::<LibError>()
-        .is_some_and(LibError::is_remote_unreadable)
+    peel_lib_error(cause).is_some_and(LibError::is_remote_unreadable)
         || cause
             .downcast_ref::<RemoteError>()
             .is_some_and(RemoteError::is_remote_unreadable)
@@ -543,7 +560,7 @@ fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
             _ => None,
         };
     }
-    cause.downcast_ref::<LibError>().and_then(guide_lib)
+    peel_lib_error(cause).and_then(guide_lib)
 }
 
 fn guide_push_plan(err: &PushPlanError) -> Option<Error> {

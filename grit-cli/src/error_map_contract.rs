@@ -8,7 +8,7 @@ use grit_lib::error::{AuthFailure, Error as LibError, NotARepositoryReason, Over
 use grit_lib::error::{RemoteUnreadableReason, WorktreeOperation};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
-use grit_lib::porcelain::{CommitError, MergeError};
+use grit_lib::porcelain::MergeError;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::RemoteError;
