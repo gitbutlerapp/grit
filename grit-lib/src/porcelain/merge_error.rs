@@ -86,6 +86,28 @@ pub enum MergeError {
     #[error("empty commit message")]
     ContinueEmptyMessage,
 
+    /// A pick/revert sequence is already in progress.
+    #[error("cherry-pick or revert is already in progress")]
+    ReplayAlreadyInProgress,
+
+    /// `message_override` was set while replaying more than one commit.
+    #[error("message_override is only valid when replaying a single commit")]
+    MessageOverrideNotForMultiCommit,
+
+    /// Merge or replay state on disk is incomplete for the requested operation.
+    #[error("merge state incomplete: missing {missing}")]
+    MergeStateIncomplete {
+        /// Recorded merge artifact that was expected but absent.
+        missing: &'static str,
+    },
+
+    /// A `.git/sequencer/created` journal line could not be parsed.
+    #[error("invalid sequencer created record: {detail}")]
+    SequencerCreatedParse {
+        /// What was wrong with the line.
+        detail: &'static str,
+    },
+
     /// Underlying repository, commit, or I/O failure during merge/replay.
     #[error(transparent)]
     Library(Box<Error>),
@@ -110,6 +132,10 @@ impl MergeError {
             Self::ContinueUnmergedPaths { .. } => "index_unmerged",
             Self::ContinueResolvedNotStaged { .. } => "index_unmerged",
             Self::ContinueEmptyMessage => "empty_commit_message",
+            Self::ReplayAlreadyInProgress => "operation_in_progress",
+            Self::MessageOverrideNotForMultiCommit => "message",
+            Self::MergeStateIncomplete { .. } => "message",
+            Self::SequencerCreatedParse { .. } => "message",
             Self::Library(e) => e.kind_name(),
         }
     }

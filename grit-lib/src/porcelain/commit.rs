@@ -799,8 +799,8 @@ fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Re
 pub fn normalize_commit_message(raw: &str) -> Result<String> {
     let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
     let processed = process(normalized.as_bytes(), &Mode::Default);
-    let message = String::from_utf8(processed)
-        .map_err(|_| Error::Message("invalid commit message".into()))?;
+    let message =
+        String::from_utf8(processed).map_err(|_| Error::from(CommitError::InvalidCommitMessage))?;
     if message.is_empty() {
         return Err(CommitError::EmptyCommitMessage.into());
     }
@@ -1686,7 +1686,7 @@ fn create_commit_with_index(
 
     if !req.amend && grit_rebase_conflict_stop_active(repo.git_dir()) {
         persist_rebase_stopped_head_if_missing(repo)
-            .map_err(|e| Error::Message(format!("rebase resolution commit: {e}")))?;
+            .map_err(|e| CommitError::Library(Box::new(Error::from(e))))?;
     }
 
     let message_source = if req.message_from_merge {
@@ -2013,7 +2013,7 @@ fn create_commit_with_index(
 ///
 /// # Errors
 ///
-/// Propagates change-id generation failures as [`Error::Message`].
+/// Propagates change-id generation failures as [`CommitError::ChangeId`].
 pub(crate) fn stamp_change_id_on_new_commit(
     repo: &Repository,
     policy: &ChangeIdPolicy,
@@ -2025,7 +2025,7 @@ pub(crate) fn stamp_change_id_on_new_commit(
             repo.odb().hash_algo(),
             repo.change_id_generator().as_ref(),
         )
-        .map_err(|e| Error::Message(format!("change id: {e}")))?
+        .map_err(CommitError::ChangeId)?
     {
         set_change_id(data, &id);
     }
@@ -3367,7 +3367,10 @@ mod tests {
             &crate::progress::NeverCancel,
         )
         .unwrap_err();
-        assert!(matches!(err, Error::Commit(CommitError::PartialCommitDuringMerge)));
+        assert!(matches!(
+            err,
+            Error::Commit(CommitError::PartialCommitDuringMerge)
+        ));
     }
 
     fn system_git(root: &Path, args: &[&str]) -> String {

@@ -52,6 +52,20 @@ The integration test builds non-conflicting `ours` / `theirs` branches, asserts 
 
 [`integrate_branch`](rustdoc:grit_lib::porcelain::merge::integrate_branch) merges one commit into a local branch and updates the index and work tree (or records merge-in-progress state on conflicts). Pass `into_ref` as either a full ref (for example `refs/heads/main`) or a short branch name (for example `main` or `feature/topic`); short names map to `refs/heads/{name}` and missing branches return [`Error::BranchNotFound`](rustdoc:grit_lib::error::Error::BranchNotFound). The `label` argument names the other side in the default merge message (`Merge {label}` unless [`MergeOptions::message`](rustdoc:grit_lib::porcelain::merge::MergeOptions::message) overrides it) and in branch reflog lines (`merge {label}`, or `merge {label}: fast-forward` on fast-forward).
 
+## Typed merge errors ([`MergeError`](rustdoc:grit_lib::porcelain::MergeError))
+
+Branch integration, [`continue_merge`](rustdoc:grit_lib::porcelain::merge::continue_merge), and replay sequencing return [`Error::Merge`](rustdoc:grit_lib::error::Error::Merge) wrapping [`MergeError`](rustdoc:grit_lib::porcelain::MergeError). Stable [`kind_name`](rustdoc:grit_lib::porcelain::MergeError::kind_name) slugs match the CLI `--json` error `kind` field (for example `not_fast_forward`, `unrelated_histories`, `continue_unmerged_paths`, `operation_in_progress`). Common variants:
+
+| Variant | When |
+| --- | --- |
+| [`NotFastForward`](rustdoc:grit_lib::porcelain::MergeError::NotFastForward) | [`FastForwardPolicy::Only`](rustdoc:grit_lib::porcelain::merge::FastForwardPolicy::Only) but histories diverged |
+| [`UnrelatedHistories`](rustdoc:grit_lib::porcelain::MergeError::UnrelatedHistories) | No merge base and `allow_unrelated` is false |
+| [`ContinueUnmergedPaths`](rustdoc:grit_lib::porcelain::MergeError::ContinueUnmergedPaths) | [`continue_merge`](rustdoc:grit_lib::porcelain::merge::continue_merge) with conflict stages still in the index |
+| [`NoMergeInProgress`](rustdoc:grit_lib::porcelain::MergeError::NoMergeInProgress) | Continue/abort/skip with no active merge |
+| [`OperationInProgress`](rustdoc:grit_lib::porcelain::MergeError::OperationInProgress) | Another paused operation (merge, pick, rebase, …) blocks the call |
+
+Repository read, object, and I/O failures surface as [`MergeError::Library`](rustdoc:grit_lib::porcelain::MergeError::Library) wrapping the umbrella [`Error`](rustdoc:grit_lib::error::Error).
+
 ## Integrating into detached `HEAD` (`integrate_detached_head`)
 
 [`integrate_detached_head`](rustdoc:grit_lib::porcelain::merge::integrate_detached_head) and [`integrate_detached_head_with`](rustdoc:grit_lib::porcelain::merge::integrate_detached_head_with) take the current detached tip (`into_oid`) instead of a branch ref. Outcomes, conflict handling, hooks, and [`MergeOptions`](rustdoc:grit_lib::porcelain::merge::MergeOptions) match [`integrate_branch_with`](rustdoc:grit_lib::porcelain::merge::integrate_branch_with), but only `HEAD` moves on a fast-forward or merge commit; no `refs/heads/*` ref is updated. Reflog lines use `merge {label}` / `merge {label}: fast-forward` on `HEAD` only.

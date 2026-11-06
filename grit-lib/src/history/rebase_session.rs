@@ -1317,12 +1317,10 @@ fn write_persisted_state(
     let dir = git_dir.join("rebase-merge");
     fs::create_dir_all(&dir).map_err(map_lib)?;
     let lock_path = dir.join("grit-plan.lock");
-    let mut lock = LockFile::acquire(&lock_path, LockWait::Immediately)
-        .map_err(|e| RebaseSessionError::Library(crate::error::Error::Message(e.to_string())))?;
-    let body = serde_json::to_vec_pretty(state).map_err(map_json)?;
+    let mut lock = LockFile::acquire(&lock_path, LockWait::Immediately).map_err(map_lib)?;
+    let body = serde_json::to_vec_pretty(state).map_err(map_persist_json)?;
     lock.write_all(&body).map_err(map_lib)?;
-    lock.commit_to(&dir.join("grit-plan"))
-        .map_err(|e| RebaseSessionError::Library(crate::error::Error::Message(e.to_string())))?;
+    lock.commit_to(&dir.join("grit-plan")).map_err(map_lib)?;
     Ok(())
 }
 
@@ -1800,8 +1798,24 @@ fn replan_rewrite_options(state: &LoadedState) -> RewriteOptions {
     state.rewrite.clone()
 }
 
-fn map_json(err: serde_json::Error) -> RebaseSessionError {
-    RebaseSessionError::Library(crate::error::Error::Message(err.to_string()))
+fn map_persist_json(err: serde_json::Error) -> RebaseSessionError {
+    RebaseSessionError::History(HistoryError::UndoRecordWrite {
+        message: err.to_string(),
+    })
+}
+
+impl From<RebaseSessionError> for crate::error::Error {
+    fn from(err: RebaseSessionError) -> Self {
+        use crate::porcelain::CommitError;
+        match err {
+            RebaseSessionError::Library(e) => e,
+            RebaseSessionError::History(h) => Self::History(h),
+            RebaseSessionError::NothingToCommit => Self::Commit(CommitError::NothingToCommit),
+            other => Self::History(HistoryError::Planning {
+                message: other.to_string(),
+            }),
+        }
+    }
 }
 
 #[cfg(test)]

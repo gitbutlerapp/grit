@@ -116,7 +116,11 @@ fn tree_to_index_entries_with_protect(
 ) -> Result<Vec<IndexEntry>> {
     let obj = repo.odb().read(oid)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::Message(format!("expected tree, got {}", obj.kind)));
+        return Err(Error::UnexpectedObjectKind {
+            oid: *oid,
+            expected: ObjectKind::Tree,
+            actual: obj.kind,
+        });
     }
     let entries = parse_tree(&obj.data)?;
     let mut result = Vec::new();
@@ -568,7 +572,7 @@ pub enum MergeDryRunPlan {
 ///
 /// # Errors
 ///
-/// Propagates object read and merge failures. Returns [`Error::Message`] when histories are
+/// Propagates object read and merge failures. Returns [`MergeError::UnrelatedHistories`] when histories are
 /// unrelated and [`MergeOptions::allow_unrelated`] is false.
 pub fn plan_branch_merge(
     repo: &Repository,
@@ -608,9 +612,11 @@ pub fn plan_branch_merge(
             parents: vec![into_oid, other_oid],
         }),
         MergePrediction::Conflicts { conflicts } => Ok(MergeDryRunPlan::Conflicts { conflicts }),
-        MergePrediction::Unrelated => Err(Error::Message(format!(
-            "'{label}' has no common history with the current branch"
-        ))),
+        MergePrediction::Unrelated => Err(MergeError::UnrelatedHistories {
+            ours: into_oid,
+            theirs: other_oid,
+        }
+        .into()),
     }
 }
 
@@ -921,7 +927,7 @@ pub enum IntegrateBranchOutcome {
 /// Propagates merge, checkout, ref, and I/O failures. Returns [`Error::WouldOverwrite`]
 /// when local or untracked paths would be overwritten by the merge tree, and
 /// [`Error::DirtyWorktree`] when the worktree is not clean but no specific paths were
-/// collected. Returns [`Error::Message`] when the histories are unrelated. Returns
+/// collected. Returns [`MergeError::UnrelatedHistories`] when the histories are unrelated. Returns
 /// [`Error::RefStore`] with [`crate::refs::store::RefStoreError::ExpectedMismatch`] when
 /// the canonical branch ref no longer points at `into_oid` (checked before the worktree
 /// is touched, and again when the ref moves).
@@ -1185,9 +1191,11 @@ fn integrate_at_tip_without_hooks(
         Some(base) => base,
         None if options.allow_unrelated => MergeBase::empty(repo)?,
         None => {
-            return Err(Error::Message(format!(
-                "'{label}' has no common history with the current branch"
-            )));
+            return Err(MergeError::UnrelatedHistories {
+                ours: into_oid,
+                theirs: other_oid,
+            }
+            .into());
         }
     };
 
@@ -1276,8 +1284,11 @@ fn integrate_at_tip_without_hooks(
         }
         MergeCommitMode::Commit => {
             drop(lock);
-            let preflight = commit_preflight
-                .ok_or_else(|| Error::Message("merge commit preflight missing".into()))?;
+            let preflight = commit_preflight.ok_or_else(|| {
+                Error::from(MergeError::MergeStateIncomplete {
+                    missing: "merge commit preflight",
+                })
+            })?;
             let config = preflight.config;
             let (tree, message) = run_merge_commit_hooks(
                 repo,
@@ -1792,8 +1803,11 @@ fn merge_abort_append_unmerged_tree_checkouts(
 }
 
 fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
-    let orig = read_orig_head_for_repository(repo)?
-        .ok_or_else(|| Error::Message("merge in progress but ORIG_HEAD is missing".into()))?;
+    let orig = read_orig_head_for_repository(repo)?.ok_or_else(|| {
+        Error::from(MergeError::MergeStateIncomplete {
+            missing: "ORIG_HEAD",
+        })
+    })?;
     let head_tree = repo.odb().commit_tree(&orig)?;
 
     let old_index = repo.load_index()?;
@@ -2096,9 +2110,7 @@ fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()>
     let current = match repo.refs().read_raw("HEAD")? {
         Some(RawRef::Direct(oid)) => Some(oid),
         Some(RawRef::Symbolic(_)) => {
-            return Err(Error::Message(
-                "HEAD points at a branch; use integrate_branch".into(),
-            ));
+            return Err(MergeError::Library(Box::new(Error::InvalidHead)).into());
         }
         None => None,
     };

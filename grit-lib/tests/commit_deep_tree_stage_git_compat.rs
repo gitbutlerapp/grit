@@ -9,6 +9,7 @@ use grit_lib::porcelain::commit::{
     commit_with_scope, commit_worktree, create_commit, CommitRequest, CommitScope, HookPolicy,
 };
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::porcelain::CommitError;
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -113,7 +114,10 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
     )
     .expect_err("clean tree");
     assert!(
-        matches!(err, grit_lib::error::CommitError::NothingToCommit),
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::NothingToCommit)
+        ),
         "expected NothingToCommit, got {err:?}"
     );
 }

@@ -11,7 +11,6 @@ use std::time::{Duration, SystemTime};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
-use grit_lib::porcelain::MergeError;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::maintenance::{
     drop_promised_blobs, gc, gc_auto, offload_blobs, AutoGcOutcome, DropPromisedBlobsOptions,
@@ -23,6 +22,7 @@ use grit_lib::objects::pack::{clear_pack_cache, read_pack_index, read_packed_del
 use grit_lib::objects::pack_objects::{build_pack_from_send_list, PackBuildOptions};
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::porcelain::MergeError;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::clone::{clone, CloneOptions};

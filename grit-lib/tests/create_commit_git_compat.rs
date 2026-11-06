@@ -572,5 +572,8 @@ fn amend_unborn_errors() {
         &grit_lib::progress::NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(err, grit_lib::error::CommitError::AmendUnborn));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Commit(CommitError::AmendUnborn)
+    ));
 }

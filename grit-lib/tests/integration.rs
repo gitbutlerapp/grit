@@ -406,6 +406,8 @@ mod commit_hook_cancel;
 #[cfg(feature = "full-tests")]
 #[path = "commit_identity_create_git_compat.rs"]
 mod commit_identity_create_git_compat;
+#[path = "commit_merge_history_errors.rs"]
+mod commit_merge_history_errors;
 #[cfg(feature = "full-tests")]
 #[path = "commit_merge_state_git_compat.rs"]
 mod commit_merge_state_git_compat;

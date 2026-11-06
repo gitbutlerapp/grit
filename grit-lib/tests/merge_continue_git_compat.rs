@@ -312,7 +312,10 @@ fn continue_without_merge_errors() {
         &grit_lib::progress::NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(err, grit_lib::error::Error::Merge(MergeError::NoMergeInProgress)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Merge(MergeError::NoMergeInProgress)
+    ));
 }
 
 #[test]

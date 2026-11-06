@@ -189,7 +189,10 @@ fn legacy_tree_modes_status_and_commit_clean_after_git_checkout() {
     )
     .expect_err("commit");
     assert!(
-        matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit),
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::NothingToCommit)
+        ),
         "expected NothingToCommit, got {err}"
     );
 
