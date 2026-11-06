@@ -31,7 +31,7 @@ Grit-lib returns **structured errors**, not strings. Each functional area gets i
 | Branch | `BranchError` | porcelain branch |
 | Tag | `TagError` | porcelain tag |
 | Notes | `NotesError` | `notes` |
-| Index | `IndexError` | `index` |
+| Index | [`IndexError`](rustdoc:grit_lib::index::IndexError) | `index` — corrupt bytes, unmerged paths, fsmonitor/cache-tree extensions, split index, chmod, write-tree; [`kind_name`](rustdoc:grit_lib::index::IndexError::kind_name) keeps legacy slugs (`index_error`, `index_unmerged`, …) when wrapped as [`Error::Index`](rustdoc:grit_lib::error::Error::Index) |
 | Worktree | `WorktreeError` | checkout, status, add/rm/mv/restore/clean, pathspec, attributes, filters, submodules, linked worktrees, hunk selection |
 | Diff | `DiffError` | `diff`, blame, apply, rerere |
 | Revision | `RevisionError` | rev-parse, rev-list, merge-base, object filters |
