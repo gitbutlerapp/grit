@@ -55,7 +55,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::CancelToken::never(),
+        &CancelToken::never(),
     )?;
     println!(
         "staged added={} modified={} removed={}",
