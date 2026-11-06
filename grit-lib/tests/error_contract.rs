@@ -204,21 +204,22 @@ fn extract_kind_name_match_body<'a>(src: &'a str, impl_anchor: &str) -> &'a str 
 fn literal_slugs_from_kind_match(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in body.lines() {
-        if !line.contains("=>") {
-            continue;
-        }
         let trimmed = line.trim();
         if trimmed.contains("=>") && trimmed.contains("kind_name()") {
             continue;
         }
-        let Some(pos) = line.find("=> \"") else {
+        let value = if let Some(pos) = line.find("=> \"") {
+            &line[pos + 4..]
+        } else if trimmed.starts_with('"') {
+            trimmed
+        } else {
             continue;
         };
-        let after = &line[pos + 4..];
-        let Some(end) = after.find('"') else {
+        let value = value.trim_start_matches('"');
+        let Some(end) = value.find('"') else {
             continue;
         };
-        out.push(after[..end].to_owned());
+        out.push(value[..end].to_owned());
     }
     out
 }
@@ -234,9 +235,6 @@ fn expanded_kind_name_slugs() -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     for line in umbrella.lines() {
         let trimmed = line.trim();
-        if !trimmed.contains("=>") {
-            continue;
-        }
         if trimmed.contains("Self::Index(") && trimmed.contains("kind_name()") {
             for s in &index_slugs {
                 if seen.insert(s.clone()) {
@@ -245,14 +243,18 @@ fn expanded_kind_name_slugs() -> Vec<String> {
             }
             continue;
         }
-        let Some(pos) = line.find("=> \"") else {
+        let value = if let Some(pos) = line.find("=> \"") {
+            &line[pos + 4..]
+        } else if trimmed.starts_with('"') {
+            trimmed
+        } else {
             continue;
         };
-        let after = &line[pos + 4..];
-        let Some(end) = after.find('"') else {
+        let value = value.trim_start_matches('"');
+        let Some(end) = value.find('"') else {
             continue;
         };
-        let slug = after[..end].to_owned();
+        let slug = value[..end].to_owned();
         if seen.insert(slug.clone()) {
             expanded.push(slug);
         }
