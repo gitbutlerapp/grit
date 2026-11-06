@@ -92,10 +92,7 @@ fn clone_cancelled_at_start_is_classified_and_needs_cleanup() {
 
     let opts = CloneOptions::new(upstream.to_string_lossy(), dest.clone());
     let err = clone(opts, &mut NoProgress, &flag, None).expect_err("cancelled before clone");
-    assert!(matches!(
-        err,
-        CloneError::Remote(RemoteError::Cancelled)
-    ));
+    assert!(matches!(err, CloneError::Remote(RemoteError::Cancelled)));
     assert!(err.is_cancelled(), "{err:?}");
     assert!(err.should_cleanup_failed_clone(), "{err:?}");
     assert!(dest.join(".git").is_dir(), "partial clone leaves .git");

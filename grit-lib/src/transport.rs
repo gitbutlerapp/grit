@@ -1936,10 +1936,10 @@ mod tests {
             err.to_string(),
             "remote error: access denied or repository not exported: /srv/x.git"
         );
-        assert!(matches!(err, RemoteError::Fatal { .. }));
+        assert!(matches!(err, Error::Remote(RemoteError::Fatal { .. })));
         assert_eq!(
             match err {
-                RemoteError::Fatal { message } => message,
+                Error::Remote(RemoteError::Fatal { message }) => message,
                 other => panic!("expected RemoteFatal, got {other:?}"),
             },
             "access denied or repository not exported: /srv/x.git"
@@ -1955,7 +1955,10 @@ mod tests {
         pkt_line::write_line_to_vec(&mut wire, "ERR service not enabled").unwrap();
         wire.extend_from_slice(b"0000");
         let err = read_advertisement(&mut std::io::Cursor::new(wire)).expect_err("v2 ERR");
-        assert!(matches!(err, RemoteError::Fatal { message } if message == "service not enabled"));
+        assert!(matches!(
+            err,
+            Error::Remote(RemoteError::Fatal { message }) if message == "service not enabled"
+        ));
     }
 
     #[test]
@@ -1998,10 +2001,10 @@ mod tests {
         assert!(
             matches!(
                 err,
-                RemoteError::Unreadable {
+                Error::Remote(RemoteError::Unreadable {
                     reason: RemoteUnreadableReason::NoHandshake,
                     ..
-                }
+                })
             ),
             "expected NoHandshake, got {err}"
         );
@@ -2099,7 +2102,7 @@ eval "$cmd"
             )
             .expect_err("git refuses a want for an object it does not have");
             match err {
-                RemoteError::Fatal { message } => assert!(
+                Error::Remote(RemoteError::Fatal { message }) => assert!(
                     message.contains("not our ref") && message.contains(&missing),
                     "v{protocol_version}: {message}"
                 ),

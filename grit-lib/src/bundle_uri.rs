@@ -561,7 +561,7 @@ mod tests {
         }
 
         impl HttpClient for LocalBundle {
-            fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
                 unreachable!()
             }
 
@@ -572,7 +572,7 @@ mod tests {
                 _: &str,
                 _: &[u8],
                 _: Option<&str>,
-            ) -> crate::error::Result<Vec<u8>> {
+            ) -> crate::remote::RemoteResult<Vec<u8>> {
                 unreachable!()
             }
 

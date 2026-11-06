@@ -355,7 +355,7 @@ fn push_options_fail_before_writing_when_not_advertised() {
             )
             .expect_err("push options need receive.advertisePushOptions");
             assert!(
-                matches!(err, RemoteError::Library(Error::PushOptionsUnsupported)),
+                matches!(err, RemoteError::PushOptionsUnsupported),
                 "{setting:?}: {err:?}"
             );
         }

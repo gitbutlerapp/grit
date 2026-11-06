@@ -247,7 +247,7 @@ mod tests {
 
     fn fatal_message(err: Error) -> String {
         match err {
-            RemoteError::Fatal { message } => message,
+            Error::Remote(RemoteError::Fatal { message }) => message,
             other => panic!("expected RemoteFatal, got {other:?}"),
         }
     }

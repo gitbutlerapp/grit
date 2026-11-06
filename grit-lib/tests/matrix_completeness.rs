@@ -477,7 +477,11 @@ struct FakeHttpClient {
 }
 
 impl HttpClient for FakeHttpClient {
-    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> GritResult<Vec<u8>> {
+    fn get(
+        &self,
+        _url: &str,
+        _git_protocol: Option<&str>,
+    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
         if let Some(e) = &self.get_err {
             return Err(Error::Message(e.clone()));
         }
@@ -490,7 +494,7 @@ impl HttpClient for FakeHttpClient {
         _accept: &str,
         _body: &[u8],
         _git_protocol: Option<&str>,
-    ) -> GritResult<Vec<u8>> {
+    ) -> grit_lib::remote::RemoteResult<Vec<u8>> {
         if let Some(e) = &self.post_err {
             return Err(Error::Message(e.clone()));
         }
@@ -505,7 +509,7 @@ impl HttpClient for FakeHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-    ) -> GritResult<Box<dyn std::io::Read + Send>> {
+    ) -> grit_lib::remote::RemoteResult<Box<dyn std::io::Read + Send>> {
         Ok(Box::new(std::io::Cursor::new(self.post(
             url,
             content_type,
@@ -653,10 +657,10 @@ fn ssh_connect_refused_port_is_remote_unreadable_not_hang() {
     assert!(
         matches!(
             err,
-            Error::RemoteUnreadable {
+            Error::Remote(grit_lib::remote::RemoteError::Unreadable {
                 reason: RemoteUnreadableReason::NoHandshake,
                 ..
-            }
+            })
         ),
         "expected RemoteUnreadable(NoHandshake), got {err}"
     );
@@ -684,10 +688,10 @@ fn git_daemon_connect_refused_port_is_typed_error_not_hang() {
     assert!(
         matches!(
             err,
-            Error::RemoteUnreadable {
+            Error::Remote(grit_lib::remote::RemoteError::Unreadable {
                 reason: RemoteUnreadableReason::Transport { .. },
                 ..
-            }
+            })
         ),
         "expected RemoteUnreadable(Transport), got {err}"
     );

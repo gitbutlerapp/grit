@@ -1172,7 +1172,7 @@ mod tests {
             )
             .expect_err("remote side-band error");
         assert!(
-            matches!(&err, RemoteError::Fatal { message } if message == "network interrupted"),
+            matches!(&err, Error::Remote(RemoteError::Fatal { message }) if message == "network interrupted"),
             "{err:?}"
         );
         drop(recv);
@@ -1208,6 +1208,9 @@ mod tests {
         let len = std::fs::metadata(&path).expect("meta").len();
         std::fs::remove_file(&path).expect("remove");
         let err = assert_received_pack_durable(&path, len).expect_err("missing pack");
-        assert!(matches!(err, RemoteError::ReceivedPackTempMissing { .. }));
+        assert!(matches!(
+            err,
+            Error::Remote(RemoteError::ReceivedPackTempMissing { .. })
+        ));
     }
 }

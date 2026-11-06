@@ -271,7 +271,11 @@ mod tests {
     }
 
     impl HttpClient for Canned {
-        fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
+        fn get(
+            &self,
+            _url: &str,
+            _git_protocol: Option<&str>,
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!("space requests only POST")
         }
 
@@ -282,13 +286,18 @@ mod tests {
             _accept: &str,
             body: &[u8],
             _git_protocol: Option<&str>,
-        ) -> crate::error::Result<Vec<u8>> {
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             assert_eq!(content_type, JSON_CONTENT_TYPE);
             self.seen
                 .lock()
                 .unwrap()
                 .push((url.to_owned(), body.to_vec()));
-            self.answer.lock().unwrap().take().unwrap()
+            self.answer
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .map_err(RemoteError::from)
         }
     }
 
@@ -307,10 +316,10 @@ mod tests {
             "https://grithub.dev/.grit/space/example.com/widget"
         );
 
-        let refused = Canned::new(Err(RemoteError::Auth {
+        let refused = Canned::new(Err(Error::Remote(RemoteError::Auth {
             url: "https://grithub.dev".to_owned(),
             reason: crate::error::AuthFailure::Rejected,
-        }));
+        })));
         assert!(matches!(
             fetch_space(&refused, &server, "example.com/widget"),
             Err(ServerAuthError::TokenRejected)

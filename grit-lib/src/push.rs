@@ -1457,7 +1457,10 @@ mod tests {
                         &crate::progress::NeverCancel,
                     )
                     .unwrap_err();
-                    assert!(matches!(err, RemoteError::PushAtomicUnsupported), "{err:?}");
+                    assert!(
+                        matches!(err, Error::Remote(RemoteError::PushAtomicUnsupported)),
+                        "{err:?}"
+                    );
                     assert!(
                         conn.output.is_empty(),
                         "unsupported atomic push wrote bytes"
@@ -1775,7 +1778,7 @@ mod tests {
         // Server did NOT advertise push-options: typed error, not Message.
         let err = require_push_capabilities(&adv_state(true, true, false), &opts).unwrap_err();
         assert!(
-            matches!(err, RemoteError::PushOptionsUnsupported),
+            matches!(err, Error::Remote(RemoteError::PushOptionsUnsupported)),
             "expected PushOptionsUnsupported, got {err:?}"
         );
         assert_eq!(

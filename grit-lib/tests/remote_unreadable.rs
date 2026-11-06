@@ -509,10 +509,10 @@ fn messages_and_slugs_per_reason() {
             message
         );
     }
-    let without_url = Error::RemoteUnreadable {
+    let without_url = Error::Remote(RemoteError::Unreadable {
         url: None,
         reason: RemoteUnreadableReason::NoHandshake,
-    };
+    });
     assert_eq!(
         without_url.to_string(),
         "could not read from the remote: no Git protocol response"

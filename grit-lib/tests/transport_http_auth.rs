@@ -9,7 +9,7 @@
 //!   * with the RIGHT credentials → fetch/push succeed (refs + objects land, the
 //!     pack `fsck`s clean, the tracking tip matches `git rev-parse`);
 //!   * with WRONG / NO credentials → the call fails fast with the typed
-//!     [`grit_lib::error::Error::Auth`] (never a hang);
+//!     [`grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Auth { .. })`] (never a hang);
 //!   * the provider's `approve` / `reject` hooks fire as Git's would.
 //!
 //! The test skips gracefully when `git`, the `grit` binary, or the
@@ -241,7 +241,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
     opts.tags = TagMode::All;
 
     // --- 0. Sanity: the server really demands auth. An unauthenticated client
-    // must fail with the typed `Error::Auth` (NOT a hang, NOT a generic error). --
+    // must fail with the typed `Error::Remote(grit_lib::remote::RemoteError::Auth { .. })` (NOT a hang, NOT a generic error). --
     {
         let local = tmp.path().join("noauth");
         std::fs::create_dir_all(&local).unwrap();
@@ -257,8 +257,8 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         )
         .expect_err("fetch with no credentials against an authed server must fail");
         assert!(
-            matches!(&err, Error::Auth { reason, .. } if !reason.is_rejected()),
-            "expected a typed Error::Auth without credentials, got: {err:?}"
+            matches!(&err, Error::Remote(grit_lib::remote::RemoteError::Auth { reason, .. }) if !reason.is_rejected()),
+            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth { .. }) without credentials, got: {err:?}"
         );
     }
 
@@ -277,7 +277,10 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
             &mut NullProgress,
         )
         .expect_err("fetch with embedded wrong creds in URL must fail");
-        assert!(matches!(err, Error::Auth { .. }));
+        assert!(matches!(
+            err,
+            Error::Remote(grit_lib::remote::RemoteError::Auth { .. })
+        ));
         let msg = err.to_string();
         assert!(
             !msg.contains("wrong-embedded-pass"),
@@ -312,12 +315,12 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         assert!(
             matches!(
                 err,
-                Error::Auth {
+                Error::Remote(grit_lib::remote::RemoteError::Auth {
                     reason: AuthFailure::Rejected,
                     ..
-                }
+                })
             ),
-            "expected a typed Error::Auth for wrong credentials, got: {err:?}"
+            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth { .. }) for wrong credentials, got: {err:?}"
         );
         let msg = err.to_string();
         assert!(
@@ -477,10 +480,10 @@ fn fetch_missing_repo_with_valid_credentials_does_not_reject_them() {
     assert!(
         matches!(
             err,
-            Error::RemoteUnreadable {
+            Error::Remote(grit_lib::remote::RemoteError::Unreadable {
                 reason: RemoteUnreadableReason::HttpStatus { status: 404 },
                 ..
-            }
+            })
         ),
         "expected HTTP 404 remote_unreadable, got: {err:?}"
     );
@@ -567,8 +570,8 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         )
         .expect_err("push with no credentials against an authed server must fail");
         assert!(
-            matches!(&err, Error::Auth { reason, .. } if !reason.is_rejected()),
-            "expected a typed Error::Auth for an unauthenticated push, got: {err:?}"
+            matches!(&err, Error::Remote(grit_lib::remote::RemoteError::Auth { reason, .. }) if !reason.is_rejected()),
+            "expected a typed Error::Remote(grit_lib::remote::RemoteError::Auth { .. }) for an unauthenticated push, got: {err:?}"
         );
         assert!(
             resolve_ref(&bare, "refs/heads/main").is_err(),
@@ -1043,10 +1046,10 @@ fn wrong_credentials_in_the_url_are_rejected_without_asking_askpass() {
     assert!(
         matches!(
             &err,
-            Error::Auth {
+            Error::Remote(grit_lib::remote::RemoteError::Auth {
                 reason: AuthFailure::Rejected,
                 ..
-            }
+            })
         ),
         "expected a rejected-credentials error, got: {err:?}"
     );
@@ -1154,10 +1157,10 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
     assert!(
         matches!(
             &err,
-            RemoteError::Library(Error::Auth {
+            RemoteError::Auth {
                 reason: AuthFailure::Rejected,
                 ..
-            })
+            }
         ),
         "expected the push to report rejected credentials, got: {err:?}"
     );
@@ -1307,10 +1310,10 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
     assert!(
         matches!(
             &err,
-            RemoteError::Library(Error::Auth {
+            RemoteError::Auth {
                 reason: AuthFailure::Rejected,
                 ..
-            })
+            }
         ),
         "{err:?}"
     );

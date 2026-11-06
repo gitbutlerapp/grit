@@ -60,6 +60,7 @@ use crate::environment::Environment;
 use crate::error::{AuthFailure, Error, RemoteUnreadableReason, Result};
 use crate::progress::Cancel;
 use crate::protocol::client_git_protocol_header_from_config;
+use crate::remote::RemoteError;
 use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
 
@@ -78,10 +79,10 @@ fn repository_url_for_display(url: &str) -> String {
 }
 
 fn auth_error(url: &str, reason: AuthFailure) -> Error {
-    RemoteError::Auth {
+    Error::Remote(RemoteError::Auth {
         url: repository_url_for_display(url),
         reason,
-    }
+    })
 }
 
 use super::{
@@ -1241,7 +1242,7 @@ impl HttpClient for UreqHttpClient {
         accept: &str,
         body: &mut dyn Read,
         git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> crate::remote::RemoteResult<Box<dyn Read + Send>> {
         let auth = self.auth_header_for_url(url);
         let result = self
             .post_request(
@@ -1253,19 +1254,27 @@ impl HttpClient for UreqHttpClient {
             )
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
-            Ok(resp) => open_response_body(resp, &self.effective_timeouts())?,
-            Err(e) => return Err(map_ureq_transport_error(url, e, &self.effective_timeouts())),
+            Ok(resp) => {
+                open_response_body(resp, &self.effective_timeouts()).map_err(RemoteError::from)?
+            }
+            Err(e) => {
+                return Err(RemoteError::from(map_ureq_transport_error(
+                    url,
+                    e,
+                    &self.effective_timeouts(),
+                )));
+            }
         };
         self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
         self.save_response_cookies(&head.set_cookie);
         if head.status == 401 {
             drain_response_body(reader);
             self.clear_auth_header();
-            return Err(auth_error(url, AuthFailure::Rejected));
+            return Err(auth_error(url, AuthFailure::Rejected).into());
         }
         if head.status >= 400 {
             drain_response_body(reader);
-            return Err(http_status_error(url, head.status));
+            return Err(http_status_error(url, head.status).into());
         }
         Ok(Box::new(reader))
     }
@@ -1494,10 +1503,10 @@ fn map_http_read_error(url: &str, err: std::io::Error, timeouts: &HttpTransportT
 }
 
 fn http_status_error(url: &str, status: u16) -> Error {
-    Error::remote_unreadable(
-        repository_url_for_display(url),
-        RemoteUnreadableReason::HttpStatus { status },
-    )
+    Error::Remote(RemoteError::Unreadable {
+        url: Some(repository_url_for_display(url)),
+        reason: RemoteUnreadableReason::HttpStatus { status },
+    })
 }
 
 // ---------------------------------------------------------------------------

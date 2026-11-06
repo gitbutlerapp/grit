@@ -549,7 +549,12 @@ fn is_auth_error(err: &anyhow::Error) -> bool {
         || err.chain().any(|cause| {
             cause
                 .downcast_ref::<grit_lib::error::Error>()
-                .is_some_and(|e| matches!(e, grit_lib::error::Error::Auth { .. }))
+                .is_some_and(|e| {
+                    matches!(
+                        e,
+                        grit_lib::error::Error::Remote(grit_lib::remote::RemoteError::Auth { .. })
+                    )
+                })
         })
 }
 

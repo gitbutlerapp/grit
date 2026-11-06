@@ -203,7 +203,10 @@ fn unshallow_on_complete_repo_errors_typed() {
         opts
     })
     .expect_err("unshallow on full repo");
-    assert!(matches!(err, Error::FetchUnshallowNotShallow));
+    assert!(matches!(
+        err,
+        Error::Remote(grit_lib::remote::RemoteError::FetchUnshallowNotShallow)
+    ));
 }
 
 fn daemon_free_port() -> u16 {

@@ -25,7 +25,7 @@ use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::serve::{receive_pack, ReceivePolicy, ServeOptions};
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::transport::http::HttpClient;
-use grit_lib::remote::Remote;
+use grit_lib::remote::{Remote, RemoteError, RemoteResult};
 use grit_lib::repo::{InitOptions, Repository};
 
 /// Deterministic incompressible bytes, so blobs keep the pack large.
@@ -340,7 +340,7 @@ impl InProcessServer {
         Repository::open(&self.repo_dir, &RepositoryOptions::empty())
     }
 
-    fn serve(&self, body: &[u8]) -> Result<Vec<u8>> {
+    fn serve(&self, body: &[u8]) -> RemoteResult<Vec<u8>> {
         let probe = body == b"0000";
         let hold = (!probe)
             .then(|| self.hold.lock().unwrap_or_else(|e| e.into_inner()).take())
@@ -367,9 +367,10 @@ impl InProcessServer {
 }
 
 impl HttpClient for InProcessServer {
-    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> Result<Vec<u8>> {
+    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> RemoteResult<Vec<u8>> {
         let mut out = Vec::new();
-        pkt_line::write_line_to_vec(&mut out, "# service=git-receive-pack")?;
+        pkt_line::write_line_to_vec(&mut out, "# service=git-receive-pack")
+            .map_err(|e| RemoteError::Nested(Box::new(Error::from(e))))?;
         out.extend_from_slice(b"0000");
         let opts = ServeOptions {
             stateless_rpc: true,
@@ -394,7 +395,7 @@ impl HttpClient for InProcessServer {
         _accept: &str,
         body: &[u8],
         _git_protocol: Option<&str>,
-    ) -> Result<Vec<u8>> {
+    ) -> RemoteResult<Vec<u8>> {
         self.serve(body)
     }
 
@@ -405,7 +406,7 @@ impl HttpClient for InProcessServer {
         _accept: &str,
         body: &mut dyn Read,
         _git_protocol: Option<&str>,
-    ) -> Result<Box<dyn Read + Send>> {
+    ) -> RemoteResult<Box<dyn Read + Send>> {
         let mut got = Vec::new();
         let mut buf = vec![0u8; 64 * 1024];
         let end = loop {
@@ -429,7 +430,9 @@ impl HttpClient for InProcessServer {
             let _ = tx.send(end);
         }
         if failed {
-            return Err(Error::Message("request body did not finish".to_owned()));
+            return Err(RemoteError::Nested(Box::new(Error::Message(
+                "request body did not finish".to_owned(),
+            ))));
         }
         Ok(Box::new(Cursor::new(self.serve(&got)?)))
     }

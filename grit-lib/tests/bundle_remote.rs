@@ -152,12 +152,12 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
     assert!(
         matches!(
             err,
-            grit_lib::remote::RemoteError::Library(grit_lib::error::Error::FetchRefspec(
+            grit_lib::remote::RemoteError::FetchRefspec(
                 grit_lib::remote::fetch_request::FetchRefspecError::SourceNotFound {
                     ref ref_name,
                     ..
                 }
-            )) if ref_name == "HEAD"
+            ) if ref_name == "HEAD"
         ),
         "unexpected error: {err:?}"
     );

@@ -465,10 +465,10 @@ fn ssh_connect_delim_only_advertisement_is_remote_unreadable() {
         tmp.path().join("ignored.git").display()
     );
     match transport.connect(&url, Service::UploadPack, &connect_opts_v0()) {
-        Err(Error::RemoteUnreadable {
+        Err(Error::Remote(grit_lib::remote::RemoteError::Unreadable {
             reason: RemoteUnreadableReason::NoHandshake,
             ..
-        }) => {}
+        })) => {}
         Ok(_) => panic!("delim-only peer must not complete handshake"),
         Err(other) => panic!("delim-only peer must not complete handshake: {other}"),
     }

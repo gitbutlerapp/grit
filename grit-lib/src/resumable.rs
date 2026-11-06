@@ -802,7 +802,7 @@ mod tests {
     }
 
     impl HttpClient for FileServer {
-        fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
         fn post(
@@ -812,7 +812,7 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::error::Result<Vec<u8>> {
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
         fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
@@ -1088,10 +1088,11 @@ mod tests {
     #[test]
     fn auth_failure_does_not_retry_the_download() {
         use crate::error::{AuthFailure, Error};
+        use crate::remote::RemoteError;
 
         struct AuthClient;
         impl HttpClient for AuthClient {
-            fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
                 unreachable!()
             }
             fn post(
@@ -1101,14 +1102,14 @@ mod tests {
                 _: &str,
                 _: &[u8],
                 _: Option<&str>,
-            ) -> crate::error::Result<Vec<u8>> {
+            ) -> crate::remote::RemoteResult<Vec<u8>> {
                 unreachable!()
             }
             fn send(&self, _: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
-                Err(RemoteError::Auth {
+                Err(Error::Remote(RemoteError::Auth {
                     url: "http://h/b".to_owned(),
                     reason: AuthFailure::Rejected,
-                })
+                }))
             }
         }
 
@@ -1181,7 +1182,7 @@ mod tests {
     }
 
     impl HttpClient for TusServer {
-        fn get(&self, _: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
         fn post(
@@ -1191,7 +1192,7 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::error::Result<Vec<u8>> {
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
         fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {

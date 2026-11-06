@@ -72,10 +72,10 @@ fn html_info_refs_body_is_not_git_server() {
     let err = discover_upload_pack_from_body(body).expect_err("html must fail");
     assert!(matches!(
         err,
-        RemoteError::Unreadable {
+        Error::Remote(RemoteError::Unreadable {
             url: None,
             reason: RemoteUnreadableReason::NotGitServer { status: 200, .. },
-        }
+        })
     ));
     assert_eq!(
         err.to_string(),
@@ -178,7 +178,7 @@ struct MockHttp {
 }
 
 impl HttpClient for MockHttp {
-    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
+    fn get(&self, _url: &str, _git_protocol: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
         Ok(self.body.clone())
     }
 
@@ -189,7 +189,7 @@ impl HttpClient for MockHttp {
         _accept: &str,
         _body: &[u8],
         _git_protocol: Option<&str>,
-    ) -> crate::error::Result<Vec<u8>> {
+    ) -> crate::remote::RemoteResult<Vec<u8>> {
         Ok(Vec::new())
     }
 
@@ -214,7 +214,7 @@ fn sample_smart_advertisement() -> Vec<u8> {
 
 fn remote_fatal_message(err: crate::error::Error) -> String {
     match err {
-        crate::error::RemoteError::Fatal { message } => message,
+        crate::error::Error::Remote(crate::remote::RemoteError::Fatal { message }) => message,
         other => panic!("expected RemoteError::Fatal, got {other:?}"),
     }
 }

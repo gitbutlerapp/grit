@@ -563,9 +563,18 @@ mod tests {
     }
 
     impl HttpClient for Canned {
-        fn get(&self, url: &str, _git_protocol: Option<&str>) -> Result<Vec<u8>> {
+        fn get(
+            &self,
+            url: &str,
+            _git_protocol: Option<&str>,
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             self.seen.lock().unwrap().push(url.to_owned());
-            self.answer.lock().unwrap().take().unwrap()
+            self.answer
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .map_err(RemoteError::from)
         }
 
         fn post(
@@ -575,7 +584,7 @@ mod tests {
             _accept: &str,
             _body: &[u8],
             _git_protocol: Option<&str>,
-        ) -> Result<Vec<u8>> {
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!("identity lookups only GET")
         }
     }
@@ -602,10 +611,10 @@ mod tests {
     fn identity_failures_are_typed() {
         let server = ServerUrl::parse("http://127.0.0.1:8080").unwrap();
 
-        let rejected = Canned::new(Err(RemoteError::Auth {
+        let rejected = Canned::new(Err(Error::Remote(RemoteError::Auth {
             url: "http://127.0.0.1:8080".to_owned(),
             reason: crate::error::AuthFailure::Rejected,
-        }));
+        })));
         assert!(matches!(
             fetch_identity(&rejected, &server),
             Err(ServerAuthError::TokenRejected)
@@ -640,7 +649,11 @@ mod tests {
     }
 
     impl HttpClient for Scripted {
-        fn get(&self, _url: &str, _git_protocol: Option<&str>) -> Result<Vec<u8>> {
+        fn get(
+            &self,
+            _url: &str,
+            _git_protocol: Option<&str>,
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!("the login flow only POSTs")
         }
 
@@ -651,13 +664,18 @@ mod tests {
             _accept: &str,
             body: &[u8],
             _git_protocol: Option<&str>,
-        ) -> Result<Vec<u8>> {
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             assert_eq!(content_type, "application/json");
             self.seen
                 .lock()
                 .unwrap()
                 .push((url.to_owned(), body.to_vec()));
-            self.answers.lock().unwrap().pop().unwrap()
+            self.answers
+                .lock()
+                .unwrap()
+                .pop()
+                .unwrap()
+                .map_err(RemoteError::from)
         }
     }
 
@@ -796,10 +814,10 @@ mod tests {
             );
         }
 
-        let challenged = Scripted::new(vec![Err(RemoteError::Auth {
+        let challenged = Scripted::new(vec![Err(Error::Remote(RemoteError::Auth {
             url: "https://gitlab.example.com".to_owned(),
             reason: crate::error::AuthFailure::NoCredentialProvider,
-        })]);
+        }))]);
         assert!(matches!(
             LoginFlow::new(&challenged, &server).start(),
             Err(ServerAuthError::NotGritServer(_))

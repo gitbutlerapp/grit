@@ -25,6 +25,7 @@ use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use crate::remote::RemoteError;
 use crate::resumable::{resolve_url, ResumableError, TusUpload};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
 
@@ -207,8 +208,12 @@ impl Drop for SpooledPack {
     }
 }
 
-fn resumable(e: ResumableError) -> Error {
-    Error::from(Box::new(e))
+fn resumable(e: ResumableError) -> RemoteError {
+    RemoteError::Resumable(Box::new(e))
+}
+
+fn remote_from_err(e: Error) -> RemoteError {
+    RemoteError::from(e)
 }
 
 /// Upload the session's bundle to `endpoint` (resuming an earlier upload),
@@ -225,14 +230,16 @@ pub(crate) fn push(
     sent_refs: &[&str],
     sideband: bool,
     progress: &mut dyn Progress,
-) -> Result<Vec<u8>> {
+) -> crate::remote::RemoteResult<Vec<u8>> {
     let bundle = session.bundle_path();
-    let length = std::fs::metadata(&bundle)?.len();
+    let length = std::fs::metadata(&bundle)
+        .map_err(|e| remote_from_err(Error::Io(e)))?
+        .len();
     let mut upload = match session.saved_upload() {
         Some(u) if u.length == length && u.offset(client).map_err(resumable)?.is_some() => u,
         _ => TusUpload::create(client, endpoint, length).map_err(resumable)?,
     };
-    session.save_upload(&upload)?;
+    session.save_upload(&upload).map_err(remote_from_err)?;
     match upload.send_file(client, &bundle, progress) {
         Ok(()) => {}
         // The server forgot the upload (it expires): start a new one, once.
@@ -240,7 +247,7 @@ pub(crate) fn push(
             status: 404 | 410, ..
         }) => {
             upload = TusUpload::create(client, endpoint, length).map_err(resumable)?;
-            session.save_upload(&upload)?;
+            session.save_upload(&upload).map_err(remote_from_err)?;
             upload
                 .send_file(client, &bundle, progress)
                 .map_err(resumable)?;
@@ -254,7 +261,7 @@ pub(crate) fn push(
         .header("Accept", "application/x-git-receive-pack-result")
         .body(commands)
         .long_running();
-    let response = client.send(&request)?;
+    let response = client.send(&request).map_err(remote_from_err)?;
     if !response.is_success() {
         let status = response.status;
         let detail = response
@@ -272,7 +279,8 @@ pub(crate) fn push(
         sent_refs,
         sideband,
         &crate::progress::NeverCancel,
-    )?;
+    )
+    .map_err(remote_from_err)?;
     session.remove();
     Ok(raw)
 }
@@ -315,10 +323,17 @@ mod tests {
     }
 
     impl HttpClient for Server {
-        fn get(&self, _: &str, _: Option<&str>) -> Result<Vec<u8>> {
+        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
-        fn post(&self, _: &str, _: &str, _: &str, _: &[u8], _: Option<&str>) -> Result<Vec<u8>> {
+        fn post(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &[u8],
+            _: Option<&str>,
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
         fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {

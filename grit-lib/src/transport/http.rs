@@ -1096,9 +1096,10 @@ fn get_interruptible<C: HttpClient + Clone + 'static>(
     cancel: &dyn Cancel,
     owner: &dyn Cancel,
     stack_watch: &std::sync::atomic::AtomicBool,
-) -> Result<Vec<u8>> {
+) -> crate::remote::RemoteResult<Vec<u8>> {
     get_with_final_url_interruptible(client, url, git_protocol, cancel, owner, stack_watch)
         .map(|(body, _)| body)
+        .map_err(RemoteError::from)
 }
 
 fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(

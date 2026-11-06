@@ -473,7 +473,11 @@ mod tests {
     }
 
     impl HttpClient for ScriptedHttp {
-        fn get(&self, url: &str, _git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
+        fn get(
+            &self,
+            url: &str,
+            _git_protocol: Option<&str>,
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             panic!("unexpected GET {url}")
         }
 
@@ -484,7 +488,7 @@ mod tests {
             accept: &str,
             body: &[u8],
             _git_protocol: Option<&str>,
-        ) -> crate::error::Result<Vec<u8>> {
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             assert_eq!(content_type, FORM_CONTENT_TYPE);
             assert_eq!(accept, FORM_CONTENT_TYPE);
             self.requests.lock().unwrap().push((
@@ -497,6 +501,7 @@ mod tests {
                 .pop_front()
                 .expect("scripted response")
                 .map(String::into_bytes)
+                .map_err(RemoteError::from)
         }
     }
 
@@ -639,10 +644,10 @@ mod tests {
     #[test]
     fn transport_errors_name_the_failing_step() {
         let http = ScriptedHttp::new(vec![
-            Err(RemoteError::Auth {
+            Err(Error::Remote(RemoteError::Auth {
                 url: "https://github.com".to_owned(),
                 reason: crate::error::AuthFailure::Rejected,
-            }),
+            })),
             Err(Error::Message("offline".to_owned())),
         ]);
         let flow = DeviceFlow::new(&http, "id");
@@ -650,14 +655,14 @@ mod tests {
             flow.request_device_code(),
             Err(DeviceFlowError::Http {
                 step: DeviceFlowStep::RequestDeviceCode,
-                source: RemoteError::Auth { .. },
+                source: Error::Remote(RemoteError::Auth { .. }),
             })
         ));
         assert!(matches!(
             flow.poll(&device(5, 900), secs(5)),
             Err(DeviceFlowError::Http {
                 step: DeviceFlowStep::PollToken,
-                source: Error::Message(_),
+                source: Error::Message(_) | Error::Remote(_),
             })
         ));
     }

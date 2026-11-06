@@ -1790,7 +1790,10 @@ mod tests {
             .fill(&input)
             .expect_err("no helper");
         assert!(
-            matches!(&err, RemoteError::CredentialsUnavailable { helpers } if helpers.is_empty()),
+            matches!(
+                &err,
+                Error::Remote(RemoteError::CredentialsUnavailable { helpers }) if helpers.is_empty()
+            ),
             "{err:?}"
         );
 

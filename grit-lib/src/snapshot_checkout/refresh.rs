@@ -692,8 +692,8 @@ mod tests {
     }
 
     impl crate::transport::http::HttpClient for WorkNames {
-        fn get(&self, url: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
-            Err(crate::error::Error::Message(format!(
+        fn get(&self, url: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+            Err(crate::remote::RemoteError::Http(format!(
                 "unexpected GET {url}"
             )))
         }
@@ -705,8 +705,8 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::error::Result<Vec<u8>> {
-            Err(crate::error::Error::Message(format!(
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
+            Err(crate::remote::RemoteError::Http(format!(
                 "unexpected POST {url}"
             )))
         }
@@ -847,8 +847,10 @@ mod tests {
     struct Unreachable;
 
     impl crate::transport::http::HttpClient for Unreachable {
-        fn get(&self, url: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
-            Err(crate::error::Error::Message(format!("{url}: unreachable")))
+        fn get(&self, url: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+            Err(crate::remote::RemoteError::Http(format!(
+                "{url}: unreachable"
+            )))
         }
 
         fn post(
@@ -858,8 +860,10 @@ mod tests {
             _: &str,
             _: &[u8],
             _: Option<&str>,
-        ) -> crate::error::Result<Vec<u8>> {
-            Err(crate::error::Error::Message(format!("{url}: unreachable")))
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
+            Err(crate::remote::RemoteError::Http(format!(
+                "{url}: unreachable"
+            )))
         }
     }
 

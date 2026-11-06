@@ -335,7 +335,7 @@ fn local_fetch_propagates_contains_many_errors() {
         .fetch(&remote, fetch_all(), &mut NullProgress, &NeverCancel, None)
         .expect_err("contains_many failure must abort fetch");
     assert!(
-        matches!(err, RemoteError::Library(Error::Io(_))),
+        matches!(err, RemoteError::Nested(boxed) if matches!(boxed.as_ref(), Error::Io(_))),
         "expected io error, got {err:?}"
     );
 }

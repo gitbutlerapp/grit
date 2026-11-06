@@ -1697,7 +1697,10 @@ mod tests {
         let err = ingest_received_pack_path(missing.clone(), &odb, &IngestPackOptions::default())
             .expect_err("missing spool");
         assert!(
-            matches!(err, RemoteError::ReceivedPackTempMissing { .. }),
+            matches!(
+                err,
+                Error::Remote(RemoteError::ReceivedPackTempMissing { .. })
+            ),
             "expected typed missing-pack error, got {err:?}"
         );
     }

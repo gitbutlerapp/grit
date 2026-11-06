@@ -598,6 +598,7 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::remote::RemoteError;
     use std::sync::mpsc;
     use std::sync::Mutex;
     use std::time::Duration;
@@ -635,11 +636,18 @@ mod tests {
     }
 
     impl HttpClient for FakeServer {
-        fn get(&self, _: &str, _: Option<&str>) -> Result<Vec<u8>> {
-            Err(Error::Message("no GETs here".to_owned()))
+        fn get(&self, _: &str, _: Option<&str>) -> crate::remote::RemoteResult<Vec<u8>> {
+            Err(RemoteError::Http("no GETs here".to_owned()))
         }
 
-        fn post(&self, _: &str, _: &str, _: &str, body: &[u8], _: Option<&str>) -> Result<Vec<u8>> {
+        fn post(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            body: &[u8],
+            _: Option<&str>,
+        ) -> crate::remote::RemoteResult<Vec<u8>> {
             self.seen
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -655,9 +663,11 @@ mod tests {
             _: &str,
             body: &mut dyn Read,
             _: Option<&str>,
-        ) -> Result<Box<dyn Read + Send>> {
+        ) -> crate::remote::RemoteResult<Box<dyn Read + Send>> {
             if self.refuse_stream {
-                return Err(Error::Message("HTTP 500 from the fake server".to_owned()));
+                return Err(RemoteError::Http(
+                    "HTTP 500 from the fake server".to_owned(),
+                ));
             }
             let mut got = Vec::new();
             let mut largest = 0;
@@ -677,7 +687,7 @@ mod tests {
                 let _ = tx.lock().unwrap_or_else(|e| e.into_inner()).send(end);
             }
             if failed {
-                return Err(Error::Message("body did not finish".to_owned()));
+                return Err(RemoteError::Http("body did not finish".to_owned()));
             }
             let mut seen = self.seen.lock().unwrap_or_else(|e| e.into_inner());
             seen.streamed = Some(got);

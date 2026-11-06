@@ -2068,21 +2068,23 @@ mod tests {
     #[test]
     fn push_without_any_remote_is_no_remote() {
         let (_tmp, repo) = init_repo();
-        assert_eq!(
+        assert!(matches!(
             configured_remote_for_push(&repo, &ConfigSet::new(), None),
             Err(PushPlanError::NoRemote)
-        );
+        ));
         assert_eq!(PushPlanError::NoRemote.to_string(), "no remote to push to");
         assert_eq!(
             load_push_plan_context(&repo, None, None).map(|_| ()),
             Err(PushPlanError::NoRemote)
         );
         let named = configured_remote_for_push(&repo, &ConfigSet::new(), Some("upstream"));
-        assert_eq!(named.as_deref(), Ok("upstream"));
+        assert_eq!(named.as_deref().unwrap(), "upstream");
         let url_less_origin = config_from("[remote \"origin\"]\n\tpushurl = /tmp/o.git\n");
         assert_eq!(
-            configured_remote_for_push(&repo, &url_less_origin, None).as_deref(),
-            Ok("origin")
+            configured_remote_for_push(&repo, &url_less_origin, None)
+                .as_deref()
+                .unwrap(),
+            "origin"
         );
     }
 
@@ -2090,7 +2092,7 @@ mod tests {
     fn push_invocation_unknown_remote_before_refspecs_is_rejected() {
         let err = resolve_push_invocation(&ConfigSet::new(), None, &strings(&["nosuch", "main"]))
             .expect_err("unknown remote");
-        assert_eq!(err, PushPlanError::UnknownRemote("nosuch".into()));
+        assert!(matches!(err, PushPlanError::UnknownRemote(name) if name == "nosuch"));
     }
 
     #[test]
@@ -2300,8 +2302,10 @@ mod tests {
                 },
                 &PushPlanContext::default(),
             )
-            .map(|r| r.specs.len()),
-            Ok(2)
+            .unwrap()
+            .specs
+            .len(),
+            2
         );
     }
 
@@ -2316,11 +2320,12 @@ mod tests {
                 &PushPlanContext::default(),
             )
             .expect_err("colon refspec with --delete");
-            assert_eq!(
-                err,
-                PushPlanError::DeleteNotPlainName {
-                    spec: spec.to_owned()
-                }
+            assert!(
+                matches!(
+                    &err,
+                    PushPlanError::DeleteNotPlainName { spec: s } if s == spec
+                ),
+                "{err}"
             );
             assert!(err.to_string().contains(spec), "{err}");
         }
@@ -2429,12 +2434,10 @@ mod tests {
             &PushPlanContext::default(),
         )
         .expect_err("ambiguous");
-        assert_eq!(
+        assert!(matches!(
             err,
-            PushPlanError::SrcRefspecAmbiguous {
-                spec: "release".into()
-            }
-        );
+            PushPlanError::SrcRefspecAmbiguous { spec } if spec == "release"
+        ));
     }
 
     #[test]
