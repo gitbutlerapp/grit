@@ -5366,9 +5366,6 @@ pub grit_lib::error::Error::CorruptPackedObject::offset: u64
 pub grit_lib::error::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CorruptPackedObject::pack: std::path::PathBuf
 pub grit_lib::error::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
-pub grit_lib::error::Error::CorruptStash(&'static str)
-pub grit_lib::error::Error::CredentialsUnavailable
-pub grit_lib::error::Error::CredentialsUnavailable::helpers: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::DeltaChainTooDeep
 pub grit_lib::error::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::error::Error::DetachedHead
@@ -5616,8 +5613,6 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
-impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::stash::StashError
-pub fn grit_lib::stash::StashError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::RemoteError
@@ -5628,6 +5623,8 @@ impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib
 pub fn grit_lib::remote::partial_clone::PartialCloneError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::push_plan::PushPlanError
 pub fn grit_lib::remote::push_plan::PushPlanError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::stash::StashError
+pub fn grit_lib::stash::StashError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -14325,9 +14322,6 @@ pub grit_lib::prelude::Error::CorruptPackedObject::offset: u64
 pub grit_lib::prelude::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CorruptPackedObject::pack: std::path::PathBuf
 pub grit_lib::prelude::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
-pub grit_lib::prelude::Error::CorruptStash(&'static str)
-pub grit_lib::prelude::Error::CredentialsUnavailable
-pub grit_lib::prelude::Error::CredentialsUnavailable::helpers: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::DeltaChainTooDeep
 pub grit_lib::prelude::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::prelude::Error::DetachedHead
@@ -14575,8 +14569,6 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
-impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::stash::StashError
-pub fn grit_lib::stash::StashError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::RemoteError
@@ -14587,6 +14579,8 @@ impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib
 pub fn grit_lib::remote::partial_clone::PartialCloneError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::push_plan::PushPlanError
 pub fn grit_lib::remote::push_plan::PushPlanError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::stash::StashError
+pub fn grit_lib::stash::StashError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
