@@ -210,7 +210,7 @@ mod tests {
     /// `main` at `base`, `one` two commits past it, `two` one commit past it, and the workspace
     /// merging both checked out.
     fn workspace_repo(dir: &TempDir) -> Result<(Repository, ObjectId, ObjectId)> {
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,

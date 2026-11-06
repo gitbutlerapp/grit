@@ -998,8 +998,10 @@ mod tests {
             let init = InitOptions::new()
                 .with_bare(true)
                 .with_initial_branch("main");
-            let main = Repository::init(&dir.path().join("main.git"), &init).unwrap();
-            Repository::init(&dir.path().join("lop.git"), &init).unwrap();
+            let (main, _) = Repository::init(&dir.path().join("main.git"), &init).unwrap();
+            Repository::init(&dir.path().join("lop.git"), &init)
+                .unwrap()
+                .0;
             let odb = main.odb();
             let blobs: Vec<ObjectId> = sizes
                 .iter()
@@ -1534,7 +1536,7 @@ mod tests {
     fn blobs_a_checkout_needs_stay() {
         let dir = tempfile::tempdir().unwrap();
         let work = dir.path().join("work");
-        let repo =
+        let (repo, _) =
             Repository::init(&work, &InitOptions::new().with_initial_branch("main")).unwrap();
         Repository::init(
             &dir.path().join("lop.git"),

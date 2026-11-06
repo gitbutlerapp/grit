@@ -513,7 +513,7 @@ mod tests {
 
     fn repo_with_index(files: &[(&str, &[u8])]) -> (tempfile::TempDir, Repository, Index) {
         let dir = tempfile::tempdir().unwrap();
-        let repo =
+        let (repo, _) =
             Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
         let mut index = Index::new();
         for (path, data) in files {

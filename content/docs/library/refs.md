@@ -240,7 +240,7 @@ fn my_store_conforms() {
 }
 ```
 
-To open a repository on your store, pass it to [`RepositoryBuilder::ref_store`](rustdoc:grit_lib::repo::RepositoryBuilder::ref_store). The git directory then needs no `HEAD` or `refs/`, and [`RepositoryBuilder::initial_branch`](rustdoc:grit_lib::repo::RepositoryBuilder::initial_branch) points `HEAD` at an unborn branch when the store has none. See [Object stores](object-stores.md) for opening with no git directory at all.
+To open a repository on your store, pass it to [`RepositoryOptions::with_ref_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_ref_store) and call [`Repository::open`](rustdoc:grit_lib::repo::Repository). The git directory then needs no `HEAD` or `refs/`, and [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch) points `HEAD` at an unborn branch when the store has none. See [Object stores](object-stores.md) for opening with no git directory at all.
 
 ## Ref names (`RefName` / `RefNamePolicy`)
 

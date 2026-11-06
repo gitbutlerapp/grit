@@ -872,7 +872,7 @@ mod tests {
     /// Repository whose index tracks `files`, staged from the working tree.
     fn staged_repo(files: &[(&str, &[u8])]) -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().unwrap_or_else(|e| panic!("tempdir: {e}"));
-        let repo = Repository::init(dir.path(), &InitOptions::default())
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())
             .unwrap_or_else(|e| panic!("init: {e}"));
         for (path, bytes) in files {
             std::fs::write(dir.path().join(path), bytes).unwrap_or_else(|e| panic!("write: {e}"));
@@ -978,7 +978,7 @@ mod tests {
             bare: true,
             ..InitOptions::default()
         };
-        let repo = Repository::init(dir.path(), &init).unwrap_or_else(|e| panic!("init: {e}"));
+        let (repo, _) = Repository::init(dir.path(), &init).unwrap_or_else(|e| panic!("init: {e}"));
         let mut diff = UncommittedDiff::new(&repo, Index::default());
         assert!(diff
             .staged_entries(RenameDetection::Off)

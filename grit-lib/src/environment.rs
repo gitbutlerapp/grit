@@ -1008,7 +1008,78 @@ fn subprocess_push_os(out: &mut Vec<(OsString, OsString)>, key: &str, val: Optio
     }
 }
 
-/// Options passed to repository open/discover with an explicit [`Environment`].
+/// Options passed to [`crate::repo::Repository::open`], [`crate::repo::Repository::discover`],
+/// and related entry points.
+///
+/// # Opening a normal repository
+///
+/// ```
+/// use grit_lib::config::environment::RepositoryOptions;
+/// use grit_lib::repo::Repository;
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let repo = Repository::open(
+///     "/path/to/repo/.git",
+///     &RepositoryOptions::from_process(),
+/// )?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Discovering from a working directory
+///
+/// ```
+/// use grit_lib::config::environment::RepositoryOptions;
+/// use grit_lib::repo::Repository;
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let repo = Repository::discover(
+///     Some(std::path::Path::new("/path/to/checkout")),
+///     &RepositoryOptions::from_process(),
+/// )?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Bare repository
+///
+/// Open the bare git directory; leave [`Self::work_tree`] unset.
+///
+/// # Linked worktree
+///
+/// Open the worktree's admin directory (under `worktrees/`) and set [`Self::work_tree`] to the
+/// linked checkout path, or call [`Repository::discover`](crate::repo::Repository::discover) from
+/// the linked checkout with environment overrides cleared (no `GIT_DIR` / `GIT_WORK_TREE`).
+///
+/// # Injected ref store and custom object store
+///
+/// ```
+/// use std::sync::Arc;
+///
+/// use grit_lib::config::environment::RepositoryOptions;
+/// use grit_lib::objects::odb::store::MemoryStore;
+/// use grit_lib::objects::odb::OdbBuilder;
+/// use grit_lib::objects::HashAlgo;
+/// use grit_lib::refs::store::MemoryRefStore;
+/// use grit_lib::repo::Repository;
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let dir = tempfile::tempdir()?;
+/// let git_dir = dir.path().join("in-memory.git");
+/// let _repo = Repository::open(
+///     &git_dir,
+///     &RepositoryOptions::empty()
+///         .with_odb_builder(
+///             OdbBuilder::files(git_dir.join("objects"))
+///                 .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+///                 .alternates(false),
+///         )
+///         .with_ref_store(Arc::new(MemoryRefStore::new()))
+///         .with_initial_branch("main"),
+/// )?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct RepositoryOptions {
@@ -1030,6 +1101,12 @@ pub struct RepositoryOptions {
     pub thread_policy: crate::parallel::ThreadPolicy,
     /// Work tree path for [`crate::repo::Repository::open`] (non-bare repos).
     pub work_tree: Option<std::path::PathBuf>,
+    /// Custom object store wiring (see [`crate::odb::OdbBuilder`]).
+    pub odb_builder: Option<crate::odb::OdbBuilder>,
+    /// Ref backend to use instead of opening one from the git directory.
+    pub ref_store: Option<std::sync::Arc<dyn crate::refs::store::RefStore>>,
+    /// When the ref store has no `HEAD` after open, seed an unborn branch at `refs/heads/<name>`.
+    pub initial_branch: Option<String>,
     /// When false, skip [`crate::repo::validate_repo_format`] during open.
     pub validate_repository_format: bool,
     /// When true, [`crate::repo::Repository::open`] resolves `path` like wire-protocol serving.
@@ -1064,6 +1141,9 @@ impl Default for RepositoryOptions {
             reference_unix_time: None,
             thread_policy: crate::parallel::ThreadPolicy::default(),
             work_tree: None,
+            odb_builder: None,
+            ref_store: None,
+            initial_branch: None,
             validate_repository_format: true,
             open_for_serving: false,
             promisor_fetcher: None,
@@ -1128,6 +1208,30 @@ impl RepositoryOptions {
     #[must_use]
     pub fn with_work_tree(mut self, work_tree: impl Into<std::path::PathBuf>) -> Self {
         self.work_tree = Some(work_tree.into());
+        self
+    }
+
+    /// Use a preconfigured [`crate::odb::OdbBuilder`] for the object store.
+    #[must_use]
+    pub fn with_odb_builder(mut self, builder: crate::odb::OdbBuilder) -> Self {
+        self.odb_builder = Some(builder);
+        self
+    }
+
+    /// Use `store` as the ref backend instead of opening one from the git directory.
+    #[must_use]
+    pub fn with_ref_store(
+        mut self,
+        store: std::sync::Arc<dyn crate::refs::store::RefStore>,
+    ) -> Self {
+        self.ref_store = Some(store);
+        self
+    }
+
+    /// Seed `HEAD` at `refs/heads/<branch>` when the ref store has no `HEAD` after open.
+    #[must_use]
+    pub fn with_initial_branch(mut self, branch: impl Into<String>) -> Self {
+        self.initial_branch = Some(branch.into());
         self
     }
 

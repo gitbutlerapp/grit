@@ -17,7 +17,8 @@ struct Harness {
 
 fn init_repo() -> Harness {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Arc::new(Repository::init(dir.path(), &InitOptions::default()).expect("init"));
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let repo = Arc::new(repo);
     let ident: Signature = "Test User <test@example.com> 0 +0000"
         .parse()
         .expect("ident");

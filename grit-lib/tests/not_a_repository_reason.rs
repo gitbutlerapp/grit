@@ -3,10 +3,10 @@
 use std::fs;
 use std::path::Path;
 
+use crate::support::discover_optional;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::{Error, NotARepositoryReason};
 use grit_lib::repo::{resolve_dot_git, resolve_git_directory_arg, Repository};
-use grit_lib::revwalk::rev_parse::discover_optional;
 use tempfile::TempDir;
 
 fn discover(start: &Path) -> grit_lib::error::Result<Repository> {

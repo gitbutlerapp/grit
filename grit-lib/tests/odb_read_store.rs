@@ -15,7 +15,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStor
 use grit_lib::objects::odb::{Odb, OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_test_support::odb_conformance::run_read_suite;
 use grit_test_support::{git, git_packed_history, rev_parse};
 
@@ -34,12 +34,14 @@ fn memory_repo(git_dir: &Path, read_sources: Vec<Arc<dyn ObjectStore>>) -> Repos
     for source in read_sources {
         odb = odb.push_read_source(source);
     }
-    RepositoryBuilder::new(isolated_options())
-        .odb_builder(odb)
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(git_dir, None)
-        .expect("open memory repository")
+    Repository::open(
+        git_dir,
+        &(isolated_options()
+            .with_odb_builder(odb)
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open memory repository")
 }
 
 fn write_blob(store: &dyn WritableObjectStore, data: &[u8]) -> ObjectId {

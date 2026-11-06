@@ -73,7 +73,7 @@ fn seed_long_history(
 #[test]
 fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let tip = seed_long_history(dir.path(), &repo, 560)?;
     for n in 0..340 {
         for spec in [format!("HEAD~{n}"), format!("main~{n}"), format!(":/c{n}")] {
@@ -118,7 +118,7 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
 #[test]
 fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let b1 = repo
         .odb()
         .write_loose_materialize(ObjectKind::Blob, b"one\n")?;
@@ -227,7 +227,7 @@ fn supporting_and_submodule_gitdir_sweep() -> grit_lib::error::Result<()> {
     };
 
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let git_dir = repo.git_dir();
     fs::write(
         git_dir.join("config"),

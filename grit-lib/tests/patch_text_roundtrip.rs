@@ -562,7 +562,7 @@ fn write_patch_resolved_hashes_in_memory_binary_bytes_for_index_line() {
 #[test]
 fn write_patch_resolved_worktree_side_needs_work_tree() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &grit_lib::repo::InitOptions::new().with_bare(true),
     )

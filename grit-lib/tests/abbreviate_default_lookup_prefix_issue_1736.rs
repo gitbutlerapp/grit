@@ -14,7 +14,7 @@ use grit_lib::error::{Error, Result};
 use grit_lib::objects::odb::store::{ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
 
 /// Implements only the required trait methods and counts full enumerations.
@@ -90,14 +90,17 @@ fn repo_over(store: Arc<MinimalStore>) -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
     Repository::init(dir.path(), &InitOptions::new().with_initial_branch("main")).expect("init");
     let git_dir = dir.path().join(".git");
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store)
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir.path()))
-        .expect("open over minimal store");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store)
+                    .alternates(false),
+            )
+            .with_work_tree(dir.path())),
+    )
+    .expect("open over minimal store");
     (dir, repo)
 }
 

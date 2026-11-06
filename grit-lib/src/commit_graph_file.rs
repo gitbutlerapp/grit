@@ -2000,10 +2000,13 @@ mod tests {
         if let Some(graph) = graph {
             builder = builder.commit_graph(graph);
         }
-        crate::repo::RepositoryBuilder::new(crate::environment::RepositoryOptions::empty())
-            .odb_builder(builder)
-            .open(&git_dir, Some(dir.path()))
-            .expect("open custom")
+        crate::repo::Repository::open(
+            &git_dir,
+            &(crate::environment::RepositoryOptions::empty()
+                .with_odb_builder(builder)
+                .with_work_tree(dir.path())),
+        )
+        .expect("open custom")
     }
 
     #[test]

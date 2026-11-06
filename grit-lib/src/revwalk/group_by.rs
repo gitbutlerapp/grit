@@ -890,7 +890,7 @@ mod tests {
     #[test]
     fn count_only_groups_preserve_ascii_case_distinct_identities() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")?;
         let o1 = write_commit(&repo, "Case", "a@example.com", tree, vec![]);
         let o2 = write_commit(&repo, "CASE", "A@example.com", tree, vec![o1]);

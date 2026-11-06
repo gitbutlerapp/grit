@@ -157,7 +157,7 @@ mod tests {
 
     fn init_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let oid = crate::refs::test_commit(repo.git_dir(), "main");
         write_ref(repo.git_dir(), "refs/heads/main", &oid).expect("main");
         write_ref(repo.git_dir(), "HEAD", &oid).expect("head");
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn unborn_head_ref_name_unresolved_like_git() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions::new().with_initial_branch("main".to_owned()),
         )

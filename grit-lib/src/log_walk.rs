@@ -594,7 +594,7 @@ mod tests {
     }
 
     fn open_repo(dir: &tempfile::TempDir) -> Result<Repository> {
-        Repository::init(
+        let (_, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,

@@ -54,7 +54,7 @@ impl<'repo> RevWalk<'repo> {
     /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-revwalk-parse-doc");
-    /// let repo = Repository::init(&dir, &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
     /// let mut req = CommitRequest::new("doc");
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
@@ -208,7 +208,7 @@ mod commit_iter_tests {
 
     fn init_repo_with_commits(count: usize) -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         for i in 0..count {
             let mut req = CommitRequest::new(format!("commit {i}"));
             req.author = Some(

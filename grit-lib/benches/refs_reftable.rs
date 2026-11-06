@@ -26,7 +26,7 @@ struct ReftableBenchFixture {
 impl ReftableBenchFixture {
     fn new() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        Repository::init(
+        let (_, _) = Repository::init(
             dir.path(),
             &InitOptions::new()
                 .with_bare(true)
@@ -83,7 +83,7 @@ fn bench_transaction_create_10k(c: &mut Criterion) {
             || {
                 let work = tempfile::tempdir().expect("workdir");
                 std::fs::create_dir_all(work.path()).expect("mkdir");
-                Repository::init(
+                let (_, _) = Repository::init(
                     work.path(),
                     &InitOptions::new()
                         .with_bare(true)

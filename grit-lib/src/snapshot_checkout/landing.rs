@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn only_work_merged_into_the_branch_the_checkout_snapshots_lands() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         marker().write(repo.git_dir()).expect("marker");
         let tip = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
 

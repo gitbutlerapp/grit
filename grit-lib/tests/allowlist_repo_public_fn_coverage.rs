@@ -297,7 +297,7 @@ fn refs_state_repo_caches_and_notes() {
     let _ = read_merge_msg(git_dir.as_path());
 
     let rt_dir = tempdir().expect("rt");
-    let rt_repo = Repository::init(
+    let (rt_repo, _) = Repository::init(
         rt_dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

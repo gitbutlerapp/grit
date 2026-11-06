@@ -13,7 +13,7 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -132,10 +132,13 @@ fn gitlink_to_file_typechange_stages_and_commits_through_every_open_path() {
 
     let built = base.join("built");
     gitlink_replaced_by_file(&built);
-    let repo = RepositoryBuilder::new(options)
-        .odb_builder(OdbBuilder::files("built/.git/objects"))
-        .open(Path::new("built/.git"), Some(Path::new("built")))
-        .expect("open through RepositoryBuilder with relative paths");
+    let repo = Repository::open(
+        Path::new("built/.git"),
+        &(options
+            .with_odb_builder(OdbBuilder::files("built/.git/objects"))
+            .with_work_tree(Path::new("built"))),
+    )
+    .expect("open through RepositoryBuilder with relative paths");
     stage_and_commit(&repo);
     assert_committed_as_blob(&built);
 }

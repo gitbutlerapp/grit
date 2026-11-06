@@ -36,7 +36,7 @@
 //!
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! let mut progress = NullProgress;
 //! let model = status::status(&repo, &StatusOptions::default(), &mut progress, &NeverCancel)?;
 //! assert!(model.staged.is_empty() && model.unstaged.is_empty());
@@ -51,7 +51,7 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! let _sink = NullProgress;
 //! let _cancel = NeverCancel;
 //! # Ok(())

@@ -12,7 +12,7 @@ use grit_lib::repo::{InitOptions, Repository};
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     (dir, repo)
 }
 

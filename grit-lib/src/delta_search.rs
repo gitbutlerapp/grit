@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn search_uses_base_only_objects_as_bases_but_never_as_targets() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let mut candidates = drifting_versions(&repo, 6);
         // The oldest version is held by the receiver; everything else is sent, and
         // all of it is in one pack that already kept the targets whole.
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     fn search_deltas_one_undeltified_base_for_large_same_path_run() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         const TWO_MIB: usize = 2 * 1024 * 1024;
         let mut candidates: Vec<DeltaCandidate> = (0..2000)
             .map(|i| {
@@ -724,7 +724,7 @@ mod tests {
     #[test]
     fn search_finds_valid_deltas_within_the_depth_limit() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let candidates = drifting_versions(&repo, 40);
         let found = search_deltas(
             repo.odb(),
@@ -760,7 +760,7 @@ mod tests {
     #[test]
     fn search_result_does_not_depend_on_thread_count() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let candidates = drifting_versions(&repo, 60);
         let key = |found: Vec<FoundDelta>| {
             let mut v: Vec<(u32, u32, Vec<u8>)> = found
@@ -792,7 +792,7 @@ mod tests {
     #[test]
     fn search_skips_pairs_already_compared_in_one_pack() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let mut candidates = drifting_versions(&repo, 20);
         for c in &mut candidates {
             c.whole_in_pack = Some(0);
@@ -819,7 +819,7 @@ mod tests {
     #[test]
     fn search_tries_only_allowed_pairs() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let candidates = drifting_versions(&repo, 20);
         let banned = candidates[0].oid;
         let allowed = |target: &ObjectId, base: &ObjectId| *target != banned && *base != banned;
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn search_leaves_room_for_dependent_chains() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let mut candidates = drifting_versions(&repo, 20);
         for c in &mut candidates {
             c.dependent_depth = 50;
@@ -860,7 +860,7 @@ mod tests {
     #[test]
     fn a_set_stop_flag_cancels_the_search_on_every_thread_count() {
         let dir = tempfile::TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         // Enough candidates at distinct paths for several chunks, so several threads
         // really run.
         let mut candidates = drifting_versions(&repo, 3 * CHUNK_MIN_OBJECTS);

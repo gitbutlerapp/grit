@@ -52,7 +52,7 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dest = tmp.path().join("grit-wt");
     fs::create_dir(&dest).expect("mkdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &dest,
         &InitOptions::new()
             .with_initial_branch("master".to_owned())
@@ -141,7 +141,7 @@ fn init_collision_repo() -> TestRepo {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dest = tmp.path().join("grit-wt");
     fs::create_dir(&dest).expect("mkdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &dest,
         &InitOptions::new()
             .with_initial_branch("master".to_owned())

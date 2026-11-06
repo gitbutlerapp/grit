@@ -38,7 +38,7 @@ fn public_tree_sha256_types() {
         Err(Error::TreeSha256InvalidHex)
     ));
     let tmp = tempfile::tempdir().unwrap();
-    let repo = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     let blob = repo
         .odb()
         .write_loose_materialize(grit_lib::objects::ObjectKind::Blob, b"x")

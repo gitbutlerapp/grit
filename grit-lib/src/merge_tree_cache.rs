@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn merge_cache_shares_parsed_entries_with_the_odb() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::new()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new()).expect("init");
         let odb = repo.odb();
         let blob = odb.write(ObjectKind::Blob, b"text\n").expect("blob");
         let tree = odb

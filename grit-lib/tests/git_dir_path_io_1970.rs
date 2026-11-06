@@ -83,7 +83,7 @@ fn commit_request(message: &str) -> CommitRequest {
 }
 
 fn init_repo(root: &Path) -> Repository {
-    let repo = Repository::init(root, &InitOptions::new()).expect("init");
+    let (repo, _) = Repository::init(root, &InitOptions::new()).expect("init");
     fs::write(
         repo.git_dir().join("config"),
         "[user]\n\tname = T\n\temail = t@e.com\n",
@@ -211,7 +211,7 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
     let dir = tempdir().expect("tempdir");
     let main_wt = dir.path().join("main");
     fs::create_dir_all(&main_wt).expect("main wt");
-    let repo = Repository::init(&main_wt, &InitOptions::new()).expect("init");
+    let (repo, _) = Repository::init(&main_wt, &InitOptions::new()).expect("init");
     fs::write(
         repo.git_dir().join("config"),
         "[user]\n\tname = T\n\temail = t@e.com\n",

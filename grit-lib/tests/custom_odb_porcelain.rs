@@ -24,7 +24,7 @@ use grit_lib::porcelain::replay_sequence::{
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 const IDENT: &str = "A U Thor <author@example.com> 1700000000 +0000";
 
@@ -38,15 +38,18 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     .expect("init");
     let git_dir = root.join(".git");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(&root))
-        .expect("open");
-    repo.config()
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(&root)),
+    )
+    .expect("open");
+    repo.config_handle()
         .set_local("user.name", "A U Thor")
         .expect("user.name");
     repo.config()
@@ -318,16 +321,19 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
     let root = dir.path().canonicalize().expect("canonical root");
     let git_dir = root.join(".git");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&git_dir, Some(&root))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")
+            .with_work_tree(&root)),
+    )
+    .expect("open");
     assert!(!git_dir.exists());
 
     fs::write(root.join("a.txt"), "hello\n").expect("write");

@@ -17,7 +17,7 @@ use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::refs_fsck::refs_fsck;
 use grit_lib::refs::store::RefName;
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::abbreviate_object_id;
 
 #[derive(Debug)]
@@ -94,14 +94,17 @@ fn flaky_repo(dir: &Path) -> (Repository, Arc<Flaky>, ObjectId) {
         inner: MemoryStore::new(HashAlgo::Sha1),
         fail: AtomicBool::new(false),
     });
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(flaky.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(flaky.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(dir)),
+    )
+    .expect("open");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
     let commit = repo
         .odb()

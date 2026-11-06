@@ -344,7 +344,7 @@ pub fn build_parallel_packed_blob_fixture(count: usize) -> (TempDir, Odb, Vec<Ob
 
 fn build_large_pack_index(objects_dir: &Path, object_count: usize) -> (PackIndex, ObjectId) {
     let tmp = tempfile::tempdir().expect("large pack tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

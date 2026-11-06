@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn inspect_unknown_remote_errors() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let err = inspect_remote(&repo, "missing", &InspectOptions::default(), None)
             .expect_err("unknown");
         assert!(matches!(err, RemoteError::UnknownRemote(name) if name == "missing"));

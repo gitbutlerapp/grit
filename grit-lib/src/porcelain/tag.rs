@@ -814,7 +814,7 @@ mod tests {
 
     fn repo_with_commit() -> (tempfile::TempDir, Repository, ObjectId) {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
         let ident = "T <t@example.com> 1 +0000".to_string();
         let sig: crate::ident::Signature = ident.parse().expect("signature");
         let mut req = CommitRequest::new("one");

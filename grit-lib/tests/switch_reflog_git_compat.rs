@@ -22,7 +22,7 @@ use tempfile::TempDir;
 
 fn init_repo() -> (TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     (dir, repo)
 }
 

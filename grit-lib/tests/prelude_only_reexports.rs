@@ -15,7 +15,6 @@ fn prelude_items_resolve_at_domain_paths() {
         OwnershipCheck as PreludeOwnershipCheck, OwnershipContext as PreludeOwnershipContext,
         OwnershipError as PreludeOwnershipError, OwnershipStatus as PreludeOwnershipStatus,
         RecordingRunner as PreludeRecordingRunner, Repository as PreludeRepository,
-        RepositoryBuilder as PreludeRepositoryBuilder,
         RepositoryOptions as PreludeRepositoryOptions, Result as PreludeResult,
         SystemCommandRunner as PreludeSystemCommandRunner,
         SystemOwnershipCheck as PreludeSystemOwnershipCheck, Trace as PreludeTrace,
@@ -37,7 +36,6 @@ fn prelude_items_resolve_at_domain_paths() {
     };
     use grit_lib::repo::{
         resolve_initial_branch, DiscoveryInfo, InitOptions, InitOutcome, Repository,
-        RepositoryBuilder,
     };
 
     fn assert_same<T, U>() {
@@ -67,7 +65,6 @@ fn prelude_items_resolve_at_domain_paths() {
     assert_same::<PreludeRecordingRunner, RecordingRunner>();
     assert_same::<PreludeSystemCommandRunner, SystemCommandRunner>();
     assert_same::<PreludeRepository, Repository>();
-    assert_same::<PreludeRepositoryBuilder, RepositoryBuilder>();
     assert_same::<PreludeInitOptions, InitOptions>();
     assert_same::<PreludeInitOutcome, InitOutcome>();
     assert_same::<PreludeDiscoveryInfo, DiscoveryInfo>();

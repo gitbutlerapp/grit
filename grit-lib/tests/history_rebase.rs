@@ -565,7 +565,7 @@ fn rebase_onto_bare_repository() {
     use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let grit = Repository::init(
+    let (grit, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_bare(true)

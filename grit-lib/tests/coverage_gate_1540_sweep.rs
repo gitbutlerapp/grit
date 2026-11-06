@@ -256,7 +256,7 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
 #[test]
 fn index_symlink_and_merge_base_diff_errors() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let blob = repo
         .odb()
         .write_loose_materialize(ObjectKind::Blob, b"target\n")?;

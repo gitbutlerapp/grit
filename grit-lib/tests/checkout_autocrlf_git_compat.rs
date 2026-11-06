@@ -26,7 +26,7 @@ fn git_eol(repo: &std::path::Path, path: &str) -> String {
 }
 
 fn init_autocrlf_repo(root: &std::path::Path) -> Repository {
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

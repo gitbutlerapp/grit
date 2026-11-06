@@ -65,7 +65,7 @@ fn tree_with_version(repo: &Repository, version: u8) -> grit_lib::objects::Objec
 #[cfg(target_os = "linux")]
 fn serial_structured_diff_peak_stays_bounded() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let old_tree = tree_with_version(&repo, 0);
     let new_tree = tree_with_version(&repo, 1);
     let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff trees");

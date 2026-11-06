@@ -202,7 +202,7 @@ impl ResolvedPathspecs {
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let dir = tempfile::tempdir()?;
-    /// let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     /// fs::write(dir.path().join("a.txt"), b"x")?;
     /// let resolved = ResolvedPathspecs::resolve(
     ///     &repo,
@@ -3317,7 +3317,7 @@ mod resolved_pathspecs_tests {
 
     fn repo_with_tree() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(dir.path().join("top.txt"), b"a").expect("write");
         std::fs::create_dir_all(dir.path().join("sub")).expect("mkdir");
         std::fs::write(dir.path().join("sub/inner.txt"), b"b").expect("write");

@@ -46,7 +46,7 @@ pub struct OdbBuilder {
 impl OdbBuilder {
     /// Default files-backed layout rooted at `objects_dir` (the repository's `objects/` tree).
     ///
-    /// When passed to [`RepositoryBuilder::odb_builder`](crate::repo::RepositoryBuilder::odb_builder),
+    /// When passed to [`RepositoryOptions::with_odb_builder`](crate::environment::RepositoryOptions::with_odb_builder),
     /// any spelling of the repository's `objects/` directory is accepted: a path through
     /// symlinks, or a relative path (resolved against the environment's current directory).
     /// With a custom [`Self::primary`] the directory need not exist, but it must still name
@@ -85,7 +85,7 @@ impl OdbBuilder {
     /// attach it with [`Self::commit_graph`] when opening the repository.
     ///
     /// The store's [`ObjectStore::hash_algo`] must match the repository's object format:
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
+    /// [`Repository::open`](crate::repo::Repository::open) fails with
     /// [`Error::ObjectFormatMismatch`] otherwise. [`Self::build`] does not check, since it
     /// has no repository config to compare against.
     #[must_use]
@@ -97,7 +97,7 @@ impl OdbBuilder {
     /// Append a read-only store consulted after the primary and before alternates.
     ///
     /// Like [`Self::primary`], its hash algorithm must match the repository's object format
-    /// or [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
+    /// or [`Repository::open`](crate::repo::Repository::open) fails with
     /// [`Error::ObjectFormatMismatch`].
     #[must_use]
     pub fn push_read_source(mut self, store: Arc<dyn ObjectStore>) -> Self {
@@ -120,7 +120,7 @@ impl OdbBuilder {
     /// [`CommitGraphChain::from_bytes`].
     ///
     /// The graph's [`CommitGraphChain::hash_algo`] must match the repository's object format,
-    /// or [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
+    /// or [`Repository::open`](crate::repo::Repository::open) fails with
     /// [`Error::ObjectFormatMismatch`].
     #[must_use]
     pub fn commit_graph(mut self, chain: Arc<CommitGraphChain>) -> Self {
@@ -168,7 +168,7 @@ impl OdbBuilder {
 }
 
 impl Odb {
-    /// Build from [`OdbBuilder`] (used by [`RepositoryBuilder`](crate::repo::RepositoryBuilder)).
+    /// Build from [`OdbBuilder`] (used by [`RepositoryOptions`](crate::repo::RepositoryOptions)).
     #[must_use]
     pub(crate) fn from_builder(builder: OdbBuilder) -> Self {
         let mut odb = Self::new(&builder.objects_dir);

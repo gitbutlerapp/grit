@@ -905,7 +905,7 @@ mod tests {
 
     fn init() -> (tempfile::TempDir, Repository) {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
         (tmp, repo)
     }
 

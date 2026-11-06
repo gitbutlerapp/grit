@@ -14,7 +14,7 @@ fn content_merge_fixture() -> (TempDir, Repository, [ObjectId; 3]) {
     use grit_lib::objects::{serialize_tree, TreeEntry};
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::new()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::new()).expect("init");
     let mut roots: [Vec<TreeEntry>; 3] = std::array::from_fn(|_| Vec::new());
     for d in 0..200 {
         let mut files: [Vec<TreeEntry>; 3] = std::array::from_fn(|_| Vec::new());

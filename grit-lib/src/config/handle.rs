@@ -33,6 +33,18 @@ impl<'repo> Config<'repo> {
     /// # Errors
     ///
     /// Propagates config load failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// let dir = std::env::temp_dir().join("grit-config-get-doc");
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
+    /// let _ = repo.config_handle().get("core.repositoryformatversion");
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline]
     pub fn snapshot(&self) -> Result<Arc<ConfigSet>> {
         self.repo.ensure_config_arc()

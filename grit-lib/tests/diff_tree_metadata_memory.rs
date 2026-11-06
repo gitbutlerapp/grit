@@ -82,7 +82,7 @@ fn metadata_fixture(
     changed: usize,
 ) -> (tempfile::TempDir, Repository, ObjectId, ObjectId) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let old_blob = repo.odb().write(ObjectKind::Blob, b"old\n").expect("blob");
     let new_blob = repo.odb().write(ObjectKind::Blob, b"new\n").expect("blob");
     let mut old_root = Vec::new();

@@ -30,7 +30,7 @@ fn make_entry(path: &str, oid: ObjectId, stage: u8) -> IndexEntry {
 #[test]
 fn large_index_v2_v4_write_read_and_mutations() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

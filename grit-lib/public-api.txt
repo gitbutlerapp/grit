@@ -15496,15 +15496,12 @@ pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resol
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
-pub fn grit_lib::repo::Repository::init_with_outcome(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
-pub fn grit_lib::repo::Repository::linked_worktree_discover_options(&self) -> grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
 pub fn grit_lib::repo::Repository::notes(&self) -> grit_lib::repo_handles::RepositoryNotes<'_>
 pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::Objects<'_>
 pub fn grit_lib::repo::Repository::odb(&self) -> &grit_lib::prelude::Odb
 pub fn grit_lib::repo::Repository::open(&std::path::Path, &grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
-pub fn grit_lib::repo::Repository::open_linked_worktree(&self, &std::path::Path, &std::path::Path) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::patch_id(&self, &grit_lib::objects::ObjectId, grit_lib::diff::patch_ids::PatchIdMode) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::repo::Repository::patch_ids_for_revs(&self, &[&str], grit_lib::diff::patch_ids::PatchIdMode) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> grit_lib::error::Result<bool>
@@ -15567,20 +15564,6 @@ impl core::marker::Unpin for grit_lib::repo::Repository
 impl core::marker::UnsafeUnpin for grit_lib::repo::Repository
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::Repository
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::Repository
-pub struct grit_lib::prelude::RepositoryBuilder
-impl grit_lib::repo::RepositoryBuilder
-pub fn grit_lib::repo::RepositoryBuilder::initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn grit_lib::repo::RepositoryBuilder::new(grit_lib::config::environment::RepositoryOptions) -> Self
-pub fn grit_lib::repo::RepositoryBuilder::odb_builder(self, grit_lib::objects::odb::OdbBuilder) -> Self
-pub fn grit_lib::repo::RepositoryBuilder::open(self, &std::path::Path, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<grit_lib::repo::Repository>
-pub fn grit_lib::repo::RepositoryBuilder::ref_store(self, alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>) -> Self
-impl core::marker::Freeze for grit_lib::repo::RepositoryBuilder
-impl core::marker::Send for grit_lib::repo::RepositoryBuilder
-impl core::marker::Sync for grit_lib::repo::RepositoryBuilder
-impl core::marker::Unpin for grit_lib::repo::RepositoryBuilder
-impl core::marker::UnsafeUnpin for grit_lib::repo::RepositoryBuilder
-impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuilder
-impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
 #[non_exhaustive] pub struct grit_lib::prelude::RepositoryOptions
 pub grit_lib::prelude::RepositoryOptions::change_id_generator: alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
 pub grit_lib::prelude::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
@@ -17814,7 +17797,6 @@ pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &str, allo
 pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::open_ref_store(&std::path::Path) -> grit_lib::error::Result<alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>>
 pub fn grit_lib::refs::store::resolve_store<S: grit_lib::refs::store::RefStore + ?core::marker::Sized>(&S, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub mod grit_lib::refs::version_sort
 pub fn grit_lib::refs::version_sort::compare_refname_versions(&str, &str, &[alloc::string::String]) -> core::cmp::Ordering
@@ -22841,15 +22823,12 @@ pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resol
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
-pub fn grit_lib::repo::Repository::init_with_outcome(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
-pub fn grit_lib::repo::Repository::linked_worktree_discover_options(&self) -> grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
 pub fn grit_lib::repo::Repository::notes(&self) -> grit_lib::repo_handles::RepositoryNotes<'_>
 pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::Objects<'_>
 pub fn grit_lib::repo::Repository::odb(&self) -> &grit_lib::prelude::Odb
 pub fn grit_lib::repo::Repository::open(&std::path::Path, &grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
-pub fn grit_lib::repo::Repository::open_linked_worktree(&self, &std::path::Path, &std::path::Path) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::patch_id(&self, &grit_lib::objects::ObjectId, grit_lib::diff::patch_ids::PatchIdMode) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::repo::Repository::patch_ids_for_revs(&self, &[&str], grit_lib::diff::patch_ids::PatchIdMode) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> grit_lib::error::Result<bool>
@@ -22912,24 +22891,8 @@ impl core::marker::Unpin for grit_lib::repo::Repository
 impl core::marker::UnsafeUnpin for grit_lib::repo::Repository
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::Repository
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::Repository
-pub struct grit_lib::repo::RepositoryBuilder
-impl grit_lib::repo::RepositoryBuilder
-pub fn grit_lib::repo::RepositoryBuilder::initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
-pub fn grit_lib::repo::RepositoryBuilder::new(grit_lib::config::environment::RepositoryOptions) -> Self
-pub fn grit_lib::repo::RepositoryBuilder::odb_builder(self, grit_lib::objects::odb::OdbBuilder) -> Self
-pub fn grit_lib::repo::RepositoryBuilder::open(self, &std::path::Path, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<grit_lib::repo::Repository>
-pub fn grit_lib::repo::RepositoryBuilder::ref_store(self, alloc::rcs::arc::Arc<dyn grit_lib::refs::store::RefStore>) -> Self
-impl core::marker::Freeze for grit_lib::repo::RepositoryBuilder
-impl core::marker::Send for grit_lib::repo::RepositoryBuilder
-impl core::marker::Sync for grit_lib::repo::RepositoryBuilder
-impl core::marker::Unpin for grit_lib::repo::RepositoryBuilder
-impl core::marker::UnsafeUnpin for grit_lib::repo::RepositoryBuilder
-impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::RepositoryBuilder
-impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::RepositoryBuilder
 pub struct grit_lib::repo::RepositoryLocation
 impl grit_lib::repo::RepositoryLocation
-pub fn grit_lib::repo::RepositoryLocation::discover(&grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
-pub fn grit_lib::repo::RepositoryLocation::discover_with_config(&grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<(Self, grit_lib::config::ConfigSet)>
 pub fn grit_lib::repo::RepositoryLocation::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::RepositoryLocation::local_config_path(&self) -> std::path::PathBuf
 pub fn grit_lib::repo::RepositoryLocation::work_tree(&self) -> core::option::Option<&std::path::Path>
@@ -25511,7 +25474,6 @@ pub fn grit_lib::revwalk::rev_parse::abbreviate_object_id(&grit_lib::repo::Repos
 pub fn grit_lib::revwalk::rev_parse::abbreviate_ref_name(&str) -> alloc::string::String
 pub fn grit_lib::revwalk::rev_parse::ambiguous_object_hint_lines(&grit_lib::repo::Repository, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::revwalk::rev_parse_error::AmbiguousObjectHint>>
 pub fn grit_lib::revwalk::rev_parse::commit_parents_for_navigation(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::rev_parse::discover_optional(core::option::Option<&std::path::Path>) -> grit_lib::error::Result<core::option::Option<grit_lib::repo::Repository>>
 pub fn grit_lib::revwalk::rev_parse::expand_at_minus_to_branch_name(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::revwalk::rev_parse::expand_parent_shorthand_rev_parse_lines(&grit_lib::repo::Repository, &str, bool, core::option::Option<usize>) -> grit_lib::error::Result<core::option::Option<alloc::vec::Vec<alloc::string::String>>>
 pub fn grit_lib::revwalk::rev_parse::expand_rev_token_circ_bang(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>

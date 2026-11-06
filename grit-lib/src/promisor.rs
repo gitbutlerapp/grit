@@ -368,7 +368,7 @@ mod checkout_blob_tests {
     #[test]
     fn checkout_blobs_cover_index_and_head_but_not_history() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let work = repo.work_tree().unwrap().to_path_buf();
         let blob = |data: &[u8]| repo.odb().hash(ObjectKind::Blob, data).unwrap();
         std::fs::write(work.join("a"), b"old\n").unwrap();
@@ -387,7 +387,7 @@ mod checkout_blob_tests {
     #[test]
     fn bare_repositories_need_no_blobs() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         assert!(blobs_needed_by_checkouts(&repo).unwrap().is_empty());
     }
 }

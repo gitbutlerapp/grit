@@ -62,6 +62,7 @@ fn init_bare(dir: &Path) -> Repository {
             .with_ref_storage(RefStorageFormat::Files),
     )
     .unwrap()
+    .0
 }
 
 /// A main repository (`main` holds a small and a 20 KiB blob) whose big blob was

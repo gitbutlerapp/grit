@@ -1656,7 +1656,7 @@ mod tests {
     fn init_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
         git(dir.path(), &["init", "-q", "-b", "main"]);
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         (dir, repo)
     }
 
@@ -2034,7 +2034,7 @@ mod tests {
     #[test]
     fn other_side_is_unselectable() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let by_id = HunkSelection {
             ids: vec![HunkId::from_bytes([1; 6])],
             ranges: Vec::new(),
@@ -2084,7 +2084,7 @@ mod tests {
     #[test]
     fn restore_plan_requires_work_tree() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -2106,7 +2106,7 @@ mod tests {
     #[test]
     fn restore_plan_rejects_gitlink_and_pathless_patches() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
 
         let mut gitlink = one_line_patch("sub");
         gitlink.new_mode = Some("160000".into());
@@ -2639,7 +2639,7 @@ mod tests {
     fn stage_lines_dry_run_writes_nothing_and_stages_only_the_range() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let repo = Repository::init(root, &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(root, &InitOptions::default()).unwrap();
         let base = numbered_lines(40);
         std::fs::write(root.join("f.txt"), &base).unwrap();
         std::fs::write(root.join("other.txt"), b"other\n").unwrap();

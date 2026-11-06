@@ -15,7 +15,7 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
-//! let repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! let query = RefQuery {
 //!     namespaces: vec![RefNamespace::Heads],
 //!     ..RefQuery::default()

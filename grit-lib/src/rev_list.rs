@@ -10769,7 +10769,7 @@ mod tests {
         range_depth: usize,
     ) -> Result<(TempDir, Repository, ObjectId, ObjectId)> {
         let dir = tempdir()?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -10838,7 +10838,7 @@ mod tests {
         use crate::maintenance::{write_commit_graph, CommitGraphOptions};
 
         let dir = tempdir()?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -10922,7 +10922,7 @@ mod tests {
         use crate::maintenance::{write_commit_graph, CommitGraphOptions};
 
         let dir = tempdir()?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -12930,7 +12930,7 @@ mod line_coverage_tests {
         use crate::commit::encoding;
 
         let dir = tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,

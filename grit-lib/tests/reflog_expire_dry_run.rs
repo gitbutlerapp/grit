@@ -110,7 +110,7 @@ fn git_dry_run_pruned_for_ref(worktree: &Path, refname: &str) -> usize {
 #[test]
 fn reflog_expire_dry_run() {
     let tmp = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

@@ -177,8 +177,8 @@ mod resolve_core_abbrev_tests {
     #[test]
     fn resolve_core_abbrev_default_matches_auto_for_empty_repo() -> crate::error::Result<()> {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-        let config = repo.config().snapshot()?.clone();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let config = repo.config()?.clone();
         let len = resolve_core_abbrev_len(&config, repo.odb())?;
         assert_eq!(len, auto_abbrev_len_for_object_count(0));
         Ok(())
@@ -187,7 +187,7 @@ mod resolve_core_abbrev_tests {
     #[test]
     fn approximate_object_count_ignores_loose_objects() -> crate::error::Result<()> {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         for n in 0..3 {
             repo.odb()
                 .write(crate::objects::ObjectKind::Blob, format!("{n}").as_bytes())?;

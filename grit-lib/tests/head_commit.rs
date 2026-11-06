@@ -15,7 +15,7 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     move_commit, EmptyPolicy, HistoryError, Placement, RefScope, RewriteOptions,
 };
@@ -124,16 +124,18 @@ fn head_tree_of_an_invalid_head_is_invalid_head_but_head_state_tree_is_none() {
 fn injected_ref_store_is_the_source_of_head() {
     let dir = tempfile::tempdir().expect("tempdir");
     let refs = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(dir.path().join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(dir.path(), None)
-        .expect("open injected");
+    let repo = Repository::open(
+        dir.path(),
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(dir.path().join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")),
+    )
+    .expect("open injected");
     let err = repo.head_commit().expect_err("unborn");
     assert!(matches!(err, Error::UnbornHead), "{err:?}");
 

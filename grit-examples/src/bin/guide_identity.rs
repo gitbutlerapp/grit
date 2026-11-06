@@ -29,7 +29,7 @@ fn main() -> Result<(), Error> {
         root.clone(),
     );
 
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &root,
         &InitOptions::new()
             .with_initial_branch("main")

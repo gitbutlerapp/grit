@@ -787,7 +787,7 @@ mod tests {
         use crate::progress::{NeverCancel, NullProgress};
         use crate::repo::{InitOptions, Repository};
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         for i in 0..count {
             let mut req = CommitRequest::new(format!("commit {i}"));
             req.allow_empty = true;
@@ -830,7 +830,7 @@ mod tests {
         use crate::progress::{NeverCancel, NullProgress};
         use crate::repo::InitOptions;
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         for i in 0..4 {
             let mut req =
                 CommitRequest::new(format!("subject {i}\n\n{}", "body line\n".repeat(50)));

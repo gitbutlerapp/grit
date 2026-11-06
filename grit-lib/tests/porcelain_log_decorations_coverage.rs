@@ -268,21 +268,22 @@ fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
     use grit_lib::refs::store::{
         Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
     };
-    use grit_lib::repo::RepositoryBuilder;
     use std::sync::Arc;
 
     let dir = tempfile::tempdir().expect("tempdir");
     let git_dir = dir.path().join("memory.git");
     let refs = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(&git_dir, None)?;
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")),
+    )?;
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit = repo.odb().write(
         ObjectKind::Commit,

@@ -104,7 +104,7 @@ fn bench_bounded_branches(c: &mut Criterion) {
     use grit_lib::repo::InitOptions;
 
     let dir = tempfile::tempdir().expect("fixture");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
     let mut commits = Vec::with_capacity(10_000);
     for i in 0..10_000 {

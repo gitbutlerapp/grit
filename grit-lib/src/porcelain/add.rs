@@ -4649,14 +4649,17 @@ mod tests {
         init_repo(root);
         let git = root.join(".git");
         let store = Arc::new(MemoryStore::new(crate::objects::HashAlgo::Sha1));
-        let repo = crate::repo::RepositoryBuilder::new(RepositoryOptions::empty())
-            .odb_builder(
-                OdbBuilder::files(git.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
-            .open(&git, Some(root))
-            .unwrap();
+        let repo = crate::repo::Repository::open(
+            &git,
+            &(RepositoryOptions::empty()
+                .with_odb_builder(
+                    OdbBuilder::files(git.join("objects"))
+                        .primary(store.clone())
+                        .alternates(false),
+                )
+                .with_work_tree(root)),
+        )
+        .unwrap();
         let bulk = StageOptions {
             staging_thresholds: Some(IndexStagingThresholds {
                 large_index_restage: 0,

@@ -21,7 +21,7 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let _repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (_repo, _outcome) = Repository::init(dir.path(), &InitOptions::default())?;
 //! # Ok(())
 //! # }
 //! ```
@@ -98,7 +98,7 @@ pub struct DiscoveryInfo {
     pub discovery_via_gitfile: bool,
 }
 
-/// Result of [`Repository::init_with_outcome`].
+/// Result of [`Repository::init`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InitOutcome {
     /// `true` when an existing repository was reinitialized in place.
@@ -227,147 +227,6 @@ impl InitOptions {
     }
 }
 
-/// Optional custom ODB (and ref store) wiring for [`RepositoryBuilder::open`].
-///
-/// # On-disk layout
-///
-/// What `open` requires in the git directory depends on what is injected:
-///
-/// - Nothing injected: a normal git directory (`HEAD`, `objects/`).
-/// - A [`Self::ref_store`]: no `HEAD` file (the store holds `HEAD`), and `refs/` is never read.
-/// - A custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary): no `objects/`.
-/// - Both: nothing at all. The git directory may be empty or missing; it is still where the
-///   repository config (`config`) is read from and where the index lives. Staging creates
-///   the directory when it is missing.
-///
-/// Hooks run with `GIT_DIR` exported only when the [`Environment`] in the options sets
-/// [`Environment::git_dir`]; `open` does not set it from its path. Objects and refs held in
-/// injected stores are not on disk, so a hook that runs the system `git` against such a
-/// repository finds no repository.
-///
-/// ```
-/// use std::sync::Arc;
-///
-/// use grit_lib::config::environment::RepositoryOptions;
-/// use grit_lib::objects::odb::store::MemoryStore;
-/// use grit_lib::objects::odb::OdbBuilder;
-/// use grit_lib::objects::HashAlgo;
-/// use grit_lib::refs::store::{MemoryRefStore, RawRef};
-/// use grit_lib::repo::RepositoryBuilder;
-///
-/// # fn main() -> grit_lib::error::Result<()> {
-/// let dir = tempfile::tempdir()?;
-/// let git_dir = dir.path().join("in-memory.git");
-/// let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-///     .odb_builder(
-///         OdbBuilder::files(git_dir.join("objects"))
-///             .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-///             .alternates(false),
-///     )
-///     .ref_store(Arc::new(MemoryRefStore::new()))
-///     .initial_branch("main")
-///     .open(&git_dir, None)?;
-/// assert_eq!(
-///     repo.refs().read_raw("HEAD")?,
-///     Some(RawRef::Symbolic("refs/heads/main".to_owned()))
-/// );
-/// assert!(!git_dir.exists());
-/// # Ok(())
-/// # }
-/// ```
-#[must_use]
-pub struct RepositoryBuilder {
-    options: RepositoryOptions,
-    odb_builder: Option<crate::odb::OdbBuilder>,
-    ref_store: Option<Arc<dyn crate::refs::store::RefStore>>,
-    initial_branch: Option<String>,
-}
-
-impl RepositoryBuilder {
-    /// Start building a repository open with `options`.
-    pub fn new(options: RepositoryOptions) -> Self {
-        Self {
-            options,
-            odb_builder: None,
-            ref_store: None,
-            initial_branch: None,
-        }
-    }
-
-    /// Use a preconfigured [`crate::odb::OdbBuilder`] for the object store.
-    ///
-    /// The builder's objects directory may be any path naming the repository's `objects/`
-    /// directory, or [`crate::environment::Environment::git_object_directory`] when that is
-    /// set (through symlinks, or relative to the environment's current directory);
-    /// [`Self::open`] replaces it with the canonical path of that directory, which is what
-    /// [`crate::odb::Odb::objects_dir`] then reports (the symlink target when `objects/`
-    /// itself is a symlink).
-    pub fn odb_builder(mut self, builder: crate::odb::OdbBuilder) -> Self {
-        self.odb_builder = Some(builder);
-        self
-    }
-
-    /// Use `store` as the repository's ref backend (for example
-    /// [`crate::refs::store::MemoryRefStore`]) instead of the one the git directory selects.
-    ///
-    /// The default backend is never opened, so the git directory needs no `HEAD` or `refs/`.
-    ///
-    /// When [`Self::open`] is given a linked worktree's admin directory
-    /// (`<git dir>/worktrees/<id>`), `store` holds only the main worktree's `HEAD`, so the
-    /// handle reads and writes the linked worktree's own `HEAD` and `HEAD` reflog in that
-    /// admin directory and every other ref in `store`. Files and reftable stores keep
-    /// per-worktree refs apart themselves and are used as given.
-    pub fn ref_store(mut self, store: Arc<dyn crate::refs::store::RefStore>) -> Self {
-        self.ref_store = Some(store);
-        self
-    }
-
-    /// When the ref store has no `HEAD` after opening, point it at `refs/heads/<branch>`
-    /// (an unborn branch), as [`Repository::init`] does for a new git directory.
-    ///
-    /// An existing `HEAD` is left alone. Mostly useful with a fresh [`Self::ref_store`].
-    pub fn initial_branch(mut self, branch: impl Into<String>) -> Self {
-        self.initial_branch = Some(branch.into());
-        self
-    }
-
-    /// Open `git_dir` with optional `work_tree`, applying builder overrides.
-    ///
-    /// With an [`Self::odb_builder`], relative `git_dir`, `work_tree` and objects paths are
-    /// resolved against the environment's current directory
-    /// ([`crate::environment::Environment::discovery_cwd`]), and paths through symlinks are
-    /// accepted.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Repository::open`], plus:
-    /// - [`Error::OdbObjectsDirMismatch`] when a files-backed [`Self::odb_builder`] names a
-    ///   directory other than the repository's `objects/` (or the environment's
-    ///   `GIT_OBJECT_DIRECTORY`).
-    /// - [`Error::ObjectFormatMismatch`] when the builder's custom primary, a read source or
-    ///   its attached [`commit_graph`](crate::odb::OdbBuilder::commit_graph) reports a
-    ///   [`hash_algo`](crate::odb::store::ObjectStore::hash_algo) other than the
-    ///   repository's `extensions.objectformat` (SHA-1 when unset or when the git directory
-    ///   has no config).
-    /// - [`Error::InvalidRef`] when [`Self::initial_branch`] is not a valid branch name.
-    /// - [`Error::RefStore`] when seeding `HEAD` in the ref store fails.
-    pub fn open(self, git_dir: &Path, work_tree: Option<&Path>) -> Result<Repository> {
-        let mut options = self.options;
-        if let Some(wt) = work_tree {
-            options.work_tree = Some(wt.to_path_buf());
-        }
-        let repo = if let Some(builder) = self.odb_builder {
-            Repository::open_with_odb_internal(&options, git_dir, builder, self.ref_store)?
-        } else {
-            Repository::open_internal_with_refs(&options, git_dir, self.ref_store)?
-        };
-        if let Some(branch) = self.initial_branch {
-            seed_unborn_head(repo.refs(), &branch)?;
-        }
-        Ok(repo)
-    }
-}
-
 /// Point `HEAD` at `refs/heads/<branch>` in `store` unless `HEAD` already exists.
 fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> Result<()> {
     use crate::refs::store::{Expected, RawRef, RefStoreError, RefTransaction, RefUpdate};
@@ -420,7 +279,7 @@ fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> R
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
-/// let repo = Repository::init(dir.path(), &InitOptions::default())?;
+/// let (repo, _outcome) = Repository::init(dir.path(), &InitOptions::default())?;
 /// let reopened = Repository::open(
 ///     repo.git_dir(),
 ///     &RepositoryOptions::empty().with_work_tree(dir.path()),
@@ -770,7 +629,7 @@ impl Repository {
     /// use grit_lib::repo::{InitOptions, Repository};
     /// # fn main() -> grit_lib::error::Result<()> {
     /// let dir = tempfile::tempdir()?;
-    /// let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    /// let (repo, _outcome) = Repository::init(dir.path(), &InitOptions::default())?;
     /// match repo.identity(IdentRole::Author, repo.identity_now()) {
     ///     Ok(author) => assert!(!author.email.is_empty()),
     ///     Err(grit_lib::error::Error::Identity(_)) => {} // nothing configured
@@ -813,12 +672,8 @@ impl Repository {
     }
 
     /// [`RepositoryOptions`] for discovering a linked worktree of this repository.
-    ///
-    /// Inherits config discovery ([`Environment`], command runner, diagnostics, thread policy)
-    /// from the caller handle but clears worktree-specific discovery overrides so
-    /// [`Repository::discover`] resolves the linked tree's own `.git` gitfile and index.
     #[must_use]
-    pub fn linked_worktree_discover_options(&self) -> RepositoryOptions {
+    pub(crate) fn linked_worktree_discover_options(&self) -> RepositoryOptions {
         let mut environment = (*self.environment).clone();
         environment.git_dir = None;
         environment.git_work_tree = None;
@@ -835,6 +690,9 @@ impl Repository {
             reference_unix_time: self.reference_unix_time,
             thread_policy: self.thread_policy,
             work_tree: None,
+            odb_builder: None,
+            ref_store: None,
+            initial_branch: None,
             validate_repository_format: true,
             open_for_serving: false,
             promisor_fetcher: self.caches().promisor_fetcher(),
@@ -881,7 +739,7 @@ impl Repository {
     ///
     /// Discovery failures, [`Error::NotARepository`] when `admin_dir` is missing, and
     /// [`Error::PathError`] when `work_tree` cannot be canonicalized.
-    pub fn open_linked_worktree(&self, admin_dir: &Path, work_tree: &Path) -> Result<Self> {
+    pub(crate) fn open_linked_worktree(&self, admin_dir: &Path, work_tree: &Path) -> Result<Self> {
         let options = self.linked_worktree_discover_options();
         if self.refs_on_disk() && self.odb.uses_files_primary() {
             return Self::discover(Some(work_tree), &options);
@@ -1421,7 +1279,7 @@ impl Repository {
     /// Replace the ref store (embedders injecting [`crate::refs::store::MemoryRefStore`]).
     ///
     /// On a linked worktree's handle, `HEAD` and its reflog stay in the worktree's admin
-    /// directory (see [`RepositoryBuilder::ref_store`]).
+    /// directory (see [`RepositoryOptions::with_ref_store`]).
     #[must_use]
     pub fn with_ref_store(mut self, store: Arc<dyn crate::refs::store::RefStore>) -> Self {
         let store = linked_worktree_view(&self.git_dir, store);
@@ -1714,22 +1572,12 @@ impl Repository {
             })
     }
 
-    /// Initialise a repository at `path` and return an open handle.
+    /// Initialise a repository at `path` and return an open handle plus init metadata.
     ///
     /// # Errors
     ///
     /// Propagates filesystem and layout errors from the underlying init helpers.
-    pub fn init(path: &Path, options: &InitOptions) -> Result<Self> {
-        Self::init_with_outcome(path, options).map(|(repo, _)| repo)
-    }
-
-    /// Like [`Self::init`], but also reports whether the repository was reinitialized and
-    /// the effective initial branch name.
-    ///
-    /// # Errors
-    ///
-    /// Propagates filesystem and layout errors from the underlying init helpers.
-    pub fn init_with_outcome(path: &Path, options: &InitOptions) -> Result<(Self, InitOutcome)> {
+    pub fn init(path: &Path, options: &InitOptions) -> Result<(Self, InitOutcome)> {
         if options.bare && options.separate_git_dir.is_some() {
             return Err(Error::InitBareWithSeparateGitDir);
         }
@@ -1830,7 +1678,16 @@ impl Repository {
     }
 
     fn open_internal(options: &RepositoryOptions, git_dir: &Path) -> Result<Self> {
-        Self::open_internal_with_refs(options, git_dir, None)
+        let injected_refs = options.ref_store.clone();
+        let repo = if let Some(builder) = options.odb_builder.clone() {
+            Self::open_with_odb_internal(options, git_dir, builder, injected_refs)?
+        } else {
+            Self::open_internal_with_refs(options, git_dir, injected_refs)?
+        };
+        if let Some(branch) = options.initial_branch.as_deref() {
+            seed_unborn_head(repo.refs(), branch)?;
+        }
+        Ok(repo)
     }
 
     fn open_internal_with_refs(
@@ -1993,7 +1850,7 @@ impl Repository {
     }
 
     /// Fail with [`Error::ObjectFormatMismatch`] when one of `injected` (the hash algorithms
-    /// of the stores and commit-graph passed to [`RepositoryBuilder::odb_builder`]) differs from
+    /// of the stores and commit-graph passed to [`RepositoryOptions::with_odb_builder`]) differs from
     /// `extensions.objectformat`, SHA-1 when unset.
     ///
     /// Reads the config snapshot the open already loaded. Files-backed primaries and
@@ -4839,7 +4696,7 @@ mod ownership_safe_tests {
     #[test]
     fn verify_safe_for_clone_source_errors_when_git_dir_removed() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         fs::remove_dir_all(repo.git_dir()).unwrap();
         let err = repo.verify_safe_for_clone_source().unwrap_err();
         match err {

@@ -1332,7 +1332,7 @@ mod tests {
     #[test]
     fn patch_lookup_finds_equivalent_in_onto_history() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1353,7 +1353,7 @@ mod tests {
     #[test]
     fn patch_lookup_diffs_merged_unrelated_root_against_empty_tree() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1407,7 +1407,7 @@ mod tests {
     fn patch_id_scan_bounded_on_large_onto_side() {
         patch_id_inject::reset_patch_id_compute_call_count();
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1578,7 +1578,7 @@ mod tests {
         };
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1623,7 +1623,7 @@ mod tests {
     #[test]
     fn rebase_range_honors_grafts_when_enumerating_fork_to_tip() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1652,7 +1652,7 @@ mod tests {
     #[test]
     fn plan_rebase_up_to_date_when_linear_child_of_upstream() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1683,7 +1683,7 @@ mod tests {
     #[test]
     fn plan_rebase_up_to_date_when_branch_extends_upstream_through_a_merge() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1721,7 +1721,7 @@ mod tests {
     #[test]
     fn patch_id_reuse_requires_full_patch_match() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1794,7 +1794,7 @@ mod tests {
     #[test]
     fn plan_rebase_fast_forwards_when_tip_is_ancestor_of_upstream() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1839,7 +1839,7 @@ mod tests {
     #[test]
     fn plan_rebase_up_to_date_when_at_upstream() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -1892,13 +1892,14 @@ mod tests {
     }
 
     fn init_repo(dir: &std::path::Path) -> Repository {
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir,
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
                 .with_ref_storage(crate::RefStorageFormat::Files),
         )
-        .expect("init")
+        .expect("init");
+        repo
     }
 
     fn flatten_opts(id: &str) -> RebaseOntoOptions {
@@ -2134,7 +2135,7 @@ mod tests {
     #[test]
     fn priority_topo_replay_order_sequential_topic_merges_issue_2365() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())

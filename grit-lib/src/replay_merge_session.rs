@@ -876,7 +876,7 @@ mod upstream_cache_tests {
     #[test]
     fn merge_for_replay_builds_upstream_cache_once() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions::new().with_initial_branch("main".to_owned()),
         )

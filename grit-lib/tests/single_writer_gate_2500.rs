@@ -14,7 +14,7 @@ use grit_lib::refs::store::{
     MemoryRefStore, PreparedRefTransaction, RawRef, RefName, RefStore, RefStoreError,
     RefTransaction,
 };
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 #[derive(Debug)]
 struct Slow {
@@ -134,19 +134,21 @@ fn run_concurrent(threads: usize, per_thread: usize, delay_ms: u64) -> Concurren
             .with_initial_branch("main"),
     )
     .expect("init");
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(dir.path().join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(Arc::new(Slow {
-            inner: MemoryRefStore::new(),
-            delay: Duration::from_millis(delay_ms),
-        }))
-        .initial_branch("main")
-        .open(dir.path(), None)
-        .expect("open");
+    let repo = Repository::open(
+        dir.path(),
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(dir.path().join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(Slow {
+                inner: MemoryRefStore::new(),
+                delay: Duration::from_millis(delay_ms),
+            }))
+            .with_initial_branch("main")),
+    )
+    .expect("open");
 
     let repo = Arc::new(repo);
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");

@@ -52,7 +52,7 @@ fn append_repo_config(repo: &Repository, section: &str, key: &str, value: &str) 
 }
 
 fn seed_repo(root: &Path, preload_index: bool) -> Repository {
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

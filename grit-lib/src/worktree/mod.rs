@@ -6,7 +6,7 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let _repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! let _wt = _repo.work_tree();
 //!
 //! # Ok(())

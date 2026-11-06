@@ -1530,7 +1530,9 @@ mod tests {
 
     fn fixture(n: usize, tagged: &[usize]) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        Repository::init(dir.path(), &InitOptions::new().with_bare(true))
+            .unwrap()
+            .0;
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).unwrap();
         let (commits, tags) = write_history(&repo, n, tagged);
         Fixture {
@@ -1797,17 +1799,19 @@ mod tests {
         let store = crate::odb::store::flaky::FlakyStore::new();
         let dir = tempfile::tempdir().unwrap();
         let git_dir = dir.path().join("repo.git");
-        let repo = crate::repo::RepositoryBuilder::new(RepositoryOptions::empty())
-            .odb_builder(
-                crate::odb::OdbBuilder::files(git_dir.join("objects"))
-                    .primary(store.clone())
-                    .alternates(false),
-            )
-            .ref_store(std::sync::Arc::new(
-                crate::refs::store::MemoryRefStore::new(),
-            ))
-            .open(&git_dir, None)
-            .unwrap();
+        let repo = crate::repo::Repository::open(
+            &git_dir,
+            &(RepositoryOptions::empty()
+                .with_odb_builder(
+                    crate::odb::OdbBuilder::files(git_dir.join("objects"))
+                        .primary(store.clone())
+                        .alternates(false),
+                )
+                .with_ref_store(std::sync::Arc::new(
+                    crate::refs::store::MemoryRefStore::new(),
+                ))),
+        )
+        .unwrap();
         let n = 3000;
         let (commits, tags) = write_history(&repo, n, &[5, n - 1]);
         let caps = HashSet::from(["include-tag".to_owned()]);

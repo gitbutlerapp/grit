@@ -81,7 +81,7 @@ fn abbrev_extends_prefix_when_collision_lives_in_another_pack() {
     let dir = root.path();
     git(dir, &["init", "-q", "-b", "main"]);
 
-    let repo = Repository::init(dir, &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir, &InitOptions::default()).expect("init");
     assert_eq!(
         repo.odb()
             .write(ObjectKind::Blob, &first_data)

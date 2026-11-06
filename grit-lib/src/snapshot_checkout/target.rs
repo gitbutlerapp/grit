@@ -804,7 +804,7 @@ mod tests {
     impl Fixture {
         fn new(bare: bool) -> Self {
             let dir = tempfile::tempdir().expect("tempdir");
-            let repo = Repository::init(
+            let (repo, _) = Repository::init(
                 dir.path(),
                 &InitOptions {
                     bare,
@@ -910,7 +910,7 @@ mod tests {
     #[test]
     fn the_target_is_heads_branch_and_names_compare_without_case() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions {
                 initial_branch: Some("trunk".to_owned()),

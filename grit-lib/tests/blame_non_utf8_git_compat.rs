@@ -367,7 +367,7 @@ fn grit_written_raw_path_objects_are_readable_by_git_blame() {
     use grit_lib::repo::InitOptions;
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    let repo = Repository::init(root, &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(root, &InitOptions::default()).unwrap();
     let blob = repo
         .odb()
         .write(ObjectKind::Blob, b"hello from grit\n")

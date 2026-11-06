@@ -385,7 +385,7 @@ mod tests {
         }
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let shared = b"same line\nsame line\nsame line\n";
         let mut old_body = shared.to_vec();
         old_body.extend_from_slice(b"tail\n");

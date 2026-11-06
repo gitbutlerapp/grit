@@ -286,7 +286,7 @@ fn assert_serial_parallel_match(
 fn parallel_matches_serial_crlf_and_ident() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -315,7 +315,7 @@ fn parallel_matches_serial_crlf_and_ident() {
 fn parallel_matches_serial_gitlink_and_replacements() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -466,7 +466,7 @@ fn external_smudge_filter_runs_once_via_recording_runner() {
 fn ignorecase_collision_uses_serial_path_and_matches() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -504,7 +504,7 @@ fn parallel_pool_error_rolls_back_every_job() {
     const N: usize = 128;
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -585,7 +585,7 @@ fn missing_blob_error_rolls_back_earlier_write() {
     use grit_lib::diff::{DiffEntry, DiffStatus};
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

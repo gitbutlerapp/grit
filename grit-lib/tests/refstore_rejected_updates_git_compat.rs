@@ -3,11 +3,12 @@
 
 use crate::support;
 
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{
-    open_ref_store, Expected, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
-    RefUpdateFlags,
+    Expected, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
 };
+use grit_lib::repo::Repository;
 
 use support::{
     assert_fsck_when_git_interop, each_backend, empty_commit_oid, git, git_for_each_ref,
@@ -30,7 +31,9 @@ fn rejected_updates_keep_repository_clean_for_git() {
     each_backend(|backend, repo| {
         let commit = empty_commit_oid(repo);
         let git_dir = repo.worktree().join(".git");
-        let store = open_ref_store(&git_dir).expect("open ref store");
+        let store = Repository::open(&git_dir, &RepositoryOptions::empty())
+            .expect("open ref store")
+            .refs();
 
         assert_eq!(
             put(

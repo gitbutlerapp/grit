@@ -10,8 +10,8 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let repo = Repository::init(dir.path(), &InitOptions::default())?;
-//! let config = repo.config().snapshot()?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+//! let config = repo.config()?;
 //! let report = fsck(
 //!     &repo,
 //!     &FsckOptions::connectivity_and_refs(false),
@@ -2264,7 +2264,7 @@ mod tests {
     #[test]
     fn clean_repo_fsck_ok() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("f"), b"x").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
@@ -2301,7 +2301,7 @@ mod tests {
     #[test]
     fn corrupt_tree_with_valid_prefix_does_not_enqueue_children() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let missing_child = ObjectId::from_hex("abababababababababababababababababababab").unwrap();
         let mut tree_bytes = Vec::new();
         tree_bytes.extend_from_slice(b"100644 a\0");
@@ -2354,7 +2354,7 @@ mod tests {
     #[test]
     fn commit_tree_pointing_at_blob_is_broken_link() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let blob = repo
             .odb()
             .write(ObjectKind::Blob, b"not-a-tree")
@@ -2426,7 +2426,7 @@ mod tests {
     /// blob it lacks, and a loose commit on top (as a push leaves it) whose tree
     /// names that blob too. Returns the promised blob and the loose tree.
     fn partial_repo_with_pushed_tree(dir: &std::path::Path) -> (ObjectId, ObjectId) {
-        let repo = Repository::init(dir, &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir, &InitOptions::new().with_bare(true)).unwrap();
         let promised = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
         let old_tree = tree_naming(&repo, &[("big", promised)]);
         let old = commit_on(&repo, old_tree, None);

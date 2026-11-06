@@ -597,7 +597,7 @@ fn forced_reset_reports_kept_upstream_in_dry_run_and_live() {
 #[test]
 fn public_branch_mutation_api_smoke() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     git(tmp.path(), &["commit", "-q", "--allow-empty", "-m", "c1"]);
     let opts = CreateBranchOptions::at_head("x");
     assert_eq!(opts.track, TrackMode::Auto);

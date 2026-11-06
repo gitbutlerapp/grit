@@ -83,7 +83,7 @@ fn abbrev_extends_prefix_when_collision_lives_in_alternate_pack() {
     let alt_work = root.path().join("alt");
     fs::create_dir_all(&alt_work).expect("alt dir");
     git(&alt_work, &["init", "-q", "-b", "main"]);
-    let alt_repo = Repository::init(&alt_work, &InitOptions::default()).expect("alt init");
+    let (alt_repo, _) = Repository::init(&alt_work, &InitOptions::default()).expect("alt init");
     assert_eq!(
         alt_repo
             .odb()
@@ -96,7 +96,7 @@ fn abbrev_extends_prefix_when_collision_lives_in_alternate_pack() {
     let primary_work = root.path().join("primary");
     fs::create_dir_all(&primary_work).expect("primary dir");
     git(&primary_work, &["init", "-q", "-b", "main"]);
-    let primary_repo =
+    let (primary_repo, _) =
         Repository::init(&primary_work, &InitOptions::default()).expect("primary init");
     assert_eq!(
         primary_repo

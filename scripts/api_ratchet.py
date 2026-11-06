@@ -28,6 +28,7 @@ BASELINE_PATH = GRIT_LIB / "api-ratchet.toml"
 DEFAULT_RUSTDOC_JSON = ROOT / "target" / "doc" / "grit_lib.json"
 
 METRIC_KEYS = (
+    "pub_repo_constructors",
     "public_api_lines",
     "pub_fn_impl_suffix",
     "pub_fn_with_in_name",
@@ -1157,6 +1158,16 @@ def compute_metrics(
 
     api_lines = [line for line in public_api_text.splitlines() if line.strip()]
 
+    repo_constructor_re = re.compile(
+        r"^pub fn grit_lib::repo::Repository::(init|open|discover)\("
+    )
+    repo_constructor_names: set[str] = set()
+    for line in api_lines:
+        m = repo_constructor_re.match(line)
+        if m:
+            repo_constructor_names.add(m.group(1))
+    repo_constructors = len(repo_constructor_names)
+
     impl_suffix: list[str] = []
     with_in_name: list[str] = []
     too_many_args: list[str] = []
@@ -1370,6 +1381,7 @@ def compute_metrics(
         multi_paths.append(f"id {item_id}: " + " | ".join(sorted(non_prelude)))
 
     metrics = {
+        "pub_repo_constructors": MetricResult(repo_constructors),
         "public_api_lines": MetricResult(len(api_lines)),
         "pub_fn_impl_suffix": MetricResult(len(impl_suffix), impl_suffix),
         "pub_fn_with_in_name": MetricResult(len(with_in_name), with_in_name),

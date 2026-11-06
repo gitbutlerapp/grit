@@ -20,7 +20,7 @@ use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit, update_branch_for_commit_on_store,
     BranchCommitRefUpdate,
 };
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 const BOGUS: &str = "1111111111111111111111111111111111111111";
 
@@ -564,10 +564,13 @@ fn empty_tree_must_be_stored_to_be_a_ref_target() {
 fn injected_ref_store_is_checked_against_the_repository_objects() {
     let fx = Fixture::new(RefStorageFormat::Files);
     let store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .ref_store(store.clone())
-        .open(&fx.worktree.join(".git"), Some(&fx.worktree))
-        .expect("open with an injected store");
+    let repo = Repository::open(
+        &fx.worktree.join(".git"),
+        &(RepositoryOptions::empty()
+            .with_ref_store(store.clone())
+            .with_work_tree(&fx.worktree)),
+    )
+    .expect("open with an injected store");
     assert_eq!(
         commit_updates(repo.refs(), vec![put("refs/heads/bogus", bogus())]),
         Err(missing("refs/heads/bogus", bogus()))

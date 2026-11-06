@@ -45,7 +45,7 @@ fn gitmodules_mailmap_path_and_signing_helpers() -> grit_lib::error::Result<()> 
     let _ = render_contact("A", "a@b.com");
 
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let _ = load_mailmap(&repo).ok();
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit =

@@ -80,7 +80,7 @@ fn seed_merged_history(
 #[test]
 fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_bare(true)

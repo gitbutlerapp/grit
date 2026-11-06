@@ -48,7 +48,7 @@ fn snapshot_fsck_missing_blob() {
         use grit_lib::repo::{InitOptions, Repository};
         use std::fs;
 
-        let repo = Repository::init(fixture.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(fixture.path(), &InitOptions::default()).expect("init");
         fs::write(repo.work_tree().unwrap().join("orphan.txt"), b"data\n").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &grit_lib::progress::NeverCancel)
             .expect("stage");

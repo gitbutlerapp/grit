@@ -16,11 +16,11 @@ use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
 use grit_lib::objects::{serialize_tree, HashAlgo, ObjectKind, TreeEntry};
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 fn main() -> grit_lib::error::Result<()> {
     let dir = tempfile::tempdir()?;
-    let source = Repository::init(&dir.path().join("source"), &InitOptions::default())?;
+    let (source, _) = Repository::init(&dir.path().join("source"), &InitOptions::default())?;
     let mut parent = None;
     for version in 1..=2 {
         let blob = source
@@ -60,15 +60,17 @@ fn main() -> grit_lib::error::Result<()> {
     let git_dir = dir.path().join("custom.git");
     std::fs::create_dir_all(&git_dir)?;
     let primary = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(primary.clone())
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&git_dir, None)?;
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(primary.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )?;
     let received = ingest_received_pack(pack, repo.odb(), &IngestPackOptions::default())?;
     println!("repo_objects={}", received.object_ids.len());
     println!("repo_commits={}", received.object_counts.commits);

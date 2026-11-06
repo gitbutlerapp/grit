@@ -245,7 +245,7 @@ fn drop_rejects_merge_commit() {
 #[test]
 fn drop_conflict_changes_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let grit = Repository::init(
+    let (grit, _) = Repository::init(
         dir.path(),
         &grit_lib::repo::InitOptions::new()
             .with_initial_branch("main".to_owned())

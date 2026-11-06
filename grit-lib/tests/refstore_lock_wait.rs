@@ -34,7 +34,7 @@ use grit_lib::refs::store::{
 use grit_lib::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store, prepare_with_lock_wait,
 };
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use time::OffsetDateTime;
 
@@ -300,16 +300,19 @@ fn repository_injected_store_uses_core_files_ref_lock_timeout_from_git_dir() {
         "[user]\n\tname = T\n\temail = t@e.x\n[core]\n\tfilesRefLockTimeout = 7500\n",
     )
     .expect("config");
-    let repo = RepositoryBuilder::new(options())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&git_dir, Some(&work_tree))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(options()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")
+            .with_work_tree(&work_tree)),
+    )
+    .expect("open");
     match repo.refs().ref_lock_wait() {
         LockWait::Backoff { budget } => assert_eq!(budget, Duration::from_millis(7500)),
         other => panic!("expected Backoff from config, got {other:?}"),
@@ -332,16 +335,19 @@ fn concurrent_create_branch_on_injected_store_never_lock_held() {
     )
     .expect("config");
     let repo = Arc::new(
-        RepositoryBuilder::new(options())
-            .odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
-            .ref_store(Arc::new(MemoryRefStore::new()))
-            .initial_branch("main")
-            .open(&git_dir, Some(&work_tree))
-            .expect("open"),
+        Repository::open(
+            &git_dir,
+            &(options()
+                .with_odb_builder(
+                    OdbBuilder::files(git_dir.join("objects"))
+                        .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                        .alternates(false),
+                )
+                .with_ref_store(Arc::new(MemoryRefStore::new()))
+                .with_initial_branch("main")
+                .with_work_tree(&work_tree)),
+        )
+        .expect("open"),
     );
     stage_and_commit(&repo, &work_tree, "base").expect("base commit");
 
@@ -395,16 +401,20 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
     )
     .expect("config");
     let refs = Arc::new(MemoryRefStore::new());
-    let main = RepositoryBuilder::new(options())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(&git_dir, Some(&main_wt))
-        .expect("open over injected stores");
+    let odb = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+    let main = Repository::open(
+        &git_dir,
+        &(options()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(odb.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")
+            .with_work_tree(&main_wt)),
+    )
+    .expect("open over injected stores");
     stage_and_commit(&main, &main_wt, "base").expect("base commit");
 
     let handles: Vec<(Repository, PathBuf)> = (0..THREADS)
@@ -422,9 +432,19 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
                     track: false,
                 })
                 .expect("add worktree");
-            let repo = main
-                .open_linked_worktree(&entry.admin_dir, &path)
-                .expect("open linked worktree");
+            let repo = Repository::open(
+                &entry.admin_dir,
+                &(options()
+                    .with_odb_builder(
+                        OdbBuilder::files(git_dir.join("objects"))
+                            .primary(odb.clone())
+                            .alternates(false),
+                    )
+                    .with_ref_store(refs.clone())
+                    .with_initial_branch("main")
+                    .with_work_tree(&path)),
+            )
+            .expect("open linked worktree");
             (repo, path)
         })
         .collect();
@@ -486,7 +506,8 @@ fn files_concurrent_disjoint_ref_updates_through_repository_never_lock_held() {
     const THREADS: usize = 8;
     const ITERS: usize = 500;
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Arc::new(Repository::init(tmp.path(), &InitOptions::default()).expect("init"));
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+    let repo = Arc::new(repo);
     let sig = Signature::new(
         "A",
         "a@example.com",

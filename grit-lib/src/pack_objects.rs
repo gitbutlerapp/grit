@@ -2489,7 +2489,7 @@ pub(crate) mod tests {
             use crate::objects::{serialize_tree, TreeEntry};
             use crate::pack_name_hash::pack_name_hash;
             let dir = tempfile::TempDir::new().unwrap();
-            let repo =
+            let (repo, _) =
                 Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
             let odb = repo.odb();
             let tree = |entries: &[(&str, ObjectId)]| {

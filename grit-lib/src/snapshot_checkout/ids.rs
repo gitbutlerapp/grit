@@ -358,7 +358,7 @@ mod tests {
 
     fn checkout() -> Checkout {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let odb = repo.odb();
         let blob = |text: &str| {
             (

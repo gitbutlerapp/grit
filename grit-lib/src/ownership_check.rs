@@ -32,7 +32,7 @@
 //!
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //!
 //! let mut env = Environment::empty();
 //! env.cwd = dir.path().to_path_buf();
@@ -242,7 +242,9 @@ mod tests {
     #[test]
     fn system_check_owned_repo_in_tempdir() {
         let dir = tempfile::tempdir().unwrap();
-        Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        Repository::init(dir.path(), &InitOptions::default())
+            .unwrap()
+            .0;
         let ctx = OwnershipContext::default();
         assert_eq!(
             SystemOwnershipCheck.status(dir.path(), &ctx).unwrap(),
@@ -265,7 +267,9 @@ mod tests {
     #[test]
     fn ownership_check_default_allows_owned_repo() {
         let td = tempfile::tempdir().unwrap();
-        Repository::init(td.path(), &InitOptions::default()).unwrap();
+        Repository::init(td.path(), &InitOptions::default())
+            .unwrap()
+            .0;
         let mut env = crate::environment::Environment::empty();
         env.cwd = td.path().to_path_buf();
         let options = RepositoryOptions::with_environment(env)
@@ -276,7 +280,9 @@ mod tests {
     #[test]
     fn ownership_check_foreign_repo_requires_safe_directory() {
         let td = tempfile::tempdir().unwrap();
-        Repository::init(td.path(), &InitOptions::default()).unwrap();
+        Repository::init(td.path(), &InitOptions::default())
+            .unwrap()
+            .0;
         let mut env = crate::environment::Environment::empty();
         env.cwd = td.path().to_path_buf();
         env.git_config_nosystem = Some("true".into());

@@ -10,9 +10,8 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
-    discover_optional, expand_at_minus_to_branch_name, resolve_at_minus_to_oid,
-    resolve_push_full_ref_for_branch, resolve_revision, resolve_revision_for_verify,
-    resolve_upstream_symbolic_name,
+    expand_at_minus_to_branch_name, resolve_at_minus_to_oid, resolve_push_full_ref_for_branch,
+    resolve_revision, resolve_revision_for_verify, resolve_upstream_symbolic_name,
 };
 
 use support::{commit_file, git, HistoryRepo};
@@ -29,7 +28,7 @@ fn open_grit(wt: &Path) -> Repository {
 fn discover_optional_rejects_gitfile_at_start() {
     let dir = tempfile::tempdir().expect("tempdir");
     fs::write(dir.path().join(".git"), b"not a gitdir line\n").expect("write");
-    let err = discover_optional(Some(dir.path())).expect_err("gitfile");
+    let err = support::discover_optional(Some(dir.path())).expect_err("gitfile");
     assert!(matches!(err, Error::NotARepository(_)));
 }
 

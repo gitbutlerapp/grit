@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn commits_on_a_snapshot_graft_onto_the_full_tree() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let odb = repo.odb();
         let full = edit(
             odb,
@@ -615,7 +615,7 @@ mod tests {
         super::super::Snapshot,
     ) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let full = edit(
             repo.odb(),
             None,

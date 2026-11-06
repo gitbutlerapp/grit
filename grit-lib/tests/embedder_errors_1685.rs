@@ -21,7 +21,7 @@ fn assert_requires_work_tree(result: Result<(), Error>) {
 #[test]
 fn bare_repo_common_failures_use_requires_work_tree() {
     let base = tempfile::tempdir().expect("tempdir");
-    let bare = Repository::init(
+    let (bare, _) = Repository::init(
         &base.path().join("bare"),
         &InitOptions::default().with_bare(true),
     )
@@ -48,7 +48,7 @@ fn bare_repo_common_failures_use_requires_work_tree() {
 
 fn repo_with_one_commit() -> (tempfile::TempDir, Repository, ObjectId) {
     let base = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &base.path().join("w"),
         &InitOptions::default().with_initial_branch("main"),
     )
@@ -105,7 +105,7 @@ fn compute_blame_missing_path_is_path_not_in_revision() {
 #[test]
 fn deep_parent_navigation_is_revision_out_of_range() {
     let base = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &base.path().join("w"),
         &InitOptions::default().with_initial_branch("main"),
     )
@@ -128,7 +128,7 @@ fn deep_parent_navigation_is_revision_out_of_range() {
 #[test]
 fn empty_commit_message_is_typed() {
     let base = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &base.path().join("w"),
         &InitOptions::default().with_initial_branch("main"),
     )

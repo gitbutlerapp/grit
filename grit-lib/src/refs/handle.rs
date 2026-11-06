@@ -61,7 +61,7 @@ impl<'repo> References<'repo> {
     /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-refs-resolve-doc");
-    /// let repo = Repository::init(&dir, &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
     /// let mut req = CommitRequest::new("doc");
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
@@ -191,7 +191,7 @@ impl<'repo> References<'repo> {
     /// use grit_lib::porcelain::commit::{create_commit, CommitRequest};
     /// use grit_lib::progress::NullProgress;
     /// let dir = std::env::temp_dir().join("grit-refs-write-doc");
-    /// let repo = Repository::init(&dir, &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
     /// let mut req = CommitRequest::new("doc");
     /// req.author = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);

@@ -395,7 +395,7 @@ fn concurrent_cas_delete_single_winner_packed_only() {
 #[test]
 fn concurrent_reftable_cas_single_winner() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

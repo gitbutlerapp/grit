@@ -3763,7 +3763,7 @@ mod v2_negotiation_tests {
     fn replayed_acks_do_not_postpone_the_in_vain_cutoff() {
         const TIPS: usize = 2000;
         let tmp = tempfile::tempdir().unwrap();
-        let repo = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
         let git_dir = repo.git_dir().to_path_buf();
         let tree = repo.odb().write(ObjectKind::Tree, &[]).unwrap();
         // Unrelated root commits: each one is a have of its own, so the
@@ -3847,7 +3847,7 @@ mod v2_negotiation_tests {
 
     fn milestones_over_local_upload_pack(protocol_version: u8) -> Vec<String> {
         let tmp = tempfile::tempdir().unwrap();
-        let src = Repository::init(&tmp.path().join("src"), &InitOptions::default()).unwrap();
+        let (src, _) = Repository::init(&tmp.path().join("src"), &InitOptions::default()).unwrap();
         let tree = src.odb().write(ObjectKind::Tree, &[]).unwrap();
         let body = format!(
             "tree {tree}\nauthor T <t@example.com> 1600000000 +0000\n\
@@ -3859,7 +3859,7 @@ mod v2_negotiation_tests {
             .unwrap();
         crate::refs::write_ref(src.git_dir(), "refs/heads/main", &commit).unwrap();
 
-        let dst = Repository::init(&tmp.path().join("dst"), &InitOptions::default()).unwrap();
+        let (dst, _) = Repository::init(&tmp.path().join("dst"), &InitOptions::default()).unwrap();
         let mut conn = crate::transport::connect_local_upload_pack(
             src.git_dir(),
             crate::transport::Service::UploadPack,
@@ -3960,7 +3960,7 @@ mod remote_fatal_fetch_tests {
     }
 
     fn empty_local(root: &Path) -> PathBuf {
-        let repo =
+        let (repo, _) =
             Repository::init(root, &InitOptions::new().with_initial_branch("main")).expect("init");
         repo.git_dir().to_path_buf()
     }

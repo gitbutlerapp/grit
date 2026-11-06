@@ -23,7 +23,7 @@ use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashMode, StashPushOptions};
 
 const IDENT: &str = "A U Thor <author@example.com> 1700000000 +0000";
@@ -165,14 +165,17 @@ fn one_file_commit(dirs: usize, batched: bool) -> OneFileCommit {
     .expect("init");
     let git_dir = root.join(".git");
     let store = Arc::new(CountingStore::new(batched));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(&root))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(&root)),
+    )
+    .expect("open");
     for d in 0..dirs {
         fs::create_dir_all(root.join(format!("d{d}"))).expect("mkdir");
     }
@@ -292,10 +295,13 @@ fn layered_repo(dirs: usize) -> Layered {
     let git_dir = root.join(".git");
     let remote = Arc::new(CountingStore::new(true));
     let open = |builder: OdbBuilder| {
-        RepositoryBuilder::new(RepositoryOptions::empty())
-            .odb_builder(builder.alternates(false))
-            .open(&git_dir, Some(&root))
-            .expect("open")
+        Repository::open(
+            &git_dir,
+            &(RepositoryOptions::empty()
+                .with_odb_builder(builder.alternates(false))
+                .with_work_tree(&root)),
+        )
+        .expect("open")
     };
     let history = open(OdbBuilder::files(git_dir.join("objects")).primary(remote.clone()));
     for d in 0..dirs {

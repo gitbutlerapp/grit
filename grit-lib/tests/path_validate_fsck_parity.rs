@@ -114,7 +114,7 @@ fn grit_object_fsck_rejects(body: &[u8]) -> bool {
 
 fn grit_repo_fsck_rejects(body: &[u8]) -> bool {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     write_loose_object(
         repo.git_dir().join("objects").as_path(),
         FixtureAlgo::Sha1,

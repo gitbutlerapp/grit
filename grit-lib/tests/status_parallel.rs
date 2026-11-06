@@ -100,7 +100,7 @@ fn assert_git_diff_files_clean(repo_root: &Path) {
 fn nested_ignores_and_negation_match_serial() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -130,7 +130,7 @@ fn nested_ignores_and_negation_match_serial() {
 fn untracked_directory_markers_match_serial() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -163,7 +163,7 @@ fn symlinked_directory_untracked_match_serial() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -315,7 +315,7 @@ fn large_index_stat_refresh_parallel_matches_serial() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

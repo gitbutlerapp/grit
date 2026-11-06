@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn commit_files_many_matches_single_commit_calls() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let tree1 = tree_with(&repo, &[("f.txt", b"a\n")]);
         let root = write_commit(&repo, tree1, vec![], "root");
         let tree2 = tree_with(&repo, &[("f.txt", b"b\n")]);
@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn commit_line_totals_skip_merges_and_honor_pathspecs() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let root_tree = tree_with(&repo, &[("a.txt", b"1\n2\n"), ("b.txt", b"x\n")]);
         let root = write_commit(&repo, root_tree, vec![], "root");
         let edit_tree = tree_with(&repo, &[("a.txt", b"1\nchanged\n3\n"), ("b.txt", b"x\n")]);
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn patch_totals_match_hunk_line_counts() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let tree1 = tree_with(&repo, &[("a.txt", b"one\n")]);
         let root = write_commit(&repo, tree1, vec![], "root");
         let tree2 = tree_with(&repo, &[("a.txt", b"one\ntwo\n")]);
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn skip_merge_patches_empties_stat_and_name_modes() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let base_tree = tree_with(&repo, &[("a.txt", b"one\n")]);
         let base = write_commit(&repo, base_tree, vec![], "base");
         let side_tree = tree_with(&repo, &[("a.txt", b"one\n"), ("b.txt", b"side\n")]);

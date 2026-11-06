@@ -13,7 +13,8 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneCheckout, CloneIntoOptions};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::remote::fetch::NoProgress;
+use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, rev_parse};
 
 fn git_upstream() -> tempfile::TempDir {
@@ -43,14 +44,17 @@ fn memory_primary_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     init_files_repo(dir.path());
     let git_dir = dir.path().join(".git");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
     (dir, repo, store)
 }
 
@@ -65,15 +69,18 @@ fn memory_primary_and_ref_repo() -> (
     let git_dir = dir.path().join(".git");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
     let ref_store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .ref_store(ref_store.clone())
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(ref_store.clone())
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
     (dir, repo, store, ref_store)
 }
 

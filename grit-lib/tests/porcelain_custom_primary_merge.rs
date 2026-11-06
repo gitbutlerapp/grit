@@ -15,7 +15,7 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -33,16 +33,19 @@ fn memory_primary_repo(
     .expect("config");
     let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
     let ref_store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .ref_store(ref_store.clone())
-        .initial_branch("main")
-        .open(&git_dir, Some(&wt))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(ref_store.clone())
+            .with_initial_branch("main")
+            .with_work_tree(&wt)),
+    )
+    .expect("open");
     (repo, store, ref_store)
 }
 

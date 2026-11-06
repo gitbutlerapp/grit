@@ -247,7 +247,7 @@ mod tests {
     impl Fixture {
         fn new() -> Self {
             let dir = tempfile::TempDir::new().unwrap();
-            let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+            let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
             Self { _dir: dir, repo }
         }
 

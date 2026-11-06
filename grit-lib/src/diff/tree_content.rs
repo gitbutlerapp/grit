@@ -533,13 +533,13 @@ mod tests {
 
     fn init_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         (dir, repo)
     }
 
     fn init_repo_with_core_config(snippet: &str) -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.git_dir().join("config"), snippet).expect("config");
         (dir, repo)
     }

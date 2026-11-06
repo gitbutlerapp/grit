@@ -2,8 +2,8 @@
 
 use std::fs;
 
+use crate::support::discover_optional;
 use grit_lib::error::{Error, NotARepositoryReason};
-use grit_lib::revwalk::rev_parse::discover_optional;
 use grit_test_support::{git, git_cmd};
 use tempfile::TempDir;
 

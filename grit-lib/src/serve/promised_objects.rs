@@ -356,7 +356,7 @@ mod tests {
     #[test]
     fn referrer_in_a_promisor_pack_settles_it_without_a_scan() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         let blob = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
         let tree = packed_tree(&repo, blob, true);
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).unwrap();
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn blob_named_only_by_ordinary_packs_is_not_promised() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         let blob = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
         let tree = packed_tree(&repo, blob, false);
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).unwrap();
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn promise_does_not_reach_past_the_objects_promisor_packs_name() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         let odb = repo.odb();
         let tree = |blob: ObjectId| {
             let mut body = b"100644 f\0".to_vec();

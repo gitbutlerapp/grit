@@ -19,7 +19,7 @@ use grit_lib::repo::{InitOptions, Repository};
 
 fn one_commit_repo() -> (tempfile::TempDir, Repository, ObjectId) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -95,7 +95,7 @@ fn git_cmd(dir: &Path, args: &[&str]) {
 
 fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<ObjectId>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -221,7 +221,7 @@ fn bloom_walk_stats_counters() {
 #[test]
 fn commit_tree_high_bit_and_parse_graph_dump() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -375,7 +375,7 @@ fn bloom_filter_slice_warns_on_bad_offsets_in_memory() {
 #[test]
 fn two_parent_graph_commit_matches_object() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -449,7 +449,7 @@ fn graph_content_hash(bytes: &[u8], algo: HashAlgo) -> String {
 
 fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

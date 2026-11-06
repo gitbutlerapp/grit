@@ -42,7 +42,7 @@ fn append_config(git_dir: &Path, text: &str) {
 
 /// A bare repository whose `main` holds a small blob and a 20 KiB one.
 fn bare_with_big_blob(git_dir: &Path) -> ObjectId {
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         git_dir,
         &InitOptions::new()
             .with_bare(true)
@@ -231,7 +231,7 @@ fn blobless_checkout_takes_each_blob_from_the_remote_that_has_it() {
     let server = tmp.path().join("server.git");
     let big = bare_with_big_blob(&server);
     let lop = tmp.path().join("lop.git");
-    let lop_repo = Repository::init(
+    let (lop_repo, _) = Repository::init(
         &lop,
         &InitOptions::new()
             .with_bare(true)
@@ -287,7 +287,7 @@ fn a_checkout_whose_blobs_cannot_be_fetched_keeps_the_clone() {
     let server = tmp.path().join("server.git");
     let big = bare_with_big_blob(&server);
     let lop = tmp.path().join("lop.git");
-    let lop_repo = Repository::init(
+    let (lop_repo, _) = Repository::init(
         &lop,
         &InitOptions::new()
             .with_bare(true)

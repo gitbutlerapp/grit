@@ -146,7 +146,7 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
 fn repack_after_many_commits_single_pack_and_git_fsck_clean() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 30);
 
     let git_dir = dir.path().join(".git");
@@ -187,7 +187,7 @@ fn repack_after_many_commits_single_pack_and_git_fsck_clean() {
 fn gc_matches_repack_plus_prune_and_git_fsck() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 20);
 
     let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
@@ -212,7 +212,7 @@ fn count_loose_head_ref_files(git_dir: &Path) -> usize {
 #[test]
 fn gc_pack_refs_packs_branch_refs() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 5);
     git(dir.path(), &["branch", "feature"]);
 
@@ -247,7 +247,7 @@ fn gc_pack_refs_packs_branch_refs() {
 /// packing every ref empties the whole `refs/` tree.
 fn repo_with_loose_stash_ref() -> (TempDir, Repository) {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
     let head = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main");
     grit_lib::refs::write_ref(repo.git_dir(), "refs/stash", &head).expect("refs/stash");
@@ -314,7 +314,7 @@ fn one_commit(repo: &Repository) {
 fn gc_preserves_staged_only_blob() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("staged-only.txt"), b"staged payload\n").expect("write");
@@ -342,7 +342,7 @@ fn gc_preserves_staged_only_blob() {
 #[test]
 fn fsck_skips_object_checks_when_check_objects_disabled() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan-index.txt"), b"x").expect("write");
@@ -380,7 +380,7 @@ fn fsck_skips_object_checks_when_check_objects_disabled() {
 #[test]
 fn fsck_reports_missing_index_blob_after_corruption() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan-index.txt"), b"x").expect("write");
@@ -420,7 +420,7 @@ fn fsck_reports_missing_index_blob_after_corruption() {
 fn repack_keeps_reflog_only_commit_and_kept_pack() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 2);
     git(dir.path(), &["reset", "--hard", "HEAD~1"]);
 
@@ -798,7 +798,7 @@ fn gc_aborts_before_pack_removal_when_stale_loose_mtime_update_fails() {
 #[test]
 fn gc_reports_kept_unreachable_loose_within_prune_grace() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
 
     repo.odb()
@@ -824,7 +824,7 @@ fn gc_reports_kept_unreachable_loose_within_prune_grace() {
 fn gc_prune_expire_never_preserves_unreachable_loose_blob() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
 
     let orphan = repo
@@ -1074,7 +1074,7 @@ fn gc_over_existing_pack_keeps_its_deltas_and_deltifies_new_blobs() {
 fn gc_repacks_loose_after_existing_pack_issue_1320() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 5);
 
     let opts = GcOptions::with_reflog_policy(1_700_000_000, false);
@@ -1768,7 +1768,7 @@ fn gc_from_loose_objects_builds_delta_compressed_pack_like_repack() {
 fn index_gitlink_absent_commit_does_not_break_repack_or_fsck() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
 
     let absent = "aabbccddeeff00112233445566778899aabbccdd";
@@ -1798,7 +1798,7 @@ fn index_gitlink_absent_commit_does_not_break_repack_or_fsck() {
 #[test]
 fn incremental_repack_with_bitmap_midx_readable_by_git() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().expect("worktree");
     std::fs::write(wt.join("base"), b"v1").expect("write base");
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
@@ -1900,7 +1900,7 @@ fn missing_oid() -> ObjectId {
 #[test]
 fn prune_rejects_missing_root_with_empty_loose_store() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     std::fs::write(
         repo.git_dir().join("refs/heads/main"),
         format!("{}\n", missing_oid().to_hex()),
@@ -2029,7 +2029,7 @@ fn prune_rejects_missing_reachable_blob() {
 #[test]
 fn prune_walks_trees_with_non_canonical_directory_modes() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let odb = repo.odb();
     let blob = odb.write(ObjectKind::Blob, b"kept\n").expect("blob");
     let mut sub = b"100644 kept.txt\0".to_vec();
@@ -3239,7 +3239,7 @@ fn gc_prunes_stale_temporary_pack_files_like_git() {
 #[test]
 fn gc_empty_history_writes_no_commit_graph_and_fsck_clean() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
     let graph = stats.commit_graph.expect("commit-graph task");
     assert_eq!(graph.commit_count, 0);
@@ -3263,7 +3263,7 @@ fn legacy_empty_commit_graph_file_parses_and_git_verify_accepts() {
     use std::collections::HashMap;
 
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let objects_dir = repo.odb().objects_dir();
     std::fs::create_dir_all(objects_dir.join("info")).expect("info");
     let (bytes, _) = build_commit_graph_bytes(
@@ -3296,7 +3296,7 @@ fn legacy_empty_commit_graph_file_parses_and_git_verify_accepts() {
 fn gc_after_one_commit_writes_commit_graph_both_fsck_clean() {
     let _pack_guard = pack_cache_guard();
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_grit_commits(&repo, 1);
     gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("gc");
     let graph_path = dir.path().join(".git/objects/info/commit-graph");
@@ -3314,7 +3314,7 @@ fn gc_after_one_commit_writes_commit_graph_both_fsck_clean() {
 #[test]
 fn write_commit_graph_empty_history_is_no_op() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let report = write_commit_graph(&repo, &CommitGraphOptions::default()).expect("write");
     assert_eq!(report.commit_count, 0);
     assert!(report.skipped.is_none());

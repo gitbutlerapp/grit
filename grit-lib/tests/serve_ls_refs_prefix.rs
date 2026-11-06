@@ -21,7 +21,7 @@ use grit_lib::remote::pkt_line;
 use grit_lib::remote::serve::{
     receive_pack, upload_pack, ProtocolVersion, ReceivePolicy, ServeOptions,
 };
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 /// In-memory object store that counts every lookup the server makes.
 #[derive(Debug, Default)]
@@ -148,14 +148,15 @@ fn many_ref_repo(n: usize) -> (tempfile::TempDir, Repository, Arc<CountingStore>
             .with_initial_branch("main"),
     )
     .expect("init");
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
+    let repo = Repository::open(
+        dir.path(),
+        &(RepositoryOptions::empty().with_odb_builder(
             OdbBuilder::files(dir.path().join("objects"))
                 .primary(Arc::clone(&store) as Arc<dyn WritableObjectStore>)
                 .alternates(false),
-        )
-        .open(dir.path(), None)
-        .expect("open over counting store");
+        )),
+    )
+    .expect("open over counting store");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
     let commit = repo
         .odb()

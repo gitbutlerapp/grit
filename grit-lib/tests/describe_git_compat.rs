@@ -61,7 +61,7 @@ fn describe_clock_skew_fixture_matches_git_rev_list_count() {
     }
     let dir = tempfile::tempdir().expect("tempdir");
     let wt = dir.path();
-    let repo = Repository::init(wt, &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(wt, &InitOptions::default()).expect("init");
     let odb = repo.odb();
     let base = write_commit_at(odb, &[], "base", 3129).expect("base");
     let tagged = write_commit_at(odb, &[base], "tagged", 2598).expect("tagged");

@@ -45,7 +45,7 @@ fn public_tag_verify_types() {
         },
     );
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
     let _ = parse_tree_sha256_tag_headers(b"object 0000000000000000000000000000000000000001\n\n");
     let _ = verify_tag(
         &repo,
@@ -61,7 +61,7 @@ fn public_tag_verify_types() {
 #[test]
 fn public_verify_tag_by_name() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
     let options = TagVerifyOptions {
         check_signature: false,
         gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),

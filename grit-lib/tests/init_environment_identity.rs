@@ -66,7 +66,7 @@ fn init_with_environment_keeps_identity_for_first_commit() {
     write_user_global_config(&cfg_home);
     let env = env_with_global(&cfg_home.path().join("gitconfig"));
     let wt = TempDir::new().expect("tempdir");
-    let repo =
+    let (repo, _) =
         Repository::init(wt.path(), &InitOptions::new().with_environment(env)).expect("init");
     let committer = repo
         .identity(IdentRole::Committer, repo.identity_now())
@@ -79,7 +79,7 @@ fn init_with_environment_keeps_identity_for_first_commit() {
 #[test]
 fn init_default_hermetic_commit_reports_missing_identity() {
     let wt = TempDir::new().expect("tempdir");
-    let repo = Repository::init(wt.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(wt.path(), &InitOptions::default()).expect("init");
     fs::write(wt.path().join("a.txt"), "hello\n").expect("write");
     stage(
         &repo,
@@ -109,7 +109,7 @@ fn init_bare_with_environment_resolves_identity() {
     write_user_global_config(&cfg_home);
     let env = env_with_global(&cfg_home.path().join("gitconfig"));
     let bare = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         bare.path(),
         &InitOptions::new().with_bare(true).with_environment(env),
     )
@@ -128,7 +128,7 @@ fn init_separate_git_dir_with_environment_commits() {
     let env = env_with_global(&cfg_home.path().join("gitconfig"));
     let wt = TempDir::new().expect("tempdir");
     let separate = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         wt.path(),
         &InitOptions::new()
             .with_environment(env)
@@ -152,7 +152,7 @@ fn init_honors_git_config_parameters_for_filesystem_config() {
             .parse::<ConfigOverride>()
             .expect("override"),
     );
-    let repo =
+    let (repo, _) =
         Repository::init(wt.path(), &InitOptions::new().with_environment(env)).expect("init");
     let config = fs::read_to_string(repo.git_dir().join("config")).expect("read config");
     assert!(

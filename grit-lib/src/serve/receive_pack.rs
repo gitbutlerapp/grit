@@ -2289,7 +2289,7 @@ mod tests {
         use crate::refs::store::{
             Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
         };
-        use crate::repo::{InitOptions, Repository, RepositoryBuilder};
+        use crate::repo::{InitOptions, Repository};
 
         let dir = tempfile::tempdir().expect("tempdir");
         Repository::init(
@@ -2300,11 +2300,13 @@ mod tests {
         )
         .expect("init");
         let store = Arc::new(MemoryRefStore::new());
-        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-            .ref_store(store.clone())
-            .initial_branch("master")
-            .open(dir.path(), None)
-            .expect("open");
+        let repo = Repository::open(
+            dir.path(),
+            &(RepositoryOptions::empty()
+                .with_ref_store(store.clone())
+                .with_initial_branch("master")),
+        )
+        .expect("open");
         let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
         let commit = repo
             .odb()

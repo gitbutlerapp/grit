@@ -1092,7 +1092,7 @@ mod tests {
     #[test]
     fn add_writes_url_and_default_fetch_refspec() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         repo.remotes()
             .add("upstream", "https://example.com/r.git")
             .expect("add");
@@ -1111,7 +1111,7 @@ mod tests {
     #[test]
     fn add_rejects_existing_and_invalid_names() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         repo.remotes().add("origin", "/tmp/a.git").expect("add");
         assert!(matches!(
             repo.remotes().add("origin", "/tmp/b.git"),
@@ -1135,7 +1135,7 @@ mod tests {
     #[test]
     fn add_origin_if_none_only_adds_to_a_repository_without_remotes() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         assert!(repo
             .remotes()
             .add_origin_if_none("https://h/me/a.git")
@@ -1155,7 +1155,7 @@ mod tests {
         );
 
         let other = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(other.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(other.path(), &InitOptions::default()).expect("init");
         repo.remotes().add("upstream", "/tmp/u.git").expect("add");
         assert!(!repo
             .remotes()

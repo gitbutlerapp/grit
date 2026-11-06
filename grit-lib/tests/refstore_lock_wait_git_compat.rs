@@ -76,7 +76,7 @@ fn files_disjoint_ref_updates_git_show_ref_and_fsck() {
 #[test]
 fn git_creates_ref_over_stale_empty_directory_at_exact_ref_path() {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
     let sig = Signature::new(
         "A",
         "a@example.com",

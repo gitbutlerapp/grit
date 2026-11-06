@@ -74,7 +74,7 @@ fn config_parse(c: &mut Criterion) {
 
 fn repository_config_access(c: &mut Criterion) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let config_path = repo.git_dir().join("config");
     let mut local = std::fs::read_to_string(&config_path).expect("read config");
     local.push_str(GLOBAL_CONFIG);

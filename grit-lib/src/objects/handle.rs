@@ -47,7 +47,7 @@ impl<'repo> Objects<'repo> {
     /// use grit_lib::objects::ObjectKind;
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = std::env::temp_dir().join("grit-objects-handle-doc");
-    /// let repo = Repository::init(&dir, &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
     /// let oid = repo.objects().write(ObjectKind::Blob, b"hello")?;
     /// assert!(repo.objects().contains(&oid)?);
     /// # Ok(())
@@ -71,7 +71,7 @@ impl<'repo> Objects<'repo> {
     /// use grit_lib::objects::ObjectKind;
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = std::env::temp_dir().join("grit-objects-read-doc");
-    /// let repo = Repository::init(&dir, &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
     /// let oid = repo.objects().write(ObjectKind::Blob, b"payload")?;
     /// let obj = repo.objects().read(&oid)?;
     /// assert_eq!(obj.data, b"payload");
@@ -107,7 +107,7 @@ impl<'repo> Objects<'repo> {
     /// use grit_lib::objects::ObjectKind;
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = std::env::temp_dir().join("grit-objects-read-commit-doc");
-    /// let repo = Repository::init(&dir, &InitOptions::default())?;
+    /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
     /// let tree = repo.objects().write(ObjectKind::Tree, b"")?;
     /// let body = format!(
     ///     "tree {tree}\nauthor A <a@example.com> 0 +0000\ncommitter A <a@example.com> 0 +0000\n\nfirst\n"
@@ -211,7 +211,7 @@ impl<'repo> Objects<'repo> {
     /// use grit_lib::objects::{ObjectKind, TreeEntry};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
-    /// let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
+    /// let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
     /// let blob = repo.objects().write(ObjectKind::Blob, b"hello\n")?;
     /// let entry = |name: &str| TreeEntry { mode: 0o100644, name: name.into(), oid: blob };
     /// let tree = repo.objects().write_tree([entry("b"), entry("a")])?;

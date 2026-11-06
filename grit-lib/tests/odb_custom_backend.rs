@@ -13,7 +13,7 @@ use grit_lib::objects::{serialize_tag, TagData};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::refs::write_ref;
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
 use std::process::Command;
@@ -80,10 +80,13 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     let builder = OdbBuilder::files(&objects)
         .primary(store.clone())
         .alternates(false);
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(builder)
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(builder)
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
     (dir, repo, store)
 }
 
@@ -108,9 +111,12 @@ fn open_with_memory_primary(
     objects: &Path,
 ) -> grit_lib::error::Result<Repository> {
     let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
-    RepositoryBuilder::new(options)
-        .odb_builder(OdbBuilder::files(objects).primary(store).alternates(false))
-        .open(git_dir, Some(work_tree))
+    Repository::open(
+        git_dir,
+        &(options
+            .with_odb_builder(OdbBuilder::files(objects).primary(store).alternates(false))
+            .with_work_tree(work_tree)),
+    )
 }
 
 #[cfg(unix)]
@@ -344,14 +350,17 @@ fn memory_primary_write_raw_ignores_seeded_loose_on_disk() {
     fs::write(&loose, b"placeholder").expect("seed loose");
 
     let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(&objects)
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(&objects)
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
 
     assert!(!store.contains(&oid).expect("contains"));
     repo.odb().write_raw(&store_bytes).expect("write_raw");
@@ -361,7 +370,7 @@ fn memory_primary_write_raw_ignores_seeded_loose_on_disk() {
 #[test]
 fn files_primary_gc_prunes_unreachable_loose() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -450,7 +459,7 @@ fn memory_primary_abbrev_unique_prefix_considers_store_collisions() {
 #[test]
 fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

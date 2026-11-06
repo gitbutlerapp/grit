@@ -640,7 +640,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     use grit_lib::repo::{InitOptions, Repository};
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().expect("worktree");
     fs::write(wt.join("a.txt"), b"a\n").unwrap();
     stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");

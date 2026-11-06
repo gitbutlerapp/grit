@@ -34,7 +34,7 @@ fn init_repo(worktree: &std::path::Path, backend: Backend) -> Repository {
     if backend == Backend::Reftable {
         opts = opts.with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable);
     }
-    let repo = Repository::init(worktree, &opts).expect("init");
+    let (repo, _) = Repository::init(worktree, &opts).expect("init");
     if backend == Backend::Reftable {
         // Seed HEAD in the table too: system Git ignores the loose HEAD in a reftable repo.
         git(worktree, &["symbolic-ref", "HEAD", "refs/heads/main"]);
@@ -184,7 +184,7 @@ fn contains_rejects_non_commit_target() {
         return;
     }
     let root = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(root.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(root.path(), &InitOptions::default()).expect("init");
     git(root.path(), &["commit", "--allow-empty", "-q", "-m", "c"]);
     let blob = repo
         .odb()
@@ -429,7 +429,7 @@ fn contains_missing_object_is_typed() {
         return;
     }
     let root = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(root.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(root.path(), &InitOptions::default()).expect("init");
     let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").expect("oid");
     let err = resolve_commit_filter_target(&repo, missing).unwrap_err();
     assert!(matches!(err, RefQueryError::MissingObject(_)));
@@ -494,16 +494,18 @@ impl grit_lib::objects::odb::store::WritableObjectStore for CountingObjects {
 fn counted_repo(root: &std::path::Path, objects: std::sync::Arc<CountingObjects>) -> Repository {
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::objects::odb::OdbBuilder;
-    use grit_lib::repo::RepositoryBuilder;
     init_repo(root, Backend::Files);
-    RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(root.join(".git/objects"))
-                .primary(objects)
-                .alternates(false),
-        )
-        .open(&root.join(".git"), Some(root))
-        .unwrap()
+    Repository::open(
+        &root.join(".git"),
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(root.join(".git/objects"))
+                    .primary(objects)
+                    .alternates(false),
+            )
+            .with_work_tree(root)),
+    )
+    .unwrap()
 }
 
 fn counted_commit(repo: &Repository, parent: Option<ObjectId>, n: usize) -> ObjectId {

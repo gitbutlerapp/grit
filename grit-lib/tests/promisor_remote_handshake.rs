@@ -127,6 +127,7 @@ fn init(dir: &Path, bare: bool) -> Repository {
             .with_ref_storage(RefStorageFormat::Files),
     )
     .unwrap()
+    .0
 }
 
 fn append_config(git_dir: &Path, text: &str) {

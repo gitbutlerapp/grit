@@ -27,7 +27,7 @@ fn write_tree(repo: &Repository, payloads: &[(&str, &str)]) -> grit_lib::objects
 #[test]
 fn commit_range_structured_diff_parallel_matches_serial() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let mut old_payloads = Vec::new();
     let mut new_payloads = Vec::new();
     for i in 0..FILE_COUNT {

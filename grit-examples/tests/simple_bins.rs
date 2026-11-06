@@ -35,7 +35,7 @@ fn run_bin(bin: &str, args: &[&str], cwd: &std::path::Path) -> Result<String> {
 #[test]
 fn simple_bins_cover_a_tiny_commit_workflow() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         temp.path(),
         &InitOptions::new()
             .with_initial_branch("main")

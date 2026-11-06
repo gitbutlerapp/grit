@@ -9,7 +9,7 @@ use std::fs;
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     (dir, repo)
 }
 
@@ -94,7 +94,7 @@ fn absolute_path_outside_work_tree_is_a_typed_error() {
 #[test]
 fn bare_repository_needs_work_tree() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo =
+    let (repo, _) =
         Repository::init(dir.path(), &InitOptions::default().with_bare(true)).expect("init bare");
     assert_eq!(
         repo.resolve_worktree_pathspec("a", None),

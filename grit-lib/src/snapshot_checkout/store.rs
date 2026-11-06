@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn work_branch_names_are_never_given_out_twice() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let store = CheckoutStore::for_repository(&repo);
         let first = store
             .reserve_work_branch(&repo, "bob/calm-fern", 1)

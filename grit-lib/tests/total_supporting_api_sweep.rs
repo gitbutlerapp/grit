@@ -24,7 +24,7 @@ use tempfile::tempdir;
 
 fn linear_repo(depth: usize) -> (tempfile::TempDir, Repository, grit_lib::objects::ObjectId) {
     let dir = tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let mut parent: Option<grit_lib::objects::ObjectId> = None;
     let mut tip = repo.odb().write(ObjectKind::Blob, b"v0\n").expect("blob");
     for i in 0..depth {

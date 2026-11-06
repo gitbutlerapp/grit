@@ -12,7 +12,7 @@ use crate::ref_storage::RefStorageFormat;
 use crate::repo::{
     init_bare_with_env_worktree, init_repository, init_repository_separate_git_dir,
     init_worktree_config, repository_format_warning, resolve_git_directory_arg,
-    validate_repo_format, InitOptions, Repository, RepositoryBuilder,
+    validate_repo_format, InitOptions, Repository,
 };
 use crate::write_tree::write_tree_from_index;
 use tempfile::tempdir;
@@ -63,8 +63,10 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
     let _ = repository_format_warning(&git_dir)?;
     let _ = init_worktree_config(&git_dir)?;
     let _ = resolve_git_directory_arg(&git_dir)?;
-    let repo =
-        RepositoryBuilder::new(RepositoryOptions::empty()).open(&git_dir, Some(dir.path()))?;
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty().with_work_tree(dir.path())),
+    )?;
     let _ = repo.thread_policy();
     let _ = repo.environment();
     let _ = repo.reference_unix_time();
@@ -104,8 +106,10 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
         crate::init_filesystem::InitFilesystemConfigOptions::default(),
         &crate::environment::Environment::empty(),
     )?;
-    let repo =
-        RepositoryBuilder::new(RepositoryOptions::empty()).open(&separate, Some(wt.path()))?;
+    let repo = Repository::open(
+        &separate,
+        &(RepositoryOptions::empty().with_work_tree(wt.path())),
+    )?;
     let _ = repo.load_index()?;
 
     let bare_dir = tempdir().map_err(crate::error::Error::Io)?;
@@ -127,7 +131,7 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
 
     let nested = tempdir().map_err(crate::error::Error::Io)?;
     let nested_git = nested.path().join("nested.git");
-    Repository::init(
+    let (_repo, _) = Repository::init(
         nested.path(),
         &InitOptions {
             separate_git_dir: Some(nested_git),
@@ -140,7 +144,7 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
 #[test]
 fn open_for_serving_and_bare_worktree_at_path() -> crate::error::Result<()> {
     let wt = tempdir().map_err(crate::error::Error::Io)?;
-    Repository::init(
+    let (repo, _) = Repository::init(
         wt.path(),
         &InitOptions {
             bare_with_worktree_at_path: true,

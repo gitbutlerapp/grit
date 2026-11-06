@@ -1566,7 +1566,7 @@ mod tests {
 
     fn init_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         (dir, repo)
     }
 
@@ -1718,7 +1718,6 @@ mod tests {
         use crate::refs::store::{
             Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
         };
-        use crate::repo::RepositoryBuilder;
 
         let (dir, repo) = init_repo();
         let root = commit_file(&repo, "main", "a.txt", b"1\n", "root\n", None);
@@ -1749,11 +1748,12 @@ mod tests {
             .expect("prepare")
             .commit()
             .expect("commit");
-        let injected = RepositoryBuilder::new(
-            RepositoryOptions::empty().with_work_tree(dir.path().to_path_buf()),
+        let injected = Repository::open(
+            repo.git_dir(),
+            &RepositoryOptions::empty()
+                .with_work_tree(dir.path())
+                .with_ref_store(store.clone()),
         )
-        .ref_store(store.clone())
-        .open(repo.git_dir(), Some(dir.path()))
         .expect("open injected");
         assert_eq!(injected.head_commit().expect("injected head"), tip);
         let disk_head = fs::read(repo.git_dir().join("HEAD")).expect("disk HEAD");

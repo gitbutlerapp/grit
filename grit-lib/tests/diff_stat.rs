@@ -48,7 +48,7 @@ fn listed(
 #[test]
 fn stat_and_patch_details_give_the_same_diffstat() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let old = tree_with(
         &repo,
         &[

@@ -1256,11 +1256,11 @@ pub enum Error {
         value: String,
     },
 
-    /// [`crate::repo::Repository::init_with_outcome`] refused to change object format on reinit.
+    /// [`crate::repo::Repository::init`] refused to change object format on reinit.
     #[error("cannot change object format in an existing repository")]
     InitObjectFormatChange,
 
-    /// [`crate::repo::Repository::init_with_outcome`] with incompatible `--bare` and separate git dir.
+    /// [`crate::repo::Repository::init`] with incompatible `--bare` and separate git dir.
     #[error("cannot combine bare repository with separate git directory")]
     InitBareWithSeparateGitDir,
 
@@ -2334,7 +2334,7 @@ pub enum Error {
         operation: &'static str,
     },
 
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
+    /// [`Repository::open`](crate::repo::Repository::open) was given an
     /// [`OdbBuilder`](crate::odb::OdbBuilder) rooted somewhere other than the repository's
     /// `objects/` directory.
     #[error(
@@ -2349,7 +2349,7 @@ pub enum Error {
         repository: std::path::PathBuf,
     },
 
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
+    /// [`Repository::open`](crate::repo::Repository::open) was given an
     /// [`OdbBuilder`](crate::odb::OdbBuilder) whose custom primary or read source hashes
     /// objects with a different algorithm than the repository's `extensions.objectformat`
     /// (SHA-1 when unset).

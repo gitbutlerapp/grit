@@ -61,7 +61,7 @@ mod tests {
 
         tracing::subscriber::with_default(subscriber, || {
             let dir = tempfile::tempdir().unwrap();
-            let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+            let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
             let ident = "T <t@example.com> 1 +0000".to_string();
             let sig: crate::ident::Signature = ident.parse().unwrap();
             let mut req = crate::porcelain::commit::CommitRequest::new("trace test");

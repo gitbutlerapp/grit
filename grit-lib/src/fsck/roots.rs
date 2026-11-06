@@ -193,7 +193,7 @@ mod tests {
     use crate::refs::store::{
         Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
     };
-    use crate::repo::{InitOptions, Repository, RepositoryBuilder};
+    use crate::repo::{InitOptions, Repository};
     use crate::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
     use filetime::FileTime;
     use tempfile::TempDir;
@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn reachability_roots_includes_index_staged_blob() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         commit_all(&repo, "c");
         std::fs::write(repo.work_tree().unwrap().join("staged-only"), b"y").unwrap();
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn reachability_roots_include_linked_worktree_index_from_main_and_linked_handles() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         commit_all(&repo, "base");
 
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn prune_keeps_blob_staged_only_in_linked_worktree_index() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         commit_all(&repo, "base");
 
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn reachability_roots_tolerates_missing_linked_worktree_index() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         commit_all(&repo, "base");
         let linked_path = dir.path().join("linked");
@@ -471,16 +471,18 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let git_dir = dir.path().join("mem.git");
         std::fs::create_dir_all(&git_dir).unwrap();
-        let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-            .odb_builder(
-                OdbBuilder::files(git_dir.join("objects"))
-                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                    .alternates(false),
-            )
-            .ref_store(Arc::new(MemoryRefStore::new()))
-            .initial_branch("main")
-            .open(&git_dir, None)
-            .unwrap();
+        let repo = Repository::open(
+            &git_dir,
+            &(RepositoryOptions::empty()
+                .with_odb_builder(
+                    OdbBuilder::files(git_dir.join("objects"))
+                        .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                        .alternates(false),
+                )
+                .with_ref_store(Arc::new(MemoryRefStore::new()))
+                .with_initial_branch("main")),
+        )
+        .unwrap();
         let sig = Signature::new(
             "T",
             "t@example.com",

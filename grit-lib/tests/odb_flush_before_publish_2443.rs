@@ -30,7 +30,7 @@ use grit_lib::refs::store::{
     MemoryRefStore, PreparedRefTransaction, RefEntry, RefStorageFormat, RefStore, RefStoreError,
     RefTransaction,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
 use grit_lib::revwalk::history::{
     apply_rewrite, reword, verify_rebase_with_exec, ApplyOptions, EmptyPolicy, ExecSpec, RefScope,
@@ -322,16 +322,19 @@ fn open_repo(gd: &Path, wt: &Path) -> (Repository, Arc<TransactionalStore>) {
     let log = EventLog::new();
     let store = Arc::new(TransactionalStore::new(log.clone()));
     let primary: Arc<dyn WritableObjectStore> = store.clone();
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(gd.join("objects"))
-                .primary(primary)
-                .alternates(false),
-        )
-        .ref_store(Arc::new(LoggingRefStore::new(log)))
-        .initial_branch("main")
-        .open(gd, Some(wt))
-        .expect("open");
+    let repo = Repository::open(
+        gd,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(gd.join("objects"))
+                    .primary(primary)
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(LoggingRefStore::new(log)))
+            .with_initial_branch("main")
+            .with_work_tree(wt)),
+    )
+    .expect("open");
     (repo, store)
 }
 
@@ -577,16 +580,18 @@ fn ingest_flush_failure_rolls_back_staged() {
     store.set_fail_flush(false);
     let gd = tmp.path().join("dest.git");
     let primary: Arc<dyn WritableObjectStore> = store.clone();
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(gd.join("objects"))
-                .primary(primary)
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&gd, None)
-        .expect("open");
+    let repo = Repository::open(
+        &gd,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(gd.join("objects"))
+                    .primary(primary)
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open");
     ingest_received_pack(pack, repo.odb(), &IngestPackOptions::default()).expect("retry ingest");
     assert!(!store.state.lock().unwrap().committed.is_empty());
 }

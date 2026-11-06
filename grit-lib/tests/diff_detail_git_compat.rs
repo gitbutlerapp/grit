@@ -14,7 +14,7 @@ use grit_lib::test_support::counters::track_blob_reads;
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     (dir, repo)
 }
 
@@ -185,8 +185,9 @@ fn tree_metadata_matrix_matches_git_without_reading_blobs() {
 
     for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default().with_object_format(algo))
-            .expect("init");
+        let (repo, _) =
+            Repository::init(dir.path(), &InitOptions::default().with_object_format(algo))
+                .expect("init");
         let a = write_blob(&repo, b"before\n");
         let b = write_blob(&repo, b"after\n");
         let entry = |name: &[u8], mode, oid: ObjectId| TreeEntry {

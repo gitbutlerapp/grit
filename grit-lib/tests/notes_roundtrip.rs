@@ -463,7 +463,7 @@ fn add_reports_added_then_replaced_and_logs_like_git() {
 #[test]
 fn notes_on_reftable_repository_use_the_ref_store() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

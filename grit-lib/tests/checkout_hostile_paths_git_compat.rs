@@ -565,7 +565,7 @@ fn win32_only_names_check_out_off_windows_like_git() {
 #[test]
 fn git_tilde1_allowed_when_protect_ntfs_disabled() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     git(dir.path(), &["config", "core.protectNTFS", "false"]);
     repo.reload_config().expect("reload config");
 

@@ -20,7 +20,7 @@ use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 
 const IDENT: &str = "Odb Env <odb-env@example.com> 1700000000 +0000";
 
@@ -299,10 +299,13 @@ fn odb_builder_must_name_env_object_directory() {
             .with_work_tree(&work)
     };
 
-    let repo = RepositoryBuilder::new(options())
-        .odb_builder(OdbBuilder::files(&objq))
-        .open(&git_dir, Some(&work))
-        .expect("builder rooted at the env dir");
+    let repo = Repository::open(
+        &git_dir,
+        &(options()
+            .with_odb_builder(OdbBuilder::files(&objq))
+            .with_work_tree(&work)),
+    )
+    .expect("builder rooted at the env dir");
     assert_eq!(repo.odb().objects_dir(), objq.as_path());
     let oid = repo.odb().write(ObjectKind::Blob, b"builder\n").unwrap();
     assert_eq!(loose_objects(&objq).len(), 1);
@@ -314,9 +317,12 @@ fn odb_builder_must_name_env_object_directory() {
     .odb()
     .exists(&oid));
 
-    let mismatch = RepositoryBuilder::new(options())
-        .odb_builder(OdbBuilder::files(git_dir.join("objects")))
-        .open(&git_dir, Some(&work));
+    let mismatch = Repository::open(
+        &git_dir,
+        &(options()
+            .with_odb_builder(OdbBuilder::files(git_dir.join("objects")))
+            .with_work_tree(&work)),
+    );
     assert!(
         matches!(
             mismatch,

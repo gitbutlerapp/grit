@@ -2177,7 +2177,7 @@ mod tests {
         use crate::repo::{InitOptions, Repository};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let hook = repo.git_dir().join("hooks").join("pre-receive");
         fs::write(
             &hook,

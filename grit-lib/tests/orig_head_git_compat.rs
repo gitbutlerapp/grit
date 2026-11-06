@@ -709,7 +709,7 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
 #[test]
 fn reftable_reset_stores_orig_head_in_the_ref_store() {
     let tmp = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

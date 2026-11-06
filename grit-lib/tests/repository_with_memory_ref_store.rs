@@ -13,22 +13,24 @@ use grit_lib::refs::list_refs_for_repository;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate, ReflogUpdate,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use time::OffsetDateTime;
 
 fn open_memory_ref_repo(git_dir: &Path) -> Repository {
     fs::create_dir_all(git_dir).expect("git dir");
-    RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(git_dir, None)
-        .expect("open")
+    Repository::open(
+        git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open")
 }
 
 fn store_commit(repo: &Repository, message: &str) -> ObjectId {

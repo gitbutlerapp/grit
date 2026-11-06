@@ -13,22 +13,24 @@ use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 
 fn open_injected(git_dir: &Path) -> grit_lib::error::Result<(Repository, Arc<MemoryRefStore>)> {
     let refs = Arc::new(MemoryRefStore::new());
     let odb = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(odb)
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(git_dir, None)?;
+    let repo = Repository::open(
+        git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(odb)
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")),
+    )?;
     Ok((repo, refs))
 }
 
@@ -124,16 +126,18 @@ fn initial_branch_keeps_an_existing_head() {
     let refs = Arc::new(MemoryRefStore::new());
     refs.set_ref("HEAD", RawRef::Symbolic("refs/heads/trunk".to_owned()))
         .expect("seed");
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(&git_dir, None)
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")),
+    )
+    .expect("open");
     assert_eq!(
         repo.refs().read_raw("HEAD").expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/trunk".to_owned()))
@@ -144,15 +148,17 @@ fn initial_branch_keeps_an_existing_head() {
 fn initial_branch_rejects_invalid_names() {
     let dir = tempfile::tempdir().expect("tempdir");
     let git_dir = dir.path().join("bad.git");
-    let result = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("bad..name")
-        .open(&git_dir, None);
+    let result = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("bad..name")),
+    );
     assert!(matches!(result, Err(Error::InvalidRef(_))), "{result:?}");
 }
 
@@ -161,10 +167,12 @@ fn a_files_object_store_still_needs_its_objects_directory() {
     let dir = tempfile::tempdir().expect("tempdir");
     let git_dir = dir.path().join("refs-only.git");
     fs::create_dir(&git_dir).expect("mkdir");
-    let result = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(OdbBuilder::files(git_dir.join("objects")))
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .open(&git_dir, None);
+    let result = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(OdbBuilder::files(git_dir.join("objects")))
+            .with_ref_store(Arc::new(MemoryRefStore::new()))),
+    );
     assert!(
         matches!(result, Err(Error::NotARepository(_))),
         "{result:?}"

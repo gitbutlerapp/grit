@@ -165,7 +165,8 @@ mod tests {
     use grit_test_support::objects::git_supports_sha256;
 
     fn init_repo(dir: &Path) -> Repository {
-        Repository::init(dir, &InitOptions::default()).expect("init")
+        let (repo, _) = Repository::init(dir, &InitOptions::default()).expect("init");
+        repo
     }
 
     #[test]

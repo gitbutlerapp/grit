@@ -9,7 +9,7 @@ use grit_lib::repo::{InitOptions, Repository};
 #[test]
 fn large_cat_matches_git_with_replace_refs_in_every_output_mode() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let original = repo
         .odb()
         .write(ObjectKind::Blob, b"original")

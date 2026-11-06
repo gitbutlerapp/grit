@@ -32,7 +32,7 @@
 //!
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! let head = resolve_head(repo.git_dir())?;
 //! assert!(matches!(head, grit_lib::state::HeadState::Branch { short_name, oid: None, .. } if short_name == "main"));
 //! let _ = Repository::open(
@@ -150,8 +150,8 @@ pub mod progress;
 ///
 /// # fn main() -> Result<()> {
 /// let dir = tempfile::tempdir()?;
-/// let repo = Repository::init(dir.path(), &InitOptions::default())?;
-/// let _cfg = repo.config().snapshot()?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+/// let _cfg = repo.config()?;
 /// assert!(repo.refs().read_raw("HEAD")?.is_some());
 /// # Ok(())
 /// # }
@@ -172,7 +172,6 @@ pub mod prelude {
     };
     pub use crate::repo::{
         resolve_initial_branch, DiscoveryInfo, InitOptions, InitOutcome, Repository,
-        RepositoryBuilder,
     };
 }
 

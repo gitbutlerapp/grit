@@ -46,7 +46,7 @@ fn git_dir_lock_names(repo: &Repository) -> Vec<String> {
 #[test]
 fn cancelled_pre_commit_hook_leaves_no_index_lock() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::default().with_initial_branch("main".to_owned()),
     )
@@ -87,7 +87,7 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
 #[test]
 fn cancelled_pre_commit_hook_waits_for_child_to_exit() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::default().with_initial_branch("main".to_owned()),
     )

@@ -70,7 +70,7 @@ fn index_entry(path: &str, oid: ObjectId) -> IndexEntry {
 #[test]
 fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let mut tip = repo
         .odb()
         .write_loose_materialize(ObjectKind::Blob, b"v0\n")?;

@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn warm_for_patch_batch_disambiguates_against_full_odb() -> Result<()> {
         let dir = TempDir::new().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let (referenced, dangling, data_ref, data_dang) = two_blobs_sharing_seven_hex_prefix();
         assert_eq!(referenced.to_hex()[..7], dangling.to_hex()[..7]);
         repo.odb().write(ObjectKind::Blob, &data_ref)?;
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn abbrev_extends_prefix_when_seven_hex_collide() -> Result<()> {
         let dir = TempDir::new().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let (a, b, data_a, data_b) = two_blobs_sharing_seven_hex_prefix();
         assert_eq!(a.to_hex()[..7], b.to_hex()[..7]);
         assert_eq!(repo.odb().write(ObjectKind::Blob, &data_a)?, a);

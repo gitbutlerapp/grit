@@ -510,7 +510,7 @@ fn generation_overflow_and_wide_commit_times() {
 #[test]
 fn root_commit_and_grit_only_write_without_generation_chunk() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

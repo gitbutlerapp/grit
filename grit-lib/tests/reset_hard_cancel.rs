@@ -168,7 +168,7 @@ fn seed_many_file_repo(repo: &Repository, files: usize) -> ObjectId {
 fn hard_reset_returns_cancelled_and_stops_checkout_early() {
     const FILES: usize = 120;
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -226,7 +226,7 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
 fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
     const FILES: usize = 120;
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -334,7 +334,7 @@ fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<Objec
 fn hard_reset_cancel_restores_coalesced_directory_delete() {
     const FILES_IN_D: usize = 600;
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

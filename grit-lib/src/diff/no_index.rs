@@ -93,11 +93,12 @@ pub fn write_paths_patch<W: std::io::Write>(
     let temp = tempfile::tempdir().map_err(|e| NoIndexError::PathNotAccessible {
         path: e.to_string(),
     })?;
-    let repo = Repository::init(temp.path(), &InitOptions::new().with_bare(true)).map_err(|e| {
-        NoIndexError::PathNotAccessible {
-            path: e.to_string(),
-        }
-    })?;
+    let (repo, _) =
+        Repository::init(temp.path(), &InitOptions::new().with_bare(true)).map_err(|e| {
+            NoIndexError::PathNotAccessible {
+                path: e.to_string(),
+            }
+        })?;
     let entries = no_index_prepared_entries(a, b, opts, repo.odb())?;
     if entries.is_empty() {
         return Ok(false);

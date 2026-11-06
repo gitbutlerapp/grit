@@ -8,7 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 fn main() -> grit_lib::error::Result<()> {
     let dir = tempfile::tempdir()?;
@@ -16,13 +16,16 @@ fn main() -> grit_lib::error::Result<()> {
     let git_dir = dir.path().join(".git");
 
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir.path()))?;
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(dir.path())),
+    )?;
 
     let blob = repo.odb().write(ObjectKind::Blob, b"hello")?;
     println!("blob={blob}");

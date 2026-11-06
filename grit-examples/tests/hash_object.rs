@@ -8,7 +8,7 @@ use grit_lib::repo::{InitOptions, Repository};
 #[test]
 fn hash_object_writes_file_contents_as_blob() -> Result<()> {
     let temp = tempfile::tempdir()?;
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         temp.path(),
         &InitOptions::new()
             .with_initial_branch("main")

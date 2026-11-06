@@ -17,7 +17,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::MemoryRefStore;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::{Remote, RemoteError};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 #[derive(Debug)]
 struct CountingStore {
@@ -161,15 +161,18 @@ fn memory_repo(store: Arc<CountingStore>) -> (tempfile::TempDir, Repository) {
     )
     .expect("init");
     let git_dir = dir.path().join(".git");
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store)
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store)
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
     (dir, repo)
 }
 

@@ -258,7 +258,7 @@ mod tests {
     #[test]
     fn objects_come_back_in_queue_order_and_misses_are_left_to_the_walk() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let odb = repo.odb();
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         let len = 3 * BATCH + 17;

@@ -317,7 +317,7 @@ fn inspect_tracked_with_non_directory_destination_prefix_reftable() {
     let head = ObjectId::from_hex(git(&upstream, &["rev-parse", "HEAD"]).trim()).expect("oid");
 
     let client = tmp.path().join("client");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         &client,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

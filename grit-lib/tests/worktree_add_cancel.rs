@@ -16,7 +16,7 @@ const IDENT: &str = "T <t@t> 0 +0000";
 
 fn init_wide_repo() -> (tempfile::TempDir, Repository) {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

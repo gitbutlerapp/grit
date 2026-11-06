@@ -19,7 +19,7 @@
 //! let odb = Odb::new(Path::new(".git/objects"));
 //! ```
 //!
-//! Custom primary store — see [`OdbBuilder`] and [`crate::repo::RepositoryBuilder`].
+//! Custom primary store — see [`OdbBuilder`] and [`RepositoryOptions::with_odb_builder`](crate::environment::RepositoryOptions::with_odb_builder).
 
 pub mod builder;
 mod commit;
@@ -1430,7 +1430,7 @@ impl Odb {
     /// to [`HashAlgo::Sha1`] when no config can be read.
     ///
     /// With a custom [`OdbBuilder::primary`] this is the store's own algorithm. A
-    /// successful [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) has
+    /// successful [`Repository::open`](crate::repo::Repository::open) has
     /// already checked that it equals the repository's object format; a standalone
     /// [`OdbBuilder::build`] reports the store's algorithm unchecked.
     #[must_use]

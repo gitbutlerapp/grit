@@ -16,7 +16,7 @@ use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::remote::serve::{
     receive_pack, ProtocolVersion, ReceivePolicy, RefUpdateRefusal, ServeOptions, UnpackError,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 
 const ZERO: &str = "0000000000000000000000000000000000000000";
 
@@ -76,16 +76,19 @@ fn push_body(commands: &[(Option<ObjectId>, Option<ObjectId>, &str)], pack: &[u8
 fn memory_serve_repo(root: &Path) -> (Repository, Arc<MemoryStore>, Arc<MemoryRefStore>) {
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
     let refs = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty().for_serving())
-        .odb_builder(
-            OdbBuilder::files(root.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(root, None)
-        .expect("open");
+    let repo = Repository::open(
+        root,
+        &(RepositoryOptions::empty()
+            .for_serving()
+            .with_odb_builder(
+                OdbBuilder::files(root.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")),
+    )
+    .expect("open");
     (repo, store, refs)
 }
 

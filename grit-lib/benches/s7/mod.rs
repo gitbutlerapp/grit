@@ -124,7 +124,7 @@ fn index_entry(path: &[u8], oid: ObjectId, size: usize, mode: u32) -> IndexEntry
 }
 
 fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

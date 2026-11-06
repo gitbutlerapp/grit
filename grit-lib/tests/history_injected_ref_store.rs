@@ -19,7 +19,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
     apply_rewrite, drop, read_history_last, reword, squash, start_rebase, undo_last_rewrite,
     verify_rebase_with_exec, AppliedRewrite, ApplyOptions, ExecSpec, HistoryError,
@@ -68,16 +68,19 @@ fn open_memory_repo(root: &Path) -> (Repository, Arc<MemoryRefStore>, std::path:
     )
     .expect("config");
     let refs = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(&git_dir, Some(&wt))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")
+            .with_work_tree(&wt)),
+    )
+    .expect("open");
     (repo, refs, wt)
 }
 

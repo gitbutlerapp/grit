@@ -29,7 +29,7 @@ use grit_lib::objects::unpack_objects::{
 use grit_lib::objects::{hash::hash_object, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 
 fn git_cmd(dir: &Path) -> Command {
     let mut cmd = Command::new("git");
@@ -165,16 +165,18 @@ fn delta_entry_count(pack: &[u8]) -> usize {
 
 fn custom_primary_repo(git_dir: &Path, store: Arc<MemoryStore>) -> Repository {
     fs::create_dir_all(git_dir).expect("git dir");
-    RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store)
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(git_dir, None)
-        .expect("open custom repository")
+    Repository::open(
+        git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store)
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open custom repository")
 }
 
 #[test]
@@ -711,17 +713,19 @@ fn custom_primary_ingest_and_write_skip_read_source_contains_probes() {
     fs::create_dir_all(&gd).expect("mkdir");
     let primary = CountingStore::new();
     let read_source = CountingStore::new();
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(gd.join("objects"))
-                .primary(primary.clone())
-                .push_read_source(read_source.clone())
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&gd, None)
-        .expect("open");
+    let repo = Repository::open(
+        &gd,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(gd.join("objects"))
+                    .primary(primary.clone())
+                    .push_read_source(read_source.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open");
 
     let ingested =
         ingest_received_pack(pack, repo.odb(), &IngestPackOptions::default()).expect("ingest");
@@ -790,16 +794,18 @@ fn custom_primary_ingest_rollback_on_failure() {
     }
     let gd = tempfile::tempdir().expect("tempdir");
     let primary = CountingStore::new();
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(gd.path().join("objects"))
-                .primary(primary.clone())
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(gd.path(), None)
-        .expect("open");
+    let repo = Repository::open(
+        gd.path(),
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(gd.path().join("objects"))
+                    .primary(primary.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open");
 
     let err = ingest_received_pack(corrupt, repo.odb(), &IngestPackOptions::default())
         .expect_err("checksum mismatch");

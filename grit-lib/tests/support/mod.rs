@@ -9,6 +9,7 @@
 mod attributes_harness;
 mod config_oracle;
 mod diff_harness;
+mod discover_optional;
 mod history_harness;
 mod index_ext_harness;
 mod index_harness;
@@ -25,6 +26,7 @@ pub use attributes_harness::*;
 pub use config_oracle::*;
 #[allow(unused_imports)]
 pub use diff_harness::*;
+pub use discover_optional::discover_optional;
 #[allow(unused_imports)]
 pub use history_harness::{
     assert_fixup_tip_matches_git_oracle, assert_fixup_tip_structure_matches,

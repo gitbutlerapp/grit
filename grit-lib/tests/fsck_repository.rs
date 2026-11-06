@@ -22,7 +22,7 @@ use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
 };
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::objects::{
     write_pack_and_index, DeltaOps, IndexPackOptions, ObjectKind as PackKind, PackBuilder,
     PackBuilt,
@@ -112,7 +112,7 @@ fn write_ref_loose(dir: &std::path::Path, ref_name: &str, oid: ObjectId) {
 
 fn init_repo() -> (TempDir, Repository) {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     (dir, repo)
 }
 
@@ -947,7 +947,7 @@ fn bad_pack_signature_is_pack_issue_regardless_of_path() {
     let tmp = TempDir::new().expect("tempdir");
     let root = tmp.path().join("index-checksum-repo");
     fs::create_dir(&root).expect("mkdir");
-    let repo = Repository::init(&root, &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(&root, &InitOptions::default()).expect("init");
     one_commit(&repo);
     let (_idx, pack) = git_repack_single_pack(&root);
     let mut bytes = fs::read(&pack).expect("read pack");
@@ -1647,7 +1647,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
     }
 
     let files_dir = TempDir::new().expect("tempdir");
-    let files_repo = Repository::init(
+    let (files_repo, _) = Repository::init(
         files_dir.path(),
         &InitOptions::new().with_initial_branch("main"),
     )
@@ -1657,16 +1657,18 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
     let mem_root = TempDir::new().expect("mem tempdir");
     let gd = mem_root.path().join("mem.git");
     fs::create_dir_all(&gd).expect("git dir");
-    let mem_repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(gd.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&gd, None)
-        .expect("memory repo");
+    let mem_repo = Repository::open(
+        &gd,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(gd.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("memory repo");
     scenario("MemoryStore + MemoryRefStore", &mem_repo);
 
     let git_text = git(files_dir.path(), &["fsck"]);
@@ -2051,7 +2053,7 @@ fn diagnostic_summary_matches_git_for_grit_objects_and_git_tag() {
 #[test]
 fn connectivity_only_dangling_excludes_reachable_blobs_in_bare_repo() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_bare(true)
@@ -2238,16 +2240,18 @@ fn connectivity_only_does_not_inflate_reachable_blob_bodies() {
         )
         .expect("commit");
 
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(gd.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .initial_branch("main")
-        .open(&gd, None)
-        .expect("open");
+    let repo = Repository::open(
+        &gd,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(gd.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_initial_branch("main")),
+    )
+    .expect("open");
 
     let ts = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
     repo.refs()

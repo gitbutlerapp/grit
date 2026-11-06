@@ -1283,7 +1283,7 @@ mod tests {
     #[test]
     fn log_short_message_skips_big_blob_reads() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         std::fs::write(
             repo.git_dir().join("config"),
             "[core]\n\tbigFileThreshold = 4k\n",
@@ -1329,7 +1329,7 @@ mod tests {
             score: Some(100),
         };
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         repo.odb().write(ObjectKind::Blob, b"x")?;
         let mut out = Cursor::new(Vec::new());
         let opts = LogPatchOptions::git_default(&ConfigSet::default());
@@ -1344,7 +1344,7 @@ mod tests {
     #[test]
     fn write_patch_resolved_index_line_hashes_text_bytes_when_new_oid_zero() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let old_oid = repo.odb().write(ObjectKind::Blob, b"one\n")?;
         let new_bytes = b"one\ntwo\n".to_vec();
         let new_oid = repo
@@ -1383,7 +1383,7 @@ mod tests {
     #[test]
     fn write_patch_resolved_gitlink_index_line_keeps_commit_ids() -> Result<()> {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let old_commit =
             ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
         let new_commit =

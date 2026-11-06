@@ -12,7 +12,7 @@ use grit_lib::repo::{InitOptions, Repository};
 #[test]
 fn branch_inventory_public_api_smoke() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let query = BranchListQuery {
         scope: BranchScope::Local,
         refs: RefQuery::default(),

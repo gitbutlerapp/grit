@@ -9,7 +9,7 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
-//! let _repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! # Ok(())
 //! # }
 //! ```
@@ -2810,7 +2810,7 @@ mod tests {
     #[test]
     fn promisor_rewrite_drops_only_the_omitted_objects() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         let odb = repo.odb();
         let big = odb.write(ObjectKind::Blob, b"big blob").unwrap();
         let packed = odb.write(ObjectKind::Blob, b"packed").unwrap();
@@ -2867,7 +2867,7 @@ mod tests {
     #[test]
     fn promisor_rewrite_without_anything_to_drop_changes_nothing() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         let blob = repo.odb().write(ObjectKind::Blob, b"x").unwrap();
         let absent = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").unwrap();
         for omit in [OidHashSet::default(), [absent].into_iter().collect()] {
@@ -2886,7 +2886,7 @@ mod tests {
     #[test]
     fn promisor_rewrite_always_folds_until_one_promisor_pack_is_left() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         let odb = repo.odb();
         let pushed = odb.write(ObjectKind::Blob, b"pushed").unwrap();
         let packed = odb.write(ObjectKind::Blob, b"packed").unwrap();
@@ -2969,7 +2969,7 @@ mod tests {
     #[test]
     fn gc_auto_skip_single_pack_without_loose() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
@@ -3011,7 +3011,7 @@ mod tests {
 
     fn repo_with_config(snippet: &str) -> (TempDir, Repository) {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let config_path = repo.git_dir().join("config");
         let mut config = fs::read_to_string(&config_path).unwrap();
         config.push_str(snippet);
@@ -3236,7 +3236,7 @@ mod tests {
     #[test]
     fn fsck_clean_repo_ok() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
@@ -3264,7 +3264,7 @@ mod tests {
     #[test]
     fn incremental_repack_with_bitmap_keeps_base_pack_and_writes_midx_bitmap() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let wt = repo.work_tree().unwrap();
         std::fs::write(wt.join("base"), b"v1").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
@@ -3363,7 +3363,7 @@ mod tests {
     #[test]
     fn incremental_repack_adds_pack_without_removing_base() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let wt = repo.work_tree().unwrap();
         std::fs::write(wt.join("base"), b"v1").unwrap();
         stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
@@ -3436,7 +3436,7 @@ mod tests {
     #[test]
     fn gc_full_run_records_per_phase_timings() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let wt = repo.work_tree().unwrap();
         for i in 0..5 {
             std::fs::write(wt.join(format!("f{i}.txt")), format!("{i}\n")).unwrap();

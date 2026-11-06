@@ -146,7 +146,7 @@ mod tests {
 
     fn bare_with_main() -> (tempfile::TempDir, Repository, ObjectId) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,

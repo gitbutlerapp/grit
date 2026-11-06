@@ -18,7 +18,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStor
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::write_ref;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_test_support::{git, git_cmd, rev_parse};
@@ -187,9 +187,12 @@ fn open_custom(
     if let Some(graph) = graph {
         builder = builder.commit_graph(graph);
     }
-    RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(builder)
-        .open(&git_dir, Some(dir))
+    Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(builder)
+            .with_work_tree(dir)),
+    )
 }
 
 fn built_graph(repo: &Repository, changed_paths: bool) -> grit_lib::maintenance::BuiltCommitGraph {

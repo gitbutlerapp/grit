@@ -3,7 +3,7 @@ title: Object stores
 summary: Pluggable ObjectStore backends, OdbBuilder, and the odb_conformance test suite.
 ---
 
-By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::objects::odb::Odb) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) and [`RepositoryBuilder`](rustdoc:grit_lib::repo::RepositoryBuilder).
+By default [`Repository`](rustdoc:grit_lib::repo::Repository) opens a files-backed [`Odb`](rustdoc:grit_lib::objects::odb::Odb) (loose objects, packs, and optional MIDX). Embedders can swap the **primary** store or add read-only layers with [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) and [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder).
 
 ## Traits
 
@@ -62,7 +62,7 @@ A damaged copy ([`Error::Zlib`](rustdoc:grit_lib::error::Error::Zlib) or [`Error
 
 ## Building a custom repository
 
-Pass an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) rooted at the repository's `objects/` directory (or at `GIT_OBJECT_DIRECTORY` when the environment sets it) to [`RepositoryBuilder::odb_builder`](rustdoc:grit_lib::repo::RepositoryBuilder::odb_builder). Any path naming that directory works: one through symlinks (such as macOS `/var` → `/private/var` or `/tmp` → `/private/tmp`) or one relative to the environment's current directory. The opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports the canonical path. A builder rooted anywhere else fails with [`Error::OdbObjectsDirMismatch`](rustdoc:grit_lib::error::Error::OdbObjectsDirMismatch).
+Pass an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) rooted at the repository's `objects/` directory (or at `GIT_OBJECT_DIRECTORY` when the environment sets it) through [`RepositoryOptions::with_odb_builder`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_odb_builder) when calling [`Repository::open`](rustdoc:grit_lib::repo::Repository::open). Any path naming that directory works: one through symlinks (such as macOS `/var` → `/private/var` or `/tmp` → `/private/tmp`) or one relative to the environment's current directory. The opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports the canonical path. A builder rooted anywhere else fails with [`Error::OdbObjectsDirMismatch`](rustdoc:grit_lib::error::Error::OdbObjectsDirMismatch).
 
 The custom primary and every read source must hash with the repository's object format: the `extensions.objectformat` value in `<git_dir>/config`, or SHA-1 when that key or the config file is missing. Create the store with the same [`HashAlgo`](rustdoc:grit_lib::objects::HashAlgo) the repository was initialized with (`MemoryStore::new(HashAlgo::Sha256)` for a SHA-256 repository). A store that reports another algorithm through `ObjectStore::hash_algo` fails to open with [`Error::ObjectFormatMismatch`](rustdoc:grit_lib::error::Error::ObjectFormatMismatch), whose `repository` and `store` fields name the two algorithms, instead of writing object ids the repository's refs, index and config disagree with. Calling `OdbBuilder::build` on its own does no check, since there is no repository config to compare against.
 
@@ -74,7 +74,7 @@ cargo run -p grit-examples --bin memory_primary
 
 ## No git directory at all
 
-When both the object store and the ref store are injected, [`RepositoryBuilder::open`](rustdoc:grit_lib::repo::RepositoryBuilder::open) reads nothing from the git directory's layout: it may be empty or missing. Repository config is still read from `<git_dir>/config` when that file exists. The index lives at `<git_dir>/index`: staging creates the git directory when it is missing, and a commit then writes `COMMIT_EDITMSG` and the index there. Seed `HEAD` with [`initial_branch`](rustdoc:grit_lib::repo::RepositoryBuilder::initial_branch):
+When both the object store and the ref store are injected, [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) reads nothing from the git directory's layout: it may be empty or missing. Repository config is still read from `<git_dir>/config` when that file exists. The index lives at `<git_dir>/index`: staging creates the git directory when it is missing, and a commit then writes `COMMIT_EDITMSG` and the index there. Seed `HEAD` with [`RepositoryOptions::with_initial_branch`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_initial_branch):
 
 ```rust
 use std::sync::Arc;
@@ -84,22 +84,23 @@ use grit_lib::objects::HashAlgo;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::RepositoryBuilder;
 
 let git_dir = std::path::Path::new("/nowhere/in-memory.git");
-let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-    .odb_builder(
-        OdbBuilder::files(git_dir.join("objects"))
-            .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-            .alternates(false),
-    )
-    .ref_store(Arc::new(MemoryRefStore::new()))
-    .initial_branch("main")
-    .open(git_dir, None)?;
+let repo = Repository::open(
+    git_dir,
+    &RepositoryOptions::empty()
+        .with_odb_builder(
+            OdbBuilder::files(git_dir.join("objects"))
+                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                .alternates(false),
+        )
+        .with_ref_store(Arc::new(MemoryRefStore::new()))
+        .with_initial_branch("main"),
+)?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
-Hooks still run, but there is nothing on disk for another program to open. They start in the work tree (the git directory when there is none), and `GIT_DIR` is exported only when the [`Environment`](rustdoc:grit_lib::config::environment::Environment) you passed sets [`git_dir`](rustdoc:grit_lib::config::environment::Environment::git_dir); opening a path through `RepositoryBuilder::open` does not set it. Even when it is set, objects and refs held in memory are invisible to the system `git`, so a `pre-commit` hook that runs `git status` or `git rev-parse` fails with "not a git repository". Keep hooks for such repositories to work that only needs the work tree and the hook's arguments.
+Hooks still run, but there is nothing on disk for another program to open. They start in the work tree (the git directory when there is none), and `GIT_DIR` is exported only when the [`Environment`](rustdoc:grit_lib::config::environment::Environment) you passed sets [`git_dir`](rustdoc:grit_lib::config::environment::Environment::git_dir); opening a path through [`Repository::open`](rustdoc:grit_lib::repo::Repository::open) does not set it. Even when it is set, objects and refs held in memory are invisible to the system `git`, so a `pre-commit` hook that runs `git status` or `git rev-parse` fails with "not a git repository". Keep hooks for such repositories to work that only needs the work tree and the hook's arguments.
 
 ## What works with a custom primary
 
@@ -137,7 +138,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::{CommitGraphBuild, CommitGraphOptions};
 use grit_lib::objects::odb::store::WritableObjectStore;
 use grit_lib::objects::odb::OdbBuilder;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::{Repository};
 use grit_lib::maintenance::BuiltCommitGraph;
 
 fn open(
@@ -152,9 +153,7 @@ fn open(
         let built = BuiltCommitGraph { bytes };
         odb = odb.commit_graph(Arc::new(built.to_chain()?));
     }
-    RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(odb)
-        .open(git_dir, None)
+    Repository::open(git_dir, &(RepositoryOptions::empty().with_odb_builder(odb)))
 }
 
 fn refresh_graph(repo: &Repository) -> grit_lib::error::Result<Option<Vec<u8>>> {

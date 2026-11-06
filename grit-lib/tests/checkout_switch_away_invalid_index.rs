@@ -14,7 +14,7 @@ fn write_blob(repo_git: &std::path::Path, data: &[u8]) -> String {
 #[test]
 fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().unwrap();
     let git_dir = repo.git_dir();
 

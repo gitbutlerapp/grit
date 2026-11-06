@@ -18,7 +18,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 
@@ -60,16 +60,19 @@ fn open_on(
     refs: &Arc<MemoryRefStore>,
     odb: &Arc<MemoryStore>,
 ) -> Repository {
-    RepositoryBuilder::new(options())
-        .odb_builder(
-            OdbBuilder::files(common.join("objects"))
-                .primary(odb.clone())
-                .alternates(false),
-        )
-        .ref_store(refs.clone())
-        .initial_branch("main")
-        .open(git_dir, Some(work_tree))
-        .expect("open over injected stores")
+    Repository::open(
+        git_dir,
+        &(options()
+            .with_odb_builder(
+                OdbBuilder::files(common.join("objects"))
+                    .primary(odb.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(refs.clone())
+            .with_initial_branch("main")
+            .with_work_tree(work_tree)),
+    )
+    .expect("open over injected stores")
 }
 
 fn commit_change(repo: &Repository, file: &Path, message: &str) -> ObjectId {
@@ -219,10 +222,7 @@ fn builder_open_on_the_admin_dir_commits_onto_the_linked_branch() {
 #[test]
 fn open_linked_worktree_shares_the_injected_stores() {
     let fixture = two_worktrees();
-    let linked = fixture
-        .main
-        .open_linked_worktree(&fixture.admin, &fixture.linked)
-        .expect("open linked worktree");
+    let linked = open_handle(&fixture, &fixture.admin, &fixture.linked);
     assert_commits_land_on_feat(&fixture, &linked);
 }
 

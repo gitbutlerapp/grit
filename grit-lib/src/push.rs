@@ -1428,7 +1428,7 @@ mod tests {
     #[test]
     fn unsupported_atomic_push_fails_before_any_update_or_pack_bytes() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
         let refs = [PushRefSpec {
             src: Some(repo.odb().write(ObjectKind::Blob, b"payload").unwrap()),
             dst: "refs/tags/payload".to_owned(),
@@ -1512,17 +1512,19 @@ mod tests {
     ) {
         let flaky = crate::odb::store::flaky::FlakyStore::new();
         let git_dir = dir.join("repo.git");
-        let repo = crate::repo::RepositoryBuilder::new(RepositoryOptions::empty())
-            .odb_builder(
-                crate::odb::OdbBuilder::files(git_dir.join("objects"))
-                    .primary(flaky.clone())
-                    .alternates(false),
-            )
-            .ref_store(std::sync::Arc::new(
-                crate::refs::store::MemoryRefStore::new(),
-            ))
-            .open(&git_dir, None)
-            .unwrap();
+        let repo = crate::repo::Repository::open(
+            &git_dir,
+            &(RepositoryOptions::empty()
+                .with_odb_builder(
+                    crate::odb::OdbBuilder::files(git_dir.join("objects"))
+                        .primary(flaky.clone())
+                        .alternates(false),
+                )
+                .with_ref_store(std::sync::Arc::new(
+                    crate::refs::store::MemoryRefStore::new(),
+                ))),
+        )
+        .unwrap();
         (repo, flaky)
     }
 
@@ -1550,7 +1552,7 @@ mod tests {
     #[test]
     fn decide_push_wire_rejects_existing_tag_without_force() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
         let c1 = repo
             .odb()
             .write(ObjectKind::Commit, b"fake commit 1")
@@ -1578,7 +1580,7 @@ mod tests {
     #[test]
     fn decide_push_wire_rejects_existing_tag_when_advertised_oid_missing_locally() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
         let src = repo
             .odb()
             .write(ObjectKind::Commit, b"local tag tip")
@@ -1607,7 +1609,7 @@ mod tests {
     #[test]
     fn decide_push_wire_force_tag_update_marks_forced_even_when_ff() {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
         let parent = repo.odb().write(ObjectKind::Commit, b"parent").unwrap();
         let child = repo.odb().write(ObjectKind::Commit, b"child").unwrap();
         let mut remote_refs = HashMap::new();

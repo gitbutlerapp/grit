@@ -18,7 +18,7 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{collect_revision_specs_from_stdin_lines, tag_targets};
 use grit_lib::revwalk::{RefSelection, RevWalkListOptions};
 use grit_lib::state::HeadState;
@@ -41,16 +41,19 @@ fn memory_repo(git_dir: &Path, work_tree: &Path) -> (Repository, Arc<MemoryRefSt
     fs::create_dir_all(work_tree).expect("work tree");
     fs::write(git_dir.join("config"), USER_CONFIG).expect("config");
     let store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(options())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(store.clone())
-        .initial_branch("main")
-        .open(git_dir, Some(work_tree))
-        .expect("open in-memory repository");
+    let repo = Repository::open(
+        git_dir,
+        &(options()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(store.clone())
+            .with_initial_branch("main")
+            .with_work_tree(work_tree)),
+    )
+    .expect("open in-memory repository");
     (repo, store)
 }
 

@@ -144,7 +144,7 @@ fn grit_write_git_accepts(version: u32) {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, ENTRY_COUNT);
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -208,7 +208,7 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, 8);
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -272,7 +272,7 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     populate_files(root, ENTRY_COUNT);
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

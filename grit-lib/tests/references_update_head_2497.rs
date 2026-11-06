@@ -19,7 +19,7 @@ use time::OffsetDateTime;
 const REFLOG_ID: &str = "T <t@example.com> 1700000000 +0000";
 
 fn init_repo(dir: &Path) -> Repository {
-    let repo =
+    let (repo, _) =
         Repository::init(dir, &InitOptions::default().with_initial_branch("main")).expect("init");
     git(dir, &["config", "user.name", "T"]);
     git(dir, &["config", "user.email", "t@example.com"]);

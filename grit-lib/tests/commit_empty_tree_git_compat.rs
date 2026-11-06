@@ -70,7 +70,7 @@ fn git_clone_fsck(source: &Path) {
 fn grit_allow_empty_root_commit_git_fsck_clean() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(root, &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(root, &InitOptions::default()).expect("init");
     let git_dir = root.join(".git");
 
     let outcome = create_commit(
@@ -98,7 +98,7 @@ fn grit_allow_empty_root_commit_git_fsck_clean() {
 fn grit_remove_everything_commit_git_fsck_clean() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let repo = Repository::init(root, &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(root, &InitOptions::default()).expect("init");
     let git_dir = root.join(".git");
 
     fs::write(root.join("a"), b"a\n").expect("write a");

@@ -127,7 +127,7 @@ impl Fixture {
     fn build(tag_stray: bool) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let server_dir = tmp.path().join("server.git");
-        let server = Repository::init(
+        let (server, _) = Repository::init(
             &server_dir,
             &InitOptions::new()
                 .with_bare(true)
@@ -561,7 +561,7 @@ fn small_blobs_are_not_candidates() {
 #[test]
 fn refusals_are_typed() {
     let tmp = tempfile::tempdir().unwrap();
-    let plain = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
+    let (plain, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     assert!(matches!(
         drop_promised_blobs(&plain, &opts(LIMIT, None)),
         Err(Error::NoPromisorRemote { .. })
@@ -704,7 +704,7 @@ fn main_with_lop(sizes: &[usize], bare: bool) -> (tempfile::TempDir, PathBuf, Ve
         let work = tmp.path().join("main");
         (work.clone(), work.join(".git"))
     };
-    let main = Repository::init(&main_path, &init.clone().with_bare(bare)).unwrap();
+    let (main, _) = Repository::init(&main_path, &init.clone().with_bare(bare)).unwrap();
     Repository::init(&tmp.path().join("lop.git"), &init.with_bare(true)).unwrap();
     let blobs: Vec<ObjectId> = sizes
         .iter()

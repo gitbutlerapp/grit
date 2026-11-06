@@ -14,7 +14,8 @@ use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneIntoOptions};
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::remote::fetch::NoProgress;
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_test_support::{git, rev_parse};
 
@@ -39,16 +40,19 @@ fn empty_injected_repo(
     fs::create_dir_all(&git_dir).expect("git dir");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
     let ref_store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .ref_store(ref_store.clone())
-        .initial_branch("main")
-        .open(&git_dir, Some(wt))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_ref_store(ref_store.clone())
+            .with_initial_branch("main")
+            .with_work_tree(wt)),
+    )
+    .expect("open");
     (repo, store, ref_store, git_dir)
 }
 
@@ -101,16 +105,19 @@ fn clone_into_injected_ref_store_keeps_clone_reflogs_in_store() {
         ref_store.read_raw("HEAD").expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store)
-                .alternates(false),
-        )
-        .ref_store(ref_store.clone())
-        .initial_branch("main")
-        .open(&git_dir, Some(wt.path()))
-        .expect("reopen");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store)
+                    .alternates(false),
+            )
+            .with_ref_store(ref_store.clone())
+            .with_initial_branch("main")
+            .with_work_tree(wt.path())),
+    )
+    .expect("reopen");
     assert_eq!(resolve_revision(&repo, "HEAD@{0}").expect("HEAD@{0}"), tip);
     assert_eq!(resolve_revision(&repo, "main@{0}").expect("main@{0}"), tip);
 }

@@ -135,7 +135,7 @@ fn repository_options_for_serving() {
 #[test]
 fn maintenance_constructors_run_on_empty_repo() {
     let tmp = TempDir::new().expect("tempdir");
-    let repo = Repository::init(tmp.path(), &InitOptions::new()).expect("init");
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::new()).expect("init");
     let opts = FsckOptions::full_repository(false);
     let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
     assert!(report.ok(&repo.config().snapshot().expect("config"), &opts));

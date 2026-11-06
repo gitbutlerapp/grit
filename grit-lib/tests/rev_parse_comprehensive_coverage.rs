@@ -8,7 +8,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::{
     abbreviate_object_id, abbreviate_ref_name, ambiguous_object_hint_lines,
-    commit_parents_for_navigation, discover_optional, expand_at_minus_to_branch_name,
+    commit_parents_for_navigation, expand_at_minus_to_branch_name,
     expand_parent_shorthand_rev_parse_lines, expand_rev_token_circ_bang, is_inside_git_dir,
     is_inside_work_tree, list_all_abbrev_matches, list_loose_abbrev_matches, load_graft_parents,
     parse_index_colon_spec, parse_peel_suffix, peel_to_commit_for_merge_base, peel_to_tree,
@@ -142,7 +142,9 @@ fn discovery_upstream_and_parser_helpers() {
     git(wt, &["checkout", "-b", "dev"]);
     commit_file(wt, "g", "2\n", "two");
     let repo = open_grit(wt);
-    assert!(discover_optional(Some(wt)).expect("disc").is_some());
+    assert!(support::discover_optional(Some(wt))
+        .expect("disc")
+        .is_some());
     assert!(is_inside_work_tree(&repo, wt));
     assert!(!is_inside_git_dir(&repo, wt));
     let _ = show_prefix(&repo, wt);

@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn branches_are_created_updated_and_refused_by_the_rules() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let a = commit(&repo, &[], "a");
         let b = commit(&repo, &[a], "b");
         let other = commit(&repo, &[], "other");
@@ -551,7 +551,7 @@ mod tests {
     #[test]
     fn checkins_update_by_a_named_rule() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let a = commit(&repo, &[], "a");
         let b = commit(&repo, &[a], "b");
         let other = commit(&repo, &[], "other");
@@ -609,7 +609,7 @@ mod tests {
         const X: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
         const Y: &str = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy";
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         // The target moved from m0 to m1; the server's branch is x on m0.
         let m0 = commit(&repo, &[], "m0");
         let m1 = commit(&repo, &[m0], "m1");
@@ -697,7 +697,7 @@ mod tests {
     #[test]
     fn a_lost_race_is_decided_again_instead_of_overwriting() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let winner = commit(&repo, &[], "winner");
         let loser = commit(&repo, &[], "loser");
         crate::refs::write_ref(repo.git_dir(), "refs/heads/shared", &winner).expect("ref");
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn case_variants_of_a_branch_are_refused_where_case_is_ignored() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let a = commit(&repo, &[], "a");
         crate::refs::write_ref(repo.git_dir(), "refs/heads/feature", &a).expect("ref");
         let config = repo.git_dir().join("config");
@@ -818,7 +818,7 @@ mod tests {
     #[test]
     fn checkin_branches_are_checked_before_they_are_grafted() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let odb = repo.odb();
         let blob = odb.write(ObjectKind::Blob, b"a").expect("blob");
         let full =

@@ -6,11 +6,12 @@ use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
 use grit_lib::refs::reflog::read_reflog;
-use grit_lib::refs::store::{open_ref_store, RefStoreError};
+use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::{
     append_reflog, delete_ref, list_refs, list_refs_glob, list_refs_physical,
     packed_refs_entry_exists, read_head, read_log_refs_config, read_raw_ref, read_ref_file,
@@ -18,6 +19,7 @@ use grit_lib::refs::{
     verify_ref_available_for_create, write_ref, write_ref_cached, write_symbolic_ref, PackedRefs,
     RawRefLookup, Ref, RefnameUnavailable, SYMREF_MAXDEPTH,
 };
+use grit_lib::repo::Repository;
 
 use support::{
     assert_git_fsck_strict, each_backend, empty_commit_oid, git, git_check_ref_format,
@@ -374,7 +376,9 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
             ),
             "{err:?}"
         );
-        let store = open_ref_store(&git_dir).expect("ref store");
+        let store = Repository::open(git_dir, &RepositoryOptions::empty())
+            .expect("open")
+            .refs();
         assert!(
             matches!(
                 store.resolve("refs/heads/dangling"),

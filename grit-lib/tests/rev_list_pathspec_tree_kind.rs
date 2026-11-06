@@ -10,7 +10,7 @@ use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 #[test]
 fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::new().with_initial_branch("main"))
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_initial_branch("main"))
         .expect("init");
     let blob_oid = repo
         .objects()

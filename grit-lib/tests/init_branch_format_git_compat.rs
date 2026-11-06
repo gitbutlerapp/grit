@@ -36,7 +36,7 @@ fn env_with_global(global_config: &std::path::Path) -> Environment {
 #[test]
 fn init_uses_explicit_initial_branch() {
     let td = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         td.path(),
         &InitOptions::new().with_initial_branch("develop"),
     )
@@ -55,7 +55,7 @@ fn init_honors_init_default_branch_from_global_config() {
         "production"
     );
     let wt = TempDir::new().expect("tempdir");
-    let repo =
+    let (repo, _) =
         Repository::init(wt.path(), &InitOptions::new().with_environment(env)).expect("init");
     let head = fs::read_to_string(repo.git_dir().join("HEAD")).expect("read HEAD");
     assert_eq!(head.trim(), "ref: refs/heads/production");
@@ -77,7 +77,7 @@ fn init_invalid_branch_name_is_typed_error() {
 fn reinit_keeps_existing_head_branch() {
     let td = TempDir::new().expect("tempdir");
     Repository::init(td.path(), &InitOptions::new().with_initial_branch("first")).expect("init");
-    let (_, outcome) = Repository::init_with_outcome(
+    let (_, outcome) = Repository::init(
         td.path(),
         &InitOptions::new().with_initial_branch("ignored"),
     )
@@ -92,7 +92,7 @@ fn reinit_keeps_existing_head_branch() {
 fn init_separate_git_dir_git_status_works() {
     let wt = TempDir::new().expect("tempdir");
     let separate = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         wt.path(),
         &InitOptions::new()
             .with_initial_branch("main")
@@ -117,7 +117,7 @@ fn init_separate_git_dir_git_status_works() {
 #[test]
 fn init_sha256_then_commit_git_fsck_clean() {
     let td = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         td.path(),
         &InitOptions::new()
             .with_initial_branch("main")
@@ -175,10 +175,10 @@ fn init_reinit_preserves_sha256_when_object_format_omitted() {
             .with_object_format(HashAlgo::Sha256),
     )
     .expect("init sha256");
-    let (_, outcome) = Repository::init_with_outcome(td.path(), &InitOptions::new())
-        .expect("reinit without object format");
+    let (_, outcome) =
+        Repository::init(td.path(), &InitOptions::new()).expect("reinit without object format");
     assert!(outcome.reinitialized);
-    let repo = Repository::init(td.path(), &InitOptions::new()).expect("open");
+    let (repo, _) = Repository::init(td.path(), &InitOptions::new()).expect("open");
     assert_eq!(repo.odb().hash_algo(), HashAlgo::Sha256);
 }
 
@@ -186,7 +186,7 @@ fn init_reinit_preserves_sha256_when_object_format_omitted() {
 fn init_rejects_bare_with_separate_git_dir() {
     let wt = TempDir::new().expect("tempdir");
     let separate = TempDir::new().expect("tempdir");
-    let err = Repository::init_with_outcome(
+    let err = Repository::init(
         wt.path(),
         &InitOptions::new()
             .with_bare(true)
@@ -208,7 +208,7 @@ fn init_reinit_rediscovers_gitfile_without_separate_flag() {
     )
     .expect("init separate");
     let (_, outcome) =
-        Repository::init_with_outcome(wt.path(), &InitOptions::new()).expect("reinit via gitfile");
+        Repository::init(wt.path(), &InitOptions::new()).expect("reinit via gitfile");
     assert!(outcome.reinitialized);
     assert_eq!(outcome.initial_branch, "main");
     let gitfile = fs::read_to_string(wt.path().join(".git")).expect("gitfile");
@@ -218,15 +218,14 @@ fn init_reinit_rediscovers_gitfile_without_separate_flag() {
 #[test]
 fn reinit_allows_detached_head() {
     let td = TempDir::new().expect("tempdir");
-    let repo =
+    let (repo, _) =
         Repository::init(td.path(), &InitOptions::new().with_initial_branch("main")).expect("init");
     fs::write(
         repo.git_dir().join("HEAD"),
         "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n",
     )
     .expect("write detached HEAD");
-    let (_, outcome) =
-        Repository::init_with_outcome(td.path(), &InitOptions::new()).expect("reinit detached");
+    let (_, outcome) = Repository::init(td.path(), &InitOptions::new()).expect("reinit detached");
     assert!(outcome.reinitialized);
     assert_eq!(outcome.initial_branch, "deadbee");
 }

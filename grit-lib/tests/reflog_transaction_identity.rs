@@ -109,7 +109,7 @@ fn memory_store_direct_prepare_rejects_forged_reflog_identity() {
 #[test]
 fn files_store_rejects_forged_reflog_identity_via_wrapper() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -132,7 +132,7 @@ fn files_store_rejects_forged_reflog_identity_via_wrapper() {
 #[test]
 fn files_store_direct_prepare_rejects_forged_reflog_identity() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -164,7 +164,7 @@ fn reftable_store_direct_prepare_rejects_forged_reflog_identity() {
         return;
     }
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

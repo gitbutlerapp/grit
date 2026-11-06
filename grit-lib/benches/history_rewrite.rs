@@ -42,7 +42,7 @@ fn build_linear_wide_repo(
     commit_count: usize,
 ) -> (tempfile::TempDir, Repository, grit_lib::objects::ObjectId) {
     let root = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

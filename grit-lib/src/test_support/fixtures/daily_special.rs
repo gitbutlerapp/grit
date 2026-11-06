@@ -319,7 +319,7 @@ pub fn generate_daily_special_repo(
         fs::remove_dir_all(out).map_err(Error::Io)?;
     }
     fs::create_dir_all(out).map_err(Error::Io)?;
-    let repo = Repository::init(out, &InitOptions::default())?;
+    let (repo, _) = Repository::init(out, &InitOptions::default())?;
     let head = generate_into_repo(&repo, spec)?;
     let pack_bytes = build_pack(
         repo.odb(),

@@ -371,7 +371,7 @@ fn delete_current_branch_preserves_git_reftable_repository() {
 #[test]
 fn list_and_delete_on_reftable_backend() {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

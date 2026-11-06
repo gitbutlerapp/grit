@@ -15,7 +15,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefStore};
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, ReflogQuery};
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
@@ -37,16 +37,19 @@ fn open_injected(root: &Path) -> (Repository, Arc<MemoryRefStore>) {
     )
     .expect("config");
     let store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::with_environment(environment()))
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(store.clone())
-        .initial_branch("main")
-        .open(&git_dir, Some(&work_tree))
-        .expect("open with injected stores");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::with_environment(environment())
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(store.clone())
+            .with_initial_branch("main")
+            .with_work_tree(&work_tree)),
+    )
+    .expect("open with injected stores");
     (repo, store)
 }
 

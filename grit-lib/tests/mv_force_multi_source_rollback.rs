@@ -9,7 +9,9 @@ use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn init_repo(root: &Path) -> Repository {
-    Repository::init(root, &InitOptions::default()).expect("init")
+    Repository::init(root, &InitOptions::default())
+        .expect("init")
+        .0
 }
 
 #[test]

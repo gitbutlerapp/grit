@@ -1156,7 +1156,7 @@ mod tests {
     fn repository_exposes_injected_change_id_generator() -> crate::error::Result<()> {
         let gen: Arc<dyn ChangeIdGenerator> = Arc::new(FixedGenerator([0xcd; 16]));
         let dir = tempfile::tempdir().map_err(crate::error::Error::Io)?;
-        let init = Repository::init(dir.path(), &InitOptions::default())?;
+        let (init, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let opts = RepositoryOptions::empty()
             .with_change_id_generator(Arc::clone(&gen))
             .with_work_tree(dir.path());

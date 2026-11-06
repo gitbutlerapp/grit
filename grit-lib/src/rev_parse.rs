@@ -5,7 +5,6 @@
 //! object-name resolution, and lightweight peeling (`^{}`, `^{object}`,
 //! `^{commit}`).
 
-use crate::environment::RepositoryOptions;
 use crate::git_path::CanonicalizeExt;
 
 use std::borrow::Cow;
@@ -23,51 +22,13 @@ use std::sync::Arc;
 
 use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::config::ConfigSet;
-use crate::error::{Error, NotARepositoryReason, Result};
+use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, ObjectKind};
 use crate::reflog::ReflogEntry;
 use crate::refs;
 use crate::refs::store::RawRef;
 use crate::repo::Repository;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
-
-/// Return `Some(repo)` when a repository can be discovered at `start`.
-///
-/// # Parameters
-///
-/// - `start` - starting path for discovery; when `None`, uses current directory.
-///
-/// # Errors
-///
-/// Returns errors other than "not a repository" (for example I/O and path
-/// canonicalization failures). [`Error::NotARepository`] is returned too when discovery
-/// stopped at a malformed gitfile ([`NotARepositoryReason::GitfileNotRegularFile`] or
-/// [`NotARepositoryReason::GitfileMissingGitdir`]) or when `start` itself holds a `.git`
-/// file or symlink.
-pub fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
-    let err = match Repository::discover(start, &RepositoryOptions::empty()) {
-        Ok(repo) => return Ok(Some(repo)),
-        Err(err) => err,
-    };
-    // A missing repository is an expected outcome, but a malformed `.git` entry found during
-    // discovery, or any `.git` file or symlink at `start`, is reported.
-    let Error::NotARepository(reason) = &err else {
-        return Err(err);
-    };
-    let malformed_gitfile = matches!(
-        reason,
-        NotARepositoryReason::GitfileNotRegularFile { .. }
-            | NotARepositoryReason::GitfileMissingGitdir { .. }
-    );
-    let dot_git_at_start = start.is_some_and(|start| {
-        let dot_git = start.join(".git");
-        dot_git.is_file() || dot_git.is_symlink()
-    });
-    if malformed_gitfile || dot_git_at_start {
-        return Err(err);
-    }
-    Ok(None)
-}
 
 /// Compute whether `cwd` is inside the repository's work tree.
 #[must_use]
@@ -4156,15 +4117,40 @@ pub fn list_loose_abbrev_matches(repo: &Repository, prefix: &str) -> Result<Vec<
 #[cfg(test)]
 mod line_coverage_tests {
     use super::*;
+    use crate::error::{Error, NotARepositoryReason, Result};
     use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
     use crate::objects::ObjectId;
     use crate::objects::ObjectKind;
 
+    use crate::config::environment::RepositoryOptions;
     use crate::ref_storage::RefStorageFormat;
     use crate::repo::{init_repository, InitOptions, Repository};
     use crate::write_tree::write_tree_from_index;
     use std::fs;
     use tempfile::tempdir;
+
+    fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
+        let err = match Repository::discover(start, &RepositoryOptions::empty()) {
+            Ok(repo) => return Ok(Some(repo)),
+            Err(err) => err,
+        };
+        let Error::NotARepository(reason) = &err else {
+            return Err(err);
+        };
+        let malformed_gitfile = matches!(
+            reason,
+            NotARepositoryReason::GitfileNotRegularFile { .. }
+                | NotARepositoryReason::GitfileMissingGitdir { .. }
+        );
+        let dot_git_at_start = start.is_some_and(|start| {
+            let dot_git = start.join(".git");
+            dot_git.is_file() || dot_git.is_symlink()
+        });
+        if malformed_gitfile || dot_git_at_start {
+            return Err(err);
+        }
+        Ok(None)
+    }
 
     fn ambiguous_hex_prefix_among(
         oids: &[ObjectId],
@@ -4336,7 +4322,7 @@ mod line_coverage_tests {
     #[test]
     fn bare_repo_resolve_variants() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4371,7 +4357,7 @@ mod line_coverage_tests {
     fn peel_to_commit_for_merge_base_follows_tag_chains_only_to_commits() -> crate::error::Result<()>
     {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4475,7 +4461,7 @@ mod line_coverage_tests {
     #[test]
     fn deep_chain_resolve_exercises_navigation() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4621,7 +4607,7 @@ mod line_coverage_tests {
     #[test]
     fn resolve_revision_impl_flag_matrix() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4713,7 +4699,7 @@ mod line_coverage_tests {
     #[test]
     fn bare_merge_commit_and_tag_object_matrix() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4796,7 +4782,7 @@ mod line_coverage_tests {
     #[test]
     fn resolve_base_error_path_sweep() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4898,7 +4884,7 @@ mod line_coverage_tests {
     #[test]
     fn ambiguous_abbrev_and_disambiguate_config() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -4946,7 +4932,7 @@ mod line_coverage_tests {
     #[test]
     fn unborn_head_resolves_as_unborn_not_object_not_found() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let err = resolve_revision_for_range_end(&repo, "HEAD").expect_err("HEAD");
         assert!(matches!(err, Error::UnbornHead), "{err:?}");
         Ok(())
@@ -4955,7 +4941,7 @@ mod line_coverage_tests {
     #[test]
     fn push_remote_ambiguous_and_graft_coverage() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let tree = repo.odb().write_loose_materialize(ObjectKind::Tree, b"")?;
         let tip = repo.odb().write_loose_materialize(
             ObjectKind::Commit,
@@ -5028,7 +5014,7 @@ mod line_coverage_tests {
     #[test]
     fn tree_blob_peel_and_dwim_coverage() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
         let sub_tree = repo
             .odb()
             .write_loose_materialize(ObjectKind::Tree, b"100644 blob {blob}\tleaf.txt\n")?;
@@ -5238,7 +5224,7 @@ mod line_coverage_tests {
     #[test]
     fn parent_navigation_shares_only_equivalent_linkage() -> crate::error::Result<()> {
         let dir = tempdir()?;
-        let repo = Repository::init(dir.path(), &InitOptions::default())?;
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
         let tree = repo.odb().write_loose_materialize(ObjectKind::Tree, b"")?;
         let root = repo.odb().write_loose_materialize(
             ObjectKind::Commit,
@@ -5355,7 +5341,7 @@ mod line_coverage_tests {
     #[test]
     fn colon_message_search_oneline_bang_patterns() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -5403,7 +5389,7 @@ mod line_coverage_tests {
         let _ = normalize_components(Path::new("/a/b/../c"));
         let _ = path_is_within(Path::new("/a/b"), Path::new("/a"));
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,
@@ -5653,7 +5639,7 @@ mod line_coverage_tests {
     #[test]
     fn describe_name_and_dwim_helpers() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
-        Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,

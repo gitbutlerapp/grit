@@ -121,7 +121,7 @@ fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
     }
 
     let wt = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(wt.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(wt.path(), &InitOptions::default())?;
     std::fs::write(wt.path().join("wt.txt"), b"worktree\n").map_err(grit_lib::error::Error::Io)?;
     let mut index = Index::new();
     let wt_blob = blob(&repo.odb(), b"worktree\n");

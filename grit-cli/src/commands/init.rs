@@ -110,7 +110,7 @@ pub fn run(
         init_options = init_options.with_separate_git_dir(Some(separate));
     }
 
-    let (repo, outcome) = Repository::init_with_outcome(&path, &init_options)
+    let (repo, outcome) = Repository::init(&path, &init_options)
         .with_context(|| format!("could not initialize a repository at {}", path.display()))?;
 
     Ok(InitOutcome {

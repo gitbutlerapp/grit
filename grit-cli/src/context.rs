@@ -103,12 +103,16 @@ pub fn discover() -> Result<Repository> {
 
 /// Locate the repository from the current directory without opening it.
 pub fn locate_repository() -> Result<RepositoryLocation> {
-    RepositoryLocation::discover(&location_options()).context("not in a repository")
+    let repo = Repository::discover(None, &location_options()).context("not in a repository")?;
+    Ok(RepositoryLocation::from(&repo))
 }
 
 /// Like [`locate_repository`], and also return the repository's merged config.
 pub fn locate_repository_with_config() -> Result<(RepositoryLocation, ConfigSet)> {
-    RepositoryLocation::discover_with_config(&location_options()).context("not in a repository")
+    let repo = Repository::discover(None, &location_options()).context("not in a repository")?;
+    let location = RepositoryLocation::from(&repo);
+    let config = repo.config()?;
+    Ok((location, (*config).clone()))
 }
 
 fn location_options() -> grit_lib::config::environment::RepositoryOptions {

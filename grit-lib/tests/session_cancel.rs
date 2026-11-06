@@ -121,7 +121,7 @@ fn cancelled_flag() -> CancelToken {
 
 fn init_repo() -> (tempfile::TempDir, Repository) {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

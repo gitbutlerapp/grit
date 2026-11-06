@@ -83,7 +83,7 @@ fn git_commit_graph_write(repo_root: &tempfile::TempDir) {
 #[test]
 fn rev_list_commit_graph_walk_matches_object_walk() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

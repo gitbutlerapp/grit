@@ -419,7 +419,7 @@ mod tests {
 
     fn repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
         (dir, repo)
     }
 

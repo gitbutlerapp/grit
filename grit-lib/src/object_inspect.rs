@@ -8,7 +8,7 @@
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
-//! let repo = Repository::init(dir.path(), &InitOptions::default())?;
+//! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 //! match repo.resolve("HEAD") {
 //!     Ok(_resolved) => {}
 //!     Err(ResolveError::UnknownRevision { .. }) => {}
@@ -613,7 +613,7 @@ mod abbreviate_for_display_tests {
     #[test]
     fn display_abbrev_extends_on_collision_and_rev_parse_round_trips() -> crate::error::Result<()> {
         let dir = tempfile::TempDir::new().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let (a, b, data_a, data_b) = two_blobs_sharing_seven_hex_prefix();
         assert_eq!(&a.to_hex()[..7], &b.to_hex()[..7]);
         repo.odb().write(ObjectKind::Blob, &data_a)?;
@@ -686,7 +686,7 @@ mod tests {
     }
     fn label_repo() -> (tempfile::TempDir, Repository, ObjectId) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new().with_initial_branch("main"),
         )
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn revision_label_keeps_unborn_branch() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new().with_initial_branch("new"),
         )

@@ -124,7 +124,7 @@ fn tag_short_names_match_git_check_ref_format() {
 #[test]
 fn write_ref_rejects_invalid_branch_names_without_loose_files() {
     let dir = tempdir().unwrap();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -153,7 +153,7 @@ fn write_ref_rejects_invalid_branch_names_without_loose_files() {
 fn write_ref_accepts_refs_heads_head_like_git() {
     let dir = tempdir().unwrap();
     let worktree = dir.path();
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         worktree,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

@@ -12,7 +12,7 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeError, ServeOptions};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 #[test]
 fn upload_pack_v0_and_v2_advertise_refs_only() -> grit_lib::remote::serve::Result<()> {
@@ -245,11 +245,13 @@ fn memory_serve_repo(
     )
     .map_err(ServeError::Repository)?;
     let store = Arc::new(MemoryRefStore::new());
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .ref_store(store.clone())
-        .initial_branch("master")
-        .open(dir, None)
-        .map_err(ServeError::Repository)?;
+    let repo = Repository::open(
+        dir,
+        &(RepositoryOptions::empty()
+            .with_ref_store(store.clone())
+            .with_initial_branch("master")),
+    )
+    .map_err(ServeError::Repository)?;
     let tree = repo.odb().write(ObjectKind::Tree, b"")?;
     let commit_body =
         format!("tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\ninit\n");

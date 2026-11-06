@@ -121,5 +121,6 @@ fn empty_dot_git_directory_still_skips_to_parent_repo() {
 
     let options = isolated_options(&inner);
     Repository::discover(Some(&inner), &options).expect("discover parent through empty .git");
-    RepositoryLocation::discover(&options).expect("locate parent through empty .git");
+    let repo = Repository::discover(Some(&inner), &options).expect("discover parent");
+    let _location = RepositoryLocation::from(&repo);
 }

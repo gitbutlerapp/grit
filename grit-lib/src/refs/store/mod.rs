@@ -33,7 +33,7 @@ pub use files::{FilesRefStore, FilesRefStoreConfig};
 pub use gate::{SingleWriterGate, SingleWriterTicket};
 pub(crate) use linked_worktree::LinkedWorktreeRefStore;
 pub use memory::MemoryRefStore;
-pub use open::open_ref_store;
+pub(crate) use open::open_ref_store;
 pub(crate) use open::{initialize_head, open_files_ref_store, open_ref_store_uncached};
 pub use reftable::ReftableRefStore;
 pub(crate) use semantics::format_reflog_identity;
@@ -199,7 +199,7 @@ pub trait RefStore: Send + Sync + Debug {
     /// A backend does not look at objects. The store
     /// [`Repository::refs`](crate::repo::Repository::refs) returns (whatever backend it
     /// wraps, including one injected with
-    /// [`RepositoryBuilder::ref_store`](crate::repo::RepositoryBuilder::ref_store)) adds one
+    /// [`RepositoryOptions::with_ref_store`](crate::environment::RepositoryOptions::with_ref_store)) adds one
     /// more check before calling the backend. Each direct value must name an object the
     /// repository stores ([`RefStoreError::MissingObject`]). A branch (`refs/heads/…`) or
     /// `HEAD` must name a commit ([`RefStoreError::NotACommit`]). An object that cannot be

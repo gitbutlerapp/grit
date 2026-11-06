@@ -243,7 +243,7 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
 /// use time::OffsetDateTime;
 ///
 /// let dir = tempfile::tempdir()?;
-/// let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
 /// let blob = repo.objects().write(ObjectKind::Blob, b"hello\n")?;
 /// let tree = repo.objects().write_tree([TreeEntry {
 ///     mode: 0o100644,

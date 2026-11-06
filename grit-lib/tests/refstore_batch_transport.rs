@@ -26,7 +26,7 @@ fn fetch_updates_refs_in_one_transaction_reftable() {
         grit_lib::refs::write_ref(&remote_git, "refs/heads/branch-b", &c2).expect("remote b");
 
         let local_root = tempfile::tempdir().expect("local tempdir");
-        let local = Repository::init(
+        let (local, _) = Repository::init(
             local_root.path(),
             &InitOptions::new()
                 .with_initial_branch("main".to_owned())

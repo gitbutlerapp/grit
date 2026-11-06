@@ -2047,7 +2047,7 @@ mod merge_call_tests {
     #[test]
     fn reword_parent_only_replay_skips_merge_tree() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -2113,7 +2113,7 @@ mod merge_call_tests {
         use crate::revwalk::history::{plan_rebase, RebaseOntoOptions, RebaseRequest};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -2475,7 +2475,7 @@ mod merge_call_tests {
         use crate::objects::{serialize_commit, CommitData};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -2519,7 +2519,7 @@ mod merge_call_tests {
         use crate::objects::{serialize_commit, CommitData};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -2562,7 +2562,7 @@ mod merge_call_tests {
         use crate::objects::{serialize_commit, CommitData};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -2605,7 +2605,7 @@ mod merge_call_tests {
         use crate::objects::{serialize_commit, CommitData};
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())
@@ -2653,7 +2653,7 @@ mod merge_call_tests {
         use std::time::Instant;
 
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             dir.path(),
             &crate::repo::InitOptions::new()
                 .with_initial_branch("main".to_owned())

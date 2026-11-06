@@ -60,7 +60,7 @@ fn tag_annotated(repo: &Repository, name: &str, target: ObjectId, msg: &str) {
 /// Deterministic merge-heavy DAG: 150 commits, 15 annotated tags, skewed committer dates.
 fn build_seed6593_fixture() -> (tempfile::TempDir, Repository, Vec<ObjectId>, Vec<String>) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let odb = repo.odb();
     let mut seed = 6593u64;
     let root = write_commit_at(odb, &[], "root", 5000).expect("root");

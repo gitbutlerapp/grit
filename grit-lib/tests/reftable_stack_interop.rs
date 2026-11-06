@@ -20,8 +20,7 @@ use grit_lib::refs::reftable::{
     reftable_write_symref, RefValue, ReftableError, ReftableStack, ReftableTransactionUpdate,
 };
 use grit_lib::refs::store::{
-    open_ref_store, Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-    ReftableRefStore,
+    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReftableRefStore,
 };
 use grit_lib::refs::{read_head, read_symbolic_ref, resolve_ref};
 use grit_lib::repo::{InitOptions, Repository};
@@ -752,7 +751,7 @@ fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
         return;
     }
     let root = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main")
@@ -760,7 +759,7 @@ fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
     )
     .expect("init");
     let git_dir = repo.git_dir().to_path_buf();
-    let store = open_ref_store(&git_dir).expect("open ref store");
+    let store = repo.refs();
 
     const UPDATES: u32 = 100;
     for i in 0..UPDATES {
@@ -810,7 +809,7 @@ fn geometric_factor_two_compacts_more_than_large_factor() {
     }
     let run_updates = |factor: u8| -> usize {
         let root = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             root.path(),
             &InitOptions::new()
                 .with_initial_branch("main")
@@ -823,7 +822,7 @@ fn geometric_factor_two_compacts_more_than_large_factor() {
             format!("[reftable]\ngeometricFactor = {factor}\n"),
         )
         .expect("config");
-        let store = open_ref_store(git_dir).expect("open ref store");
+        let store = repo.refs();
         for i in 0..60u32 {
             let txn = RefTransaction::new()
                 .update(RefUpdate {

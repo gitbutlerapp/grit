@@ -297,7 +297,7 @@ fn remote_fetch_cancels_during_stalled_discovery_without_shared_watch() {
 
             let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(300));
             let tmp = tempfile::tempdir().expect("tempdir");
-            let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+            let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let remote = Remote::from_url(&url).expect("remote url");
             let started = Instant::now();
@@ -426,7 +426,7 @@ fn remote_fetch_cancels_during_stalled_upload_pack_post_without_shared_watch() {
 
             let cancel = DeadlineCancel(Instant::now() + Duration::from_millis(300));
             let tmp = tempfile::tempdir().expect("tempdir");
-            let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+            let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let remote = Remote::from_url(&url).expect("remote url");
             let started = Instant::now();
@@ -883,7 +883,7 @@ fn remote_fetch_aborts_on_silent_stall_with_low_speed_env() {
             let (port, stop, _connections) = spawn_silent_stall_server(SilentStallMode::Silent);
             let env = low_speed_test_env();
             let tmp = tempfile::tempdir().expect("tempdir");
-            let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+            let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let remote = Remote::from_url(&url).expect("remote url");
             let started = Instant::now();
@@ -922,7 +922,7 @@ fn remote_fetch_aborts_on_headers_stall_with_low_speed_env() {
                 spawn_silent_stall_server(SilentStallMode::HeadersContentLength);
             let env = low_speed_test_env();
             let tmp = tempfile::tempdir().expect("tempdir");
-            let repo = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
+            let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).expect("init");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let remote = Remote::from_url(&url).expect("remote url");
             let started = Instant::now();

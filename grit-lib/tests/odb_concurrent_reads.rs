@@ -66,7 +66,7 @@ fn odb_concurrent_reads() {
     pack_store::reset();
 
     let root = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -218,7 +218,7 @@ fn stale_read_after_invalidation() {
     pack_store::reset();
 
     let root = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -345,7 +345,7 @@ fn proc_maps_regions_for(path: &Path) -> usize {
 fn pack_thread_local_released_when_store_dropped_on_same_thread() {
     clear_pack_cache();
     let root = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

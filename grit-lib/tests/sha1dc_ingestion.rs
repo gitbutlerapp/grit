@@ -149,7 +149,7 @@ fn unpack_objects_accepts_shattered_prefix_blob() {
 #[test]
 fn fsck_accepts_git_written_shattered_prefix_blob() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let data = shattered_prefix(1);
     let hex = grit_test_support::write_loose_object(
         repo.odb().objects_dir(),

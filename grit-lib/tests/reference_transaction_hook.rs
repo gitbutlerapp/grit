@@ -23,7 +23,7 @@ use grit_lib::refs::store::{Expected, MemoryRefStore, RawRef, RefUpdate, RefUpda
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit_on_store, BranchCommitRefUpdate,
 };
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 
 fn install_reference_transaction_hook(repo: &Repository, log_path: &Path, deny_prepared: bool) {
@@ -376,16 +376,19 @@ fn memory_ref_store_second_commit_head_line_matches_branch_old_oid() {
     fs::write(&hook, script).expect("hook");
     fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
 
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .initial_branch("main")
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
-                .alternates(false),
-        )
-        .ref_store(Arc::new(MemoryRefStore::new()))
-        .open(&git_dir, Some(&root))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_initial_branch("main")
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+                    .alternates(false),
+            )
+            .with_ref_store(Arc::new(MemoryRefStore::new()))
+            .with_work_tree(&root)),
+    )
+    .expect("open");
 
     let ident: Signature = "T <t@x> 1700000000 +0000".parse().expect("sig");
     for i in 0..2 {

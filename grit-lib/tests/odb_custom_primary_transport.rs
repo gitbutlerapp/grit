@@ -25,7 +25,7 @@ use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 
 /// Non-bare upstream with two commits on `main`, written by the system `git`.
 fn git_upstream() -> tempfile::TempDir {
@@ -61,14 +61,17 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     init_files_repo(dir.path());
     let git_dir = dir.path().join(".git");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
     (dir, repo, store)
 }
 

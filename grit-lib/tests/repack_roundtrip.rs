@@ -15,7 +15,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git_fsck;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -80,7 +80,7 @@ fn many_commits(repo: &Repository, n: usize) {
 #[test]
 fn repack_all_into_one_git_fsck_strict_clean() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_commits(&repo, 25);
     repack_all(&repo, &RepackOptions::default()).expect("repack");
     let packs = std::fs::read_dir(dir.path().join(".git/objects/pack"))
@@ -96,7 +96,7 @@ fn repack_all_into_one_git_fsck_strict_clean() {
 #[test]
 fn repack_preserves_rev_list_objects_all() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_commits(&repo, 15);
     let before = git_rev_list_objects_all(dir.path());
     repack_all(&repo, &RepackOptions::default()).expect("repack");
@@ -143,7 +143,7 @@ fn repack_keeps_reflog_index_and_worktree_head_objects() {
 #[test]
 fn keep_packs_untouched() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_commits(&repo, 3);
     git(dir.path(), &["repack", "-a", "-d"]);
     let pack_dir = dir.path().join(".git/objects/pack");
@@ -162,7 +162,7 @@ fn keep_packs_untouched() {
 #[test]
 fn bitmap_written_and_git_rev_list_use_bitmap_index_count_matches() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_commits(&repo, 40);
     let mut opts = RepackOptions::default();
     opts.write_bitmap = true;
@@ -196,7 +196,7 @@ fn bitmap_written_and_git_rev_list_use_bitmap_index_count_matches() {
 #[test]
 fn git_verify_pack_accepts_output() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_commits(&repo, 10);
     repack_all(&repo, &RepackOptions::default()).expect("repack");
     let pack = std::fs::read_dir(dir.path().join(".git/objects/pack"))
@@ -234,7 +234,7 @@ fn repack_git_written_repo() {
 #[test]
 fn rootless_repo_prunes_unreachable_loose_when_pruning_enabled() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
 
     let orphan = repo
         .odb()
@@ -396,7 +396,7 @@ fn default_repack_preserves_unreachable_loose_like_git_repack_ad() {
 #[test]
 fn prune_respects_cutoff() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     many_commits(&repo, 1);
 
     let orphan = repo
@@ -452,14 +452,17 @@ fn custom_backend_unsupported_error() {
     Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let git_dir = dir.path().join(".git");
     let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
-    let custom = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(git_dir.join("objects"))
-                .primary(store)
-                .alternates(false),
-        )
-        .open(&git_dir, Some(dir.path()))
-        .expect("open");
+    let custom = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(git_dir.join("objects"))
+                    .primary(store)
+                    .alternates(false),
+            )
+            .with_work_tree(dir.path())),
+    )
+    .expect("open");
     let err = repack(&custom, &RepackOptions::default()).expect_err("custom backend");
     assert!(matches!(
         err,

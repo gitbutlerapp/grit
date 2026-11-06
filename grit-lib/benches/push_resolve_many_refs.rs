@@ -13,7 +13,7 @@ use grit_lib::repo::{InitOptions, Repository};
 
 fn fixture() -> (tempfile::TempDir, Repository, ConfigSet, Vec<String>) {
     let tmp = tempfile::tempdir().unwrap();
-    let repo = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     let git_dir = repo.git_dir();
     std::fs::write(
         git_dir.join("config"),

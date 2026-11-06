@@ -83,7 +83,7 @@ fn query_listings_from_pairs_and_store() {
 #[test]
 fn references_query_peels_annotated_tags() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     let commit = create_commit(
         &repo,
@@ -128,7 +128,7 @@ fn references_query_peels_annotated_tags() {
 #[test]
 fn references_query_peels_annotated_tag_to_non_commit() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let blob: ObjectId = repo.odb().write(ObjectKind::Blob, b"payload").unwrap();
     create_tag(
         &repo,
@@ -164,7 +164,7 @@ fn references_query_peels_annotated_tag_to_non_commit() {
 #[test]
 fn references_query_lightweight_commit_tag_has_no_peel() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     let commit = create_commit(
         &repo,
@@ -208,7 +208,7 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
 #[test]
 fn overlapping_namespaces_deduplicate_by_full_name() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     let commit = create_commit(
         &repo,
@@ -281,7 +281,7 @@ fn symbolic_ref_listing_does_not_leak_resolved_peel() {
 #[test]
 fn date_sort_keeps_refs_with_missing_objects() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let ident = "T <t@example.com> 1700000000 +0000".to_owned();
     let commit = create_commit(
         &repo,

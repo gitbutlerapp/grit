@@ -31,7 +31,7 @@ fn gitlink_entry(path: &str, oid: ObjectId) -> IndexEntry {
 #[test]
 fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Result<()> {
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     let submodule_tip = repo
         .odb()
         .write(ObjectKind::Commit, b"tree 0000000000000000000000000000000000000000\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nsub\n")?;

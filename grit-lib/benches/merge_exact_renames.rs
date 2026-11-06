@@ -63,7 +63,7 @@ fn exact_rename_merge_fixture(
     files: usize,
 ) -> (TempDir, Repository, [ObjectId; 3]) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::new()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::new()).expect("init");
     let odb = repo.odb();
 
     let blobs: Vec<ObjectId> = (0..files)

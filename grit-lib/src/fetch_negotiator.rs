@@ -336,7 +336,7 @@ mod tests {
     #[test]
     fn add_tip_accepts_annotated_tag() {
         let tmp = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(
+        let (repo, _) = Repository::init(
             tmp.path(),
             &InitOptions::new()
                 .with_bare(true)

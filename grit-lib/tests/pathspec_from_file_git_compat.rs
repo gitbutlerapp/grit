@@ -61,7 +61,7 @@ fn nul_mode_literal_spaces_and_quotes_match_git_add() {
     use grit_lib::worktree::pathspec::{PathspecInput, ResolvedPathspecs};
 
     let dir2 = tempfile::tempdir().expect("tempdir2");
-    let repo = Repository::init(dir2.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir2.path(), &InitOptions::default()).expect("init");
     fs::write(dir2.path().join("  spaced  "), b"x\n").expect("write");
     let quoted2 = dir2.path().join("\"double\"");
     fs::create_dir_all(&quoted2).expect("mkdir");

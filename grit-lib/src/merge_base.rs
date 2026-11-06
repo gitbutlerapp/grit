@@ -4546,7 +4546,7 @@ mod tests {
     }
 
     fn open_test_bare(dir: &tempfile::TempDir) -> Result<Repository> {
-        Repository::init(
+        let (_, _) = Repository::init(
             dir.path(),
             &InitOptions {
                 bare: true,

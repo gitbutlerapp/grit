@@ -1494,7 +1494,7 @@ mod tests {
     #[test]
     fn worktree_targets_have_no_stored_entries() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo =
+        let (repo, _) =
             Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
         for target in [
             DiffTarget::WorktreeVsHead,
@@ -1511,7 +1511,7 @@ mod tests {
     #[test]
     fn limit_target_entries_applies_pathspecs_then_diff_filter() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo =
+        let (repo, _) =
             Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
         let entry = |status: DiffStatus, path: &str| DiffEntry {
             status,
@@ -1562,7 +1562,7 @@ mod tests {
     #[test]
     fn failed_revision_with_file_paths_keeps_revision_error() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo =
+        let (repo, _) =
             Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
         let request = DiffRequest {
             positionals: vec!["unknown-revision".into()],
@@ -1578,8 +1578,9 @@ mod tests {
     #[test]
     fn resolve_errors_staged_and_unstaged() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())
-            .expect("init");
+        let (repo, _) =
+            crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())
+                .expect("init");
         let err = resolve_diff_arguments(&repo, None, true, true, None, &[], &[]).unwrap_err();
         assert!(matches!(err, ResolveDiffArgumentsError::StagedAndUnstaged));
     }

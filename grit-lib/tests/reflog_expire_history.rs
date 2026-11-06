@@ -255,7 +255,7 @@ fn assert_logs_match(git_side: &Path, grit_side: &Path, refnames: &[&str]) {
 /// A files-backend repository with `main` checked out and the generated history.
 fn seed_repo() -> (tempfile::TempDir, History) {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new().with_initial_branch("main".to_owned()),
     )
@@ -517,7 +517,7 @@ fn expire_many_refs_in_one_pass_judges_each_ref_by_its_own_tip_like_git() {
 #[test]
 fn stale_fix_prunes_entries_with_missing_objects_like_git() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new().with_initial_branch("main".to_owned()),
     )

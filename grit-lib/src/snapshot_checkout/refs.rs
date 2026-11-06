@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn swaps_are_create_only_or_compare_and_swap_and_logged() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let a = crate::refs::test_commit(repo.git_dir(), "a");
         let b = crate::refs::test_commit(repo.git_dir(), "b");
         let name = "refs/heads/topic";

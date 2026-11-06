@@ -15,7 +15,7 @@ use crate::split_index::WriteSplitIndexRequest;
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
-/// let repo = Repository::init(dir.path(), &InitOptions::default())?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 /// let handle = repo.index_handle();
 /// let index = handle.load()?;
 /// assert!(index.entries().is_empty());

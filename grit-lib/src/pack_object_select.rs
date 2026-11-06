@@ -1882,7 +1882,7 @@ mod tests {
     #[test]
     fn tips_only_boundary_matches_closure_on_linear_incremental_push() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let mut parent = write_commit(
             &repo,
@@ -1932,7 +1932,7 @@ mod tests {
         };
 
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let mut parent = write_commit(
             &repo,
@@ -1975,7 +1975,7 @@ mod tests {
     #[test]
     fn tree_read_ahead_leaves_the_walk_output_unchanged() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let mut tip: Option<ObjectId> = None;
         // Two trees per commit, so the queue holds far more than one read-ahead batch.
@@ -2013,7 +2013,7 @@ mod tests {
     fn send_pack_walk_without_haves_reads_no_commits() {
         use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let tree = write_tree(&repo, &[]);
         let mut tip = write_commit(&repo, tree, &[], 1_300_000_000);
         for i in 1..50 {
@@ -2048,7 +2048,7 @@ mod tests {
     fn push_dated_before_graphed_history_stops_at_the_frontier() {
         use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let tree = write_tree(&repo, &[]);
         // The remote's history, in the commit-graph, with a tag partway down.
         let mut tip = write_commit(&repo, tree, &[], 1_300_000_000);
@@ -2096,7 +2096,7 @@ mod tests {
     fn push_dated_before_packed_history_reads_commit_headers() {
         use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let tree = write_tree(&repo, &[]);
         let body = "a long message line\n".repeat(100);
         let write = |parents: &[ObjectId], time: i64| {
@@ -2167,7 +2167,7 @@ mod tests {
     fn duplicated_wants_already_on_peer_balance_the_frontier() {
         use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let tree = write_tree(&repo, &[]);
         let mut tip = write_commit(&repo, tree, &[], 0);
         for time in 1..100 {
@@ -2213,7 +2213,7 @@ mod tests {
         };
 
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let mut chain = Vec::new();
         let mut parent = write_commit(
@@ -2272,7 +2272,7 @@ mod tests {
         use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
 
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let mut parent = write_commit(
             &repo,
@@ -2310,7 +2310,7 @@ mod tests {
     #[test]
     fn walk_lists_trees_of_newer_commits_first() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let tree_a = write_tree(&repo, &[(0o100644, "f", blob("a"))]);
         let tree_b = write_tree(&repo, &[(0o100644, "f", blob("b"))]);
@@ -2329,7 +2329,7 @@ mod tests {
     #[test]
     fn walk_names_trees_and_keeps_history_paths_for_path_less_roots() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let file = repo.odb().write(ObjectKind::Blob, b"x\n").unwrap();
         let link = repo.odb().write(ObjectKind::Blob, b"target").unwrap();
         let sub = write_tree(
@@ -2371,7 +2371,9 @@ mod tests {
     #[test]
     fn walk_descends_into_trees_with_non_canonical_modes() {
         let tmp = tempfile::tempdir().unwrap();
-        Repository::init(tmp.path(), &InitOptions::new().with_bare(true)).unwrap();
+        Repository::init(tmp.path(), &InitOptions::new().with_bare(true))
+            .unwrap()
+            .0;
         let repo = Repository::open(tmp.path(), &RepositoryOptions::empty()).unwrap();
         let odb = repo.odb();
         let deep = odb
@@ -2454,7 +2456,7 @@ mod tests {
     #[test]
     fn tips_only_thin_bases_come_from_edge_commits_not_every_advertised_tip() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
         let base_tree = write_tree(&repo, &[(0o100644, "f", blob("base"))]);
         let root = write_commit(&repo, base_tree, &[], 0);
@@ -2510,7 +2512,7 @@ mod tests {
     fn send_pack_walk_peels_tag_haves_and_ignores_non_commit_targets() {
         use super::send_pack_walk_test_hooks::{commit_reads, reset_commit_reads};
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let blob = repo.odb().write(ObjectKind::Blob, b"x").unwrap();
         let tree = write_tree(&repo, &[(0o100644, "f", blob)]);
         let old = write_commit(&repo, tree, &[], 0);
@@ -2642,7 +2644,7 @@ mod tests {
     #[test]
     fn walk_lists_every_entry_of_successive_tree_versions() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let mut rng = Xorshift(0x2545_f491_4f6c_dd1d);
         let mut next_blob = 0usize;
         let mut new_blob = |repo: &Repository| {
@@ -2717,7 +2719,7 @@ mod tests {
     #[test]
     fn walk_reparses_a_tree_whose_shared_tail_starts_inside_an_entry() {
         let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let kept = repo.odb().write(ObjectKind::Blob, b"kept").unwrap();
         let older = repo.odb().write(ObjectKind::Blob, b"older").unwrap();
         let newer = repo.odb().write(ObjectKind::Blob, b"newer").unwrap();

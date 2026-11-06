@@ -166,7 +166,7 @@ mod tests {
     #[test]
     fn edits_and_diffs_round_trip() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let odb = repo.odb();
         let (a, b, c) = (blob(odb, "a"), blob(odb, "b"), blob(odb, "c"));
         let base = edit(
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn a_directory_and_a_file_replace_each_other_in_one_batch() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let odb = repo.odb();
         let (x, y, f) = (blob(odb, "x"), blob(odb, "y"), blob(odb, "f"));
         let with_dir = edit(

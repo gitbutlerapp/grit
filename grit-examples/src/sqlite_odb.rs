@@ -528,7 +528,7 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     use grit_lib::objects::odb::OdbBuilder;
     use grit_lib::objects::{serialize_tree, TreeEntry};
     use grit_lib::refs::store::RefName;
-    use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+    use grit_lib::repo::{InitOptions, Repository};
     use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 
     Repository::init(
@@ -542,13 +542,16 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     let db_path = git_dir.join("objects.sqlite");
 
     let sqlite = Arc::new(SqliteOdbStore::create(&db_path, HashAlgo::Sha1)?);
-    let repo = RepositoryBuilder::new(RepositoryOptions::empty())
-        .odb_builder(
-            OdbBuilder::files(&objects_dir)
-                .primary(sqlite.clone())
-                .alternates(false),
-        )
-        .open(&git_dir, Some(repo_root))?;
+    let repo = Repository::open(
+        &git_dir,
+        &(RepositoryOptions::empty()
+            .with_odb_builder(
+                OdbBuilder::files(&objects_dir)
+                    .primary(sqlite.clone())
+                    .alternates(false),
+            )
+            .with_work_tree(repo_root)),
+    )?;
 
     let blob = repo.odb().write(ObjectKind::Blob, b"hello sqlite odb\n")?;
     let tree_body = serialize_tree(&[TreeEntry {

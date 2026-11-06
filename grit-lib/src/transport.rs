@@ -2084,7 +2084,7 @@ eval "$cmd"
             assert_eq!(conn.protocol_version(), protocol_version);
 
             let local = tmp.path().join(format!("local-v{protocol_version}"));
-            let repo = crate::repo::Repository::init(&local, &crate::repo::InitOptions::new())
+            let (repo, _) = crate::repo::Repository::init(&local, &crate::repo::InitOptions::new())
                 .expect("init local");
             let mut fetch = crate::transfer::FetchOptions::new();
             fetch.refspecs = vec![format!("{missing}:refs/heads/missing")];

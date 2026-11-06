@@ -16,7 +16,7 @@ fn main() -> Result<(), Error> {
     let open_named =
         |name: &str, email: &str| -> Result<(Repository, Arc<CollectingDiagnostics>), Error> {
             let root = base.path().join(name);
-            Repository::init(
+            let (_repo, _) = Repository::init(
                 &root,
                 &InitOptions::new()
                     .with_initial_branch("main")

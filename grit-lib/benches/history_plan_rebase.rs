@@ -52,7 +52,7 @@ fn build_rebase_plan_fixture(
     grit_lib::objects::ObjectId,
 ) {
     let root = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

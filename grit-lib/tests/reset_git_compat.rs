@@ -76,7 +76,7 @@ fn commit_file(
 #[test]
 fn mixed_reset_readable_by_git() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -200,7 +200,7 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
 #[test]
 fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -307,7 +307,7 @@ fn reset_orphaned_commits_main_only_git_init() {
 #[test]
 fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -340,7 +340,7 @@ fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
 #[test]
 fn reset_orphan_zero_when_other_ref_holds_old_tip() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -415,7 +415,7 @@ fn reset_keep_rejects_unmerged_index_like_git() {
 #[test]
 fn reset_forward_has_no_orphan_walk() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -446,7 +446,7 @@ fn reset_reflog_identity_includes_signature_timestamp_and_git_reads_it() {
     use time::{OffsetDateTime, UtcOffset};
 
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
@@ -495,7 +495,7 @@ fn reset_reflog_identity_includes_signature_timestamp_and_git_reads_it() {
 #[test]
 fn append_reflog_rejects_malformed_identity() {
     let dir = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dir.path(),
         &InitOptions::new().with_initial_branch("main".to_owned()),
     )

@@ -1603,7 +1603,7 @@ pub fn materialize(
         return Err(CheckoutError::DestinationNotEmpty(dest.to_path_buf()));
     }
     std::fs::create_dir_all(dest)?;
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         dest,
         &InitOptions {
             initial_branch: Some(work.to_owned()),
@@ -1868,7 +1868,7 @@ mod tests {
     /// `src/big` nowhere. Returns the commit and the big blob's id and data.
     fn offloaded(dir: &Path) -> (ObjectId, ObjectId, Vec<u8>) {
         use crate::objects::ObjectKind;
-        let repo = Repository::init(dir, &InitOptions::new().with_bare(true)).unwrap();
+        let (repo, _) = Repository::init(dir, &InitOptions::new().with_bare(true)).unwrap();
         let odb = repo.odb();
         let small = odb
             .write_loose_materialize(ObjectKind::Blob, b"a\n")
