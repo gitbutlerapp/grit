@@ -369,11 +369,19 @@ impl CancelToken {
 
     pub(crate) fn poll(&self) -> std::result::Result<(), Cancelled> {
         #[cfg(feature = "test-support")]
-        self.tick_poll_budget_only();
+        {
+            self.tick_poll_budget_only();
+            // Match `is_cancelled()` for the integration-test hook (`CancelToken::with_check_counter`):
+            // hot paths poll instead of calling `is_cancelled()`, but tests still expect every poll to
+            // count as a cancellation check.
+            if let Some(counter) = self.check_counter.as_ref() {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
         #[cfg(not(feature = "test-support"))]
         let _ = ();
-        // Read the flag directly: `is_cancelled()` counts toward the integration-test hook and would
-        // double-count `after_polls` when both paths run.
+        // Read the flag directly so we do not run `is_cancelled()` here: that would double-apply
+        // `tick_poll_budget_only` together with this `poll` in the same boundary.
         if self.flag.load(std::sync::atomic::Ordering::Relaxed) {
             Err(Cancelled)
         } else {
