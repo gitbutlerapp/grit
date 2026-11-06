@@ -1589,7 +1589,6 @@ mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
-#[cfg(feature = "full-tests")]
 #[path = "remote_error_variants.rs"]
 mod remote_error_variants;
 #[cfg(feature = "full-tests")]
