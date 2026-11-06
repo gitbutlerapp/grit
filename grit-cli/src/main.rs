@@ -25,6 +25,7 @@ mod diff_render;
 mod embedded_gitlink;
 mod error_hints;
 mod error_kind;
+mod error_map;
 mod exit_status;
 mod global_args;
 mod grit_trace;

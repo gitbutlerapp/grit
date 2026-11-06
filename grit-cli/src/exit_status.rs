@@ -141,7 +141,7 @@ impl ExitStatus {
     }
 
     #[must_use]
-    fn for_structured_kind(kind: ErrorKind) -> Self {
+    pub(crate) fn for_structured_kind(kind: ErrorKind) -> Self {
         match kind {
             ErrorKind::InvalidPattern => Self::InvalidCommitFilter,
             ErrorKind::Usage => Self::Usage,

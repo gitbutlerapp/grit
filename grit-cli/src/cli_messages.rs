@@ -9,21 +9,23 @@ use crate::revision_errors::map_lib_revision_error;
 
 /// Human-readable (and JSON `error` string) message for a command failure.
 pub fn human_error_message(err: &Error) -> String {
-    if let Some(structured) = err.downcast_ref::<StructuredCliError>() {
-        return structured.human.clone();
-    }
-    if let Some(lib) = err.downcast_ref::<LibError>() {
-        return map_lib_error(lib);
+    if err.downcast_ref::<StructuredCliError>().is_some() {
+        return crate::error_map::classify(err).human;
     }
     for cause in err.chain() {
-        if let Some(structured) = cause.downcast_ref::<StructuredCliError>() {
-            return structured.human.clone();
+        if cause.downcast_ref::<StructuredCliError>().is_some() {
+            return crate::error_map::classify(err).human;
         }
-        if let Some(
-            lib
-            @ (LibError::HashCollision { .. } | LibError::LockHeld { .. } | LibError::Config(_)),
-        ) = cause.downcast_ref::<LibError>()
-        {
+    }
+    let classified = crate::error_map::classify(err);
+    if classified.payload.is_some() {
+        return classified.human;
+    }
+    if classified.human != format!("{err:#}") {
+        return classified.human;
+    }
+    for cause in err.chain() {
+        if let Some(lib @ LibError::Config(_)) = cause.downcast_ref::<LibError>() {
             return map_lib_error(lib);
         }
     }
