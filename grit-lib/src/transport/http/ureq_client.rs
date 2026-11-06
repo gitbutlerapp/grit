@@ -2316,10 +2316,10 @@ mod tests {
             assert!(
                 matches!(
                     &err,
-                    RemoteError::Unreadable {
+                    Error::Remote(RemoteError::Unreadable {
                         url: Some(u),
                         reason: RemoteUnreadableReason::HttpStatus { status: 404 },
-                    } if u == "https://github.com/o/r.git"
+                    }) if u == "https://github.com/o/r.git"
                 ),
                 "{err:?}"
             );
@@ -2337,7 +2337,7 @@ mod tests {
             let err = super::auth_error(endpoint, AuthFailure::Rejected);
             assert!(matches!(
                 &err,
-                RemoteError::Auth { url, reason: AuthFailure::Rejected }
+                Error::Remote(RemoteError::Auth { url, reason: AuthFailure::Rejected })
                     if url == "https://example.com/team/r.git"
             ));
             assert_eq!(
@@ -2532,7 +2532,7 @@ mod tests {
             String::from_utf8_lossy(&buf).into_owned()
         }
 
-        fn assert_rejected(err: Error) {
+        fn assert_rejected(err: RemoteError) {
             assert!(
                 matches!(
                     err,
@@ -2608,7 +2608,11 @@ mod tests {
 
         let send_url = format!("{base}/git-upload-pack");
         let request = HttpRequest::new(HttpMethod::Get, &send_url);
-        assert_rejected(client.send(&request).expect_err("send"));
+        let send_err = client.send(&request).expect_err("send");
+        assert_rejected(match send_err {
+            Error::Remote(remote) => remote,
+            other => panic!("expected remote auth error, got {other:?}"),
+        });
 
         assert_rejected(
             client

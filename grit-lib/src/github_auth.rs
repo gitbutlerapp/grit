@@ -26,7 +26,6 @@ use thiserror::Error;
 
 use crate::credentials::Credential;
 use crate::error::Error;
-use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
 
 /// Host name of GitHub's web and Git endpoints.
