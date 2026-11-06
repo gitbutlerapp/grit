@@ -1488,7 +1488,7 @@ pub(crate) fn collect_blob_lookup_batches_with_literal_paths<S, P>(
     literal_paths: bool,
     symlink_probe: S,
     sparse: BlobScanSparseMode,
-    cancel_watch: Option<Arc<AtomicBool>>,
+    cancel: Option<crate::progress::CancelToken>,
     cancel_poll: Option<Arc<crate::progress::StackCancelPoll>>,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>>
 where
@@ -1497,7 +1497,7 @@ where
 {
     let blob_count = plan.len();
     let cancel = StatScanCancel {
-        watch: cancel_watch,
+        watch: cancel.as_ref().map(crate::progress::CancelToken::watch_arc),
         owner_poll: cancel_poll,
     };
     // Keep small scans on the existing metadata path: setting up descriptor-relative

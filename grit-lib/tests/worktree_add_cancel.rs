@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
-use grit_lib::progress::{FlagCancel, NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NeverCancel, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::{
@@ -41,7 +41,7 @@ fn init_wide_repo() -> (tempfile::TempDir, Repository) {
 fn cancel_during_worktree_add_leaves_no_registration_or_branch() {
     let (tmp, repo) = init_wide_repo();
     let wt_path = tmp.path().join("wt");
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let flag = cancel.clone();
     let common = grit_lib::worktree::common_git_dir(repo.git_dir());
     let handle = thread::spawn(move || {

@@ -105,7 +105,7 @@ pub struct RestoreOutcome {
 /// or [`Error::RestoreConflictNotUnmerged`] when the index shape does not allow
 /// the requested checkout. [`Error::LockHeld`] means another process holds `index.lock`;
 /// the lock is taken before the index is read, so nothing was changed. [`Error::Cancelled`]
-/// means `cancel` (or [`ProgressSink::should_cancel`]) fired while restoring the work tree:
+/// means `cancel` fired while restoring the work tree:
 /// every work-tree change is rolled back (including directories replaced by files), and the
 /// index is not written. Other failures are I/O or object-store errors.
 ///

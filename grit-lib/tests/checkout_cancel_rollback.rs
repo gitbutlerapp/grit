@@ -16,13 +16,13 @@ use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::{
-    Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
+    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
 use grit_lib::repo::Repository;
 
 /// Raises `cancel` on the `limit`-th checkout progress increment, after running `at_cancel`.
 struct CancelAfter<F: FnMut()> {
-    cancel: FlagCancel,
+    cancel: CancelToken,
     limit: u64,
     seen: u64,
     in_checkout: bool,
@@ -352,7 +352,7 @@ fn cancelled_switch_rolls_back(shape: Shape) {
     for limit in cut_points(total) {
         let context = format!("{shape:?} cancel at {limit}/{total}");
         let before = repository_state(&fx.root);
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let mut progress = CancelAfter {
             cancel: cancel.clone(),
             limit,
@@ -420,7 +420,7 @@ fn cancelled_tree_to_tree_checkout_leaves_repository_unchanged() {
     for limit in [1, 10, 40, 120] {
         let context = format!("checkout_between_trees cancel at {limit}");
         let before = repository_state(&fx.root);
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let mut progress = CancelAfter {
             cancel: cancel.clone(),
             limit,
@@ -459,7 +459,7 @@ fn cancelled_initial_checkout_leaves_work_tree_empty() {
         ],
     );
     let tree = tree_of(&target, "HEAD");
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let mut progress = CancelAfter {
         cancel: cancel.clone(),
         limit: 30,
@@ -512,7 +512,7 @@ fn rollback_that_cannot_remove_a_created_file_reports_it() {
     let limit = full_switch_incs(&fx) - 2;
     let locked = fx.root.join("new/deep");
     let before = repository_state(&fx.root);
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let mut progress = CancelAfter {
         cancel: cancel.clone(),
         limit,
@@ -580,7 +580,7 @@ fn cancelled_hard_reset_keeps_dirty_and_index_only_files() {
     );
     let before = repository_state(&fx.root);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let mut progress = CancelAfter {
         cancel: cancel.clone(),
         limit: 5,
@@ -652,7 +652,7 @@ fn cancelled_cross_tree_hard_reset_keeps_dirty_tree_diff_paths() {
     for limit in [1, 5, 40, 100] {
         let context = format!("cross-tree reset cancel at {limit}");
         let before = repository_state(&fx.root);
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let mut progress = CancelAfter {
             cancel: cancel.clone(),
             limit,
@@ -756,7 +756,7 @@ fn cancelled_hard_reset_keeps_same_size_edits_behind_racy_stat_matches() {
     for limit in [5, 100] {
         let context = format!("racy same-size reset cancel at {limit}");
         let before = repository_state(&fx.root);
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let mut progress = CancelAfter {
             cancel: cancel.clone(),
             limit,
@@ -853,7 +853,7 @@ fn preset_cancel_switch_returns_before_wholesale_delete() {
 
     let (_dir, root, _main, ren) = wholesale_rename_fixture(40);
     let before = repository_state(&root);
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     cancel.cancel();
     let start = Instant::now();
     let err = switch_repository(
@@ -891,7 +891,7 @@ fn delayed_cancel_switch_during_wholesale_delete_leaves_some_dirs() {
 
     let (_dir, root, _main, ren) = wholesale_rename_fixture(120);
     let before = repository_state(&root);
-    let cancel = Arc::new(FlagCancel::new());
+    let cancel = Arc::new(CancelToken::new());
     let flip = cancel.clone();
     let sleeper = thread::spawn(move || {
         thread::sleep(Duration::from_millis(2));

@@ -760,7 +760,7 @@ pub(crate) fn resolve_url(base: &str, reference: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::fetch::NoProgress;
-    use crate::progress::{FlagCancel, NeverCancel};
+    use crate::progress::{CancelToken, NeverCancel};
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
@@ -1011,7 +1011,7 @@ mod tests {
 
     /// Cancels once `after` bytes of the download are on disk.
     struct CancelAfter {
-        flag: FlagCancel,
+        flag: CancelToken,
         after: u64,
     }
     impl crate::progress::ProgressSink for CancelAfter {}
@@ -1030,7 +1030,7 @@ mod tests {
         let dir = tempdir();
         let dest = dir.path().join("clone.bundle");
         let srv = server(&[]);
-        let flag = FlagCancel::new();
+        let flag = CancelToken::new();
         let mut progress = CancelAfter {
             flag: flag.clone(),
             after: 1,
@@ -1126,7 +1126,7 @@ mod tests {
         let dir = tempdir();
         let dest = dir.path().join("clone.bundle");
         let srv = server(&[]);
-        let flag = FlagCancel::new();
+        let flag = CancelToken::new();
         flag.cancel();
         assert!(matches!(
             download_resumable(&srv, "http://h/b", &dest, &mut NoProgress, &flag),

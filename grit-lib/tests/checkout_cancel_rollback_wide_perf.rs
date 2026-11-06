@@ -12,7 +12,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{integrate_branch, resolve_merge_source};
-use grit_lib::progress::{FlagCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
 
@@ -89,7 +89,7 @@ fn run_integrate(root: &std::path::Path, cancel_ms: u64) -> Result<Duration, Err
         &RefName::try_from("refs/heads/main").map_err(|e| Error::PathError(e.to_string()))?,
     )?;
     let other = resolve_merge_source(&repo, "other")?.oid;
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     if cancel_ms > 0 {
         let c = Arc::new(cancel.clone());
         thread::spawn(move || {

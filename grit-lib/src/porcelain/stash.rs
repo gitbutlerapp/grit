@@ -1781,7 +1781,7 @@ pub struct StashPushResult {
 /// # Errors
 ///
 /// [`Error::LockHeld`] when another process holds `index.lock`, with the repository
-/// unchanged; [`Error::Cancelled`] when `cancel` or [`ProgressSink::should_cancel`] fired;
+/// unchanged; [`Error::Cancelled`] when `cancel` fired;
 /// otherwise the same as [`create_stash`] and [`store_stash`], plus checkout failures.
 pub(crate) fn push_stash(
     repo: &Repository,

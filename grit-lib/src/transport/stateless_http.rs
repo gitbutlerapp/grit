@@ -572,10 +572,6 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
         self.finish_in_flight_upload(Some(cancel), Self::cancel_ref(&self.operation_cancel()))
     }
 
-    fn http_stack_watch(&self) -> Option<&std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        Some(&self.stack_watch)
-    }
-
     fn finish_send(&mut self) {
         if self.service == Service::ReceivePack && !self.recv_posted {
             if let Err(e) = self.post_receive_pack(&NeverCancel) {

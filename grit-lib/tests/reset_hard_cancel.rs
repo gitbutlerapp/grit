@@ -6,14 +6,14 @@ use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::{Cancel, FlagCancel, ProgressPhase, ProgressSink};
+use grit_lib::progress::{Cancel, CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 struct CancelHardResetOnFiles {
-    flag: FlagCancel,
+    flag: CancelToken,
     checkout_incs: AtomicU64,
     limit: u64,
     in_checkout: AtomicBool,
@@ -22,7 +22,7 @@ struct CancelHardResetOnFiles {
 impl CancelHardResetOnFiles {
     fn new(limit: u64) -> Self {
         Self {
-            flag: FlagCancel::new(),
+            flag: CancelToken::new(),
             checkout_incs: AtomicU64::new(0),
             limit,
             in_checkout: AtomicBool::new(false),
@@ -45,10 +45,6 @@ impl ProgressSink for CancelHardResetOnFiles {
         if prev + units >= self.limit {
             self.flag.cancel();
         }
-    }
-
-    fn should_cancel(&self) -> bool {
-        self.flag.is_cancelled()
     }
 }
 
@@ -365,19 +361,16 @@ fn hard_reset_cancel_restores_coalesced_directory_delete() {
     let git_status_before = git_status_porcelain(&repo);
 
     struct CancelOnAnyCheckoutInc {
-        flag: FlagCancel,
+        flag: CancelToken,
     }
     impl ProgressSink for CancelOnAnyCheckoutInc {
         fn inc(&mut self, _: u64) {
             self.flag.cancel();
         }
-        fn should_cancel(&self) -> bool {
-            self.flag.is_cancelled()
-        }
     }
 
     let before = ref_and_index(&repo);
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     let mut progress = CancelOnAnyCheckoutInc { flag: flag.clone() };
     let err = reset_to_commit(
         &repo,

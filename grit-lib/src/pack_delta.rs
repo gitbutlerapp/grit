@@ -596,7 +596,7 @@ mod tests {
         let entries: Vec<PlannedEntry> = (0..3000u32)
             .map(|i| whole_entry(&odb, format!("blob number {i}\n").as_bytes()))
             .collect();
-        let cancel = crate::progress::FlagCancel::new();
+        let cancel = crate::progress::CancelToken::new();
         cancel.cancel();
         for threads in [1, 4] {
             let mut out = Vec::new();

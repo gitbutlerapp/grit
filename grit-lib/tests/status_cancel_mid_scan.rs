@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{FlagCancel, NeverCancel, NullProgress, ProgressSink};
+use grit_lib::progress::{CancelToken, NeverCancel, NullProgress, ProgressSink};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,7 +49,7 @@ fn status_returns_cancelled_when_signalled_during_untracked_walk() {
     }
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     let flag_for_thread = flag.clone();
     let sleeper = thread::spawn(move || {
         thread::sleep(Duration::from_millis(5));
@@ -84,7 +84,7 @@ fn status_returns_cancelled_during_tracked_stat_scan_with_flag_cancel() {
         "fixture should spend measurable time in stat scan (got {baseline_elapsed:?})"
     );
 
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     let flag_for_thread = flag.clone();
     let sleeper = thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
@@ -108,11 +108,7 @@ fn status_returns_cancelled_during_tracked_stat_scan_with_progress_sink() {
         requested: Arc<AtomicBool>,
     }
 
-    impl ProgressSink for CancelSink {
-        fn should_cancel(&self) -> bool {
-            self.requested.load(Ordering::Relaxed)
-        }
-    }
+    impl ProgressSink for CancelSink {}
 
     let (_tmp, repo) = repo_with_many_tracked_files();
     let opts = status_opts();

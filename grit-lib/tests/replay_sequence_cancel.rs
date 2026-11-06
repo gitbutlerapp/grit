@@ -11,11 +11,11 @@ use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
 };
-use grit_lib::progress::{Cancel, FlagCancel, ProgressPhase, ProgressSink};
+use grit_lib::progress::{Cancel, CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::repo::Repository;
 
 struct CancelReplayOnCheckout {
-    flag: FlagCancel,
+    flag: CancelToken,
     checkout_incs: AtomicU64,
     limit: u64,
     in_checkout: AtomicBool,
@@ -24,7 +24,7 @@ struct CancelReplayOnCheckout {
 impl CancelReplayOnCheckout {
     fn new(limit: u64) -> Self {
         Self {
-            flag: FlagCancel::new(),
+            flag: CancelToken::new(),
             checkout_incs: AtomicU64::new(0),
             limit,
             in_checkout: AtomicBool::new(false),
@@ -47,10 +47,6 @@ impl ProgressSink for CancelReplayOnCheckout {
         if prev + units >= self.limit {
             self.flag.cancel();
         }
-    }
-
-    fn should_cancel(&self) -> bool {
-        self.flag.is_cancelled()
     }
 }
 

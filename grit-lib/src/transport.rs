@@ -159,12 +159,10 @@ pub trait Connection {
     /// (v0/v1 connections, where the server closes after the single response).
     fn finish_send(&mut self) {}
 
-    /// Mirror a stack-scoped [`Cancel`] into [`Self::http_stack_watch`] before
+    /// Mirror a stack-scoped [`Cancel`] into the connection's HTTP wait flag before
     /// writes that may block on smart HTTP (upload-pack POST on flush).
     fn mirror_http_cancel(&mut self, cancel: &dyn Cancel) {
-        if let Some(watch) = self.http_stack_watch() {
-            crate::progress::mirror_stack_cancel(cancel, watch);
-        }
+        let _ = cancel;
     }
 
     /// Complete any deferred smart-HTTP request still waiting on the owning thread.
@@ -174,11 +172,6 @@ pub trait Connection {
     fn drain_pending_http(&mut self, cancel: &dyn Cancel) -> crate::error::Result<()> {
         let _ = cancel;
         Ok(())
-    }
-
-    /// Shared flag mirrored from the stack [`Cancel`] during smart-HTTP waits.
-    fn http_stack_watch(&self) -> Option<&std::sync::Arc<std::sync::atomic::AtomicBool>> {
-        None
     }
 
     /// End the session and report how the server side ended, for transports whose

@@ -5452,9 +5452,8 @@ pub struct DiffIndexToWorktreeOptions {
     pub skip_index_path: Option<IndexPathSkipPredicate>,
     /// When true with staging materialization, compute blob OIDs without writing loose objects.
     pub hash_blobs_without_write: bool,
-    /// When set, long loops abort with [`crate::error::Error::Cancelled`] once the flag is raised
-    /// (see [`crate::progress::cancel_watch_arc`] and [`crate::progress::poll_cancel_watch`]).
-    pub cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// When set, long loops abort with [`crate::error::Error::Cancelled`] once cancelled.
+    pub cancel: Option<crate::progress::CancelToken>,
     /// When set, work-tree access failures during status emit [`crate::diagnostics::Warning`]
     /// values here instead of aborting the diff.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
@@ -5485,7 +5484,7 @@ impl Default for DiffIndexToWorktreeOptions {
             restrict_to_paths: None,
             skip_index_path: None,
             hash_blobs_without_write: false,
-            cancel_watch: None,
+            cancel: None,
             diagnostics: None,
             skip_inaccessible_paths: false,
         }
@@ -5513,11 +5512,11 @@ fn worktree_diff_skips_inaccessible_paths(
 }
 
 #[inline]
-fn poll_diff_cancel_watch(
-    watch: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+fn poll_diff_cancel_token(
+    cancel: Option<&crate::progress::CancelToken>,
 ) -> crate::error::Result<()> {
-    if let Some(flag) = watch {
-        crate::progress::poll_watch(flag)?;
+    if let Some(token) = cancel {
+        token.poll_result()?;
     }
     Ok(())
 }
@@ -5530,7 +5529,7 @@ fn poll_diff_cancel(
     if let Some(poll) = owner_poll {
         poll.poll_owner()?;
     } else {
-        poll_diff_cancel_watch(options.cancel_watch.as_ref())?;
+        poll_diff_cancel_token(options.cancel.as_ref())?;
     }
     Ok(())
 }
@@ -6664,7 +6663,7 @@ fn diff_index_to_worktree_inner(
             }
         },
         sparse,
-        options.cancel_watch.clone(),
+        options.cancel.clone(),
         owner_poll.clone(),
     )?;
     // Size-changed entries ask whether their clean conversion is the identity in both the stat
@@ -6710,7 +6709,7 @@ fn diff_index_to_worktree_inner(
                 filter_process: filter_fp,
             },
             par_opts,
-            options.cancel_watch.as_ref(),
+            options.cancel.as_ref(),
         )?
     } else {
         RefreshChecks::default()
@@ -8040,9 +8039,9 @@ fn refresh_content_checks(
     include: &dyn Fn(usize, &IndexEntry, &crate::worktree_scan::BlobDiskStat) -> bool,
     ctx: &WorktreeHashContext<'_>,
     par_opts: crate::parallel::ParallelOptions,
-    cancel_watch: Option<&std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    cancel: Option<&crate::progress::CancelToken>,
 ) -> Result<RefreshChecks> {
-    use crate::progress::{poll_watch, CANCEL_POLL_STRIDE};
+    use crate::progress::CANCEL_POLL_STRIDE;
     use crate::worktree_scan::BlobDiskLookup;
 
     /// Attributes are resolved on the calling thread: the shared rules are not `Sync`.
@@ -8060,8 +8059,8 @@ fn refresh_content_checks(
     for (entry_index, lookup) in batches.iter().flatten() {
         cancel_stride = cancel_stride.wrapping_add(1);
         if cancel_stride.is_multiple_of(CANCEL_POLL_STRIDE) {
-            if let Some(w) = cancel_watch {
-                poll_watch(w)?;
+            if let Some(token) = cancel {
+                token.poll_result()?;
             }
         }
         let BlobDiskLookup::Present(stat) = lookup else {
@@ -8090,11 +8089,10 @@ fn refresh_content_checks(
         (ctx.work_tree, ctx.precompose_unicode, ctx.ignorecase);
     let (conv, filter_process) = (ctx.conv, ctx.filter_process);
     let entries = index.entries.as_slice();
-    let watch_for_hash = cancel_watch.cloned();
     let hash_one = |job: &ContentCheck| -> Result<RefreshContent> {
         if job.entry_index.is_multiple_of(CANCEL_POLL_STRIDE) {
-            if let Some(w) = watch_for_hash.as_ref() {
-                poll_watch(w)?;
+            if let Some(token) = cancel {
+                token.poll_result()?;
             }
         }
         let ie = &entries[job.entry_index];
@@ -8121,8 +8119,8 @@ fn refresh_content_checks(
         for job in &jobs {
             serial_stride = serial_stride.wrapping_add(1);
             if serial_stride.is_multiple_of(CANCEL_POLL_STRIDE) {
-                if let Some(w) = cancel_watch {
-                    poll_watch(w)?;
+                if let Some(token) = cancel {
+                    token.poll_result()?;
                 }
             }
             out.push(hash_one(job)?);
@@ -9513,11 +9511,9 @@ pub(crate) fn detect_renames(
 }
 
 #[inline]
-fn poll_rename_cancel(
-    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
-) -> crate::error::Result<()> {
-    if let Some(watch) = cancel_watch {
-        crate::progress::poll_watch(watch)?;
+fn poll_rename_cancel(cancel: Option<&crate::progress::CancelToken>) -> crate::error::Result<()> {
+    if let Some(token) = cancel {
+        token.poll_result()?;
     }
     Ok(())
 }
@@ -9531,7 +9527,7 @@ fn poll_rename_cancel(
 /// # Errors
 ///
 /// Returns object database errors from reading candidate blobs, and the cancellation
-/// error when `cancel_watch` is set.
+/// error when `cancel` is set.
 #[allow(clippy::too_many_arguments)]
 pub fn detect_renames_with_policy(
     odb: &Odb,
@@ -9540,10 +9536,10 @@ pub fn detect_renames_with_policy(
     threshold: u32,
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
-    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
+    cancel: Option<&crate::progress::CancelToken>,
     detect_opts: DetectRenamesOptions,
 ) -> Result<RenameDetectionResult> {
-    poll_rename_cancel(cancel_watch)?;
+    poll_rename_cancel(cancel)?;
     let has_deleted = entries.iter().any(|e| e.status == DiffStatus::Deleted);
     let has_added = entries.iter().any(|e| e.status == DiffStatus::Added);
     if (!has_deleted || !has_added) && entries_strictly_sorted_by_path(&entries) {
@@ -9649,7 +9645,7 @@ pub fn detect_renames_with_policy(
     }
     let mut exact_scores: Vec<(u32, usize, usize)> = Vec::new();
     for (di, del) in deleted.iter().enumerate() {
-        poll_rename_cancel(cancel_watch)?;
+        poll_rename_cancel(cancel)?;
         if let Some(ais) = added_by_oid.get(&del.old_oid) {
             for &ai in ais {
                 exact_scores.push((100, di, ai));
@@ -9686,7 +9682,7 @@ pub fn detect_renames_with_policy(
             &mut used_added,
             &mut renames,
             threshold,
-            cancel_watch,
+            cancel,
             &mut cache,
             par_opts,
         )?;
@@ -9747,7 +9743,7 @@ pub fn detect_renames_with_policy(
         let mut load_added = vec![false; remaining_added.len()];
         let mut candidate_pairs: Vec<(usize, usize)> = Vec::new();
         for (row, &di) in remaining_deleted.iter().enumerate() {
-            poll_rename_cancel(cancel_watch)?;
+            poll_rename_cancel(cancel)?;
             let del = &deleted[di];
             if !is_regularish_mode(del.old_mode) {
                 continue;
@@ -9940,7 +9936,7 @@ pub fn detect_renames_with_policy(
 
             let mut inexact_scores: Vec<(u32, usize, usize)> = Vec::new();
             for (row, col) in candidate_pairs {
-                poll_rename_cancel(cancel_watch)?;
+                poll_rename_cancel(cancel)?;
                 let di = remaining_deleted[row];
                 let ai = remaining_added[col];
                 let (Some(old_table), Some(new_table)) = (&deleted_tables[row], &added_tables[col])
@@ -10721,7 +10717,7 @@ pub(crate) fn status_apply_rename_copy_detection(
     head_tree: Option<&ObjectId>,
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
-    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
+    cancel: Option<&crate::progress::CancelToken>,
 ) -> Result<Vec<DiffEntry>> {
     if !copies {
         return detect_renames_with_policy(
@@ -10731,7 +10727,7 @@ pub(crate) fn status_apply_rename_copy_detection(
             threshold,
             config,
             thread_policy,
-            cancel_watch,
+            cancel,
             DetectRenamesOptions::default(),
         )
         .map(|r| r.entries);

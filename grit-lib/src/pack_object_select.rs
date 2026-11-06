@@ -967,7 +967,9 @@ fn rev_list_filtered_objects(
         no_object_names: false,
         quiet: true,
         filter: Some(filter.clone()),
-        cancel_watch: Some(stop.watch_arc()),
+        cancel: Some(crate::progress::CancelToken::from_shared_flag(
+            stop.watch_arc(),
+        )),
         missing_action: match missing_mode {
             MissingBlobMode::Fail => MissingAction::Error,
             MissingBlobMode::Probe => MissingAction::Allow,

@@ -61,10 +61,7 @@ CANCEL_FAMILY_NAMES = frozenset(
     {
         "Cancel",
         "NeverCancel",
-        "FlagCancel",
         "CancelProgress",
-        "WatchProgress",
-        "HttpStackWatch",
         "cancel_watch_arc",
         "poll_watch",
         "poll_cancel_watch",

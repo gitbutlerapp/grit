@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
 use grit_lib::progress::{
-    Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
+    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -22,7 +22,7 @@ const MAX_LATE_CANCEL_RATIO: f64 = 3.0;
 struct CancelAfterCheckoutUnits {
     seen: u64,
     active: bool,
-    flag: FlagCancel,
+    flag: CancelToken,
 }
 
 impl CancelAfterCheckoutUnits {
@@ -30,7 +30,7 @@ impl CancelAfterCheckoutUnits {
         Self {
             seen: 0,
             active: false,
-            flag: FlagCancel::new(),
+            flag: CancelToken::new(),
         }
     }
 }
@@ -49,10 +49,6 @@ impl ProgressSink for CancelAfterCheckoutUnits {
         if self.seen >= 5 {
             self.flag.cancel();
         }
-    }
-
-    fn should_cancel(&self) -> bool {
-        self.flag.is_cancelled()
     }
 }
 

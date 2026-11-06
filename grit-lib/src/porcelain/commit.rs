@@ -482,8 +482,8 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 
 /// Record a commit using `scope` to decide how the index is prepared.
 ///
-/// Staging reports [`crate::progress::ProgressPhase::StagingFiles`] to `progress`; `cancel` (or
-/// [`ProgressSink::should_cancel`]) stops the commit with [`Error::Cancelled`] up to the point
+/// Staging reports [`crate::progress::ProgressPhase::StagingFiles`] to `progress`; `cancel` stops
+/// the commit with [`Error::Cancelled`] up to the point
 /// the commit object is written, leaving `HEAD` and the branch where they were.
 ///
 /// # Errors
@@ -985,7 +985,7 @@ impl CommitOutcome {
 ///
 /// # Errors
 ///
-/// - [`Error::Cancelled`] when `cancel` or [`ProgressSink::should_cancel`] fired before the
+/// - [`Error::Cancelled`] when `cancel` fired before the
 ///   commit object was written; `HEAD` and the branch are unchanged. Hook failures and cancel
 ///   after hooks leave the on-disk index unchanged when the caller holds an index lock (for
 ///   example [`commit_worktree`] and path-scoped commits).

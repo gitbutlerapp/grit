@@ -1290,7 +1290,7 @@ fn bundles_create_replaces_existing_destination_on_success() {
 
 #[test]
 fn bundles_create_cancelled_preserves_destination_and_removes_part_file() {
-    use grit_lib::progress::{FlagCancel, NullProgress};
+    use grit_lib::progress::{CancelToken, NullProgress};
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let src = tmp.path();
@@ -1300,7 +1300,7 @@ fn bundles_create_cancelled_preserves_destination_and_removes_part_file() {
     const SENTINEL: &[u8] = b"pre-existing bundle sentinel\n";
     std::fs::write(&bundle_path, SENTINEL).expect("seed");
 
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     flag.cancel();
     let err = repo
         .bundles()

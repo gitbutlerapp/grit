@@ -9,7 +9,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::progress::{
-    Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
+    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
 use grit_lib::repo::Repository;
 
@@ -69,7 +69,7 @@ fn tree_of(root: &Path, rev: &str) -> ObjectId {
 }
 
 struct CancelAfter {
-    cancel: FlagCancel,
+    cancel: CancelToken,
     limit: u64,
     seen: u64,
     in_checkout: bool,
@@ -144,7 +144,7 @@ fn cancelled_checkout_restores_process_filtered_file() {
 
     let from = tree_of(root, "main");
     let to = tree_of(root, "next");
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let mut progress = CancelAfter {
         cancel: cancel.clone(),
         limit: 4,

@@ -260,7 +260,7 @@ impl RebaseSessionError {
 /// leaves the repository untouched, because stopping would discard that work.
 ///
 /// Work-tree updates report [`crate::progress::ProgressPhase::CheckingOutFiles`] to `progress`.
-/// `cancel` (or [`ProgressSink::should_cancel`]) is checked after planning and during the apply
+/// `cancel` is checked after planning and during the apply
 /// and stop checkouts; a cancel returns [`RebaseSessionError::Library`] wrapping
 /// [`Error::Cancelled`](crate::error::Error::Cancelled) (see [`RebaseSessionError::is_cancelled`]).
 /// The last cancel point is before a conflict stop is recorded, so a cancel leaves nothing

@@ -93,7 +93,7 @@ pub enum ReplayOutcome {
 /// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
 /// - [`Error::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
-/// - [`Error::Cancelled`] when `cancel` (or [`ProgressSink::should_cancel`]) fires before the
+/// - [`Error::Cancelled`] when `cancel` fires before the
 ///   branch moved; a checkout already under way is rolled back to `HEAD` first.
 ///
 /// The work-tree update reports [`crate::progress::ProgressPhase::CheckingOutFiles`] to

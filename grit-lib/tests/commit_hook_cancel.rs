@@ -10,7 +10,7 @@ use std::time::Duration;
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-use grit_lib::progress::{FlagCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::resolve_revision_for_verify;
 
@@ -56,7 +56,7 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &FlagCancel::new(),
+        &CancelToken::new(),
     )
     .expect("seed commit");
     let head_before = resolve_revision_for_verify(&repo, "HEAD").expect("head");
@@ -64,7 +64,7 @@ fn cancelled_pre_commit_hook_leaves_no_index_lock() {
     write_sleep_pre_commit(&repo, 60);
     std::fs::write(dir.path().join("a"), "dirty\n").expect("dirty");
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let cancel_worker = cancel.clone();
     let kick = thread::spawn(move || {
         thread::sleep(Duration::from_millis(300));
@@ -97,14 +97,14 @@ fn cancelled_pre_commit_hook_waits_for_child_to_exit() {
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &FlagCancel::new(),
+        &CancelToken::new(),
     )
     .expect("seed commit");
 
     write_sleep_pre_commit(&repo, 2);
     std::fs::write(dir.path().join("a"), "dirty\n").expect("dirty");
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let cancel_worker = cancel.clone();
     let kick = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));

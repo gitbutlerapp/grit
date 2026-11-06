@@ -2,14 +2,14 @@
 
 use grit_lib::bundle::Bundle;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::progress::{FlagCancel, ProgressPhase, ProgressSink, ProgressUnit};
+use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 struct CancelAfterIndexing {
-    flag: FlagCancel,
+    flag: CancelToken,
     saw_indexing: Arc<AtomicBool>,
 }
 
@@ -65,7 +65,7 @@ fn bundle_unbundle_returns_cancelled_during_index_pack() {
     )
     .expect("open");
     let bundle = Bundle::open(&bundle_path).expect("open bundle");
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     let saw = Arc::new(AtomicBool::new(false));
     let mut progress = CancelAfterIndexing {
         flag: flag.clone(),

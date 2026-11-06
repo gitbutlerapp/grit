@@ -1037,7 +1037,7 @@ pub enum ApplyError {
     },
 
     /// The caller's [`crate::progress::Cancel`] or
-    /// [`crate::progress::ProgressSink::should_cancel`] stopped the apply between files.
+    /// Cancellation stopped the apply between files.
     #[error("operation cancelled")]
     Cancelled,
 }

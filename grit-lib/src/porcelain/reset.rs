@@ -2229,7 +2229,7 @@ mod tests {
     #[test]
     fn cancelled_wide_hard_reset_restores_racy_same_size_worktree_bytes() {
         use crate::error::Error;
-        use crate::progress::{Cancel, FlagCancel, ProgressPhase, ProgressSink};
+        use crate::progress::{Cancel, CancelToken, ProgressPhase, ProgressSink};
         use crate::test_support::counters::{
             checkout_spool_probe_count, reset_checkout_spool_probe,
         };
@@ -2237,7 +2237,7 @@ mod tests {
         const FILES: usize = 65;
 
         struct CancelAfterCheckout {
-            cancel: FlagCancel,
+            cancel: CancelToken,
             limit: u64,
             seen: u64,
             in_checkout: bool,
@@ -2332,7 +2332,7 @@ mod tests {
         )
         .expect("open");
         let other = ObjectId::from_hex(git(root, &["rev-parse", "other"]).trim()).expect("other");
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let mut progress = CancelAfterCheckout {
             cancel: cancel.clone(),
             limit: 1,

@@ -27,7 +27,7 @@ use grit_lib::objects::unpack_objects::{
     ingest_pack_into, ingest_pack_into_with_progress, pack_is_thin, UnpackOptions,
 };
 use grit_lib::objects::{hash::hash_object, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
-use grit_lib::progress::{FlagCancel, ProgressPhase, ProgressSink};
+use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::refs::store::MemoryRefStore;
 use grit_lib::repo::{Repository, RepositoryBuilder};
 
@@ -459,7 +459,7 @@ fn progress_reports_indexing_and_resolving_and_cancel_stops() {
     assert_eq!(progress.increments, total + deltas);
     assert_eq!(progress.finished, 2);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     cancel.cancel();
     let fresh = MemoryStore::new(HashAlgo::Sha1);
     let err = ingest_pack_into_with_progress(

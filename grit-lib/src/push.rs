@@ -114,10 +114,6 @@ impl crate::progress::ProgressSink for PushSidebandCollector<'_> {
     fn finish(&mut self) {
         self.inner.finish();
     }
-
-    fn should_cancel(&self) -> bool {
-        self.inner.should_cancel()
-    }
 }
 
 impl Progress for PushSidebandCollector<'_> {
@@ -1946,7 +1942,7 @@ mod tests {
         /// Hands out `payload` in one read, then fires `cancel`.
         struct CancelAfterRead {
             payload: Cursor<Vec<u8>>,
-            cancel: crate::progress::FlagCancel,
+            cancel: crate::progress::CancelToken,
         }
         impl Read for CancelAfterRead {
             fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
@@ -1960,7 +1956,7 @@ mod tests {
             (&["unpack ok"][..], false),
             (&["unpack ok", "ok refs/heads/main"][..], true),
         ] {
-            let cancel = crate::progress::FlagCancel::new();
+            let cancel = crate::progress::CancelToken::new();
             let report = report_bytes(lines);
             let mut reader = CancelAfterRead {
                 payload: Cursor::new(report.clone()),

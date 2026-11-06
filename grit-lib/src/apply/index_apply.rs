@@ -525,13 +525,13 @@ mod tests {
 
     #[test]
     fn apply_patch_to_index_and_write_cancelled_leaves_index_untouched() {
-        use crate::progress::FlagCancel;
+        use crate::progress::CancelToken;
         use std::fs;
 
         let (_dir, repo, mut index) = repo_with_index(&[("f.txt", b"a\n")]);
         repo.write_index(&mut index).expect("write index");
         let before = fs::read(repo.index_path()).expect("read index");
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         cancel.cancel();
         let patch = one_line_patch("f.txt", "a", "b");
         let err =

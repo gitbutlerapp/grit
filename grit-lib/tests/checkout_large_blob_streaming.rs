@@ -22,13 +22,13 @@ const BIG: usize = 3 * 1024 * 1024 + 123;
 #[test]
 fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
     use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-    use grit_lib::progress::{FlagCancel, ProgressSink};
+    use grit_lib::progress::{CancelToken, ProgressSink};
 
     /// Cancels on the ninth file and records how many files were on disk at that moment (the
     /// checkout rolls them back before it returns).
     struct StopAfterNine<'a> {
         completed: u64,
-        cancel: FlagCancel,
+        cancel: CancelToken,
         root: &'a Path,
         written_at_cancel: Option<usize>,
     }
@@ -64,7 +64,7 @@ fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
     let tree = ObjectId::from_hex(git(root, &["rev-parse", "HEAD^{tree}"]).trim()).expect("tree");
     git(root, &["rm", "-qr", "--", "."]);
     let repo = open(root);
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let mut progress = StopAfterNine {
         completed: 0,
         cancel: cancel.clone(),

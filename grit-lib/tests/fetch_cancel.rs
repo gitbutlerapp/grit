@@ -1,7 +1,7 @@
 //! Cancellation during local fetch.
 
 use grit_lib::error::Error;
-use grit_lib::progress::FlagCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local_with_progress, FetchOptions, TagMode};
 use grit_test_support::git;
@@ -21,7 +21,7 @@ fn fetch_local_returns_cancelled_when_signalled_before_start() {
     );
     git(&local, &["commit", "-q", "--allow-empty", "-m", "c1"]);
 
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     flag.cancel();
 
     let mut opts = FetchOptions::new();

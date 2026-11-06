@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_lib::progress::FlagCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::serve::{
     upload_pack, upload_pack_cancellable, ProtocolVersion, ServeError, ServeOptions,
@@ -902,7 +902,7 @@ fn upload_pack_cancelled_before_start_writes_no_pack() {
     .expect("init");
     let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
     let tip = seed_bare_main(&repo);
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     cancel.cancel();
     let mut out = Vec::new();
     let mut opts = test_serve_opts(ProtocolVersion::V0, false, true);

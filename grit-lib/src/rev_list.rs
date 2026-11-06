@@ -60,7 +60,11 @@ use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::pathspec::{pathspec_has_attr_magic, PathspecMatcher};
-use crate::progress::poll_watch;
+use crate::progress::{poll_watch, CancelToken};
+
+fn cancel_watch_for_walk(cancel: &Option<CancelToken>) -> Option<Arc<AtomicBool>> {
+    cancel.as_ref().map(CancelToken::watch_arc)
+}
 use crate::reflog::{read_reflog_on_store, reflog_refs_on_store};
 use crate::refs;
 use crate::repo::Repository;
@@ -593,9 +597,9 @@ pub struct RevListOptions {
     /// Follow renames when history is limited to a single literal file path (Git `log --follow`).
     /// Requires exactly one plain file pathspec in [`Self::paths`].
     pub follow: bool,
-    /// When set, filtered object walks poll this flag and stop with [`Error::Cancelled`].
+    /// When set, filtered object walks stop with [`Error::Cancelled`] once cancelled.
     #[doc(hidden)]
-    pub cancel_watch: Option<Arc<AtomicBool>>,
+    pub cancel: Option<crate::progress::CancelToken>,
 }
 
 impl RevListOptions {
@@ -684,7 +688,7 @@ impl Default for RevListOptions {
             pickaxe: None,
             retain_commit_data: false,
             follow: false,
-            cancel_watch: None,
+            cancel: None,
         }
     }
 }
@@ -1910,7 +1914,7 @@ pub fn rev_list(
                     skip_trees,
                     omit_object_paths,
                     collect_tree_omits,
-                    options.cancel_watch.clone(),
+                    cancel_watch_for_walk(&options.cancel),
                 )?;
                 let filter_provided = options.filter_provided_objects;
                 let (mut objs, mut omit, mut miss, mut counts, mut segments) =
@@ -1929,7 +1933,7 @@ pub fn rev_list(
                             omit_object_paths,
                             packed_set.as_ref(),
                             collect_tree_omits,
-                            options.cancel_watch.clone(),
+                            cancel_watch_for_walk(&options.cancel),
                         )?;
                         (o, om, mi, c, Vec::<Vec<(ObjectId, String)>>::new())
                     } else {
@@ -1947,7 +1951,7 @@ pub fn rev_list(
                             omit_object_paths,
                             packed_set.as_ref(),
                             collect_tree_omits,
-                            options.cancel_watch.clone(),
+                            cancel_watch_for_walk(&options.cancel),
                         )?;
                         (o, om, mi, Vec::new(), segments)
                     };

@@ -6,7 +6,7 @@
 use grit_lib::bundle::BundleError;
 use grit_lib::error::Error;
 use grit_lib::porcelain::pull::PullError;
-use grit_lib::progress::FlagCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local_with_progress, FetchOptions, TagMode};
@@ -65,7 +65,7 @@ fn fetch_local_cancelled_at_start_is_classified() {
     );
     git(&local, &["commit", "-q", "--allow-empty", "-m", "c1"]);
 
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     flag.cancel();
 
     let mut opts = FetchOptions::new();
@@ -87,7 +87,7 @@ fn clone_cancelled_at_start_is_classified_and_needs_cleanup() {
     );
     git(&upstream, &["commit", "-q", "--allow-empty", "-m", "c1"]);
 
-    let flag = FlagCancel::new();
+    let flag = CancelToken::new();
     flag.cancel();
 
     let opts = CloneOptions::new(upstream.to_string_lossy(), dest.clone());

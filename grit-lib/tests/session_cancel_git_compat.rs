@@ -14,7 +14,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::integrate_branch;
 use grit_lib::progress::{
-    Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
+    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
 use grit_lib::revwalk::history::{
     start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope,
@@ -31,7 +31,7 @@ struct CancelAfter {
     limit: u64,
     active: Option<ProgressPhase>,
     seen: u64,
-    flag: FlagCancel,
+    flag: CancelToken,
 }
 
 impl CancelAfter {
@@ -41,7 +41,7 @@ impl CancelAfter {
             limit,
             active: None,
             seen: 0,
-            flag: FlagCancel::new(),
+            flag: CancelToken::new(),
         }
     }
 }
@@ -58,10 +58,6 @@ impl ProgressSink for CancelAfter {
                 self.flag.cancel();
             }
         }
-    }
-
-    fn should_cancel(&self) -> bool {
-        self.flag.is_cancelled()
     }
 }
 

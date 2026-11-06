@@ -927,13 +927,13 @@ mod tests {
 
     #[test]
     fn install_pack_cancelled_during_indexing_cleans_stage() {
-        use crate::progress::{FlagCancel, ProgressPhase, ProgressSink, ProgressUnit};
+        use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
         use grit_test_support::objects::{HashAlgo, ObjectKind as PK, PackBuilder};
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
 
         struct CancelAtIndexing {
-            flag: FlagCancel,
+            flag: CancelToken,
             saw_indexing: Arc<AtomicBool>,
         }
 
@@ -965,7 +965,7 @@ mod tests {
         let pack_path = tmp.path().join("incoming.pack");
         std::fs::write(&pack_path, &pack).expect("write pack");
         let odb = Odb::new(tmp.path());
-        let flag = FlagCancel::new();
+        let flag = CancelToken::new();
         let saw = Arc::new(AtomicBool::new(false));
         let mut progress = CancelAtIndexing {
             flag: flag.clone(),

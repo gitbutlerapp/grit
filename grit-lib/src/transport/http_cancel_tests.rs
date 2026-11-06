@@ -15,7 +15,7 @@ use crate::environment::Environment;
 use crate::error::Error;
 use crate::pkt_line::write_line_to_vec;
 use crate::progress::{
-    connect_cancel_arc, mirror_stack_cancel, Cancel, FlagCancel, HttpWaitGuard, NeverCancel,
+    connect_cancel_arc, mirror_stack_cancel, Cancel, CancelToken, HttpWaitGuard, NeverCancel,
 };
 use crate::remote::fetch::NoProgress;
 use crate::remote::transfer::FetchOptions;
@@ -138,7 +138,7 @@ fn discover_cancels_while_info_refs_stalls() {
             }
         });
 
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let cancel_arm = cancel.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(300));
@@ -549,7 +549,7 @@ fn clone_cancels_during_stalled_bundle_uri_probe() {
             }
         });
 
-        let cancel = FlagCancel::new();
+        let cancel = CancelToken::new();
         let cancel_arm = cancel.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(300));
@@ -675,7 +675,7 @@ fn smart_http_discovery_completes_one_connection_with_slow_body_and_low_speed_en
                 .expect("client");
             let url = format!("http://127.0.0.1:{port}/x.git");
             let transport = SmartHttpTransport::new(http_client_arc(client));
-            let cancel = FlagCancel::new();
+            let cancel = CancelToken::new();
             let (stack_watch, _guard) = HttpWaitGuard::bind(&cancel);
             let mut connect = ConnectOptions {
                 cancel: Some(connect_cancel_arc(

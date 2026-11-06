@@ -16,7 +16,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::{parse_commit, serialize_tree, ObjectId, ObjectKind, TreeEntry};
-use grit_lib::progress::{Cancel, FlagCancel, NeverCancel};
+use grit_lib::progress::{Cancel, CancelToken, NeverCancel};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::pkt_line;
@@ -172,7 +172,7 @@ fn local_push_with_a_fired_cancel_writes_nothing() {
     init_bare(&remote_dir);
     let before = object_files(&remote_dir);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     cancel.cancel();
     let err = push_file(&local, &remote_dir, tip, &cancel).expect_err("cancelled");
     assert!(err.is_cancelled(), "{err:?}");
@@ -290,7 +290,7 @@ fn local_push_returns_promptly_when_cancelled_from_another_thread() {
     let remote_dir = tmp.path().join("remote.git");
     init_bare(&remote_dir);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let flip = cancel.clone();
     let flipper = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(5));
@@ -474,7 +474,7 @@ fn http_push_cancelled_mid_body_abandons_the_request_and_a_retry_lands() {
     let body_read = Arc::clone(&server.body_read);
     let server = Arc::new(server);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let flip = cancel.clone();
     let flipper = std::thread::spawn(move || {
         while body_read.load(Ordering::SeqCst) < 512 * 1024 {
@@ -519,7 +519,7 @@ fn http_push_cancelled_while_the_server_is_silent_returns_at_once() {
     let held = Arc::clone(&server.held);
     let server = Arc::new(server);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let flip = cancel.clone();
     let flipper = std::thread::spawn(move || {
         while !held.load(Ordering::SeqCst) {
@@ -571,7 +571,7 @@ fn local_push_cancelled_while_streaming_one_large_blob_drops_quarantine() {
     init_bare(&remote_dir);
     let before = object_files(&remote_dir);
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let flip = cancel.clone();
     let flipper = std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(5));

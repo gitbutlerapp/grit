@@ -1,26 +1,13 @@
-//! `RepositoryRemotes::fetch_all` aborts on progress-sink and per-remote cancellation.
+//! `RepositoryRemotes::fetch_all` aborts when the cancel token fires.
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
-use grit_lib::progress::{NeverCancel, ProgressSink};
-use grit_lib::remote::fetch::{NoProgress, Progress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use std::path::Path;
-
-struct AlwaysCancelProgress;
-
-impl ProgressSink for AlwaysCancelProgress {
-    fn should_cancel(&self) -> bool {
-        true
-    }
-}
-
-impl Progress for AlwaysCancelProgress {
-    fn message(&mut self, _bytes: &[u8]) {}
-}
 
 fn seed_bare(base: &Path, name: &str) -> std::path::PathBuf {
     let bare = base.join(format!("{name}.git"));
@@ -39,7 +26,7 @@ fn seed_bare(base: &Path, name: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn fetch_all_aborts_when_progress_sink_requests_cancel_on_only_remote() {
+fn fetch_all_aborts_when_cancelled_on_only_remote() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let bare = seed_bare(tmp.path(), "origin");
     let consumer = tmp.path().join("consumer");
@@ -59,7 +46,9 @@ fn fetch_all_aborts_when_progress_sink_requests_cancel_on_only_remote() {
         true,
     )
     .expect("config");
-    let mut progress = AlwaysCancelProgress;
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let mut progress = NullProgress;
     let err = repo
         .remotes()
         .fetch_all(
@@ -68,10 +57,10 @@ fn fetch_all_aborts_when_progress_sink_requests_cancel_on_only_remote() {
             None,
             None,
             &mut progress,
-            &NeverCancel,
+            &cancel,
             None,
         )
-        .expect_err("progress cancel should abort fetch_all");
+        .expect_err("cancel should abort fetch_all");
     assert!(matches!(err, Error::Cancelled));
 }
 
@@ -96,9 +85,9 @@ fn fetch_all_aborts_when_only_remote_returns_cancelled() {
         true,
     )
     .expect("config");
-    let flag = grit_lib::progress::FlagCancel::new();
-    flag.cancel();
-    let mut progress = NoProgress;
+    let cancel = CancelToken::new();
+    cancel.cancel();
+    let mut progress = NullProgress;
     let err = repo
         .remotes()
         .fetch_all(
@@ -107,9 +96,9 @@ fn fetch_all_aborts_when_only_remote_returns_cancelled() {
             None,
             None,
             &mut progress,
-            &flag,
+            &cancel,
             None,
         )
-        .expect_err("cancel before fetch_all loop");
+        .expect_err("cancel should abort fetch_all");
     assert!(matches!(err, Error::Cancelled));
 }

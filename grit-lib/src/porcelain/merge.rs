@@ -911,7 +911,7 @@ pub enum IntegrateBranchOutcome {
 /// path then holds the virtual base's version.
 ///
 /// The work-tree update reports [`crate::progress::ProgressPhase::CheckingOutFiles`] to
-/// `progress`. `cancel` (or [`ProgressSink::should_cancel`]) is checked before the work tree is
+/// `progress`. `cancel` is checked before the work tree is
 /// touched and throughout the checkout; once the checkout completed, the index, merge state and
 /// branch update always follow, so a cancel never leaves the branch behind a finished checkout.
 ///

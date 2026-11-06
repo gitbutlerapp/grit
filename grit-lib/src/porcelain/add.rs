@@ -287,7 +287,7 @@ pub(crate) fn validate_commit_staging_pathspecs(
 /// time. A dry run reads the index without locking.
 ///
 /// Reports [`ProgressPhase::StagingFiles`] to `progress` (no total: the changed set is found
-/// while scanning) and stops when `cancel` or [`ProgressSink::should_cancel`] fires.
+/// while scanning) and stops when `cancel` fires.
 ///
 /// # Errors
 ///

@@ -1391,7 +1391,7 @@ pub struct WorktreeReverseApplyOptions {
 /// # Errors
 ///
 /// [`ApplyError`] when a patch cannot be reversed on the worktree, and
-/// [`ApplyError::Cancelled`] when `cancel` or [`ProgressSink::should_cancel`] fired.
+/// [`ApplyError::Cancelled`] when `cancel` fired.
 pub fn reverse_apply_patches_to_worktree(
     repo: &Repository,
     patches: &[FilePatch],

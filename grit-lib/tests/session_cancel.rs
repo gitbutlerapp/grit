@@ -1,6 +1,5 @@
 //! Staging, commit, stash, merge, rebase, replay and restore report progress and stop on
-//! cancellation (issue #2142), through either the `&dyn Cancel` argument or
-//! [`ProgressSink::should_cancel`].
+//! cancellation (issue #2142), through the `&dyn Cancel` argument.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -16,7 +15,7 @@ use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest}
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::progress::{
-    Cancel, FlagCancel, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
+    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
 };
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -38,7 +37,7 @@ struct CancelAfter {
     active: Option<ProgressPhase>,
     seen: u64,
     started: Vec<ProgressPhase>,
-    flag: FlagCancel,
+    flag: CancelToken,
 }
 
 impl CancelAfter {
@@ -51,7 +50,7 @@ impl CancelAfter {
             active: None,
             seen: 0,
             started: Vec::new(),
-            flag: FlagCancel::new(),
+            flag: CancelToken::new(),
         }
     }
 
@@ -64,7 +63,7 @@ impl CancelAfter {
             active: None,
             seen: 0,
             started: Vec::new(),
-            flag: FlagCancel::new(),
+            flag: CancelToken::new(),
         }
     }
 
@@ -112,14 +111,10 @@ impl ProgressSink for CancelAfter {
             self.flag.cancel();
         }
     }
-
-    fn should_cancel(&self) -> bool {
-        self.flag.is_cancelled()
-    }
 }
 
-fn cancelled_flag() -> FlagCancel {
-    let flag = FlagCancel::new();
+fn cancelled_flag() -> CancelToken {
+    let flag = CancelToken::new();
     flag.cancel();
     flag
 }
@@ -217,12 +212,8 @@ fn stage_stops_when_the_sink_asks() {
     write_files(tmp.path(), "d", "new");
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 1);
-    assert_cancelled(stage(
-        &repo,
-        &StageOptions::default(),
-        &mut sink,
-        &NeverCancel,
-    ));
+    let cancel = sink.flag.clone();
+    assert_cancelled(stage(&repo, &StageOptions::default(), &mut sink, &cancel));
     assert_index_untouched(&repo, &before);
 }
 
@@ -283,12 +274,13 @@ fn auto_stage_commit_stops_when_the_sink_asks() {
     let (_tmp, repo, base) = repo_with_modified_files();
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
+    let cancel = sink.flag.clone();
     assert_cancelled(commit_with_scope(
         &repo,
         &commit_req("change"),
         CommitScope::AutoStage,
         &mut sink,
-        &NeverCancel,
+        &cancel,
     ));
     assert_eq!(head(&repo), base, "HEAD must not move");
     assert_index_untouched(&repo, &before);
@@ -333,7 +325,8 @@ fn assert_stash_reset_cancelled(
     opts: &StashPushOptions,
 ) {
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
-    assert_cancelled(repo.stash().push(opts, &mut sink, &NeverCancel));
+    let cancel = sink.flag.clone();
+    assert_cancelled(repo.stash().push(opts, &mut sink, &cancel));
     assert_eq!(
         repo.stash().list().expect("list").len(),
         1,
@@ -410,7 +403,8 @@ fn stash_push_stops_before_storing_the_entry() {
     let (tmp, repo, _) = repo_with_modified_files();
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
-    assert_cancelled(repo.stash().push(&stash_opts(), &mut sink, &NeverCancel));
+    let cancel = sink.flag.clone();
+    assert_cancelled(repo.stash().push(&stash_opts(), &mut sink, &cancel));
     assert!(repo.stash().list().expect("list").is_empty());
     assert_index_untouched(&repo, &before);
     let kept = fs::read_to_string(tmp.path().join("d/f0000.txt")).expect("read");
@@ -452,9 +446,10 @@ fn stash_pop_cancel_keeps_the_entry() {
     );
 
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
+    let cancel = sink.flag.clone();
     assert_cancelled(
         repo.stash()
-            .pop(0, &StashApplyOptions::default(), &mut sink, &NeverCancel),
+            .pop(0, &StashApplyOptions::default(), &mut sink, &cancel),
     );
     assert_eq!(repo.stash().list().expect("list").len(), 1);
     assert_index_untouched(&repo, &before);
@@ -498,6 +493,7 @@ fn repo_with_side_branch() -> (tempfile::TempDir, Repository, ObjectId, ObjectId
 fn fast_forward_merge_stops_during_checkout() {
     let (_tmp, repo, base, side) = repo_with_side_branch();
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
+    let cancel = sink.flag.clone();
     assert_cancelled(integrate_branch(
         &repo,
         "refs/heads/main",
@@ -505,7 +501,7 @@ fn fast_forward_merge_stops_during_checkout() {
         side,
         "side",
         &mut sink,
-        &NeverCancel,
+        &cancel,
     ));
     assert_eq!(branch(&repo, "main"), base, "the branch must not move");
     assert!(
@@ -569,6 +565,7 @@ fn conflicting_merge_cancel_restores_the_index() {
     let before = index_bytes(&repo);
 
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
+    let cancel = sink.flag.clone();
     assert_cancelled(integrate_branch(
         &repo,
         "refs/heads/main",
@@ -576,7 +573,7 @@ fn conflicting_merge_cancel_restores_the_index() {
         side,
         "side",
         &mut sink,
-        &NeverCancel,
+        &cancel,
     ));
     assert_eq!(branch(&repo, "main"), main);
     assert_index_untouched(&repo, &before);
@@ -622,6 +619,7 @@ fn conflicting_merge_cancel_after_checkout_rolls_back_worktree() {
     let before = index_bytes(&repo);
 
     let mut sink = CancelAfter::cancel_when_phase_finishes(ProgressPhase::CheckingOutFiles);
+    let cancel = sink.flag.clone();
     assert_cancelled(integrate_branch(
         &repo,
         "refs/heads/main",
@@ -629,7 +627,7 @@ fn conflicting_merge_cancel_after_checkout_rolls_back_worktree() {
         side,
         "side",
         &mut sink,
-        &NeverCancel,
+        &cancel,
     ));
     assert_eq!(branch(&repo, "main"), main);
     assert_index_untouched(&repo, &before);
@@ -785,8 +783,9 @@ fn rebase_stops_on_cancel_argument_before_touching_anything() {
 fn rebase_cancelled_during_checkout_rolls_back() {
     let (tmp, repo, side, topic) = repo_for_rebase();
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
-    let err = start_rebase(&repo, &rebase_start(side, topic), &mut sink, &NeverCancel)
-        .expect_err("cancelled");
+    let cancel = sink.flag.clone();
+    let err =
+        start_rebase(&repo, &rebase_start(side, topic), &mut sink, &cancel).expect_err("cancelled");
     assert!(
         matches!(&err, RebaseSessionError::Library(e) if e.is_cancelled()),
         "expected RebaseSessionError::Library(Cancelled), got {err:?}"
@@ -825,7 +824,8 @@ fn pick_stops_before_moving_the_branch() {
 
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
-    assert_cancelled(replay_commit(&repo, &req, &mut sink, &NeverCancel));
+    let cancel = sink.flag.clone();
+    assert_cancelled(replay_commit(&repo, &req, &mut sink, &cancel));
     assert_eq!(branch(&repo, "topic"), topic);
     assert!(
         !tmp.path().join("side/f0299.txt").exists(),
@@ -847,8 +847,9 @@ fn restore_stops_when_the_sink_asks() {
         remerge: None,
     };
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
+    let cancel = sink.flag.clone();
     let before_index = index_bytes(&repo);
-    assert_cancelled(restore_paths(&repo, &opts, &mut sink, &NeverCancel));
+    assert_cancelled(restore_paths(&repo, &opts, &mut sink, &cancel));
     let last = fs::read_to_string(tmp.path().join("d/f0299.txt")).expect("read");
     assert_eq!(
         last, "changed 299\n",
@@ -901,7 +902,8 @@ fn restore_source_cancel_restores_directory_replacing_tracked_file() {
     };
     let before_index = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 1);
-    assert_cancelled(restore_paths(&repo, &opts, &mut sink, &NeverCancel));
+    let cancel = sink.flag.clone();
+    assert_cancelled(restore_paths(&repo, &opts, &mut sink, &cancel));
 
     let victim_meta = fs::symlink_metadata(wt.join(victim)).expect("victim metadata");
     assert!(

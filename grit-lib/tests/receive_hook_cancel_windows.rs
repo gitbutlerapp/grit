@@ -10,7 +10,7 @@ use std::time::Duration;
 use grit_lib::command_runner::hooks::{run_hook_in_git_dir_with_cancel, HookError};
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::progress::FlagCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 
 fn write_sh_hook(path: &std::path::Path, body: &str) {
@@ -45,7 +45,7 @@ fn cancelled_pre_receive_hook_terminates_sleeping_child() {
     )
     .expect("open");
 
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let cancel_worker = cancel.clone();
     let kick = thread::spawn(move || {
         thread::sleep(Duration::from_millis(400));

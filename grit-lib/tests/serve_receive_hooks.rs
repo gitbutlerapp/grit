@@ -14,7 +14,7 @@ use grit_lib::command_runner::{CommandRunner, RecordedResponse, RecordingRunner}
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::progress::FlagCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
     receive_pack, receive_pack_with_hook, receive_pack_with_hook_cancellable, ProtocolVersion,
@@ -290,7 +290,7 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
         hidden_refs: Vec::new(),
         ..ServeOptions::default()
     };
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     let repo_for_thread =
         open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
     let body_for_thread = body.clone();
@@ -368,7 +368,7 @@ fn receive_cancel_before_apply_leaves_ref_unmoved() {
         hidden_refs: Vec::new(),
         ..ServeOptions::default()
     };
-    let cancel = FlagCancel::new();
+    let cancel = CancelToken::new();
     cancel.cancel();
     let err = receive_pack_with_hook_cancellable(
         &repo,

@@ -509,9 +509,7 @@ fn negotiate_pack(
     let mut got_ready = false;
     if !skip_local_haves {
         while let Some(oid) = negotiator.next_have()? {
-            if let Some(watch) = conn.http_stack_watch() {
-                mirror_stack_cancel(cancel, watch);
-            }
+            conn.mirror_http_cancel(cancel);
             poll_cancel(progress, cancel)?;
             pkt_line::write_line_to_vec(&mut pending, &format!("have {}", oid.to_hex()))?;
             count += 1;
@@ -564,9 +562,7 @@ fn negotiate_pack(
         let mut tail = state;
         tail.extend_from_slice(&pending);
         pkt_line::write_line_to_vec(&mut tail, "done")?;
-        if let Some(watch) = conn.http_stack_watch() {
-            mirror_stack_cancel(cancel, watch);
-        }
+        conn.mirror_http_cancel(cancel);
         conn.writer().write_all(&tail)?;
         http_writer_flush(conn, cancel)?;
 

@@ -72,7 +72,7 @@ impl<'repo> RepositoryStash<'repo> {
     ///   (use [`Self::preview`]).
     /// - [`crate::error::Error::StashNoInitialCommit`] before the first commit.
     /// - [`crate::error::Error::Cancelled`] when `cancel` or
-    ///   [`ProgressSink::should_cancel`] fires. Before `refs/stash` moves, the repository is
+    ///   fires. Before `refs/stash` moves, the repository is
     ///   unchanged; once the entry is stored it stays, even when the reset that follows is
     ///   cancelled (the same rule as a failed reset).
     /// - Stash build, ref, and checkout failures.

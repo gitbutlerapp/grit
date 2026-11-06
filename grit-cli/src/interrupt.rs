@@ -8,12 +8,12 @@
 //! [`DUPLICATE_WINDOW_NS`] of the first: tools such as `timeout` signal both the child and
 //! its process group, and that duplicate must not cut the rollback short.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 
-use grit_lib::progress::Cancel;
+use grit_lib::progress::{Cancel, CancelToken};
 
-static INTERRUPTED: LazyLock<Arc<AtomicBool>> = LazyLock::new(|| Arc::new(AtomicBool::new(false)));
+static PROCESS_CANCEL: LazyLock<CancelToken> = LazyLock::new(CancelToken::new);
 
 /// Monotonic time of the first interrupt, in nanoseconds.
 static FIRST_INTERRUPT_NS: AtomicU64 = AtomicU64::new(0);
@@ -23,6 +23,11 @@ const DUPLICATE_WINDOW_NS: u64 = 100_000_000;
 
 #[cfg(unix)]
 const HANDLED_SIGNALS: [libc::c_int; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
+
+/// Shared cancel handle wired to the signal handler; pass [`process_cancel_token`] into library calls.
+pub fn process_cancel_token() -> CancelToken {
+    PROCESS_CANCEL.clone()
+}
 
 /// Cancels the running library operation on the first interrupt; restores the previous handlers
 /// when dropped.
@@ -37,7 +42,8 @@ pub struct InterruptCancel {
 /// Returns `true` when the interrupt is absorbed (the first one, or a duplicate of it) and
 /// `false` when the process should terminate.
 fn absorb_interrupt(now_ns: u64) -> bool {
-    if !INTERRUPTED.swap(true, Ordering::Relaxed) {
+    if !PROCESS_CANCEL.is_cancelled() {
+        PROCESS_CANCEL.cancel();
         FIRST_INTERRUPT_NS.store(now_ns, Ordering::Relaxed);
         return true;
     }
@@ -95,7 +101,8 @@ impl InterruptCancel {
     /// terminating.
     #[cfg(unix)]
     pub fn install() -> Self {
-        INTERRUPTED.store(false, Ordering::Relaxed);
+        PROCESS_CANCEL.reset();
+        FIRST_INTERRUPT_NS.store(0, Ordering::Relaxed);
         // SAFETY: the handler only touches atomics and async-signal-safe libc calls, and
         // both `sigaction` structs are fully initialized before the call.
         unsafe {
@@ -120,7 +127,8 @@ impl InterruptCancel {
     /// fires.
     #[cfg(windows)]
     pub fn install() -> Self {
-        INTERRUPTED.store(false, Ordering::Relaxed);
+        PROCESS_CANCEL.reset();
+        FIRST_INTERRUPT_NS.store(0, Ordering::Relaxed);
         monotonic_ns();
         // SAFETY: registers a handler that only touches atomics; it is removed in `drop`.
         unsafe {
@@ -138,11 +146,11 @@ impl InterruptCancel {
 
 impl Cancel for InterruptCancel {
     fn is_cancelled(&self) -> bool {
-        INTERRUPTED.load(Ordering::Relaxed)
+        PROCESS_CANCEL.is_cancelled()
     }
 
-    fn shared_watch(&self) -> Option<Arc<AtomicBool>> {
-        Some(Arc::clone(&INTERRUPTED))
+    fn shared_watch(&self) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        Some(PROCESS_CANCEL.watch_arc())
     }
 }
 
@@ -173,10 +181,10 @@ mod tests {
     #[test]
     fn first_interrupt_and_its_duplicate_are_absorbed_a_later_one_terminates() {
         let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-        INTERRUPTED.store(false, Ordering::Relaxed);
+        PROCESS_CANCEL.reset();
         let start = 5_000_000_000;
         assert!(absorb_interrupt(start), "the first interrupt cancels");
-        assert!(INTERRUPTED.load(Ordering::Relaxed));
+        assert!(PROCESS_CANCEL.is_cancelled());
         assert!(
             absorb_interrupt(start + DUPLICATE_WINDOW_NS - 1),
             "a duplicate delivery is absorbed"
@@ -185,7 +193,7 @@ mod tests {
             !absorb_interrupt(start + DUPLICATE_WINDOW_NS),
             "a deliberate second Ctrl+C terminates"
         );
-        INTERRUPTED.store(false, Ordering::Relaxed);
+        PROCESS_CANCEL.reset();
     }
 
     #[cfg(unix)]

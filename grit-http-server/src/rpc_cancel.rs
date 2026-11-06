@@ -2,9 +2,9 @@
 
 use std::sync::{Arc, Mutex, Weak};
 
-use grit_lib::progress::{Cancel, FlagCancel};
+use grit_lib::progress::{Cancel, CancelToken};
 
-/// Tracks [`FlagCancel`] handles for in-flight receive/upload RPC work.
+/// Tracks [`CancelToken`] handles for in-flight receive/upload RPC work.
 #[derive(Default)]
 pub(crate) struct RpcCancelRegistry {
     inner: Arc<RpcCancelRegistryInner>,
@@ -12,13 +12,13 @@ pub(crate) struct RpcCancelRegistry {
 
 #[derive(Default)]
 struct RpcCancelRegistryInner {
-    active: Mutex<Vec<Weak<FlagCancel>>>,
+    active: Mutex<Vec<Weak<CancelToken>>>,
 }
 
 impl RpcCancelRegistry {
     /// Register a cancel flag for one RPC and return it for [`ServeSession`].
     pub(crate) fn register(&self) -> (Arc<dyn Cancel + Send + Sync>, RpcCancelGuard) {
-        let cancel = Arc::new(FlagCancel::new());
+        let cancel = Arc::new(CancelToken::new());
         self.inner
             .active
             .lock()
@@ -44,7 +44,7 @@ impl RpcCancelRegistry {
         }
     }
 
-    fn unregister(inner: &RpcCancelRegistryInner, cancel: &Arc<FlagCancel>) {
+    fn unregister(inner: &RpcCancelRegistryInner, cancel: &Arc<CancelToken>) {
         let mut active = inner.active.lock().unwrap_or_else(|e| e.into_inner());
         active.retain(|weak| weak.upgrade().is_none_or(|c| !Arc::ptr_eq(&c, cancel)));
     }
@@ -52,7 +52,7 @@ impl RpcCancelRegistry {
 
 /// Cancels the RPC when dropped unless [`Self::complete`] ran first.
 pub(crate) struct RpcCancelGuard {
-    cancel: Arc<FlagCancel>,
+    cancel: Arc<CancelToken>,
     registry: Arc<RpcCancelRegistryInner>,
     completed: bool,
 }

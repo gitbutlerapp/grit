@@ -12,9 +12,9 @@ use super::rename_blob_cache::RenameBlobCache;
 use super::rename_lines::RenameLineTable;
 use super::DiffEntry;
 
-fn poll_rename_cancel(cancel_watch: Option<&std::sync::atomic::AtomicBool>) -> Result<()> {
-    if let Some(watch) = cancel_watch {
-        crate::progress::poll_watch(watch)?;
+fn poll_rename_cancel(cancel: Option<&crate::progress::CancelToken>) -> Result<()> {
+    if let Some(token) = cancel {
+        token.poll_result()?;
     }
     Ok(())
 }
@@ -468,7 +468,7 @@ pub(crate) fn apply_basename_rename_pairs(
     used_added: &mut [bool],
     renames: &mut Vec<DiffEntry>,
     threshold: u32,
-    cancel_watch: Option<&std::sync::atomic::AtomicBool>,
+    cancel: Option<&crate::progress::CancelToken>,
     cache: &mut RenameBlobCache,
     par_opts: ParallelOptions,
 ) -> Result<()> {
@@ -504,7 +504,7 @@ pub(crate) fn apply_basename_rename_pairs(
     let mut need_added = vec![false; added.len()];
 
     for (i, del) in deleted.iter().enumerate() {
-        poll_rename_cancel(cancel_watch)?;
+        poll_rename_cancel(cancel)?;
         if used_deleted[i] {
             continue;
         }
@@ -582,7 +582,7 @@ pub(crate) fn apply_basename_rename_pairs(
 
     let mut scores: Vec<(u32, usize, usize)> = Vec::new();
     for cand in candidates {
-        poll_rename_cancel(cancel_watch)?;
+        poll_rename_cancel(cancel)?;
         let Some(old_bytes) = cache
             .deleted_blob(odb, deleted, cand.src_index)
             .map(|b| b.to_vec())
