@@ -11,7 +11,7 @@ use grit_lib::porcelain::replay_sequence::{
     predict_replay_sequence, start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
     SequenceOutcome, SequencePrediction,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
@@ -103,7 +103,7 @@ fn issue_2397_pick_predict_and_apply_stop_on_content_conflict() {
     }
 
     let outcome =
-        start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick");
+        start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     assert!(
         matches!(outcome, SequenceOutcome::Conflicts { .. }),
         "pick must stop with conflicts, not silently merge"

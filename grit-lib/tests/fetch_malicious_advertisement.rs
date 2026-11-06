@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::pkt_line;
@@ -147,8 +146,8 @@ fn fetch_v0_malicious_advertisement_preserves_config() {
         &git_dir,
         &mut conn,
         &mut opts,
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
     )
     .expect("fetch completes");
     assert_config_unchanged(&git_dir, &config_before);
@@ -183,8 +182,8 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
         &git_dir,
         &mut conn,
         &mut opts,
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
     )
     .expect("v2 fetch completes");
     assert_config_unchanged(&git_dir, &config_before);

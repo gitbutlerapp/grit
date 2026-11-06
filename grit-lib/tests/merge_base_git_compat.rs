@@ -249,7 +249,7 @@ fn merge_base_default_skewed_dates_without_commit_graph_matches_git() {
         g,
         "G",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate_branch merge");
     let IntegrateBranchOutcome::Merged { oid: merge_oid, .. } = outcome else {

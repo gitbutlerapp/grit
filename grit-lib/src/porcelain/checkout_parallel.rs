@@ -406,7 +406,7 @@ fn flush_prepared_writes_serial(
     dir_cache: &mut LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     for item in prepared {
         crate::progress::poll_cancel(progress, cancel)?;
@@ -529,7 +529,7 @@ fn flush_parallel_batch(
     pool: Option<ParallelOptions>,
     parallel_prepare_blobs: bool,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     if batch.is_empty() {
         return Ok(());
@@ -615,7 +615,7 @@ fn flush_prepared_batch(
     dir_cache: &mut LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     if prepared.is_empty() {
         return Ok(());
@@ -666,7 +666,7 @@ pub(crate) fn execute_write_jobs(
     checkout_parallel_threshold: Option<i64>,
     skip_chunk_ramp: bool,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
     journal: &mut CheckoutJournal,
 ) -> Result<Vec<WriteJobOutcome>> {
     let result = execute_write_jobs_unrecorded(
@@ -710,7 +710,7 @@ pub(crate) fn execute_write_jobs_unrecorded(
     checkout_parallel_threshold: Option<i64>,
     skip_chunk_ramp: bool,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<Vec<WriteJobOutcome>> {
     let mut outcomes: Vec<Option<WriteJobOutcome>> = (0..jobs.len()).map(|_| None).collect();
     let pool = parallel_pool_for_checkout(

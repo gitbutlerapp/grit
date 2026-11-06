@@ -90,7 +90,7 @@ fn mixed_reset_readable_by_git() {
         &repo,
         &ResetOptions::new(c1, ResetMode::Mixed, identity(), "reset"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
 
@@ -147,7 +147,7 @@ fn reset_keep_preserves_unrelated_local_changes_like_git() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("keep reset");
     assert_porcelain_v2_matches_git(dir2.path(), &repo);
@@ -181,7 +181,7 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit should refuse");
     assert!(
@@ -227,7 +227,7 @@ fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
         &repo,
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry-run");
     assert!(outcome.dry_run);
@@ -287,7 +287,7 @@ fn reset_orphaned_commits_main_only_git_init() {
         &repo,
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry-run reset");
     assert_eq!(preview.orphaned_total, 2, "c2 and c3 should orphan");
@@ -328,7 +328,7 @@ fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 1);
@@ -361,7 +361,7 @@ fn reset_orphan_zero_when_other_ref_holds_old_tip() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 0);
@@ -405,7 +405,7 @@ fn reset_keep_rejects_unmerged_index_like_git() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit keep should refuse unmerged index");
     assert!(matches!(err, Error::IndexUnmerged));
@@ -433,7 +433,7 @@ fn reset_forward_has_no_orphan_walk() {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 0);
@@ -486,7 +486,7 @@ fn reset_reflog_identity_includes_signature_timestamp_and_git_reads_it() {
         &repo,
         &ResetOptions::new(c1, ResetMode::Soft, sig.clone(), "reset: test"),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
     let log = std::fs::read_to_string(repo.git_dir().join("logs/HEAD")).expect("log");

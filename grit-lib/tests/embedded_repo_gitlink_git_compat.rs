@@ -59,7 +59,7 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add all");
 
@@ -110,7 +110,7 @@ fn add_skips_gitignored_embedded_repo() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add all");
 
@@ -146,7 +146,7 @@ fn add_does_not_treat_placeholder_dot_git_as_embedded_repo() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add all");
 
@@ -219,7 +219,7 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add all");
 

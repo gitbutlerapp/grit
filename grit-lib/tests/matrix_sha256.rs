@@ -42,8 +42,6 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::push::{push_http, push_remote};
@@ -376,8 +374,8 @@ fn sha256_fetch_over_git_daemon_v2() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
     )
     .expect("sha256 v2 fetch_remote over git daemon");
 
@@ -679,8 +677,8 @@ fn sha256_push_over_git_daemon() {
         &mut *conn,
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("sha256 push_remote over git daemon");
     drop(conn);
@@ -755,8 +753,8 @@ fn sha256_push_over_git_daemon() {
         &mut *conn2,
         &[nonff],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_remote completes");
     drop(conn2);
@@ -790,8 +788,8 @@ fn sha256_push_over_git_daemon() {
         &mut *conn3,
         &[forced],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_remote completes");
     drop(conn3);
@@ -915,8 +913,8 @@ fn sha256_push_over_smart_http() {
         &url,
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("sha256 push_http over grit-http-server");
 
@@ -982,8 +980,8 @@ fn sha256_push_over_smart_http() {
         &url,
         &[spec_feature],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("sha256 push_http feature over grit-http-server");
     assert_eq!(

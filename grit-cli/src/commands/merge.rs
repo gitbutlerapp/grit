@@ -27,7 +27,8 @@ use grit_lib::porcelain::merge::{
     IntegrateBranchOutcome, MergeCommitMode, MergeDryRunPlan, MergeOptions, MergePrediction,
     MergePredictionOptions,
 };
-use grit_lib::progress::{Cancel, ProgressSink};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::ProgressSink;
 use grit_lib::repo::Repository;
 use grit_lib::state::{read_merge_msg, resolve_head, HeadState};
 use schemars::JsonSchema;
@@ -581,7 +582,7 @@ pub fn run(
     progress: &mut dyn ProgressSink,
 ) -> Result<MergeOutcome> {
     let repo = context::discover()?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
 
     if abort {
         abort_branch_merge(&repo).map_err(anyhow::Error::new)?;
@@ -593,7 +594,12 @@ pub fn run(
             bail!("cannot merge a branch while finishing a merge with --continue");
         }
         let continue_message = read_message_input(&options.message)?;
-        return run_continue(&repo, continue_message.as_deref(), progress, &interrupt);
+        return run_continue(
+            &repo,
+            continue_message.as_deref(),
+            progress,
+            &crate::interrupt::process_cancel_token(),
+        );
     }
 
     let branch = branch.context("branch name required unless using --abort or --continue")?;
@@ -648,7 +654,7 @@ pub fn run(
                 &short_name,
                 &merge_options,
                 progress,
-                &interrupt,
+                &crate::interrupt::process_cancel_token(),
             )
         }
         HeadState::Branch { .. } => bail!("no commits yet on this branch"),
@@ -682,7 +688,7 @@ pub fn run(
                 branch,
                 &merge_options,
                 progress,
-                &interrupt,
+                &crate::interrupt::process_cancel_token(),
             )
         }
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
@@ -744,7 +750,7 @@ fn run_continue(
     repo: &Repository,
     message: Option<&str>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<MergeOutcome> {
     let label = merge_continue_label(repo.git_dir());
     let detached = matches!(resolve_head(repo.git_dir())?, HeadState::Detached { .. });
@@ -839,7 +845,7 @@ fn integrate_with_options(
     head_short: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<MergeOutcome> {
     match integrate_branch_with(
         repo,
@@ -868,7 +874,7 @@ fn integrate_detached_with_options(
     label: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<MergeOutcome> {
     match integrate_detached_head_with(
         repo,

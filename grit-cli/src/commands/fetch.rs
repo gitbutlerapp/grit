@@ -8,7 +8,7 @@ use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::short_hex;
-use grit_lib::progress::Cancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::{
@@ -302,16 +302,9 @@ pub(crate) fn run_one_in(
     args: &FetchArgs,
     mode: OutputMode,
 ) -> Result<FetchOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
-    let config = ConfigSet::load(
-        &crate::context::environment(),
-        Some(repo.git_dir()),
-        &grit_lib::config::LoadConfigOptions::standard(
-            &crate::context::environment(),
-            Some(repo.git_dir()),
-        ),
-    )
-    .context("could not load config")?;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
     let head = resolve_head_for_repository(repo).ok();
     let invocation = resolve_fetch_invocation(
         &config,
@@ -363,7 +356,7 @@ pub(crate) fn run_one_in(
         args.force,
         &factory,
         &mut progress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     ) {
         Ok(result) => result,
         Err(err) => {
@@ -379,7 +372,7 @@ pub(crate) fn run_one_in(
                     args.force,
                     &factory,
                     &mut progress,
-                    &interrupt,
+                    &crate::interrupt::process_cancel_token(),
                 )?
             } else {
                 return Err(err);
@@ -427,7 +420,7 @@ fn shallow_json(
 }
 
 fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let config = ConfigSet::load(
         &crate::context::environment(),
@@ -454,7 +447,7 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
             args.prune_override(),
             args.tag_mode_override(),
             &mut progress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
             Some(&factory),
         )
         .context("could not fetch all remotes")?;
@@ -560,7 +553,7 @@ fn fetch_once(
     force: bool,
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<grit_lib::remote::transfer::FetchOutcome> {
     let remote = resolve_remote_argument(config, &invocation.remote).map_err(map_remote_error)?;
     remote
@@ -737,6 +730,7 @@ mod map_remote_error_tests {
     #[test]
     fn fetch_update_status_serializes_snake_case() {
         use super::{FetchUpdate, FetchUpdateStatus};
+        use grit_lib::progress::CancelToken;
         for (status, expected) in [
             (FetchUpdateStatus::New, "new"),
             (FetchUpdateStatus::FastForward, "fast_forward"),

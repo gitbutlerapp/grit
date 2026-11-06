@@ -16,7 +16,7 @@
 //!     &repo,
 //!     &FsckOptions::connectivity_and_refs(false),
 //!     &mut NullProgress,
-//!     &NeverCancel,
+//!     &CancelToken::never(),
 //! )?;
 //! assert!(report.ok(&config, &FsckOptions::connectivity_and_refs(false)));
 //! # Ok(())
@@ -53,7 +53,7 @@ use crate::pack::{
 };
 use crate::pack_fsck_verify::{verify_pack_objects as verify_pack_file, PackFsckObjectOutcome};
 use crate::parallel::{pool_worthwhile, run_ordered_batches, ParallelOp, ParallelOptions};
-use crate::progress::{cancel_watch_arc, Cancel, ProgressPhase, ProgressSink};
+use crate::progress::{CancelToken, ProgressPhase, ProgressSink};
 use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
 use crate::repo::Repository;
 
@@ -462,7 +462,7 @@ pub fn fsck(
     repo: &Repository,
     options: &FsckOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<FsckReport> {
     let config = repo.config().snapshot()?;
     let odb = repo.odb();
@@ -862,7 +862,7 @@ fn verify_loose_objects(
     strict: bool,
     issues: &mut Vec<FsckIssue>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(
     usize,
     OidHashSet,
@@ -958,7 +958,7 @@ fn verify_custom_primary_objects(
     strict: bool,
     issues: &mut Vec<FsckIssue>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(
     usize,
     OidHashSet,
@@ -1187,7 +1187,7 @@ fn verify_pack_objects(
     strict: bool,
     issues: &mut Vec<FsckIssue>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(
     usize,
     OidHashSet,
@@ -1218,7 +1218,7 @@ fn verify_pack_objects(
     progress.start(ProgressPhase::IndexingObjects, Some(pack_jobs.len() as u64));
     let par_opts: ParallelOptions = repo.thread_policy().resolve(ParallelOp::IndexPack, config);
     let threads = par_opts.parallelism().threads();
-    let cancel_watch = cancel_watch_arc(cancel);
+    let cancel_watch = cancel.watch_arc();
     let mut checked = 0usize;
     let mut validated = oid_hash_set();
     let mut links = oid_hash_map();
@@ -1316,7 +1316,7 @@ fn verify_pack_objects(
 fn build_connectivity_kind_map(
     repo: &Repository,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<OidHashMap<ObjectKind>> {
     let odb = repo.odb();
     let mut kinds = oid_hash_map();
@@ -1486,7 +1486,7 @@ fn walk_connectivity(
     config: &ConfigSet,
     strict: bool,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     promised: &OidHashSet,
     shallow: &OidHashSet,
 ) -> Result<(OidHashSet, Vec<FsckIssue>)> {
@@ -2051,7 +2051,7 @@ mod tests {
     use super::*;
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::NullProgress;
     use crate::repo::InitOptions;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -2266,7 +2266,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("f"), b"x").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -2283,7 +2283,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
         let config = repo.config().snapshot().expect("config");
@@ -2291,7 +2291,7 @@ mod tests {
             &repo,
             &FsckOptions::full_repository(true),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("fsck");
         assert!(report.ok(&config, &FsckOptions::full_repository(true)));
@@ -2325,7 +2325,7 @@ mod tests {
             &repo,
             &FsckOptions::full_repository(false),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("fsck");
         assert!(
@@ -2373,7 +2373,7 @@ mod tests {
             &repo,
             &FsckOptions::full_repository(false),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("fsck");
         assert!(
@@ -2475,7 +2475,7 @@ mod tests {
             &repo,
             &FsckOptions::full_repository(false),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(report.issues.is_empty(), "{:?}", report.issues);
@@ -2502,7 +2502,7 @@ mod tests {
             &repo,
             &FsckOptions::full_repository(false),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(

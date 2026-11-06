@@ -644,7 +644,7 @@ fn fsck_of_an_offloaded_repository_never_fetches() {
         &repo,
         &FsckOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert!(report.issues.is_empty(), "{:?}", report.issues);
@@ -731,7 +731,7 @@ fn small_push_naming_an_offloaded_blob_is_accepted() {
         &repo,
         &grit_lib::maintenance::repository_fsck::FsckOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert!(report.issues.is_empty(), "{:?}", report.issues);

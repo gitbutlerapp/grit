@@ -51,7 +51,7 @@ fn add_dot_stages_resolved_and_unrelated_while_naming_marked_conflicts() {
         topic_oid,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -66,7 +66,7 @@ fn add_dot_stages_resolved_and_unrelated_while_naming_marked_conflicts() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     let Error::UnmergedConflictMarkers { paths } = err else {
@@ -95,7 +95,7 @@ fn add_single_marked_unmerged_path_names_that_path() {
         topic_oid,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
 
@@ -106,7 +106,7 @@ fn add_single_marked_unmerged_path_names_that_path() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
     let Error::UnmergedConflictMarkers { paths } = err else {

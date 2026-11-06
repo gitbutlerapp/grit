@@ -15,7 +15,7 @@ use grit_lib::porcelain::replay_sequence::{
     predict_replay_sequence, start_replay_sequence, ReplayEmptyPolicy, ReplayOptions,
     ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
@@ -139,7 +139,8 @@ fn predict_empty_keep_intrinsic_advances_head_for_following_pick() {
         "expected clean prediction after empty keep then replay of original HEAD, got {prediction:?}"
     );
 
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick");
+    let out =
+        start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     assert_ne!(
         oid_from_rev(root.path(), "HEAD"),
@@ -166,7 +167,8 @@ fn predict_no_commit_chains_index_tree_across_pick_range() {
         ..ReplayOptions::default()
     };
     let req = pick_req(vec![c1, c2], opts.clone());
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick");
+    let out =
+        start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     let applied_index_tree = index_tree_from_git(root.path());
 
@@ -199,7 +201,8 @@ fn predict_no_commit_chains_index_tree_across_revert_range() {
         committer: IDENT.parse().expect("IDENT"),
         options: opts.clone(),
     };
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("revert");
+    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never())
+        .expect("revert");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
     let applied_index_tree = index_tree_from_git(root.path());
 
@@ -301,7 +304,7 @@ fn x_theirs_pick_matches_git_cherry_pick_X_theirs_tree() {
         &repo,
         &pick_req(vec![pick], opts),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("pick");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
@@ -355,7 +358,7 @@ fn diff3_pick_markers_byte_equal_git() {
         &repo,
         &pick_req(vec![pick], opts),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("pick");
     assert!(matches!(out, SequenceOutcome::Conflicts { .. }));

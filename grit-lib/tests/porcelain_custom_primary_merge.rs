@@ -13,7 +13,8 @@ use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::repo::Repository;
 
@@ -54,7 +55,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let mut req = CommitRequest::new(message);
@@ -65,7 +66,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         &req,
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -87,7 +88,7 @@ fn switch_to(repo: &Repository, branch: &str) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
 }
@@ -133,7 +134,7 @@ fn integrate_branch_disjoint_files_on_custom_primary() {
         topic_tip,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("integrate");
     let IntegrateBranchOutcome::Merged { oid: merge_oid, .. } = outcome else {
@@ -175,7 +176,7 @@ fn integrate_branch_clean_content_merge_on_custom_primary() {
         topic_tip,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("integrate");
     let IntegrateBranchOutcome::Merged { oid: merge_oid, .. } = outcome else {
@@ -239,7 +240,7 @@ fn integrate_branch_fast_forward_and_conflict_unchanged_on_custom_primary() {
         topic_tip,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("ff integrate");
     assert!(matches!(ff, IntegrateBranchOutcome::FastForward { .. }));
@@ -258,7 +259,7 @@ fn integrate_branch_fast_forward_and_conflict_unchanged_on_custom_primary() {
         topic_tip2,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("conflict integrate");
     assert!(matches!(conflict, IntegrateBranchOutcome::Conflicts { .. }));

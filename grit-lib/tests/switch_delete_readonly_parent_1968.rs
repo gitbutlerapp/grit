@@ -52,7 +52,7 @@ mod unix {
                 hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("switch must fail when a deletion cannot be removed")
     }

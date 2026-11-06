@@ -53,7 +53,7 @@ fn status_lists_embedded_repository_before_staging() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
 
@@ -90,7 +90,7 @@ fn add_and_commit_report_new_embedded_gitlink() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -128,7 +128,7 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -146,7 +146,7 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     assert!(stage_outcome.embedded_gitlinks.is_empty());
@@ -183,7 +183,7 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(model.embedded_repositories.is_empty());
@@ -197,7 +197,7 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     assert!(stage_outcome.embedded_gitlinks.is_empty());
@@ -229,7 +229,7 @@ fn real_directory_with_gitdir_symlink_still_counts_as_embedded() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("status");
     assert!(

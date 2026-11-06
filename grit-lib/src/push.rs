@@ -35,7 +35,7 @@ use crate::fetch::Progress;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::pack_objects::PackStats;
 use crate::pkt_line::{self, Packet};
-use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, ReceivedObjects};
+use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressUnit, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::remote::RemoteError;
 use crate::repo::Repository;
@@ -187,7 +187,7 @@ pub fn push_remote(
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<PushOutcome> {
     let local = Repository::open(local_git_dir, &RepositoryOptions::empty())?;
     push_remote_from(&local, conn, refs, opts, progress, cancel, None)
@@ -202,7 +202,7 @@ pub(crate) fn push_remote_from(
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
     push_remote_with(local, conn, refs, opts, progress, cancel, None, pre_push)
@@ -225,7 +225,7 @@ pub(crate) fn push_remote_with(
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     bundle_target: Option<BundlePushTarget<'_>>,
     pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
@@ -515,7 +515,7 @@ pub fn push_http(
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<PushOutcome> {
     use crate::transport::http::SmartHttpTransport;
     use crate::transport::{ConnectOptions, Service, Transport};
@@ -1098,7 +1098,7 @@ pub(crate) fn read_receive_pack_response(
     reader: &mut dyn Read,
     sent_refs: &[&str],
     server_sideband: bool,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<Vec<u8>> {
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
@@ -1454,7 +1454,7 @@ mod tests {
                         refs,
                         &opts,
                         &mut crate::fetch::NoProgress,
-                        &crate::progress::NeverCancel,
+                        &crate::progress::CancelToken::never(),
                     )
                     .unwrap_err();
                     assert!(
@@ -1919,8 +1919,12 @@ mod tests {
         sideband: bool,
         progress: &mut dyn Progress,
     ) -> Result<Vec<u8>> {
-        let raw =
-            read_receive_pack_response(reader, sent_refs, sideband, &crate::progress::NeverCancel)?;
+        let raw = read_receive_pack_response(
+            reader,
+            sent_refs,
+            sideband,
+            &crate::progress::CancelToken::never(),
+        )?;
         if sideband {
             demux_report_and_remote_messages(&raw, progress)
         } else {
@@ -1940,7 +1944,7 @@ mod tests {
             &mut reader,
             &["refs/heads/main"],
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("reset");
         assert_eq!(out, report);
@@ -1992,7 +1996,7 @@ mod tests {
             &mut reader,
             &["refs/heads/main"],
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(

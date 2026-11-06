@@ -2,8 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::list_refs;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
@@ -90,7 +89,7 @@ fn fetch_all_remotes_matches_git_fetch_all() {
             None,
             None,
             &mut progress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect("fetch_all");

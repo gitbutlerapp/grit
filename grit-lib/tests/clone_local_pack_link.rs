@@ -4,8 +4,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::pack::read_pack_index_no_verify;
-use grit_lib::progress::NullProgress;
-use grit_lib::progress::{NeverCancel, ProgressPhase, ProgressSink};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::{ProgressPhase, ProgressSink};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
 fn git(dir: &Path, args: &[&str]) {
@@ -91,8 +91,8 @@ fn clone_local_loose_source_links_blobs_and_reports_all_kinds() {
         let mut options = CloneOptions::new(source.to_string_lossy(), dest.clone());
         options.depth = depth;
         let mut progress = CopyProgress::default();
-        let outcome =
-            clone_repo(options, &mut progress, &NeverCancel, None).expect("clone loose source");
+        let outcome = clone_repo(options, &mut progress, &CancelToken::never(), None)
+            .expect("clone loose source");
         assert_eq!(outcome.transfer.objects, 3);
         assert_eq!(progress.completed.last(), Some(&3));
         let kinds = outcome.transfer.kinds.expect("object kinds");
@@ -135,8 +135,8 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
         CloneOptions {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");
@@ -204,8 +204,8 @@ fn clone_local_repacked_plus_unreachable_loose_still_links_pack() {
         CloneOptions {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");

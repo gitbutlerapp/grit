@@ -565,8 +565,8 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
             &url,
             std::slice::from_ref(&spec),
             &PushOptions::default(),
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("push with no credentials against an authed server must fail");
         assert!(
@@ -588,8 +588,8 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         &url,
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("authed push with correct credentials must succeed");
 
@@ -748,8 +748,8 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         &format!("http://{host}/push.git"),
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push authenticated by the host-level store entry");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -982,8 +982,8 @@ fn core_askpass_authenticates_push_through_the_default_factory() {
         &format!("http://127.0.0.1:{port}/push.git"),
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push authenticated through core.askPass");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -1148,8 +1148,8 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
                 &repo,
                 std::slice::from_ref(&spec),
                 PushOptions::default(),
-                &mut NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &mut NoProgress,
+                &grit_lib::progress::CancelToken::never(),
                 None,
             )
     };
@@ -1302,8 +1302,8 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
             &repo,
             std::slice::from_ref(&spec),
             PushOptions::default(),
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
             Some(&factory),
         )
         .expect_err("wrong credentials");

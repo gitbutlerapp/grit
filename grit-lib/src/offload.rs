@@ -39,6 +39,7 @@ use crate::odb::Odb;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::partial_clone::{stored_remote_filter, ObjectFilterSpec};
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 
 /// Message written into the `.keep` marker of every pack offload adds to a LOP.
@@ -1547,7 +1548,7 @@ mod tests {
         crate::porcelain::add::stage_for_commit(
             &repo,
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let ident = "T <t@example.com> 1 +0000".to_string();
@@ -1559,7 +1560,7 @@ mod tests {
             &repo,
             &req,
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let config = repo.git_dir().join("config");

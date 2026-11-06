@@ -1,5 +1,5 @@
 //! Staging, commit, stash, merge, rebase, replay and restore report progress and stop on
-//! cancellation (issue #2142), through the `&dyn Cancel` argument.
+//! cancellation (issue #2142), through the `&CancelToken` argument.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -14,9 +14,7 @@ use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
-use grit_lib::progress::{
-    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
-};
+use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
@@ -153,7 +151,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         &commit_req(message),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -207,7 +205,13 @@ fn stage_reports_staging_progress() {
     let (tmp, repo) = init_repo();
     write_files(tmp.path(), "d", "new");
     let mut sink = CancelAfter::recorder();
-    let outcome = stage(&repo, &StageOptions::default(), &mut sink, &NeverCancel).expect("stage");
+    let outcome = stage(
+        &repo,
+        &StageOptions::default(),
+        &mut sink,
+        &CancelToken::never(),
+    )
+    .expect("stage");
     assert_eq!(outcome.added.len(), FILES);
     assert_eq!(sink.started.first(), Some(&ProgressPhase::StagingFiles));
     assert_eq!(sink.units_of(ProgressPhase::StagingFiles), FILES as u64);
@@ -253,7 +257,7 @@ fn stage_stops_on_cancel_argument() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage after cancel");
     assert_eq!(outcome.modified.len(), FILES);
@@ -268,7 +272,7 @@ fn auto_stage_commit_reports_progress() {
         &commit_req("change"),
         CommitScope::AutoStage,
         &mut sink,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(outcome.parent, Some(base));
@@ -300,7 +304,7 @@ fn staged_and_path_commits_stop_on_cancel_argument() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let before = index_bytes(&repo);
@@ -361,7 +365,7 @@ fn stash_push_staged_only_reset_stops_when_the_sink_asks() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let before = index_bytes(&repo);
@@ -429,7 +433,7 @@ fn stash_pop_cancel_keeps_the_entry() {
     let (tmp, repo, _) = repo_with_modified_files();
     let mut sink = CancelAfter::recorder();
     repo.stash()
-        .push(&stash_opts(), &mut sink, &NeverCancel)
+        .push(&stash_opts(), &mut sink, &CancelToken::never())
         .expect("push")
         .expect("stashed");
     assert!(sink.started.contains(&ProgressPhase::StagingFiles));
@@ -472,7 +476,7 @@ fn stash_pop_cancel_keeps_the_entry() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
     assert!(repo.stash().list().expect("list").is_empty());
@@ -490,7 +494,7 @@ fn repo_with_side_branch() -> (tempfile::TempDir, Repository, ObjectId, ObjectId
         &repo,
         &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("reset");
     (tmp, repo, base, side)
@@ -543,7 +547,7 @@ fn fast_forward_merge_completes_without_cancel() {
         side,
         "side",
         &mut sink,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::FastForward { oid, .. } if oid == side));
@@ -564,7 +568,7 @@ fn conflicting_merge_cancel_restores_the_index() {
         &repo,
         &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("reset");
     fs::write(root.join("c.txt"), "main\n").expect("write");
@@ -598,7 +602,7 @@ fn conflicting_merge_cancel_restores_the_index() {
         side,
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -618,7 +622,7 @@ fn conflicting_merge_cancel_after_checkout_rolls_back_worktree() {
         &repo,
         &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("reset");
     fs::write(root.join("c.txt"), "main\n").expect("write");
@@ -703,7 +707,7 @@ fn repo_for_conflicting_rebase() -> (tempfile::TempDir, Repository, ObjectId, Ob
         &repo,
         &ResetOptions::new(base, ResetMode::Hard, IDENT.parse().expect("sig"), "reset"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("reset");
     fs::write(root.join("c.txt"), "topic\n").expect("write");
@@ -738,8 +742,13 @@ fn conflicting_rebase_cancelled_before_the_stop_changes_nothing() {
 fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolution() {
     let (_tmp, repo, main, topic) = repo_for_conflicting_rebase();
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 0);
-    let outcome = start_rebase(&repo, &rebase_start(main, topic), &mut sink, &NeverCancel)
-        .expect("a published stop finishes installing");
+    let outcome = start_rebase(
+        &repo,
+        &rebase_start(main, topic),
+        &mut sink,
+        &CancelToken::never(),
+    )
+    .expect("a published stop finishes installing");
     assert!(
         matches!(outcome, RebaseOutcome::Stopped(_)),
         "got {outcome:?}"
@@ -758,7 +767,7 @@ fn conflicting_rebase_stop_completes_once_published_and_continue_needs_resolutio
         &repo,
         &rebase_start(main, topic),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("continue must require resolution");
     assert!(
@@ -805,8 +814,13 @@ fn rebase_cancelled_during_checkout_rolls_back() {
     );
 
     let mut sink = CancelAfter::recorder();
-    let outcome =
-        start_rebase(&repo, &rebase_start(side, topic), &mut sink, &NeverCancel).expect("rebase");
+    let outcome = start_rebase(
+        &repo,
+        &rebase_start(side, topic),
+        &mut sink,
+        &CancelToken::never(),
+    )
+    .expect("rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }));
     assert!(sink.started.contains(&ProgressPhase::CheckingOutFiles));
     assert!(tmp.path().join("side/f0299.txt").exists());
@@ -868,7 +882,7 @@ fn restore_stops_when_the_sink_asks() {
         "index must stay unchanged"
     );
 
-    restore_paths(&repo, &opts, &mut NullProgress, &NeverCancel).expect("restore");
+    restore_paths(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("restore");
     let last = fs::read_to_string(tmp.path().join("d/f0299.txt")).expect("read");
     assert_eq!(last, "base 299\n");
 }

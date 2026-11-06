@@ -6,8 +6,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{cache_tree_extension_valid, cache_tree_fully_valid};
 use grit_lib::index::Index;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -43,8 +42,8 @@ fn grit_clone_index_has_cache_tree_matching_head() {
             upstream.path().to_string_lossy(),
             grit_dest.path().to_path_buf(),
         ),
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone");

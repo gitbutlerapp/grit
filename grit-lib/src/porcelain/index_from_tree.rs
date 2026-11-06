@@ -10,6 +10,7 @@ use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
 use crate::porcelain::merge::tree_to_index_entries;
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::repo_relpath::join_rel;
 use crate::sparse_checkout::SparseCheckout;
@@ -844,7 +845,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_owned();
@@ -855,7 +856,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("commit");
         let head = resolve_head_for_repository(&repo).expect("head");
@@ -901,15 +902,20 @@ mod tests {
             repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_owned();
         let mut req = CommitRequest::new("c");
         req.author = Some(ident.parse().expect("signature"));
         req.committer = Some(ident.parse().expect("signature"));
-        create_commit(repo, &req, &mut NullProgress, &crate::progress::NeverCancel)
-            .expect("commit");
+        create_commit(
+            repo,
+            &req,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("commit");
         let head = resolve_head_for_repository(repo).expect("head");
         let commit = repo.odb().read(head.oid().expect("oid")).expect("read");
         crate::objects::parse_commit(&commit.data)
@@ -1068,7 +1074,6 @@ mod tests {
     fn sparse_reset_and_switch_do_not_expand_unchanged_monorepo_directories() {
         use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
         use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-        use crate::progress::NeverCancel;
         for paths in [120_000, 240_000] {
             let dir = TempDir::new().expect("tempdir");
             grit_test_support::sparse_scale::create(Path::new("git"), dir.path(), paths, false, 0)
@@ -1098,7 +1103,7 @@ mod tests {
                         "reset",
                     ),
                     &mut NullProgress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                 )
                 .expect("reset");
                 let index = Index::load(&repo.index_path()).expect("raw index");
@@ -1125,7 +1130,7 @@ mod tests {
                         hooks: crate::hooks::PostOperationHooks::Skip,
                     },
                     &mut NullProgress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                 )
                 .expect("switch");
                 assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
@@ -1149,7 +1154,6 @@ mod tests {
     #[test]
     fn sparse_hard_reset_retargets_changed_excluded_directories_git_compat() {
         use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-        use crate::progress::NeverCancel;
         let dir = TempDir::new().expect("tempdir");
         // Every one of the 400 excluded directories changes between the two commits.
         grit_test_support::sparse_scale::create(Path::new("git"), dir.path(), 12_000, true, 2_000)
@@ -1170,7 +1174,7 @@ mod tests {
                     "reset",
                 ),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("reset");
             assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
@@ -1325,7 +1329,6 @@ mod tests {
     #[test]
     fn sparse_hard_reset_never_reads_or_expands_changed_excluded_trees() {
         use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-        use crate::progress::NeverCancel;
         let (dir, repo, t1, t2, c1, c2) = sparse_two_commit_repo();
         let tree_c1 = subtree_oid(&repo, &t1, b"c");
         let tree_c2 = subtree_oid(&repo, &t2, b"c");
@@ -1346,7 +1349,7 @@ mod tests {
                     "reset",
                 ),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("reset");
             assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
@@ -1407,7 +1410,6 @@ mod tests {
     #[test]
     fn sparse_switch_never_reads_or_expands_changed_excluded_trees() {
         use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-        use crate::progress::NeverCancel;
         let (dir, repo, t1, t2, c1, c2) = sparse_two_commit_repo();
         let tree_c1 = subtree_oid(&repo, &t1, b"c");
         let tree_c2 = subtree_oid(&repo, &t2, b"c");
@@ -1429,7 +1431,7 @@ mod tests {
                     hooks: crate::hooks::PostOperationHooks::Skip,
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("switch");
             assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
@@ -1458,7 +1460,6 @@ mod tests {
     #[test]
     fn sparse_switch_refuses_to_drop_staged_content_in_excluded_directory() {
         use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-        use crate::progress::NeverCancel;
         let (_dir, repo, t1, _t2, c1, _) = sparse_two_commit_repo();
         let mut index = repo.load_index_preserving_sparse().expect("index");
         // Stage an unrelated tree as `c/`: it matches neither HEAD nor the target.
@@ -1480,7 +1481,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Skip,
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("staged c/ content must block the switch");
         assert!(matches!(err, Error::WouldOverwrite { .. }), "{err:?}");
@@ -1582,7 +1583,6 @@ mod tests {
     #[test]
     fn sparse_switch_absent_added_excluded_directories_git_round_trip() {
         use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-        use crate::progress::NeverCancel;
         let dir = TempDir::new().expect("tempdir");
         create_absent_added_excluded_sparse_fixture(dir.path()).expect("fixture");
         let git = |args: &[&str]| grit_test_support::git(dir.path(), args);
@@ -1601,7 +1601,7 @@ mod tests {
                     hooks: crate::hooks::PostOperationHooks::Skip,
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("switch");
             assert_eq!(repo.odb().hot_path_metrics().sparse_expanded_rows(), 0);
@@ -1625,7 +1625,6 @@ mod tests {
     #[test]
     fn sparse_switch_retargets_changed_excluded_directories_git_compat() {
         use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-        use crate::progress::NeverCancel;
         let grit_dir = TempDir::new().expect("tempdir");
         let git_dir = TempDir::new().expect("tempdir");
         for dir in [&grit_dir, &git_dir] {
@@ -1657,7 +1656,7 @@ mod tests {
                     hooks: crate::hooks::PostOperationHooks::Skip,
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("switch");
             git(&git_dir, &["switch", "-q", "--detach", name]);

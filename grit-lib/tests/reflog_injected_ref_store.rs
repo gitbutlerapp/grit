@@ -61,7 +61,7 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) -> Vec<ObjectId> {
                 repo,
                 &StageOptions::default(),
                 &mut NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("stage");
             commit_with_scope(
@@ -69,7 +69,7 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) -> Vec<ObjectId> {
                 &grit_test_support::commit_request(format!("c{i}"), IDENT_TS),
                 CommitScope::Staged,
                 &mut NullProgress,
-                &grit_lib::progress::NeverCancel,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("commit")
             .oid

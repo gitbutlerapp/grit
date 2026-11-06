@@ -10,8 +10,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::maintenance::{gc, GcOptions};
 use grit_lib::objects::HashAlgo;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::reflog::all_reflog_oids;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::repo::Repository;
@@ -45,7 +45,11 @@ fn git_sha256_repo_reflog_null_oid_excluded_from_fsck_and_gc() {
     );
 
     let report = repo
-        .fsck(&FsckOptions::default(), &mut NullProgress, &NeverCancel)
+        .fsck(
+            &FsckOptions::default(),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("fsck");
     assert!(
         report.issues.is_empty(),
@@ -76,8 +80,8 @@ fn grit_clone_local_git_sha256_repo() {
             dest: dest.clone(),
             ..CloneOptions::new(source.to_string_lossy().into_owned(), dest.clone())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");
@@ -190,8 +194,8 @@ fn grit_clone_git_daemon_sha256_repo_after_sha1_init() {
     let dest = tmp.path().join("clone");
     let outcome = clone(
         CloneOptions::new(url, dest.clone()),
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("git:// clone of sha256 repo");

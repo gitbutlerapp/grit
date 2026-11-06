@@ -12,7 +12,8 @@ use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope}
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
@@ -67,9 +68,14 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
         let _ = fs::remove_file(dest.join(name));
     }
 
-    let checkout =
-        checkout_between_trees_with_progress(&repo, None, &tree, &mut NullProgress, &NeverCancel)
-            .expect("checkout");
+    let checkout = checkout_between_trees_with_progress(
+        &repo,
+        None,
+        &tree,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("checkout");
 
     assert_eq!(
         checkout.path_collisions,
@@ -119,7 +125,7 @@ fn populated_checkout_reports_collisions_and_auto_stage_skips_losers() {
         &req,
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 
@@ -161,8 +167,14 @@ fn checkout_collision_tree(repo: &Repository, dest: &Path) {
     for name in ["File.txt", "file.txt", "dir/A.txt", "Dir/a.txt"] {
         let _ = fs::remove_file(dest.join(name));
     }
-    checkout_between_trees_with_progress(repo, None, &tree, &mut NullProgress, &NeverCancel)
-        .expect("checkout");
+    checkout_between_trees_with_progress(
+        repo,
+        None,
+        &tree,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("checkout");
 }
 
 fn keep_one_spelling_per_collision_group(dest: &Path) {
@@ -186,7 +198,7 @@ fn auto_stage_unrelated_and_commit(repo: &Repository, dest: &Path) {
         &req,
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 }
@@ -264,7 +276,7 @@ fn collision_clone_worktree(fx: &TestRepo) {
         &commit_request("base"),
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("seed HEAD from collision index");
 }
@@ -303,7 +315,7 @@ fn collision_loser_path_commit_leaves_index_and_head_unchanged() {
             scoped: true,
         }),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("path commit must not delete collision loser");
     assert!(
@@ -337,7 +349,7 @@ fn collision_loser_auto_stage_commit_is_noop() {
         &commit_request("e"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("auto-stage must not commit phantom loser changes");
     assert!(
@@ -395,7 +407,7 @@ fn commit_directory_collision_head(
         &commit_request("base"),
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("seed HEAD");
     oids
@@ -442,7 +454,7 @@ fn directory_collision_winner_omitted_from_status_when_bytes_match_sibling() {
         &fx.repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -482,7 +494,7 @@ fn collision_loser_omitted_from_status_unstaged() {
         &fx.repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -524,7 +536,7 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
         &empty,
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("empty main");
     let main_tip = head_oid(&fx.repo);
@@ -535,7 +547,7 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
         &commit_request("collide"),
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("collide commit");
     let collide_tip = head_oid(&fx.repo);
@@ -562,7 +574,7 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
             hooks: Default::default(),
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
     assert!(
@@ -582,7 +594,7 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
         &fx.repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(

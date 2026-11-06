@@ -75,7 +75,7 @@ fn commit_second(repo: &Repository) -> grit_lib::error::Result<grit_lib::objects
         repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .map(|o| o.oid)
 }

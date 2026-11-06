@@ -213,12 +213,12 @@ pub fn run(
         remerge,
     };
 
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = restore_paths(
         &repo,
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(crate::json_error::map_lib_error)?;
     Ok(RestoreCliOutcome::from(outcome).with_path_display(&repo))

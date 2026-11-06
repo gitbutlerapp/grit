@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
@@ -71,7 +71,7 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         &repo,
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let req = {
@@ -84,8 +84,13 @@ fn seed_repo(root: &Path, preload_index: bool) -> Repository {
         req.assume_worktree_synced = false;
         req
     };
-    grit_lib::porcelain::commit::create_commit(&repo, &req, &mut NullProgress, &NeverCancel)
-        .expect("commit");
+    grit_lib::porcelain::commit::create_commit(
+        &repo,
+        &req,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("commit");
 
     // Content matches HEAD; mtimes differ so stat refresh runs (including racy re-verify).
     let now = filetime::FileTime::now();
@@ -103,7 +108,7 @@ fn run_status(
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
     opts.stat_parallel_threads = Some(threads);
-    let model = status(repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
+    let model = status(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("status");
     let index_bytes = fs::read(repo.index_handle().path()).expect("index bytes");
     (model, index_bytes)
 }

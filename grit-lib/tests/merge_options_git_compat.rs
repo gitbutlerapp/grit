@@ -122,7 +122,7 @@ fn ff_only_refuses_divergent_and_changes_nothing() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("ff-only must fail");
     assert!(matches!(err, Error::NotFastForward));
@@ -149,7 +149,7 @@ fn no_ff_creates_two_parent_commit_git_fsck_clean() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("no-ff merge");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -179,7 +179,7 @@ fn squash_writes_squash_msg_no_merge_head() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash merge");
     assert_eq!(outcome, IntegrateBranchOutcome::Squashed);
@@ -212,7 +212,7 @@ fn no_commit_state_readable_by_git() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("no-commit merge");
     assert_eq!(outcome, IntegrateBranchOutcome::Stopped);
@@ -247,7 +247,7 @@ fn message_override_used() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge with message");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -274,7 +274,7 @@ fn no_commit_merge_mode_bytes_match_git() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("no-commit");
     let mode_path = tmp.path().join(".git/MERGE_MODE");
@@ -294,7 +294,7 @@ fn no_commit_merge_mode_bytes_match_git() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("no-ff no-commit");
     assert_eq!(
@@ -326,7 +326,7 @@ fn squash_conflict_writes_merge_and_squash_msg_no_merge_head() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash with conflicts");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -363,7 +363,7 @@ fn squash_msg_date_line_matches_git() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit squash");
     let grit_squash =
@@ -398,7 +398,7 @@ fn squash_conflict_abort_restores_pre_merge_state() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash conflicts");
     abort_branch_merge(&repo).expect("abort squash conflict");
@@ -436,7 +436,7 @@ fn squash_conflict_pending_message_prefers_merge_msg() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash conflicts");
     let pending = pending_commit_message(&repo)
@@ -467,7 +467,7 @@ fn squash_commit_clears_squash_msg() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash");
     assert!(tmp.path().join(".git/SQUASH_MSG").exists());
@@ -475,7 +475,7 @@ fn squash_commit_clears_squash_msg() {
         &repo,
         &empty_commit_req(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash commit");
     assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
@@ -497,7 +497,7 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash");
     let squash_msg =
@@ -506,7 +506,7 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
         &repo,
         &empty_commit_req(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash commit");
     assert!(!tmp.path().join(".git/SQUASH_MSG").exists());
@@ -517,7 +517,7 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
         &repo,
         &empty_commit_req(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no msg");
     assert!(
@@ -550,7 +550,7 @@ fn squash_conflict_resolves_with_git_commit_no_edit() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("squash with conflicts");
     assert!(!tmp.path().join(".git/MERGE_HEAD").exists());

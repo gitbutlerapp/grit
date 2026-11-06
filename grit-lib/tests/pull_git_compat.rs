@@ -9,8 +9,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::{
     pull, resolve_pull_mode, PullError, PullMode, PullOptions, PullResult,
 };
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
@@ -88,16 +86,16 @@ fn fetch_opts(env: &Environment) -> FetchOptions {
 }
 
 fn pull_grit(repo: &Repository, options: &PullOptions) -> grit_lib::porcelain::pull::PullOutcome {
-    let mut progress = NullProgress;
-    pull(repo, options, &mut progress, &NeverCancel, None).expect("grit pull")
+    let mut progress = NoProgress;
+    pull(repo, options, &mut progress, &CancelToken::never(), None).expect("grit pull")
 }
 
 fn try_pull_grit(
     repo: &Repository,
     options: &PullOptions,
 ) -> Result<grit_lib::porcelain::pull::PullOutcome, PullError> {
-    let mut progress = NullProgress;
-    pull(repo, options, &mut progress, &NeverCancel, None)
+    let mut progress = NoProgress;
+    pull(repo, options, &mut progress, &CancelToken::never(), None)
 }
 
 fn assert_fsck(dir: &Path) {

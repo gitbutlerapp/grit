@@ -12,8 +12,8 @@ use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions, FsckReport};
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::repo_treats_promisor_packs;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -135,8 +135,8 @@ fn grit_clone_filtered(
             checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");
@@ -300,7 +300,13 @@ fn refetch_reapplies_stored_filter() {
     fetch_opts.tags = TagMode::Following;
     fetch_opts.remote_name = Some("origin".to_owned());
     remote
-        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("refetch");
     clear_pack_cache();
     let objects = git_dir.join("objects");
@@ -313,8 +319,8 @@ fn refetch_reapplies_stored_filter() {
 /// Object store, connectivity and refs, like `git fsck --no-dangling`.
 fn grit_fsck(repo: &Repository) -> (FsckReport, bool) {
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let report = fsck(repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let ok = report.ok(&repo.config().snapshot().expect("config"), &opts);
+    let report = fsck(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
+    let ok = report.ok(&repo.config().expect("config"), &opts);
     (report, ok)
 }
 
@@ -462,8 +468,8 @@ mod http_v2 {
                 checkout: false,
                 ..CloneOptions::new(&url, dest.path().to_path_buf())
             },
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             Some(&grit_lib::remote::DefaultHttpClientFactory::new()),
         )
         .expect("http clone");

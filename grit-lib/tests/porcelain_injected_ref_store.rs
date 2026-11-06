@@ -67,7 +67,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     commit_with_scope(
@@ -80,7 +80,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         },
         CommitScope::Staged,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -102,7 +102,7 @@ fn switch_to(repo: &Repository, branch: &str) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch");
 }
@@ -172,7 +172,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         topic_tip,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate")
     {
@@ -209,7 +209,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             "reset: moving to HEAD~1",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset");
     assert_eq!(reset.target, main_tip);
@@ -225,7 +225,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             "reset: moving to v1",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset back");
 
@@ -243,7 +243,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
                 mode: Default::default(),
             },
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("stash push")
         .expect("stash created")
@@ -257,7 +257,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
                 0,
                 &StashApplyOptions::default(),
                 &mut NullProgress,
-                &grit_lib::progress::NeverCancel
+                &grit_lib::progress::CancelToken::never()
             )
             .expect("stash pop")
             .has_conflicts(),
@@ -281,7 +281,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("detach");
     assert!(head_branch(repo).is_none());
@@ -293,7 +293,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage rm");
     reset_to_commit(
@@ -305,7 +305,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             "reset: moving to HEAD",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("clean detached");
     switch_to(repo, "main");
@@ -585,7 +585,7 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch");
     assert_eq!(outcome.commit, tip);
@@ -612,7 +612,7 @@ fn detached_switch_installs_head_when_store_has_none() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("detach");
     assert_eq!(

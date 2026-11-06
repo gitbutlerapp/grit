@@ -14,7 +14,7 @@ use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     start_rebase, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
@@ -180,7 +180,7 @@ fn issue_2468_git_rr_cache_replayed_by_grit_merge() {
         side,
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
 
@@ -216,14 +216,19 @@ fn issue_2468_grit_records_rr_cache_for_git_merge() {
         side,
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
 
     std::fs::write(dir.path().join("f"), b"l1\nRESOLVED\nl3\n").unwrap();
     git_cmd(dir.path(), &["add", "f"]);
-    continue_merge(&repo, &continue_opts(), &mut NullProgress, &NeverCancel)
-        .expect("continue merge");
+    continue_merge(
+        &repo,
+        &continue_opts(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("continue merge");
 
     assert_eq!(
         rr_cache_entries(&dir),
@@ -264,7 +269,7 @@ fn issue_2468_rerere_disabled_leaves_markers() {
         side,
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -287,7 +292,8 @@ fn issue_2468_pick_replays_git_rr_cache() {
         committer: ident(),
         options: ReplayOptions::default(),
     };
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick");
+    let out =
+        start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     let SequenceOutcome::Conflicts { rerere, .. } = out else {
         panic!("expected pick conflicts");
     };
@@ -336,7 +342,7 @@ fn issue_2468_rebase_replays_git_rr_cache() {
         },
         pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
     };
-    let out = start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("rebase");
+    let out = start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("rebase");
     let RebaseOutcome::Stopped(stop) = out else {
         panic!("expected rebase stop on conflicts");
     };
@@ -366,7 +372,7 @@ fn issue_2468_squash_conflict_commit_records_rerere_postimage() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("squash merge");
 
@@ -385,7 +391,8 @@ fn issue_2468_squash_conflict_commit_records_rerere_postimage() {
     let mut req = CommitRequest::new("squashed side");
     req.author = Some(ident());
     req.committer = Some(ident());
-    let outcome = create_commit(&repo, &req, &mut NullProgress, &NeverCancel).expect("commit");
+    let outcome =
+        create_commit(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("commit");
     assert!(
         outcome
             .rerere
@@ -415,14 +422,19 @@ fn issue_2468_merge_continue_returns_recorded_resolution() {
         side,
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
 
     std::fs::write(dir.path().join("f"), b"l1\nRESOLVED\nl3\n").unwrap();
     git_cmd(dir.path(), &["add", "f"]);
-    let cont = continue_merge(&repo, &continue_opts(), &mut NullProgress, &NeverCancel)
-        .expect("continue merge");
+    let cont = continue_merge(
+        &repo,
+        &continue_opts(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("continue merge");
     assert!(
         cont.rerere
             .iter()

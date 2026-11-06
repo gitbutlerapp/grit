@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{CancelToken, NeverCancel, NullProgress, ProgressSink};
+use grit_lib::progress::{CancelToken, NullProgress, ProgressSink};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 use std::thread;
@@ -61,7 +61,7 @@ fn status_returns_cancelled_when_signalled_during_untracked_walk() {
     sleeper.join().expect("join");
     assert!(matches!(err, Error::Cancelled));
 
-    let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("full scan");
+    let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("full scan");
     assert_eq!(
         model.untracked.len(),
         800,
@@ -75,7 +75,7 @@ fn status_returns_cancelled_during_tracked_stat_scan_with_flag_cancel() {
     let opts = status_opts();
 
     let baseline = Instant::now();
-    status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("baseline status");
+    status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("baseline status");
     let baseline_elapsed = baseline.elapsed();
     assert!(
         baseline_elapsed > Duration::from_millis(150),
@@ -121,7 +121,7 @@ fn status_returns_cancelled_during_tracked_stat_scan_with_progress_sink() {
     let opts = status_opts();
 
     let baseline = Instant::now();
-    status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("baseline status");
+    status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("baseline status");
     let baseline_elapsed = baseline.elapsed();
     assert!(
         baseline_elapsed > Duration::from_millis(150),
@@ -149,7 +149,8 @@ fn status_returns_cancelled_during_tracked_stat_scan_with_progress_sink() {
 fn status_without_cancel_still_scans_every_tracked_path() {
     let (_tmp, repo) = repo_with_many_tracked_files();
     let opts = status_opts();
-    let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).expect("full status");
+    let model =
+        status(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("full status");
     assert!(
         model.staged.is_empty() && model.unstaged.is_empty() && model.untracked.is_empty(),
         "clean tree with untracked disabled"

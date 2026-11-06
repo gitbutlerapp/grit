@@ -7,7 +7,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -39,7 +40,7 @@ fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_or_else(|err| panic!("switch to {branch}: {err}"));
 }
@@ -111,7 +112,7 @@ fn hard_reset_removes_a_deep_path() {
         &repo,
         &ResetOptions::new(gone, ResetMode::Hard, identity, "reset: moving to gone"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset");
 

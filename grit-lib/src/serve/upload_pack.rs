@@ -18,7 +18,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::pack_object_select::{PackObjectSelection, TagCandidate};
 use crate::pack_objects::{write_upload_pack_selection, write_upload_pack_stream_with_cancel};
 use crate::pkt_line::SidebandChannel1Writer;
-use crate::progress::{Cancel, CancelSignal, NeverCancel};
+use crate::progress::{CancelSignal, CancelToken};
 use crate::promisor_remote::{parse_accepted_reply, PromisorAdvertisement};
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -178,7 +178,7 @@ pub fn upload_pack(
     output: &mut dyn Write,
     opts: &mut ServeOptions,
 ) -> Result<UploadOutcome> {
-    upload_pack_cancellable(repo, input, output, opts, &NeverCancel)
+    upload_pack_cancellable(repo, input, output, opts, &CancelToken::never())
 }
 
 /// Serve one fetch session, stopping when `cancel` fires.
@@ -191,7 +191,7 @@ pub fn upload_pack_cancellable(
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &mut ServeOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<UploadOutcome> {
     let stop = CancelSignal::new(cancel);
     stop.poll().map_err(|_| ServeError::Cancelled)?;

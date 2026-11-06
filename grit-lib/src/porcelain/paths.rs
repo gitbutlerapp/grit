@@ -22,7 +22,7 @@ use crate::porcelain::checkout::remove_empty_parent_dirs_batch;
 use crate::porcelain::pathspec_match::{
     index_stage0_path_modes, RepositoryPathspecFilter, REGULAR_FILE_MODE,
 };
-use crate::progress::{poll_cancel, Cancel, NullProgress};
+use crate::progress::{poll_cancel, CancelToken, NullProgress};
 use crate::repo::Repository;
 
 /// Options for [`remove_paths`].
@@ -189,7 +189,7 @@ pub struct MoveOutcome {
 pub fn remove_paths(
     repo: &Repository,
     opts: &RemoveOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RemoveOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
@@ -285,7 +285,7 @@ pub fn move_path(
     src: &str,
     dst: &str,
     force: bool,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<MoveOutcome> {
     move_paths(
         repo,
@@ -315,7 +315,7 @@ pub fn move_path(
 pub fn move_paths(
     repo: &Repository,
     opts: &MoveOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<MoveOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     if opts.sources.is_empty() {
@@ -458,7 +458,7 @@ pub fn move_paths(
 fn poll_remove_cancel(
     work_tree: &Path,
     backups: &[WorktreePathBackup],
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     if let Err(err) = poll_cancel(&mut NullProgress, cancel) {
         return Err(abort_failed_remove_worktree(work_tree, backups, err));
@@ -1786,7 +1786,7 @@ mod collect_removal_paths_tests {
     use std::fs;
 
     use crate::porcelain::add::{stage, StageOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::NullProgress;
     use crate::repo::{init_repository, Repository};
 
     use crate::index::Index;
@@ -1809,7 +1809,7 @@ mod collect_removal_paths_tests {
                 force: true,
                 ..Default::default()
             },
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("dry-run rm")
         .removed
@@ -1829,7 +1829,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -1852,7 +1852,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -1872,7 +1872,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -1891,7 +1891,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -1905,7 +1905,7 @@ mod collect_removal_paths_tests {
                 ignore_unmatch: true,
                 ..Default::default()
             },
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("ignore unmatch");
         assert_eq!(outcome.removed, vec!["keep.txt".to_string()]);
@@ -1974,7 +1974,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -2000,7 +2000,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -2030,7 +2030,7 @@ mod collect_removal_paths_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -2043,7 +2043,7 @@ mod collect_removal_paths_tests {
                 force: true,
                 ..Default::default()
             },
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("dry-run rm");
         assert_eq!(outcome.removed.len(), 2);
@@ -2477,27 +2477,14 @@ mod move_rollback_tests {
 
 #[cfg(test)]
 mod cancel_regression_tests {
-    use std::fs;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use crate::error::Error;
     use crate::porcelain::add::{stage, StageOptions};
-    use crate::progress::{Cancel, NullProgress};
+    use crate::progress::CancelToken;
+    use crate::progress::NullProgress;
     use crate::repo::{init_repository, Repository};
+    use std::fs;
 
     use super::{move_path, remove_paths, RemoveOptions};
-
-    /// Cancels on the Nth `is_cancelled` poll (1-based).
-    struct CancelOnNthCheck {
-        calls: AtomicUsize,
-        cancel_from: usize,
-    }
-
-    impl Cancel for CancelOnNthCheck {
-        fn is_cancelled(&self) -> bool {
-            self.calls.fetch_add(1, Ordering::SeqCst) >= self.cancel_from
-        }
-    }
 
     fn init_repo(root: &std::path::Path) -> Repository {
         init_repository(root, false, "main", None, Default::default()).expect("init")
@@ -2518,7 +2505,7 @@ mod cancel_regression_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::set_permissions(root.join("locked"), fs::Permissions::from_mode(0o555)).unwrap();
@@ -2531,7 +2518,7 @@ mod cancel_regression_tests {
                 force: true,
                 ..RemoveOptions::default()
             },
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("unlink under read-only directory must fail");
 
@@ -2576,16 +2563,13 @@ mod cancel_regression_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let index_before = fs::read(repo.index_path()).expect("read index");
 
         // After lock poll, cancel while removing the second worktree file.
-        let cancel = CancelOnNthCheck {
-            calls: AtomicUsize::new(0),
-            cancel_from: 3,
-        };
+        let cancel = CancelToken::after_polls(4);
         let err = remove_paths(
             &repo,
             &RemoveOptions {
@@ -2615,16 +2599,13 @@ mod cancel_regression_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let index_before = fs::read(repo.index_path()).expect("read index");
 
         // After lock poll and loop guard, cancel at the final pre-commit poll.
-        let cancel = CancelOnNthCheck {
-            calls: AtomicUsize::new(0),
-            cancel_from: 2,
-        };
+        let cancel = CancelToken::after_polls(3);
         let err = move_path(&repo, "a.txt", "b.txt", false, &cancel).expect_err("cancelled mv");
         assert!(matches!(err, Error::Cancelled));
         assert_eq!(
@@ -2661,7 +2642,7 @@ mod index_lock_transaction_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2674,7 +2655,7 @@ mod index_lock_transaction_tests {
                 force: true,
                 ..Default::default()
             },
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("injected write failure");
         set_test_inject_index_write_fail(false);
@@ -2692,7 +2673,7 @@ mod index_lock_transaction_tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2702,7 +2683,7 @@ mod index_lock_transaction_tests {
             "a.txt",
             "b.txt",
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("injected write failure");
         set_test_inject_index_write_fail(false);
@@ -2732,7 +2713,7 @@ mod trailing_slash_move_tests {
             repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("stage");
     }
@@ -2745,7 +2726,14 @@ mod trailing_slash_move_tests {
         fs::create_dir_all(root.join("dir")).unwrap();
         fs::write(root.join("c"), b"c\n").unwrap();
         stage_all(&repo);
-        move_path(&repo, "c", "dir/", false, &crate::progress::NeverCancel).expect("mv");
+        move_path(
+            &repo,
+            "c",
+            "dir/",
+            false,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("mv");
         assert!(root.join("dir/c").is_file());
         assert!(!root.join("c").exists());
     }
@@ -2757,8 +2745,14 @@ mod trailing_slash_move_tests {
         let repo = init_repo(root);
         fs::write(root.join("c"), b"c\n").unwrap();
         stage_all(&repo);
-        let err = move_path(&repo, "c", "missing/", false, &crate::progress::NeverCancel)
-            .expect_err("mv");
+        let err = move_path(
+            &repo,
+            "c",
+            "missing/",
+            false,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect_err("mv");
         assert!(matches!(err, Error::MoveDestinationNotDirectory { .. }));
         assert!(root.join("c").is_file());
     }
@@ -2771,7 +2765,14 @@ mod trailing_slash_move_tests {
         fs::create_dir_all(root.join("src/nested")).unwrap();
         fs::write(root.join("src/nested/file"), b"x\n").unwrap();
         stage_all(&repo);
-        move_path(&repo, "src", "dest/", false, &crate::progress::NeverCancel).expect("mv");
+        move_path(
+            &repo,
+            "src",
+            "dest/",
+            false,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("mv");
         assert!(root.join("dest/nested/file").is_file());
         assert!(!root.join("src").exists());
     }

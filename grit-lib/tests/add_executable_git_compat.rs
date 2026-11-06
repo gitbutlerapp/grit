@@ -65,7 +65,7 @@ fn add_executable_stages_100755_when_filemode_false() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     assert_eq!(
@@ -84,7 +84,7 @@ fn add_executable_stages_100755_when_filemode_false() {
         &repo,
         &commit_req("script"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let tree_mode = git_out(root, &["ls-tree", "HEAD", "tool.sh"]);
@@ -113,14 +113,14 @@ fn add_executable_mode_only_on_tracked_file() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -137,7 +137,7 @@ fn add_executable_mode_only_on_tracked_file() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("chmod stage");
     assert_eq!(
@@ -156,7 +156,7 @@ fn add_executable_mode_only_on_tracked_file() {
         &repo,
         &commit_req("executable"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     let tree_line = git_out(root, &["ls-tree", "HEAD", "tool.sh"]);
@@ -202,14 +202,14 @@ fn filemode_false_stages_regular_to_symlink_typechange() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("base"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 
@@ -223,7 +223,7 @@ fn filemode_false_stages_regular_to_symlink_typechange() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage symlink");
 
@@ -303,7 +303,7 @@ fn filemode_false_stages_typechange_when_symlink_oid_matches_file() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage typechange");
 
@@ -334,7 +334,7 @@ fn add_does_not_clobber_existing_executable_in_index() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let staged = git_out(root, &["ls-files", "-s", "tool.sh"]);
@@ -351,7 +351,7 @@ fn add_does_not_clobber_existing_executable_in_index() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restage");
     let restaged = git_out(root, &["ls-files", "-s", "tool.sh"]);

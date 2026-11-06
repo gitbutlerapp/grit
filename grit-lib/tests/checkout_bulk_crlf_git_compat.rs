@@ -6,7 +6,8 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -64,7 +65,7 @@ fn bulk_checkout_applies_path_specific_eol_crlf() {
         Some(&main_tree),
         &other_tree,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit checkout");
 

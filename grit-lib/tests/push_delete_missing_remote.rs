@@ -40,7 +40,7 @@ fn delete_missing_remote_branch_errors_like_git() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
     assert_eq!(outcome.results.len(), 1);
@@ -90,7 +90,7 @@ fn delete_resolves_local_tag_when_remote_tag_gone() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
     assert_eq!(outcome.results.len(), 1);

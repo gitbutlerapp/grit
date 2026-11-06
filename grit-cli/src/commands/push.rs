@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::push_plan::{
     apply_set_upstream_after_push, expand_repository_shorthand, load_push_plan_context,
     open_push_destination, parse_force_mode, push_follow_tags_config, resolve_push,
@@ -24,7 +25,6 @@ use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContex
 use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
 use crate::progress::TerminalProgress;
 use crate::quiet_args::QuietArgs;
-use grit_lib::progress::Cancel;
 use grit_lib::remote::transfer::TransferStats;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
@@ -471,7 +471,7 @@ pub fn run(
         remote_ref_tips: plan_ctx.remote_tips,
         no_verify,
     };
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = quiet.progress(mode).with_overall(false);
     let url = crate::context::config_string(&config, &format!("remote.{}.url", plan.remote))
         .or_else(|| shorthand_url.clone());
@@ -494,7 +494,7 @@ pub fn run(
         &wire,
         &factory,
         &mut progress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     ) {
         Ok(report) => report,
         Err(err) => {
@@ -510,7 +510,7 @@ pub fn run(
                     &wire,
                     &factory,
                     &mut progress,
-                    &interrupt,
+                    &crate::interrupt::process_cancel_token(),
                 )?
             } else {
                 return Err(err);
@@ -763,7 +763,7 @@ fn push_once(
     wire: &PushWireOptions<'_>,
     factory: &DefaultHttpClientFactory,
     progress: &mut TerminalProgress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
     let remote = open_push_destination(config, remote_name).map_err(map_remote_error)?;
     let options = PushOptions {
@@ -783,6 +783,7 @@ fn push_once(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use grit_lib::progress::CancelToken;
 
     #[test]
     fn push_status_serializes_snake_case() {

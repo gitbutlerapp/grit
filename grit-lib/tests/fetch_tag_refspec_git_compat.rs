@@ -196,8 +196,8 @@ fn ssh_fetch(
         &local.join(".git"),
         conn.as_mut(),
         &mut opts,
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("ssh fetch")
 }

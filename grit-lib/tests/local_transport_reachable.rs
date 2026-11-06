@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
@@ -108,7 +107,13 @@ fn fetch_heads(dest: &Path, url: &str) {
     fetch_opts.tags = TagMode::None;
     Remote::from_url(url)
         .expect("url")
-        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("fetch");
 }
 
@@ -138,8 +143,8 @@ fn file_url_push_sends_only_objects_reachable_from_pushed_ref() {
                 ..Default::default()
             }],
             PushOptions::default(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("push");
@@ -231,8 +236,8 @@ fn file_url_clone_matches_git_and_plain_path_clone_links_whole_store() {
     let clone = |url: String, dest: PathBuf| {
         clone_repo(
             CloneOptions::new(url, dest),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("clone");

@@ -95,7 +95,7 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -113,7 +113,7 @@ fn create_commit_aborts_on_pre_commit_hook_failure() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit should fail");
     assert!(matches!(
@@ -141,7 +141,7 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -159,7 +159,7 @@ fn commit_msg_hook_receives_editmsg_path_argument() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 

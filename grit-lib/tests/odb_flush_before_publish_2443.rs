@@ -24,7 +24,7 @@ use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, write_commit_object, CommitRequest};
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
     MemoryRefStore, PreparedRefTransaction, RefEntry, RefStorageFormat, RefStore, RefStoreError,
@@ -357,14 +357,14 @@ fn seed_commit(repo: &Repository) -> ObjectId {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage seed");
     let mut req = CommitRequest::new("base");
     req.author = Some(ident());
     req.committer = Some(ident());
     req.assume_worktree_synced = true;
-    create_commit(repo, &req, &mut NullProgress, &NeverCancel)
+    create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }
@@ -459,7 +459,7 @@ fn reword_apply_flushes_before_ref_update() {
         &plan,
         &apply_options(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("apply");
 
@@ -494,7 +494,7 @@ fn stage_flushes_before_index_write() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
 
@@ -605,14 +605,14 @@ fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> Objec
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let mut req = CommitRequest::new(message);
     req.author = Some(ident());
     req.committer = Some(ident());
     req.assume_worktree_synced = true;
-    create_commit(repo, &req, &mut NullProgress, &NeverCancel)
+    create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
         .expect("commit")
         .oid
 }

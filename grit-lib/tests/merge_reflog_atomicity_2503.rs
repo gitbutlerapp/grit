@@ -17,7 +17,7 @@ use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::merge::{integrate_branch_with, IntegrateBranchOutcome, MergeOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
     BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStore,
@@ -207,7 +207,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     let mut req = CommitRequest::new(message);
@@ -218,7 +218,7 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         &req,
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -240,7 +240,7 @@ fn switch_to(repo: &Repository, branch: &str) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
 }
@@ -287,7 +287,7 @@ fn merge_ref_update_rolls_back_when_reflog_commit_fails() {
         "feat",
         &MergeOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect_err("merge fails when reflog transaction cannot commit");
     assert!(matches!(err, Error::RefStore(_)), "{err:?}");
@@ -330,7 +330,7 @@ fn merge_branch_move_and_reflogs_share_one_transaction() {
         "feat",
         &MergeOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Merged { oid: merge_oid, .. } = outcome else {

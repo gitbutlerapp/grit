@@ -4,7 +4,6 @@ use grit_lib::diff::DiffStatus;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::stash::{
     parse_stash_reference, StashApplyOptions, StashDiffOptions, StashError, StashPushOptions,
@@ -76,7 +75,7 @@ fn grit_stash_create_matches_git_list_show_pop_and_fsck() {
         .push(
             &stash_options(false, Some("custom msg")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("had changes")
@@ -135,7 +134,11 @@ fn grit_stash_with_untracked_matches_git() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("stash");
 
@@ -174,7 +177,7 @@ fn git_stash_list_order_visible_to_grit_pop_and_drop() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop newest");
 
@@ -203,7 +206,11 @@ fn push_stash_clears_index_when_worktree_matches_head_but_index_staged() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("had staged index change");
 
@@ -279,7 +286,7 @@ fn drop_stash_returns_oid_and_apply_commit_recover_after_drop() {
             &dropped,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("apply dropped oid");
     assert_eq!(
@@ -397,7 +404,7 @@ fn pop_keeps_entry_on_conflict() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop with conflict");
     assert!(
@@ -431,7 +438,7 @@ fn pop_stash_with_index_restores_staged_deletion_like_git() {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit pop --index");
     git_cmd(git_dir.path(), &["stash", "pop", "--index"]);
@@ -469,7 +476,7 @@ fn pop_stash_restores_untracked_symlink_like_git() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit pop");
     git_cmd(git_dir.path(), &["stash", "pop"]);
@@ -505,7 +512,7 @@ fn stash_pop_with_untracked_does_not_overwrite_existing_untracked() {
         .push(
             &stash_options(true, Some("m")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("stash");
@@ -517,7 +524,7 @@ fn stash_pop_with_untracked_does_not_overwrite_existing_untracked() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("pop must fail");
     assert!(
@@ -539,7 +546,7 @@ fn stash_pop_with_untracked_does_not_overwrite_existing_untracked() {
             &repo.stash().list().expect("list")[0].oid,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("apply must fail");
     assert!(
@@ -588,7 +595,11 @@ fn stash_apply_with_untracked_does_not_overwrite_ignored_path() {
     std::fs::write(dir.path().join("u.txt"), "stashed-untracked\n").expect("untracked");
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("stash");
     std::fs::write(dir.path().join(".gitignore"), "u.txt\n").expect("ignore");
@@ -600,7 +611,7 @@ fn stash_apply_with_untracked_does_not_overwrite_ignored_path() {
             &repo.stash().list().expect("list")[0].oid,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("apply must fail on ignored collision");
     assert!(
@@ -642,7 +653,11 @@ fn stash_apply_with_untracked_does_not_overwrite_newly_tracked_path() {
     std::fs::write(dir.path().join("u.txt"), "stashed-untracked\n").expect("untracked");
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("stash");
     std::fs::write(dir.path().join("u.txt"), "precious\n").expect("precious");
@@ -655,7 +670,7 @@ fn stash_apply_with_untracked_does_not_overwrite_newly_tracked_path() {
             &repo.stash().list().expect("list")[0].oid,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("apply must fail on tracked collision");
     assert!(
@@ -698,7 +713,11 @@ fn stash_diff_matches_git_show_stat_paths() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("oid");
 
@@ -730,7 +749,7 @@ fn t3903_grit_stash_read_by_git_and_reverse() {
         .push(
             &stash_options(false, Some("grit msg")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("changes")
@@ -765,7 +784,7 @@ fn t3903_grit_stash_read_by_git_and_reverse() {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit apply git stash");
     git_cmd(git_dir.path(), &["stash", "apply", "--index", "stash@{0}"]);
@@ -799,7 +818,11 @@ fn stash_push_u_preserves_untracked_nested_repository() {
 
     (open_grit(grit_root.path()))
         .stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("grit push")
         .expect("had changes");
     git_cmd(git_root.path(), &["stash", "push", "-u"]);
@@ -850,7 +873,7 @@ fn t3905_include_untracked_stash_shape_matches_git() {
         .push(
             &stash_options(true, Some("with-u")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit push")
         .expect("had changes");
@@ -898,7 +921,7 @@ fn t3908_stash_in_linked_worktree() {
     .push(
         &stash_options(false, Some("from-linked")),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stash from linked")
     .expect("changes");
@@ -926,7 +949,11 @@ fn stash_push_u_dir_replaced_by_untracked_file_leaves_clean_tree() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("stash oid");
 
@@ -943,7 +970,7 @@ fn stash_push_u_dir_replaced_by_untracked_file_leaves_clean_tree() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
 
@@ -973,7 +1000,11 @@ fn stash_push_u_tracked_file_replaced_by_untracked_dir_pop_refuses() {
     let repo = open_grit(dir.path());
     let stash_oid = repo
         .stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("stash oid")
         .oid;
@@ -999,7 +1030,7 @@ fn stash_push_u_tracked_file_replaced_by_untracked_dir_pop_refuses() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("pop must fail like git when untracked dir cannot be restored");
     assert!(
@@ -1044,7 +1075,11 @@ fn push_stash_clears_unstaged_exec_bit_only_change() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("had mode-only change");
 
@@ -1070,7 +1105,7 @@ fn push_stash_clears_unstaged_exec_bit_only_change() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
 
@@ -1109,7 +1144,11 @@ fn push_stash_clears_unstaged_exec_bit_in_subdirectory() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("stash");
 
@@ -1124,7 +1163,7 @@ fn push_stash_clears_unstaged_exec_bit_in_subdirectory() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
 }
@@ -1142,7 +1181,11 @@ fn push_stash_normalizes_crlf_worktree_under_gitattributes_eol_crlf() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("had changes");
 
@@ -1179,7 +1222,11 @@ fn push_stash_untracked_normalizes_crlf_under_gitattributes_eol_crlf() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("had changes");
 
@@ -1249,7 +1296,11 @@ fn stash_show_untracked_lists_u_commit_files() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("changes");
 
@@ -1280,7 +1331,7 @@ fn stash_branch_creates_branch_at_base_and_restores_index() {
         .push(
             &stash_options(false, Some("branch me")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("changes");
@@ -1305,7 +1356,7 @@ fn stash_branch_creates_branch_at_base_and_restores_index() {
         &repo,
         &StatusOptions::default(),
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -1328,7 +1379,11 @@ fn stash_branch_existing_name_is_typed_error() {
     std::fs::write(dir.path().join("a"), "dirty\n").expect("dirty");
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("changes");
     let err = repo.stash().branch("taken", 0).unwrap_err();
@@ -1351,7 +1406,7 @@ fn stash_clear_removes_ref_and_reflog_git_agrees() {
         .push(
             &stash_options(false, Some("first")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("changes");
@@ -1360,7 +1415,7 @@ fn stash_clear_removes_ref_and_reflog_git_agrees() {
         .push(
             &stash_options(false, Some("second")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("push")
         .expect("changes");
@@ -1422,7 +1477,11 @@ fn stash_show_untracked_lists_u_path_in_base_tree_when_not_in_w_diff() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("changes");
 
@@ -1492,7 +1551,11 @@ fn stash_push_pop_wide_tree_matches_git_trees_and_status() {
 
     let repo = open_grit(grit_root.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("changes");
     git_cmd(git_root.path(), &["stash", "push", "-q"]);
@@ -1517,7 +1580,7 @@ fn stash_push_pop_wide_tree_matches_git_trees_and_status() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
     assert!(!outcome.has_conflicts());
@@ -1567,7 +1630,11 @@ fn stash_pop_added_and_deleted_siblings_in_one_dir_matches_git() {
 
     let repo = open_grit(grit_root.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("changes");
     git_cmd(git_root.path(), &["stash", "push", "-q"]);
@@ -1579,7 +1646,7 @@ fn stash_pop_added_and_deleted_siblings_in_one_dir_matches_git() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
     assert!(!outcome.has_conflicts());
@@ -1618,7 +1685,11 @@ fn stash_pop_refuses_racily_rewritten_same_size_file() {
 
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(false, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(false, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push")
         .expect("changes");
     assert_eq!(
@@ -1634,7 +1705,7 @@ fn stash_pop_refuses_racily_rewritten_same_size_file() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("pop must refuse to overwrite the local change");
     assert!(
@@ -1670,7 +1741,11 @@ fn stash_commits_are_unsigned_even_with_commit_gpgsign() {
     std::fs::write(dir.path().join("u.txt"), "untracked\n").expect("untracked");
     let repo = open_grit(dir.path());
     repo.stash()
-        .push(&stash_options(true, None), &mut NullProgress, &NeverCancel)
+        .push(
+            &stash_options(true, None),
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
         .expect("push must not try to sign")
         .expect("changes");
 
@@ -1722,7 +1797,7 @@ fn stash_pop_many_files_without_index_matches_git() {
         .push(
             &stash_options(false, Some("bulk")),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit push")
         .expect("changes");
@@ -1737,7 +1812,7 @@ fn stash_pop_many_files_without_index_matches_git() {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit pop");
 
@@ -1788,7 +1863,7 @@ fn wide_sparse_pop_keeps_conflicts_and_unrelated_local_content() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("pop");
     assert_eq!(
@@ -1865,7 +1940,7 @@ fn apply_stash_skips_identical_untracked_collision_with_overwrite_flag() {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("apply identical untracked");
     assert_eq!(
@@ -1908,7 +1983,7 @@ fn apply_stash_still_refuses_differing_untracked_with_overwrite_flag() {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("differing untracked");
     assert!(matches!(
@@ -1954,7 +2029,7 @@ fn apply_stash_overwrite_identical_rejects_when_any_collision_differs() {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("differing z must block apply");
     assert!(matches!(

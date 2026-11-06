@@ -9,7 +9,8 @@ use std::process::{Command, Stdio};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
@@ -100,7 +101,7 @@ fn fsck_peak_memory_does_not_follow_uncompressed_pack_size() {
         &repo,
         &FsckOptions::full_repository(false),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("fsck");
     let growth = peak_rss().saturating_sub(before);

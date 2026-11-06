@@ -21,8 +21,7 @@ use crate::odb::Odb;
 use crate::pack::{verify_pack_and_collect, write_v2_pack_index_sorting};
 use crate::pack_index_build::{build_mapped_pack_index, RESIDENT_PACK_BYTES};
 use crate::pack_map::{PackData, ResidentBudget};
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
-use crate::remote::RemoteError;
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::unpack_objects::{IngestedObjects, PackIndexRecord};
 
 pub use crate::pack_index_build::build_pack_index_records;
@@ -272,7 +271,7 @@ pub fn ingest_received_pack_with_progress(
     odb: &Odb,
     opts: &IngestPackOptions,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
     if pack.is_empty() {
         return Ok(IngestedPack::default());
@@ -298,7 +297,7 @@ fn ingest_into_custom_primary(
     reader: &mut dyn std::io::Read,
     odb: &Odb,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
     crate::unpack_objects::ingest_pack_into_odb(
         reader,
@@ -353,7 +352,7 @@ pub fn ingest_received_pack_path_with_progress(
     odb: &Odb,
     opts: &IngestPackOptions,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
     crate::trace::trace_span!("grit.pack.index");
     let pack_path = wait_for_received_pack_path(pack_path)?;
@@ -387,7 +386,7 @@ pub fn install_pack_bytes_with_progress(
     odb: &Odb,
     opts: &IngestPackOptions,
     progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
     odb.require_files_primary("index_pack")?;
     let pack_dir = odb.objects_dir().join("pack");
@@ -433,7 +432,7 @@ pub fn install_pack_path_with_progress(
     odb: &Odb,
     opts: &IngestPackOptions,
     mut progress: Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<IngestedPack> {
     odb.require_files_primary("index_pack")?;
     let publish_policy = resolve_ingest_pack_publish_policy(opts, odb)?;
@@ -755,7 +754,7 @@ fn append_thin_bases(
 
 fn poll_ingest_cancel(
     progress: &mut Option<&mut dyn ProgressSink>,
-    cancel: Option<&dyn Cancel>,
+    cancel: Option<&CancelToken>,
 ) -> Result<()> {
     let Some(c) = cancel else {
         return Ok(());
@@ -932,7 +931,7 @@ mod tests {
 
     #[test]
     fn install_pack_cancelled_during_indexing_cleans_stage() {
-        use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
+        use crate::progress::{ProgressPhase, ProgressSink, ProgressUnit, Token};
         use grit_test_support::objects::{HashAlgo, ObjectKind as PK, PackBuilder};
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
@@ -1528,43 +1527,36 @@ mod tests {
     #[test]
     fn cancel_once_pack_published_never_strands_a_peer_install() {
         use std::sync::atomic::{AtomicBool, Ordering};
+        use std::thread;
+        use std::time::Duration;
 
-        /// Cancels the install as soon as its `.pack` is published, after running a
-        /// complete peer install of the same pack that relies on that file.
-        struct PeerThenCancel<'a> {
-            pack_dir: PathBuf,
-            objects: PathBuf,
-            pack: &'a [u8],
-            peer_ran: AtomicBool,
-        }
-
-        impl Cancel for PeerThenCancel<'_> {
-            fn is_cancelled(&self) -> bool {
-                if self.peer_ran.load(Ordering::Relaxed) {
-                    return true;
-                }
-                if published_files(&self.pack_dir, "pack") == 0 {
-                    return false;
-                }
-                self.peer_ran.store(true, Ordering::Relaxed);
-                let peer_odb = Odb::new(&self.objects);
-                install_pack_bytes(self.pack.to_vec(), &peer_odb, &IngestPackOptions::default())
-                    .expect("peer install succeeds");
-                true
-            }
-        }
+        use crate::progress::CancelToken;
 
         let (pack, tip) = commit_pack();
         let repo = tempfile::tempdir().expect("repo");
         git_in(repo.path(), &["init", "-q", "-b", "main"]);
         let objects = repo.path().join(".git/objects");
         let pack_dir = objects.join("pack");
-        let cancel = PeerThenCancel {
-            pack_dir: pack_dir.clone(),
-            objects: objects.clone(),
-            pack: &pack,
-            peer_ran: AtomicBool::new(false),
-        };
+        let cancel = CancelToken::new();
+        let peer_ran = AtomicBool::new(false);
+        let watch_cancel = cancel.clone();
+        let watch_pack_dir = pack_dir.clone();
+        let watch_objects = objects.clone();
+        let watch_pack = pack.clone();
+        let watch_peer = peer_ran.clone();
+        thread::spawn(move || {
+            while !watch_cancel.is_cancelled() {
+                if published_files(&watch_pack_dir, "pack") > 0 {
+                    watch_peer.store(true, Ordering::Relaxed);
+                    let peer_odb = Odb::new(&watch_objects);
+                    install_pack_bytes(watch_pack, &peer_odb, &IngestPackOptions::default())
+                        .expect("peer install succeeds");
+                    watch_cancel.cancel();
+                    return;
+                }
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
         let odb = Odb::new(&objects);
         let result = install_pack_bytes_with_progress(
             pack.clone(),
@@ -1575,7 +1567,7 @@ mod tests {
         );
         match result {
             Ok(_) => {}
-            Err(Error::Cancelled) => assert!(cancel.peer_ran.load(Ordering::Relaxed)),
+            Err(Error::Cancelled) => assert!(peer_ran.load(Ordering::Relaxed)),
             Err(e) => panic!("unexpected install error: {e:?}"),
         }
         assert_eq!(published_files(&pack_dir, "pack"), 1);

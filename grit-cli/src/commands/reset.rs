@@ -257,12 +257,12 @@ pub fn run(
     opts.dry_run = dry_run;
     opts.orphan_limit = orphan_limit.unwrap_or(DEFAULT_ORPHAN_LIMIT);
 
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = reset_to_commit(
         &repo,
         &opts,
         &mut grit_lib::progress::NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(anyhow::Error::new)?;
 

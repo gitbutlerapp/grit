@@ -9,7 +9,7 @@ The stash stack is Git-compatible ref and commit machinery. There is one API for
 
 [`StashPushOptions`](rustdoc:grit_lib::stash::StashPushOptions) carries the message, whether to include untracked files, [`StashMode`](rustdoc:grit_lib::stash::StashMode) (`All`, `StagedOnly`, `KeepIndex`), optional hunk selection and pathspecs, and the [`Signature`](rustdoc:grit_lib::ident::Signature) used for the stash commits and the `refs/stash` reflog (usually `repo.identity(IdentRole::Committer, now)`, see [Repository](../repository/#identity)). [`StashPushOptions::new`](rustdoc:grit_lib::stash::StashPushOptions::new) sets the other fields to their defaults. `RepositoryStash::push` returns a [`StashPushResult`](rustdoc:grit_lib::stash::StashPushResult) (the stash commit, its message and tree), or `Ok(None)` when there is nothing to stash. `RepositoryStash::preview` takes the same options and lists the paths that would be saved without writing objects or refs. For a partial push (a hunk selection), both the result and the [`StashPreview`](rustdoc:grit_lib::stash::StashPreview) report what the selection resolved to: `stashed_hunks` maps each path to the hunk ids it stashes and `stashed_lines` to its line range labels, so callers do not need to resolve the selection again. [`StashPushOptions::validate`](rustdoc:grit_lib::stash::StashPushOptions::validate) rejects incompatible flag combinations as [`StashPushValidationError`](rustdoc:grit_lib::stash::StashPushValidationError). Stash commits are always written unsigned, whatever `commit.gpgsign` says, matching Git.
 
-`push`, `apply`, `apply_commit` and `pop` take a [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink) and a [`Cancel`](rustdoc:grit_lib::progress::Cancel). Push reports [`StagingFiles`](rustdoc:grit_lib::progress::ProgressPhase::StagingFiles) while it hashes local changes and [`CheckingOutFiles`](rustdoc:grit_lib::progress::ProgressPhase::CheckingOutFiles) while it resets them. A cancel before `refs/stash` moves returns [`StashError::Cancelled`](rustdoc:grit_lib::stash::StashError::Cancelled) with the repository unchanged; once the entry is stored it stays, even if the reset that follows is cancelled. A cancelled apply or pop keeps the entry, leaves the index alone and rolls its checkout back; only files it content-merged onto a moved `HEAD` before the cancel stay written.
+`push`, `apply`, `apply_commit` and `pop` take a [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink) and a [`CancelToken`](rustdoc:grit_lib::progress::CancelToken). Push reports [`StagingFiles`](rustdoc:grit_lib::progress::ProgressPhase::StagingFiles) while it hashes local changes and [`CheckingOutFiles`](rustdoc:grit_lib::progress::ProgressPhase::CheckingOutFiles) while it resets them. A cancel before `refs/stash` moves returns [`Error::Cancelled`](rustdoc:grit_lib::error::Error::Cancelled) with the repository unchanged; once the entry is stored it stays, even if the reset that follows is cancelled. A cancelled apply or pop keeps the entry, leaves the index alone and rolls its checkout back; only files it content-merged onto a moved `HEAD` before the cancel stay written.
 
 ## Apply and pop
 
@@ -19,11 +19,11 @@ Dropping an entry rewrites the `refs/stash` reflog without adding a new entry, s
 
 ```rust
 use grit_lib::stash::StashApplyOptions;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 
 let popped = repo
     .stash()
-    .pop(0, &StashApplyOptions::default(), &mut NullProgress, &NeverCancel)?;
+    .pop(0, &StashApplyOptions::default(), &mut NullProgress, &CancelToken::never())?;
 for conflict in &popped.conflicts {
     println!(
         "conflict: {} ({}; stash@{{0}} was kept)",

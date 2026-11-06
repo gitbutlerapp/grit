@@ -10,7 +10,8 @@ use std::time::Duration;
 use filetime::FileTime;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git_cmd as git_shell;
 
@@ -76,7 +77,7 @@ fn unstaged_paths(work_tree: &std::path::Path, options: &RepositoryOptions) -> V
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     model

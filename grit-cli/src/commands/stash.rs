@@ -476,10 +476,14 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
             None => StashPushOutcome::Nothing { stashed: false },
         });
     }
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let pushed = repo
         .stash()
-        .push(&options, progress, &interrupt)
+        .push(
+            &options,
+            progress,
+            &crate::interrupt::process_cancel_token(),
+        )
         .map_err(map_stash_error)?;
     Ok(match pushed {
         Some(result) => StashPushOutcome::Saved {
@@ -742,7 +746,7 @@ pub fn run_apply(
         .context("grit stash apply needs a working tree")?;
     let reference = repo.stash().parse_reference(index.as_deref())?;
     let (stack_index, oid) = stash_reference_parts(&repo, reference)?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let applied = repo
         .stash()
         .apply_reference(
@@ -752,7 +756,7 @@ pub fn run_apply(
                 ..Default::default()
             },
             progress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(map_stash_error)?;
     Ok(StashApplyOutcome {
@@ -775,7 +779,7 @@ pub fn run_pop(
     let reference = repo.stash().parse_reference(index.as_deref())?;
     let (stack_index, oid) = stash_reference_parts(&repo, reference)?;
     let n = stack_index.unwrap_or(0);
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let popped = repo
         .stash()
         .pop_reference(
@@ -785,7 +789,7 @@ pub fn run_pop(
                 ..Default::default()
             },
             progress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(map_stash_error)?;
     let conflicts = popped.has_conflicts();

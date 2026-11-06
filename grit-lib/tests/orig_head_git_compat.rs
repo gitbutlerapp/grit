@@ -15,7 +15,7 @@ use grit_lib::porcelain::merge::{
     MergeCommitMode, MergeOptions,
 };
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
@@ -86,7 +86,7 @@ fn reset(repo: &Repository, target: ObjectId, mode: ResetMode) -> Result<(), Err
         repo,
         &ResetOptions::new(target, mode, ident(), "reset: moving"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .map(|_| ())
 }
@@ -105,7 +105,7 @@ fn merge(
         "topic",
         options,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
 }
 
@@ -184,7 +184,7 @@ fn dry_run_and_refused_resets_leave_orig_head_alone() {
     let target = rev(dir, "HEAD~1");
     let mut opts = ResetOptions::new(target, ResetMode::Hard, ident(), "reset");
     opts.dry_run = true;
-    reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel).expect("dry run");
+    reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("dry run");
     assert_eq!(
         git_orig_head(dir),
         None,
@@ -331,7 +331,7 @@ fn rebase(dir: &Path, upstream: ObjectId, tip: ObjectId) -> RebaseOutcome {
         &open(dir),
         &rebase_opts(upstream, tip),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("start rebase")
 }
@@ -379,7 +379,7 @@ fn up_to_date_rebase_with_exec_runs_at_each_commit_without_rewriting_tip() {
         },
         runner.as_ref(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("exec rebase");
     assert!(
@@ -417,7 +417,7 @@ fn up_to_date_rebase_with_exec_amend_moves_stacked_branch() {
         },
         system_command_runner().as_ref(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("exec rebase");
     assert!(
@@ -464,7 +464,7 @@ fn up_to_date_rebase_with_exec_on_empty_range_runs_nothing() {
         },
         runner.as_ref(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("exec");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }), "{outcome:?}");
@@ -485,7 +485,7 @@ fn rebase_with_exec(
         },
         system_command_runner().as_ref(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
 }
 
@@ -569,8 +569,8 @@ fn favored_rebase_records_orig_head_like_git() {
     set_stale_orig_head(dir);
     let mut opts = rebase_opts(main, topic);
     opts.rebase.favor = grit_lib::diff::merge_file::MergeFavor::Ours;
-    let outcome =
-        start_rebase(&open(dir), &opts, &mut NullProgress, &NeverCancel).expect("favored rebase");
+    let outcome = start_rebase(&open(dir), &opts, &mut NullProgress, &CancelToken::never())
+        .expect("favored rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }), "{outcome:?}");
     assert_eq!(
         git(dir, &["show", "HEAD:f1"]),
@@ -621,11 +621,13 @@ fn favored_rebase_stops_on_unresolvable_conflict_and_continue_keeps_the_favor() 
     let mut opts = rebase_opts(main, topic);
     opts.rebase.favor = grit_lib::diff::merge_file::MergeFavor::Ours;
     let repo = open(dir);
-    let outcome = start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("start");
+    let outcome =
+        start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("start");
     assert!(matches!(outcome, RebaseOutcome::Stopped(_)), "{outcome:?}");
     assert_eq!(git_orig_head(dir), Some(topic));
     git(dir, &["rm", "-q", "f1"]);
-    let done = continue_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("continue");
+    let done =
+        continue_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("continue");
     assert!(matches!(done, RebaseOutcome::Done { .. }), "{done:?}");
     assert_eq!(
         git(dir, &["show", "HEAD:g"]),
@@ -655,7 +657,7 @@ fn stopped_rebase_keeps_orig_head_through_continue_and_abort() {
                 &repo,
                 &rebase_opts(main, tip),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("continue");
             assert!(matches!(done, RebaseOutcome::Done { .. }), "{done:?}");

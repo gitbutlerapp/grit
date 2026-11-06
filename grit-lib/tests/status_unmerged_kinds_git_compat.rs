@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::operation::{conflict_kind_from_stagemask, ConflictKind};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -54,7 +54,7 @@ fn assert_kind_matches_git(root: &std::path::Path, path: &str) {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let detail = model

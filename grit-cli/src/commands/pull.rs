@@ -15,7 +15,7 @@ use crate::progress::summary::transfer_header;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
 use grit_lib::remote::snapshot_checkout::{
     ensure_refreshable, fetch_branch, refresh, refresh_branch, same_branch_name, valid_branch_name,
@@ -115,7 +115,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     options.fetch = fetch_opts;
     let remote_name = invocation.remote;
     let factory = crate::context::http_client_factory();
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
     let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
@@ -131,12 +131,24 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
             )
         );
     }
-    let lib = match pull(&repo, &options, &mut progress, &interrupt, Some(&factory)) {
+    let lib = match pull(
+        &repo,
+        &options,
+        &mut progress,
+        &crate::interrupt::process_cancel_token(),
+        Some(&factory),
+    ) {
         Ok(outcome) => outcome,
         Err(PullError::Remote(remote_err)) => {
             let mapped = map_remote_error(remote_err);
             if auth::offer_reauth(&mapped, url.as_deref().unwrap_or_default())? {
-                pull(&repo, &options, &mut progress, &interrupt, Some(&factory))?
+                pull(
+                    &repo,
+                    &options,
+                    &mut progress,
+                    &crate::interrupt::process_cancel_token(),
+                    Some(&factory),
+                )?
             } else {
                 return Err(mapped);
             }
@@ -241,7 +253,7 @@ fn pull_server_branch(
         &info,
         fetch,
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
         Some(&crate::context::http_client_factory()),
     )
     .map_err(refresh_error)?;
@@ -303,7 +315,7 @@ fn refresh_checkout(
         &info,
         &options,
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
         Some(&crate::context::http_client_factory()),
     )
     .map_err(refresh_error)?;

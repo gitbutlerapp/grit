@@ -233,14 +233,14 @@ pub fn run_hunks(
         amend,
         allow_empty,
     )?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = commit_with_patch(
         &repo,
         &req,
         CommitPatchInput::Hunks(selection),
         &pathspecs,
         &mut NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(map_patch_error)?;
     finish_commit_outcome(req, outcome, CommitScopeJson::Patch, dry_run)
@@ -288,14 +288,14 @@ pub fn run_patch_file(
         amend,
         allow_empty,
     )?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = commit_with_patch(
         &repo,
         &req,
         CommitPatchInput::Patches(patches),
         &[],
         &mut NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(map_patch_error)?;
     finish_commit_outcome(req, outcome, CommitScopeJson::Patch, dry_run)
@@ -359,9 +359,15 @@ pub fn run(
         amend,
         allow_empty,
     )?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome =
-        commit_with_scope(&repo, &req, scope, progress, &interrupt).map_err(map_commit_error)?;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let outcome = commit_with_scope(
+        &repo,
+        &req,
+        scope,
+        progress,
+        &crate::interrupt::process_cancel_token(),
+    )
+    .map_err(map_commit_error)?;
     finish_commit_outcome(req, outcome, scope_json, dry_run)
 }
 

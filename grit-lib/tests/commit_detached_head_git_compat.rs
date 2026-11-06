@@ -73,7 +73,7 @@ fn grit_commit_on_detached_head_matches_git() {
         &repo,
         &commit_req("detached"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert_eq!(outcome.branch, None);

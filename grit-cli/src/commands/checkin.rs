@@ -211,14 +211,14 @@ fn check_in(
     gave_change_ids: usize,
     mode: OutputMode,
 ) -> Result<CheckinOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = TerminalProgress::new(mode);
     let pushed = push_for_checkin(
         &co.repo,
         &co.marker,
         branches,
         &mut progress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
         Some(&crate::context::http_client_factory()),
     )
     .map_err(|e| match e {

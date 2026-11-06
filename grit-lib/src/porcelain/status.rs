@@ -2668,7 +2668,7 @@ pub fn status(
     repo: &Repository,
     opts: &StatusOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<StatusModel> {
     let _ = progress;
     crate::trace::trace_span!("grit.status.scan");
@@ -2688,7 +2688,7 @@ pub fn status(
     } else {
         None
     };
-    let cancel_token = crate::progress::cancel_token_from(cancel);
+    let cancel_token = cancel.clone();
     let watch = cancel_token.watch_arc();
     crate::progress::poll_cancel_watch(cancel, &watch)?;
     let work_tree = repo
@@ -3752,7 +3752,7 @@ mod pathspec_prune_tests {
 mod status_op_tests {
     use super::*;
     use crate::environment::RepositoryOptions;
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use std::fs;
     use tempfile::TempDir;
 
@@ -3905,7 +3905,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -4000,7 +4000,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(
@@ -4227,7 +4227,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -4276,7 +4276,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert_eq!(normal.untracked, vec!["tool/"]);
@@ -4288,7 +4288,7 @@ mod status_op_tests {
                 ..StatusOptions::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert_eq!(all.untracked, vec!["tool/sub/"]);
@@ -4307,7 +4307,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert_eq!(normal.untracked, vec!["tool/", "top/"]);
@@ -4319,7 +4319,7 @@ mod status_op_tests {
                 ..StatusOptions::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert_eq!(
@@ -4353,7 +4353,7 @@ mod status_op_tests {
                 ..StatusOptions::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -4417,7 +4417,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let modified = model
@@ -4468,7 +4468,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let tracked = repo.load_index().unwrap().entries.len();
@@ -4505,7 +4505,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(
@@ -4533,7 +4533,7 @@ mod status_op_tests {
             ignored: IgnoredMode::Traditional,
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         assert!(
             model.untracked.is_empty(),
             "untracked=No must omit untracked, got {:?}",
@@ -4562,7 +4562,7 @@ mod status_op_tests {
             untracked: UntrackedMode::No,
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         assert!(
             model.untracked.is_empty(),
             "untracked=No must report nothing, got {:?}",
@@ -4608,14 +4608,14 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         status(
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -4624,7 +4624,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let entries_read = untracked_walk_probe::count();
@@ -4650,7 +4650,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let op = model.operation.expect("merge operation");
@@ -4689,7 +4689,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let op = model.operation.expect("merge operation");
@@ -4747,7 +4747,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(model.state.cherry_pick_in_progress);
@@ -4863,7 +4863,7 @@ mod status_op_tests {
             }),
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
 
         assert!(
             model.staged.iter().all(|e| e.path().starts_with("scoped/")),
@@ -4920,7 +4920,7 @@ mod status_op_tests {
             }),
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         let rename_line = short_status_lines(&model)
             .into_iter()
             .find_map(|line| match line {
@@ -4965,7 +4965,7 @@ mod status_op_tests {
             }),
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         let renamed: Vec<_> = model
             .staged
             .iter()
@@ -5050,7 +5050,7 @@ mod status_op_tests {
                 renames,
                 ..StatusOptions::default()
             };
-            let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+            let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
             let grit_rows = staged_letters(&model);
             let git_rows = git_staged_porcelain_v2(root, spec);
             assert_eq!(
@@ -5067,7 +5067,8 @@ mod status_op_tests {
             renames,
             ..StatusOptions::default()
         };
-        let model_both = status(&repo, &opts_both, &mut NullProgress, &NeverCancel).unwrap();
+        let model_both =
+            status(&repo, &opts_both, &mut NullProgress, &CancelToken::never()).unwrap();
         assert!(
             model_both
                 .staged
@@ -5111,7 +5112,7 @@ mod status_op_tests {
             renames: status_renames_from_config(config.as_ref()),
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         let grit_letters: Vec<_> = staged_letters(&model).into_iter().map(|(c, _)| c).collect();
         let git_out = std::process::Command::new("git")
             .args(["status", "--porcelain=v2"])
@@ -5177,7 +5178,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert_eq!(model.unstaged.len(), 1, "{:?}", model.unstaged);
@@ -5217,7 +5218,7 @@ mod status_op_tests {
             }),
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         assert!(
             model
                 .unstaged
@@ -5279,14 +5280,14 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         status(
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -5297,7 +5298,7 @@ mod status_op_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let entries_read = untracked_walk_probe::count();
@@ -5343,7 +5344,7 @@ mod status_op_tests {
             ignored: IgnoredMode::Traditional,
             ..StatusOptions::default()
         };
-        let model = status(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+        let model = status(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
         let grit_ignored: std::collections::BTreeSet<String> = model.ignored.into_iter().collect();
 
         let git_out = std::process::Command::new("git")

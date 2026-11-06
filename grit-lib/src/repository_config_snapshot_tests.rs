@@ -22,7 +22,7 @@ mod tests {
     use crate::porcelain::checkout::checkout_between_trees;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::ref_storage::RefStorageFormat;
     use crate::repo::{init_repository, init_repository_separate_git_dir, Repository};
     use crate::rev_list::{rev_list, RevListOptions};
@@ -56,7 +56,7 @@ mod tests {
                 &repo,
                 &StatusOptions::default(),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .unwrap();
         });
@@ -70,7 +70,7 @@ mod tests {
                 &repo2,
                 &StageOptions::default(),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .unwrap();
         });
@@ -83,7 +83,7 @@ mod tests {
             &repo3,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let req = CommitRequest {
@@ -99,7 +99,7 @@ mod tests {
             ..Default::default()
         };
         cascade_load_counters::measure(|| {
-            create_commit(&repo3, &req, &mut NullProgress, &NeverCancel).unwrap();
+            create_commit(&repo3, &req, &mut NullProgress, &CancelToken::never()).unwrap();
         });
         // Index write, ref update, and object-format / MIDX config probes may each revalidate
         // the repository config cache once when using a shared repository snapshot.
@@ -115,7 +115,7 @@ mod tests {
             &repo3,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let mut index = repo3.load_index().unwrap();
@@ -523,7 +523,7 @@ mod tests {
                 &repo,
                 &StageOptions::default(),
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .unwrap();
             let mut index = repo.load_index().unwrap();
@@ -588,7 +588,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 
@@ -603,7 +603,7 @@ mod tests {
             &discovered,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         );
 
         if let Some(v) = prev_global {

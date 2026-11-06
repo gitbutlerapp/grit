@@ -5,8 +5,7 @@ use std::process::Command;
 
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
 fn git(dir: &Path, args: &[&str]) {
@@ -92,8 +91,8 @@ fn clone_local_mixed_packed_tree_and_loose_blob() {
         CloneOptions {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone must succeed when blob stays loose");

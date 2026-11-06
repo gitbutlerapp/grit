@@ -39,6 +39,7 @@ use crate::operation_output::{
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 use crate::ui::path_display_for_discovered_repo;
+use grit_lib::progress::CancelToken;
 
 /// Which local refs a history rewrite may move.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -854,14 +855,14 @@ pub fn run_move(
     )
     .map_err(on_err)?;
     if !shared.dry_run {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let message = format!("history move: {}", commit_oid.to_short_hex());
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("move", message)?,
             &mut grit_lib::progress::NullProgress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(on_err)?;
     }
@@ -877,14 +878,14 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
     let plan = history_drop(&rewrite.repo, commit_oid, &rewrite.options).map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let message = format!("history drop: {}", rewrite.subject(commit_oid)?);
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("drop", message)?,
             &mut grit_lib::progress::NullProgress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(on_err)?;
     }
@@ -927,14 +928,14 @@ pub fn run_reword(
         .replacement(commit_oid)
         .ok_or_else(|| anyhow::anyhow!("rewritten commit missing from plan"))?;
     if !shared.dry_run {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let message = format!("history reword: {}", rewrite.subject(new_oid)?);
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("reword", message)?,
             &mut grit_lib::progress::NullProgress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(on_err)?;
     }
@@ -972,7 +973,7 @@ pub fn run_fixup(
     )
     .map_err(map_fixup_error)?;
     if !shared.dry_run {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let subject = match plan.replacement(commit_oid) {
             Some(new_oid) => rewrite.subject(new_oid)?,
             None => commit.to_owned(),
@@ -985,7 +986,7 @@ pub fn run_fixup(
                 &apply_opts,
                 selection,
                 &pathspec_list,
-                &interrupt,
+                &crate::interrupt::process_cancel_token(),
             )
             .map_err(map_fixup_error)?;
         } else {
@@ -995,7 +996,7 @@ pub fn run_fixup(
                 &plan,
                 &apply_opts,
                 &staged_paths,
-                &interrupt,
+                &crate::interrupt::process_cancel_token(),
             )
             .map_err(on_err)?;
         }
@@ -1049,7 +1050,7 @@ pub fn run_squash(
     .map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let subject = match plan.commits.first() {
             Some(first) => rewrite.subject(first.new.unwrap_or(first.old))?,
             None => "squash".into(),
@@ -1060,7 +1061,7 @@ pub fn run_squash(
             &plan,
             &rewrite.apply_options("squash", message)?,
             &mut grit_lib::progress::NullProgress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(on_err)?;
     }
@@ -1095,14 +1096,14 @@ pub fn run_split(
     .map_err(on_err)?;
     verify_rewrite_plan(&rewrite.repo, &plan).map_err(on_err)?;
     if !shared.dry_run {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let subject = rewrite.subject(commit_oid)?;
         apply_rewrite(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("split", format!("history split: {subject}"))?,
             &mut grit_lib::progress::NullProgress,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(on_err)?;
     }
@@ -1324,7 +1325,7 @@ fn run_rebase_with_exec(
         &spec,
         runner.as_ref(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     ) {
         Ok(RebaseOutcome::Done { .. }) => {
             RebaseCliOutcome::from_rewrite(HistoryRewriteOutcome::up_to_date("rebase", false))
@@ -1399,7 +1400,7 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     let resume_apply = rewrite.apply_options("rebase", resume_message.into())?;
 
     if opts.continue_rebase || opts.skip {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         let head_oid = resolve_commit(&rewrite.repo, "HEAD", "HEAD")?;
         let resume_opts = StartRebaseOptions {
             request: RebaseRequest {
@@ -1416,14 +1417,14 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                 &rewrite.repo,
                 &resume_opts,
                 &mut grit_lib::progress::NullProgress,
-                &interrupt,
+                &crate::interrupt::process_cancel_token(),
             )
         } else {
             skip_rebase(
                 &rewrite.repo,
                 &resume_opts,
                 &mut grit_lib::progress::NullProgress,
-                &interrupt,
+                &crate::interrupt::process_cancel_token(),
             )
         };
         let rendered = match outcome {
@@ -1534,12 +1535,12 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
         };
     }
 
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = start_rebase(
         &rewrite.repo,
         &start_opts,
         &mut grit_lib::progress::NullProgress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(|err| map_rebase_session_error(&rewrite.repo, err))?;
     Ok(RebaseRunOutcome::Rebase(map_rebase_outcome(outcome)?))
@@ -1695,10 +1696,14 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryUndoOutcome> {
         record_operation: None,
         hooks: PostOperationHooks::Skip,
     };
-    let interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome =
-        undo_last_rewrite_with_cancel(&rewrite.repo, &apply_opts, shared.dry_run, &interrupt)
-            .map_err(on_err)?;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let outcome = undo_last_rewrite_with_cancel(
+        &rewrite.repo,
+        &apply_opts,
+        shared.dry_run,
+        &crate::interrupt::process_cancel_token(),
+    )
+    .map_err(on_err)?;
     let rewrite = HistoryRewriteOutcome {
         operation: "undo".into(),
         rewritten: Vec::new(),
@@ -1743,12 +1748,12 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
     )
     .map_err(on_err)?;
     if !shared.dry_run && !absorb_plan.plan.commits.is_empty() {
-        let interrupt = crate::interrupt::InterruptCancel::install();
+        let _interrupt = crate::interrupt::InterruptCancel::install();
         apply_absorb_rewrite_with_cancel(
             &rewrite.repo,
             &absorb_plan,
             &rewrite.apply_options("absorb", "history absorb".into())?,
-            &interrupt,
+            &crate::interrupt::process_cancel_token(),
         )
         .map_err(on_err)?;
     }

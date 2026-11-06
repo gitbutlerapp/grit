@@ -10,7 +10,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions, StageOutcome};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
 use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::knobs::stage_options_staging_thresholds;
 use grit_test_support::git;
@@ -43,7 +44,13 @@ fn stage_all(root: &Path, thresholds: Option<IndexStagingThresholds>) -> StageOu
         Some(t) => stage_options_staging_thresholds(base, t),
         None => base,
     };
-    stage(&open_repo(root), &opts, &mut NullProgress, &NeverCancel).expect("stage")
+    stage(
+        &open_repo(root),
+        &opts,
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("stage")
 }
 
 fn cached_name_status(root: &Path) -> String {
@@ -94,7 +101,7 @@ fn commit_and_check(root: &Path, expected: &str) {
         &open_repo(root),
         &commit_request(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(
@@ -189,15 +196,23 @@ fn stage_directory_replaced_by_file_with_later_sibling() {
 fn stage_for_commit_records_both_flips() {
     let tmp = tempfile::tempdir().expect("tempdir");
     file_became_dir_repo(tmp.path(), true);
-    let outcome =
-        stage_for_commit(&open_repo(tmp.path()), &mut NullProgress, &NeverCancel).expect("stage");
+    let outcome = stage_for_commit(
+        &open_repo(tmp.path()),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("stage");
     assert_eq!(outcome.removed, ["f"]);
     assert_eq!(outcome.added, ["f/i"]);
 
     let tmp = tempfile::tempdir().expect("tempdir");
     dir_became_file_repo(tmp.path());
-    let outcome =
-        stage_for_commit(&open_repo(tmp.path()), &mut NullProgress, &NeverCancel).expect("stage");
+    let outcome = stage_for_commit(
+        &open_repo(tmp.path()),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("stage");
     assert_eq!(outcome.removed, ["d/x"]);
     assert_eq!(outcome.added, ["d"]);
 }

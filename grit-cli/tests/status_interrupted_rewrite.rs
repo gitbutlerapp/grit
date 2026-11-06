@@ -6,6 +6,7 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+use grit_lib::progress::CancelToken;
 use grit_lib::revwalk::history::{
     apply_rewrite, plan_rewrite, ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope,
     RewriteOptions,
@@ -119,7 +120,7 @@ fn interrupted_rewrite_repo() -> (tempfile::TempDir, String) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort after refs");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);

@@ -9,6 +9,7 @@ use super::error::HistoryError;
 use super::last::{read_history_last, HistoryLastRecord};
 use super::types::{ApplyOptions, UndoOutcome};
 use super::undo_work::{read_undo_work, UndoWork};
+use crate::progress::CancelToken;
 
 /// Revert the last recorded history rewrite when refs are still at the post-rewrite tips.
 ///
@@ -37,7 +38,7 @@ pub fn undo_last_rewrite(
     opts: &ApplyOptions,
     dry_run: bool,
 ) -> Result<UndoOutcome, HistoryError> {
-    undo_last_rewrite_with_cancel(repo, opts, dry_run, &crate::progress::NeverCancel)
+    undo_last_rewrite_with_cancel(repo, opts, dry_run, &crate::progress::CancelToken::never())
 }
 
 /// Like [`undo_last_rewrite`], but stops when `cancel` is set and rolls back partial work.
@@ -45,7 +46,7 @@ pub fn undo_last_rewrite_with_cancel(
     repo: &Repository,
     opts: &ApplyOptions,
     dry_run: bool,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<UndoOutcome, HistoryError> {
     let record = read_history_last(repo)?.ok_or(HistoryError::NoUndoRecord)?;
     verify_record_still_valid(repo, &record)?;

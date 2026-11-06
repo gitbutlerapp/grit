@@ -12,7 +12,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::{integrate_branch, resolve_merge_source};
-use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::{NullProgress, Token};
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
 

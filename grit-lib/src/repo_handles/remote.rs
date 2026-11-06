@@ -7,7 +7,7 @@ use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Error;
 use crate::error::Result;
 use crate::fetch::Progress;
-use crate::fetch_request::FetchRefspecError;
+use crate::progress::CancelToken;
 use crate::refs::store::{Expected, RefUpdate, RefUpdateFlags};
 use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
 use crate::refspec::{fetch_specs_bind_local_ref, parse_fetch_refspec, RefspecItem};
@@ -271,7 +271,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// let mut progress = NoProgress;
     /// let _out = repo
     ///     .remotes()
-    ///     .fetch(&remote, FetchOptions::default(), &mut progress, &NeverCancel, None)?;
+    ///     .fetch(&remote, FetchOptions::default(), &mut progress, &CancelToken::never(), None)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -280,7 +280,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         remote: &Remote,
         options: FetchOptions,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<FetchOutcome, RemoteError> {
         remote.fetch(self.repo, options, progress, cancel, http_factory)
@@ -307,7 +307,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         cli_prune: Option<bool>,
         cli_tags: Option<bool>,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<Vec<(String, std::result::Result<FetchOutcome, RemoteError>)>> {
         use crate::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags};
@@ -367,7 +367,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// let refs: Vec<PushRefSpec> = Vec::new();
     /// let _out = repo
     ///     .remotes()
-    ///     .push(&remote, &refs, PushOptions::default(), &mut progress, &NeverCancel, None)?;
+    ///     .push(&remote, &refs, PushOptions::default(), &mut progress, &CancelToken::never(), None)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -377,7 +377,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         refs: &[PushRefSpec],
         options: PushOptions,
         progress: &mut dyn Progress,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<PushOutcome, RemoteError> {
         remote.push(self.repo, refs, options, progress, cancel, http_factory)

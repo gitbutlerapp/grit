@@ -126,7 +126,7 @@ fn switch_nested_gitattributes_crlf_clean_worktree_matches_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch must succeed on clean nested-eol=crlf worktree like git");
 
@@ -205,7 +205,7 @@ fn switch_wholesale_deleted_gitattributes_does_not_apply_stale_eol() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch");
 
@@ -284,7 +284,7 @@ fn switch_preserves_untracked_in_wholesale_deleted_directory() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
 
@@ -361,7 +361,7 @@ fn switch_preserves_untracked_fifo_under_fast_wholesale_delete_scan() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
 
@@ -430,7 +430,7 @@ fn switch_preserves_ignored_file_in_wholesale_deleted_directory() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
 
@@ -497,7 +497,7 @@ fn switch_preserves_ignored_file_from_nested_tracked_gitignore() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
 
@@ -564,7 +564,7 @@ fn switch_preserves_ignored_file_from_deep_nested_tracked_gitignore() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
 
@@ -648,7 +648,7 @@ fn switch_preserves_populated_gitlink_under_wholesale_deleted_directory() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
 
@@ -770,7 +770,7 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit switch must refuse racy dirty worktree like git");
     match err {
@@ -823,7 +823,7 @@ fn switch_tree_diff_git_clean_after() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch to target");
 
@@ -881,7 +881,7 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("dirty switch must fail");
     match err {
@@ -962,7 +962,7 @@ fn switch_refuses_dirty_second_path_when_first_has_stat_drift_only_like_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit switch must refuse when b.txt is dirty");
     match err {
@@ -1090,7 +1090,7 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit switch must refuse racy dirty b.txt");
     match err {
@@ -1205,7 +1205,7 @@ fn switch_refuses_dirty_file_deleted_on_target_like_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit must refuse switch like git");
     match err {
@@ -1279,7 +1279,7 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch");
 
@@ -1307,7 +1307,7 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch back");
     assert!(
@@ -1425,7 +1425,7 @@ fn switch_removes_gitlink_when_parent_directory_dropped() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch");
 
@@ -1528,7 +1528,7 @@ fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch must match git and preserve dirty gitlink worktree");
 
@@ -1585,7 +1585,7 @@ fn switch_scoped_worktree_diff_limits_metadata_probes() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch");
     const FILE_COUNT: usize = 500;
@@ -1681,7 +1681,7 @@ fn switch_tracked_deletes_fail_and_roll_back_when_wholesale_dir_removal_fails() 
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit switch must fail when tracked deletes cannot be unlinked");
     match &err {
@@ -1789,7 +1789,7 @@ fn issue_1160_unstaged_delete_with_staged_add_deleted_allows_switch() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch main with unstaged delete + AD path");
 
@@ -1883,7 +1883,7 @@ fn issue_1160_dangling_symlink_with_staged_add_deleted_refuses_switch() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit must refuse switch for retargeted dangling symlink");
     match grit_err {
@@ -1965,7 +1965,7 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to target");
     assert!(
@@ -1990,7 +1990,7 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch back to main");
     assert!(
@@ -2150,7 +2150,7 @@ fn grit_switch_detach(repo: &Repository, commit: ObjectId) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch --detach tip-b");
 }
@@ -2186,7 +2186,7 @@ fn switch_create_advances_index_gitlink_when_submodule_ahead() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch -c x tip-b");
     assert_eq!(git_porcelain(&fixture.root), "");
@@ -2205,7 +2205,7 @@ fn merge_fast_forward_advances_index_gitlink_when_submodule_ahead() {
         fixture.rev("tip-b"),
         "tip-b",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge tip-b");
     assert!(
@@ -2268,7 +2268,7 @@ fn merge_fast_forward_with_drifted_gitlink_matches_git() {
             fixture.rev("tip-b"),
             "tip-b",
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit merge tip-b with drifted submodule");
         let observed = fixture.observed();
@@ -2314,7 +2314,7 @@ fn switch_refuses_staged_gitlink_that_differs_from_target_like_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("grit switch must refuse a staged gitlink the target would overwrite");
     match err {
@@ -2391,7 +2391,7 @@ fn switch_tracked_symlink_to_dir_with_wholesale_deletes_matches_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to s");
     switch_repository(
@@ -2405,7 +2405,7 @@ fn switch_tracked_symlink_to_dir_with_wholesale_deletes_matches_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch to m must not false-positive through tracked symlink");
 
@@ -2472,7 +2472,7 @@ fn switch_wholesale_fast_path_still_blocks_genuine_untracked_at_added_path() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("untracked at added path must block switch");
     match err {
@@ -2545,7 +2545,7 @@ fn merge_fast_forward_keeps_files_in_uninitialized_gitlink_dir_like_git() {
         fixture.rev("tip-b"),
         "tip-b",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge tip-b with uninitialized submodule");
     assert_eq!(uninitialized_gitlink_observed(&fixture), expected);

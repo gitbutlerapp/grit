@@ -19,8 +19,7 @@ use grit_lib::porcelain::pull::{pull, PullMode, PullOptions};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd, git_fsck, unique_tmp};
@@ -210,7 +209,7 @@ fn reset(repo: &Repository, target: ObjectId, mode: ResetMode) {
             "reset",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit reset");
 }
@@ -304,7 +303,7 @@ fn switch_detach_keeps_out_of_cone_paths_skip_worktree() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch");
 
@@ -332,7 +331,7 @@ fn switch_branch_adds_out_of_cone_paths_as_skip_worktree() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch");
 
@@ -355,7 +354,7 @@ fn fast_forward_merge_keeps_new_out_of_cone_paths_skip_worktree() {
         rev(&pair.grit_dir, "side"),
         "side",
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit merge");
     assert!(matches!(
@@ -379,7 +378,7 @@ fn three_way_merge_keeps_new_out_of_cone_paths_skip_worktree() {
         rev(&pair.grit_dir, "side"),
         "side",
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Merged { .. }));
@@ -411,7 +410,7 @@ fn conflicted_out_of_cone_path_is_materialized_like_git() {
         rev(&pair.grit_dir, "theirs"),
         "theirs",
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit merge");
     let IntegrateBranchOutcome::Conflicts { paths, .. } = outcome else {
@@ -444,7 +443,7 @@ fn restore_from_source_matches_git() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit restore");
 
@@ -497,8 +496,8 @@ fn grit_pull(dir: &Path, mode: PullMode) {
             fetch: fetch_opts,
             ..PullOptions::default()
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit pull");
@@ -550,7 +549,7 @@ fn sparse_index_survives_reset_hard_and_switch() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch");
 
@@ -595,7 +594,7 @@ fn switch_does_not_refuse_untracked_file_at_skipped_path() {
                 hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit switch");
         assert_untracked_file_kept(&pair, contents);
@@ -623,7 +622,7 @@ fn merges_do_not_refuse_untracked_file_at_skipped_path() {
             rev(&pair.grit_dir, "side"),
             "side",
             &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("grit merge");
         assert_untracked_file_kept(pair, "mine\n");
@@ -675,7 +674,7 @@ fn switch_with_wholesale_deleted_directories_keeps_new_skip_worktree_rows() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit switch");
 
@@ -762,7 +761,7 @@ fn git_sparse_index_nested_transitions_and_dirty_head_reset() {
                 hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
             },
             &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("switch");
         assert_matches_git(&pair);
@@ -812,7 +811,7 @@ fn sparse_index_switch_preserves_staged_and_unstaged_excluded_changes() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
     assert_matches_git(&pair);
@@ -886,7 +885,7 @@ fn sparse_index_file_directory_and_gitlink_transitions_match_git() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
         },
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
     assert_matches_git(&pair);

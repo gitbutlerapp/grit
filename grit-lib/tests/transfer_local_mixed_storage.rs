@@ -11,8 +11,6 @@ use grit_test_support::rev_parse;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
 use grit_test_support::{git, git_cmd};
@@ -120,8 +118,8 @@ fn grit_clone(url: String, dest: PathBuf) {
         CloneOptions {
             ..CloneOptions::new(url, dest)
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone");
@@ -222,7 +220,7 @@ fn push_to_empty_bare_packs_only_loose_objects_beside_linked_pack() {
         &remote,
         &specs,
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
 

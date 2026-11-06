@@ -24,7 +24,7 @@ use crate::porcelain::switch::{
     verify_tree_transition_allow_local, TreeTransitionPrepareError, TreeTransitionVerifyError,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
-use crate::progress::{poll_cancel, Cancel, NeverCancel, NullProgress, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, NullProgress, ProgressSink};
 use crate::refs::prepare_with_lock_wait;
 use crate::refs::read_symbolic_ref_for_repository;
 use crate::refs::ref_update_flags;
@@ -264,7 +264,7 @@ pub fn apply_absorb_rewrite(
     absorb: &AbsorbPlan,
     opts: &ApplyOptions,
 ) -> Result<AppliedRewrite, HistoryError> {
-    apply_absorb_rewrite_with_cancel(repo, absorb, opts, &NeverCancel)
+    apply_absorb_rewrite_with_cancel(repo, absorb, opts, &CancelToken::never())
 }
 
 /// Like [`apply_absorb_rewrite`], but stops when `cancel` is set and rolls back partial work.
@@ -272,7 +272,7 @@ pub fn apply_absorb_rewrite_with_cancel(
     repo: &Repository,
     absorb: &AbsorbPlan,
     opts: &ApplyOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<AppliedRewrite, HistoryError> {
     let staged_paths = staged_absorb_paths(repo)?;
     let prestate = if !repo.is_bare() && !staged_paths.is_empty() {
@@ -326,7 +326,7 @@ fn apply_absorb_refs_and_worktree(
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
     consumed: Option<Vec<PathState>>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<AppliedRewrite, HistoryError> {
     let plan = &absorb.plan;
     let (old_tree, new_tree) = head_tree_transition(plan);
@@ -378,7 +378,7 @@ fn apply_absorb_worktree_after_refs(
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(), HistoryError> {
     if !staged_paths.is_empty() {
         clear_fixup_staging_after_apply(repo, old_head_commit, staged_paths)?;
@@ -455,7 +455,7 @@ pub fn apply_fixup_rewrite(
     opts: &ApplyOptions,
     staged_paths: &[String],
 ) -> Result<AppliedRewrite, HistoryError> {
-    apply_fixup_rewrite_with_cancel(repo, plan, opts, staged_paths, &NeverCancel)
+    apply_fixup_rewrite_with_cancel(repo, plan, opts, staged_paths, &CancelToken::never())
 }
 
 /// Like [`apply_fixup_rewrite`], but stops when `cancel` is set and rolls back partial work.
@@ -464,7 +464,7 @@ pub fn apply_fixup_rewrite_with_cancel(
     plan: &RewritePlan,
     opts: &ApplyOptions,
     staged_paths: &[String],
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<AppliedRewrite, HistoryError> {
     let consumed = consumed_states_for_undo(repo, opts, staged_paths)?;
     apply_fixup_rewrite_then(repo, plan, opts, staged_paths, consumed, cancel, |_| Ok(()))
@@ -480,7 +480,7 @@ pub(crate) fn apply_fixup_rewrite_then(
     opts: &ApplyOptions,
     staged_paths: &[String],
     consumed: Option<Vec<PathState>>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     finish: impl FnOnce(&Repository) -> Result<(), HistoryError>,
 ) -> Result<AppliedRewrite, HistoryError> {
     let prestate = if !repo.is_bare() && !staged_paths.is_empty() {
@@ -814,7 +814,7 @@ fn apply_fixup_refs_and_worktree(
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
     consumed: Option<Vec<PathState>>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     finish: impl FnOnce(&Repository) -> Result<(), HistoryError>,
 ) -> Result<AppliedRewrite, HistoryError> {
     let (old_tree, new_tree) = head_tree_transition(plan);
@@ -865,7 +865,7 @@ fn apply_fixup_worktree_after_refs(
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(), HistoryError> {
     if !staged_paths.is_empty() {
         clear_fixup_staging_after_apply(repo, old_head_commit, staged_paths)?;
@@ -1051,7 +1051,7 @@ pub fn apply_rewrite(
     plan: &RewritePlan,
     opts: &ApplyOptions,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<AppliedRewrite, HistoryError> {
     verify_live_head_matches_plan(repo, &plan.head)?;
     let (old_tree, new_tree) = head_tree_transition(plan);
@@ -1115,7 +1115,7 @@ pub(crate) fn apply_undo_rewrite(
     plan: &RewritePlan,
     opts: &ApplyOptions,
     work: Option<&UndoWork>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<AppliedRewrite, HistoryError> {
     verify_live_head_matches_plan(repo, &plan.head)?;
     let before = verify_undo_worktree(repo, plan, work)?;
@@ -1166,7 +1166,7 @@ fn run_planned_rewrite_apply<F>(
     opts: &ApplyOptions,
     apply_kind: rewrite_journal::RewriteApplyKind,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     apply_worktree: F,
 ) -> Result<AppliedRewrite, HistoryError>
 where
@@ -1175,7 +1175,7 @@ where
         Option<&ObjectId>,
         &ObjectId,
         &mut dyn ProgressSink,
-        &dyn Cancel,
+        &CancelToken,
     ) -> Result<Option<UndoWork>, HistoryError>,
 {
     let mut work = None;
@@ -1419,7 +1419,7 @@ fn apply_head_tree_to_worktree(
     to_tree: &ObjectId,
     index_lock: Option<&mut crate::index::IndexLock>,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<(), HistoryError> {
     checkout_tree_transition_allow_local_with_preserved(
         repo,
@@ -2374,7 +2374,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Skip,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("invalid notes rewrite mode");
         assert!(
@@ -2516,7 +2516,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("inject");
         assert!(matches!(err, HistoryError::RefApply { .. }));
@@ -2648,7 +2648,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("inject checkout failure");
         crate::test_support::inject::set_test_inject_index_write_fail(false);
@@ -3228,7 +3228,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("inject checkout failure");
         crate::test_support::inject::set_test_inject_index_write_fail(false);
@@ -3368,7 +3368,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("inject checkout failure");
         crate::test_support::inject::set_test_inject_index_write_fail(false);
@@ -3494,7 +3494,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("inject checkout failure");
         crate::test_support::inject::set_test_inject_index_write_fail(false);
@@ -3731,7 +3731,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("inject checkout failure");
         crate::test_support::inject::set_test_inject_index_write_fail(false);
@@ -3872,7 +3872,7 @@ mod inject_and_apply_tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("checkout must fail");
         crate::test_support::inject::set_test_inject_index_write_fail(false);

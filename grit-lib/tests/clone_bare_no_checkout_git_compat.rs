@@ -3,8 +3,7 @@
 use std::process::Command;
 
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneCheckout, CloneOptions};
 
 fn git_env(cmd: &mut Command) {
@@ -106,8 +105,8 @@ fn clone_bare_matches_git_layout() {
                 grit_bare.path().to_path_buf(),
             )
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit bare clone");
@@ -185,8 +184,8 @@ fn clone_no_checkout_leaves_no_index() {
                 grit_dest.path().to_path_buf(),
             )
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit no-checkout clone");
@@ -225,8 +224,8 @@ fn clone_checkout_counts_files() {
     let dest = tempfile::tempdir().expect("dest");
     let outcome = clone_repo(
         CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf()),
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");
@@ -267,8 +266,8 @@ fn local_clone_checkout_honors_thread_policy_on_repository() {
             thread_policy: policy,
             ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("local clone with checkout");

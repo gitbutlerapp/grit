@@ -61,7 +61,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch despite hostile index path");
 

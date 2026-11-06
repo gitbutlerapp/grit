@@ -112,7 +112,7 @@ fn replay_pick(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result<R
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 
@@ -126,7 +126,7 @@ fn replay_revert(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 

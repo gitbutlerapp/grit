@@ -20,8 +20,8 @@ use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::IndexStagingThresholds;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
@@ -167,8 +167,8 @@ fn fetch_into_custom_primary_round_trips_with_git() {
         .fetch(
             &remote,
             fetch_all_branches(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("fetch into custom primary");
@@ -202,8 +202,8 @@ fn fetch_from_bundle_into_custom_primary_succeeds() {
         .fetch(
             &remote,
             fetch_all_branches(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("bundle fetch into custom primary");
@@ -222,8 +222,8 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
         .fetch(
             &remote,
             fetch_main_tracking(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("initial fetch");
@@ -237,8 +237,8 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
         .fetch(
             &remote,
             fetch_main_tracking(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("incremental fetch");
@@ -263,8 +263,8 @@ fn fetch_dry_run_into_custom_primary_classifies_without_persisting() {
                 opts.dry_run = true;
                 opts
             },
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("dry-run fetch");
@@ -410,8 +410,8 @@ fn fetch_all_succeeds_with_custom_primary() {
             &FetchOptions::default(),
             None,
             None,
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("fetch_all");
@@ -445,8 +445,8 @@ fn push_from_custom_primary_round_trips_with_git() {
             &remote,
             &[spec],
             PushOptions::default(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("push from custom primary");
@@ -472,8 +472,8 @@ fn partial_fetch_custom_primary_is_refused() {
                 opts.filter = Some(grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone);
                 opts
             },
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect_err("partial fetch");
@@ -496,7 +496,7 @@ fn fsck_on_custom_primary_validates_the_store() {
     commit_into(&repo, b"x\n");
     let options = FsckOptions::default();
     let report = repo
-        .fsck(&options, &mut NullProgress, &NeverCancel)
+        .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck reads objects through the custom primary");
     assert!(report.objects_checked > 0);
     assert!(report.issues.is_empty(), "{:?}", report.issues);
@@ -518,7 +518,7 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
             ..StageOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage into custom primary");
     assert_eq!(outcome.added.len(), 2, "{outcome:?}");
@@ -542,7 +542,7 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
         &req,
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit staged");
 
@@ -561,7 +561,7 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
             },
         ),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("parallel restage into custom primary");
     let deeper =
@@ -579,7 +579,7 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
         &req,
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("auto-stage commit into custom primary");
     assert_ne!(first.oid, second.oid);
@@ -612,8 +612,8 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
         .fetch(
             &remote,
             fetch_all_branches(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("files-primary fetch");
@@ -639,8 +639,8 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
             &dest,
             &[spec],
             PushOptions::default(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("files-primary push");

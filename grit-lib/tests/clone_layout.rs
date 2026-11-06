@@ -7,8 +7,7 @@ use std::process::Command;
 
 use grit_lib::objects::pack::verify_pack_and_collect;
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::transfer::{fetch_local, CloneReflog, FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
@@ -315,8 +314,8 @@ fn library_clone_api_passes_fsck_and_status() {
         CloneOptions {
             ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("library clone");
@@ -398,7 +397,7 @@ fn clone_tag_layout_covers_bare_no_tags_shallow_and_empty() {
         }
         git_args.extend([&url, "."]);
         assert!(git_in(control.path(), &git_args));
-        let result = clone_repo(opts, &mut NullProgress, &NeverCancel, None).unwrap();
+        let result = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).unwrap();
         let git_dir = result.repo.git_dir();
         let tags = git_out(
             dest.path(),
@@ -448,8 +447,8 @@ fn clone_tag_layout_covers_bare_no_tags_shallow_and_empty() {
     let dest = tempfile::tempdir().unwrap();
     let result = clone_repo(
         CloneOptions::new(empty.path().to_string_lossy(), dest.path().to_path_buf()),
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .unwrap();
@@ -555,7 +554,7 @@ fn clone_of_many_branches_packs_them_in_one_file_like_git() {
         }
         git_args.extend([url.as_str(), "."]);
         assert!(git_in(control.path(), &git_args));
-        let result = clone_repo(opts, &mut NullProgress, &NeverCancel, None).unwrap();
+        let result = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).unwrap();
         let git_dir = result.repo.git_dir().to_path_buf();
 
         let imported = if bare {

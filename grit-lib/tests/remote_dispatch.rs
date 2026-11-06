@@ -437,8 +437,8 @@ fn remote_push_local_file_url_matches_git() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &grit_lib::progress::CancelToken::never(),
             None,
         )
         .unwrap();
@@ -463,8 +463,8 @@ fn remote_push_local_file_url_matches_git() {
             &repo,
             &[push_spec],
             PushOptions::default(),
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &grit_lib::progress::CancelToken::never(),
             None,
         )
         .unwrap();
@@ -589,8 +589,8 @@ fn remote_fetch_git_daemon_matches_git() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &grit_lib::progress::CancelToken::never(),
             None,
         )
         .unwrap();

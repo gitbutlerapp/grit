@@ -8,7 +8,7 @@ use grit_lib::diff::{
     DiffIndexToWorktreeOptions, DiffStatus,
 };
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 use std::fs;
@@ -231,7 +231,13 @@ fn assert_eol_only_rewrite_is_clean(
         ..StatusOptions::default()
     };
     for run in 0..2 {
-        let model = status(&grit_repo, &options, &mut NullProgress, &NeverCancel).expect("status");
+        let model = status(
+            &grit_repo,
+            &options,
+            &mut NullProgress,
+            &CancelToken::never(),
+        )
+        .expect("status");
         assert!(model.is_clean(), "{case} run {run}: {:?}", model.unstaged);
     }
 
@@ -307,7 +313,7 @@ fn eol_crlf_real_size_change_is_still_modified() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let unstaged: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();

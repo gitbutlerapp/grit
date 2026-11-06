@@ -16,7 +16,6 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::worktree::attributes::collect_attrs_for_path;
 use grit_lib::worktree::ignore::IgnoreMatcher;
@@ -142,7 +141,9 @@ fn bench_add_stage_all_100k(c: &mut Criterion) {
     group.throughput(Throughput::Elements(100_000));
     group.bench_function("stat_clean", |b| {
         let _ = wt;
-        b.iter(|| black_box(stage(repo, &opts, &mut progress, &NeverCancel).expect("stage all")));
+        b.iter(|| {
+            black_box(stage(repo, &opts, &mut progress, &CancelToken::never()).expect("stage all"))
+        });
     });
     group.finish();
 }
@@ -238,7 +239,7 @@ fn bench_status_with_nested_gitattributes_l(c: &mut Criterion) {
                     &fx.status_plain_l_repo,
                     &opts,
                     &mut NullProgress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                 )
                 .expect("status plain L"),
             );
@@ -251,7 +252,7 @@ fn bench_status_with_nested_gitattributes_l(c: &mut Criterion) {
                     &fx.status_nested_attr_repo,
                     &opts,
                     &mut NullProgress,
-                    &NeverCancel,
+                    &CancelToken::never(),
                 )
                 .expect("status nested attrs L"),
             );

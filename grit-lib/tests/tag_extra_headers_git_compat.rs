@@ -8,7 +8,7 @@ use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::objects::{
     extra_header_values, parse_tag, serialize_tag, set_extra_header, ObjectKind, TagData,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -198,8 +198,8 @@ fn grit_fsck_ignores_tag_extra_headers() {
     );
 
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
-    let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let config = repo.config().snapshot().expect("config");
+    let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck");
+    let config = repo.config().expect("config");
     assert!(
         report.ok(&config, &opts),
         "expected fsck ok; issues: {:?}",

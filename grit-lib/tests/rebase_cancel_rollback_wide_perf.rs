@@ -6,9 +6,7 @@
 use std::time::{Duration, Instant};
 
 use grit_lib::porcelain::commit::{commit_with_scope, CommitScope};
-use grit_lib::progress::{
-    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
-};
+use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
@@ -91,7 +89,7 @@ fn repo_for_rebase() -> (
             "reset",
         ),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("reset");
     grit_lib::refs::write_ref(repo.git_dir(), "refs/heads/topic", &base).expect("topic");
@@ -109,7 +107,7 @@ fn commit_all(repo: &Repository, msg: &str) -> grit_lib::objects::ObjectId {
         &grit_test_support::commit_request(msg, IDENT),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -158,7 +156,7 @@ fn run_rebase(
             repo,
             &opts,
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
     };
     let elapsed = start.elapsed();

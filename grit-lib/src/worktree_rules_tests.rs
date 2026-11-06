@@ -16,7 +16,7 @@ mod tests {
     use crate::index::{entry_from_stat, MODE_REGULAR};
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::repo::{init_repository, Repository};
     use crate::worktree_rules::file_load_counters;
     use crate::write_tree::write_tree_from_index;
@@ -58,7 +58,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(
@@ -72,7 +72,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(
@@ -119,7 +119,7 @@ mod tests {
                 ..StatusOptions::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         assert!(
@@ -161,7 +161,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let mut index = repo.load_index().unwrap();
@@ -234,7 +234,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
         let index = repo.load_index().unwrap();
@@ -299,7 +299,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
 

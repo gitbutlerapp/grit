@@ -24,6 +24,7 @@ use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::path_icase::{DentrySpellingCache, ScheduledDeletePathLookup, Stage0TrackedPaths};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
 use crate::porcelain::status::{collect_untracked_and_ignored_with_cache, IgnoredMode};
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::sparse_checkout::SparseCheckout;
 use crate::state::resolve_head_for_repository;
@@ -2715,7 +2716,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         );
         assert!(
             switch_err.is_err(),
@@ -3096,7 +3097,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         );
         assert!(
             switch_err.is_err(),
@@ -3522,7 +3523,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .map(|_| ())
     }

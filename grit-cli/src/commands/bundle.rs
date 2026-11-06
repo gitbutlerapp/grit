@@ -304,11 +304,16 @@ pub fn run_create(
             prerequisites,
         });
     }
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = grit_lib::progress::NullProgress;
     let refs = repo
         .bundles()
-        .create_with_options(&options, &path, &mut progress, &interrupt)
+        .create_with_options(
+            &options,
+            &path,
+            &mut progress,
+            &crate::interrupt::process_cancel_token(),
+        )
         .map_err(map_bundle_error)?;
     Ok(BundleCreateOutcome {
         path: filesystem_path_for_user(&path),
@@ -373,10 +378,14 @@ pub fn run_unbundle(path: PathBuf, dry_run: bool) -> Result<BundleUnbundleOutcom
             missing_prerequisites,
         });
     }
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let outcome = repo
         .bundles()
-        .unbundle_with_progress(&path, &mut grit_lib::progress::NullProgress, &interrupt)
+        .unbundle_with_progress(
+            &path,
+            &mut grit_lib::progress::NullProgress,
+            &crate::interrupt::process_cancel_token(),
+        )
         .map_err(map_bundle_error)?;
     Ok(BundleUnbundleOutcome {
         path: filesystem_path_for_user(&path),

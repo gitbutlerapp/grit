@@ -339,7 +339,7 @@ fn commit_one_file(repo: &Repository, dir: &Path) -> grit_lib::error::Result<Com
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let ident = "T <t@t> 1 +0000".to_string();
@@ -352,7 +352,7 @@ fn commit_one_file(repo: &Repository, dir: &Path) -> grit_lib::error::Result<Com
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 
@@ -538,7 +538,7 @@ fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("post-checkout runs after the switch and must not fail it");
     assert!(outcome.hooks_run.is_empty());
@@ -588,7 +588,7 @@ fn commit_staged(
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let ident = "T <t@t> 1 +0000".to_string();
@@ -601,7 +601,7 @@ fn commit_staged(
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 

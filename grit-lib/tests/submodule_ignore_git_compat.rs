@@ -10,7 +10,7 @@ use grit_lib::diff::{
     RenameDetection, UncommittedDiff,
 };
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::StashPushOptions;
 use grit_test_support::git;
@@ -103,7 +103,7 @@ fn dirty_submodule_only_reported_without_ignore() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -123,7 +123,7 @@ fn dirty_submodule_only_reported_without_ignore() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -164,7 +164,7 @@ fn stash_skips_dirty_submodule_only_worktree() {
     };
     let pushed = repo
         .stash()
-        .push(&opts, &mut NullProgress, &NeverCancel)
+        .push(&opts, &mut NullProgress, &CancelToken::never())
         .expect("stash push");
     assert!(
         pushed.is_none(),
@@ -195,7 +195,7 @@ fn moved_submodule_head_honors_ignore_dirty_not_all() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -214,7 +214,7 @@ fn moved_submodule_head_honors_ignore_dirty_not_all() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -238,7 +238,7 @@ fn short_status_uses_lowercase_m_for_content_dirty_gitlink() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let lines = grit_lib::porcelain::status::short_status_lines(&model);
@@ -354,7 +354,7 @@ fn gitmodules_duplicate_ignore_last_value_wins() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -387,7 +387,7 @@ fn gitmodules_logical_name_ignore_all_hides_dirty_submodule() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(
@@ -434,7 +434,7 @@ fn staged_gitlink_visible_in_status_hidden_in_diff_with_ignore_all() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(

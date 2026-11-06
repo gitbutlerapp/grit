@@ -650,7 +650,7 @@ mod tests {
     use crate::ident::Signature;
     use crate::objects::{serialize_tag, ObjectKind, TagData};
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::refs::store::RefName;
     use crate::repo::{InitOptions, Repository};
 
@@ -666,7 +666,7 @@ mod tests {
         req.author = Some(Signature::new("A", "a@e.com", repo.identity_now()).expect("author"));
         req.committer =
             Some(Signature::new("C", "c@e.com", repo.identity_now()).expect("committer"));
-        create_commit(repo, &req, &mut NullProgress, &NeverCancel)
+        create_commit(repo, &req, &mut NullProgress, &CancelToken::never())
             .expect("commit")
             .oid
     }

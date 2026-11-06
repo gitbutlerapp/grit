@@ -881,7 +881,7 @@ fn stop_on_replay_conflict(
                 &parent_tree,
                 &merge,
                 &mut crate::progress::NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )?;
             return Ok(parent);
         }
@@ -1058,7 +1058,7 @@ fn restore_exec_prestate(
         &current_tree,
         &pre.head_tree,
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
@@ -1284,7 +1284,7 @@ pub(super) fn resume_exec_rebase(
     apply: &super::ApplyOptions,
     skip: bool,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<super::RebaseOutcome, super::RebaseSessionError> {
     let state = load_exec_stop(repo)?;
     let rewrite = &state.rewrite;
@@ -1549,7 +1549,7 @@ mod tests {
     use crate::objects::parse_commit;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::refs::{resolve_ref, write_ref, write_symbolic_ref};
     use crate::repo::{InitOptions, Repository};
 
@@ -2043,7 +2043,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert!(
@@ -2176,7 +2176,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Skip,
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("apply");
         assert_eq!(

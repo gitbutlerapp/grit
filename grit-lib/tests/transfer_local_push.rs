@@ -84,7 +84,7 @@ fn push_local_full_lifecycle() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push main");
 
@@ -139,7 +139,7 @@ fn push_local_full_lifecycle() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push call");
     assert_eq!(outcome.results[0].status, PushRefStatus::RejectNeedsForce);
@@ -161,7 +161,7 @@ fn push_local_full_lifecycle() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push call");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -188,7 +188,7 @@ fn push_local_full_lifecycle() {
         remote_git,
         &delete_main,
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete current branch push call");
     assert_eq!(outcome.results[0].status, PushRefStatus::RemoteRejected);
@@ -203,7 +203,7 @@ fn push_local_full_lifecycle() {
         remote_git,
         &delete_main,
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete push call");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -234,7 +234,7 @@ fn push_local_full_lifecycle() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("cas push call");
     assert_eq!(outcome.results[0].status, PushRefStatus::RejectStale);
@@ -256,7 +256,7 @@ fn push_local_full_lifecycle() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("cas push call (matching)");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -303,7 +303,7 @@ fn push_local_atomic_rejects_all_on_any_failure() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("seed locked ref");
     assert_eq!(remote_ref(remote_git, "refs/heads/locked"), Some(c1));
@@ -339,7 +339,7 @@ fn push_local_atomic_rejects_all_on_any_failure() {
             dry_run: false,
             ..PushOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("atomic push call");
 
@@ -410,7 +410,7 @@ fn push_local_non_atomic_df_applies_first_ref_only() {
             },
         ],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-atomic df push");
 
@@ -478,7 +478,7 @@ fn push_local_atomic_store_batch_df_marks_atomic_push_failed() {
             atomic: true,
             ..PushOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("atomic df push");
 
@@ -541,7 +541,7 @@ fn push_local_updates_remote_tracking_ref_when_configured() {
             tracking_remote: Some("origin".to_owned()),
             ..PushOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push with tracking");
 
@@ -596,7 +596,7 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
             tracking_remote: Some("origin".to_owned()),
             ..PushOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("initial push");
 
@@ -620,7 +620,7 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
             tracking_remote: Some("origin".to_owned()),
             ..PushOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("up-to-date push");
 
@@ -681,7 +681,7 @@ fn push_local_honors_custom_fetch_refspec_for_tracking() {
             tracking_remote: Some("origin".to_owned()),
             ..PushOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push with custom tracking mapping");
 
@@ -724,7 +724,7 @@ fn push_local_missing_remote_is_error() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("push to missing remote must fail");
     let msg = err.to_string();
@@ -778,7 +778,7 @@ fn push_local_does_not_use_decoy_repo_when_parent_relative_target_missing() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("missing ../wrong.git must fail");
     assert!(
@@ -858,7 +858,7 @@ fn linked_worktree_resolves_relative_remote_from_worktree_root() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push from linked worktree with resolved remote");
     assert_eq!(outcome.results.len(), 1);
@@ -913,7 +913,7 @@ fn push_local_into_empty_repo_links_local_pack() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
 
@@ -1004,7 +1004,7 @@ fn push_local_shallow_to_empty_remote_with_shallow_update() {
         dest_git,
         &[spec],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("shallow push with receive.shallowUpdate");
     assert_eq!(outcome.results.len(), 1);
@@ -1046,7 +1046,7 @@ fn push_local_shallow_to_empty_remote_refused_without_shallow_update() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push completes with per-ref refusal");
     assert_eq!(outcome.results.len(), 1);
@@ -1086,7 +1086,7 @@ fn push_local_shallow_to_remote_with_full_history_needs_no_shallow_file() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push onto remote that already has history");
     assert_eq!(outcome.results[0].status, PushRefStatus::UpToDate);
@@ -1157,7 +1157,7 @@ fn push_local_installs_single_pack_without_loose_objects() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push to empty bare remote");
 
@@ -1229,7 +1229,7 @@ fn push_local_concurrent_creates_of_same_branch_never_lose_an_update() {
                                 ..Default::default()
                             }],
                             &PushOptions::default(),
-                            &grit_lib::progress::NeverCancel,
+                            &grit_lib::progress::CancelToken::never(),
                         )
                         .expect("push call");
                         (*head, outcome.results[0].status.clone())
@@ -1331,7 +1331,7 @@ fn push_local_rebuilds_pack_when_store_has_unreachable_objects() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);

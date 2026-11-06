@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, StageOptions, StageOutcome};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -86,7 +87,7 @@ fn stage_all(root: &Path) -> (StageOutcome, Duration) {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     (outcome, t0.elapsed())

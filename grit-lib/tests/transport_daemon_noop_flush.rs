@@ -12,7 +12,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::Remote;
 use grit_lib::repo::Repository;
@@ -154,8 +154,8 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
         .fetch(
             &repo,
             fetch_opts.clone(),
-            &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &CancelToken::never(),
             None,
         )
         .unwrap();
@@ -165,8 +165,8 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &CancelToken::never(),
             None,
         )
         .unwrap();
@@ -186,8 +186,8 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
                 ..Default::default()
             }],
             PushOptions::default(),
-            &mut grit_lib::progress::NullProgress,
-            &NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &CancelToken::never(),
             None,
         )
         .unwrap();

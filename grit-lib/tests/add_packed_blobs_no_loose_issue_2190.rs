@@ -13,7 +13,7 @@ use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::stage_tracked::{
     stage_tracked_modifications_with_thresholds, IndexStagingThresholds,
 };
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, unique_tmp};
 
@@ -52,7 +52,7 @@ fn stage_with_grit(root: &Path, pathspecs: &[&str]) {
         mode: StageMode::All,
         ..StageOptions::default()
     };
-    stage(&repo, &opts, &mut NullProgress, &NeverCancel).expect("stage");
+    stage(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("stage");
 }
 
 fn assert_index_matches_head_and_fsck(root: &Path) {

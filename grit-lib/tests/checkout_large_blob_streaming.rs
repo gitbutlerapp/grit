@@ -22,7 +22,7 @@ const BIG: usize = 3 * 1024 * 1024 + 123;
 #[test]
 fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
     use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
-    use grit_lib::progress::{CancelToken, ProgressSink};
+    use grit_lib::progress::{ProgressSink, Token};
 
     /// Cancels on the ninth file and records how many files were on disk at that moment (the
     /// checkout rolls them back before it returns).
@@ -240,7 +240,7 @@ fn restore_from_index(repo: &Repository, paths: &[&str]) {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
 }
@@ -257,7 +257,7 @@ fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) {
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch");
 }
@@ -287,7 +287,7 @@ fn exercise(storage: Storage) {
             "reset: test",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("reset --hard");
     assert_git_clean(&fx, &format!("{storage:?} reset --hard"));
@@ -341,7 +341,7 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     );
     assert!(err.is_err(), "restore of a truncated blob must fail");
     assert!(
@@ -359,7 +359,7 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
             "reset: test",
         ),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     );
     assert!(err.is_err(), "reset --hard to a truncated blob must fail");
     assert_eq!(
@@ -410,7 +410,7 @@ fn large_text_blob_under_autocrlf_is_converted_not_copied() {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("restore");
 

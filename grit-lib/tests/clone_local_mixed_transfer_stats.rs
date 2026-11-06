@@ -3,8 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
 fn git(dir: &Path, args: &[&str]) {
@@ -80,8 +79,8 @@ fn clone_local_repacked_plus_loose_reports_full_transfer_stats() {
         CloneOptions {
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");

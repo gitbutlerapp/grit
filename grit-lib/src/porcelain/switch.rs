@@ -452,7 +452,7 @@ pub fn switch_repository(
     repo: &Repository,
     opts: &SwitchOptions,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<SwitchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
@@ -477,7 +477,7 @@ fn switch_without_hooks(
     repo: &Repository,
     opts: &SwitchOptions,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<SwitchOutcome> {
     let (
         target_oid,
@@ -626,7 +626,7 @@ fn switch_to_target(
     reflog_to_label: &str,
     dry_run: bool,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<SwitchOutcome> {
     let head_before = resolve_head_for_repository(repo)?;
     let checkout_head = if needs_initial_checkout(&index) {
@@ -1205,7 +1205,7 @@ pub(crate) fn checkout_tree_transition_allow_local(
         &HashSet::new(),
         None,
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
 }
 
@@ -1215,7 +1215,7 @@ pub(crate) fn checkout_tree_transition_allow_local_reset(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new())
         .map_err(map_switch_tree_transition_prepare_error)?;
@@ -1234,7 +1234,7 @@ pub(crate) fn checkout_tree_transition_allow_local_with_preserved(
     force_preserve_worktree: &HashSet<String>,
     index_lock: Option<&mut IndexLock>,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     let prepared =
         prepare_tree_transition_allow_local(repo, from_tree, to_tree, force_preserve_worktree)
@@ -1247,7 +1247,7 @@ pub(crate) fn checkout_prepared_tree_transition_for_merge(
     repo: &Repository,
     prepared: PreparedSwitch,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     checkout_prepared_tree_transition(repo, prepared, None, progress, cancel)
 }
@@ -1259,7 +1259,7 @@ fn checkout_prepared_tree_transition(
     mut prepared: PreparedSwitch,
     index_lock: Option<&mut IndexLock>,
     progress: &mut dyn crate::progress::ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
     let mut owned_lock = None;
     let index_lock = match index_lock {
@@ -1422,7 +1422,7 @@ mod tests {
     use super::*;
     use crate::objects::{serialize_commit, serialize_tag, CommitData, ObjectKind, TagData};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::repo::{init_repository, Repository};
     use crate::state::resolve_head_for_repository;
     use crate::state::HeadState;
@@ -1651,7 +1651,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("must refuse overwrite");
         assert!(matches!(
@@ -1794,7 +1794,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("local changes should block switch");
         assert!(matches!(
@@ -1835,7 +1835,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("switch");
 
@@ -1844,7 +1844,7 @@ mod tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status");
         assert_eq!(st.unstaged.len(), 1);
@@ -1883,7 +1883,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("conflict");
         assert!(matches!(
@@ -1927,7 +1927,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("switch");
         let config = repo.config().snapshot().expect("config");
@@ -2014,7 +2014,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("switch");
         let config = repo.config().snapshot().expect("config");
@@ -2078,7 +2078,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("detach at annotated tag");
 
@@ -2102,7 +2102,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("detach");
         assert_eq!(detached.branch, None);
@@ -2120,7 +2120,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("preview");
         assert_eq!(preview.branch.as_deref(), Some("main"));
@@ -2135,7 +2135,7 @@ mod tests {
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("create");
         assert_eq!(attached.branch.as_deref(), Some("topic"));
@@ -2257,7 +2257,7 @@ mod tests {
                 hooks: Default::default(),
             },
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("switch")
     }

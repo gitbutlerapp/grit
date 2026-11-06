@@ -11,7 +11,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{forced_parallel_policy, git};
 
@@ -118,7 +119,8 @@ fn serial_and_parallel_status_preserve_mixed_raw_paths() {
             ..StatusOptions::default()
         };
         for _ in 0..2 {
-            let model = status(&repo, &options, &mut NullProgress, &NeverCancel).expect("status");
+            let model =
+                status(&repo, &options, &mut NullProgress, &CancelToken::never()).expect("status");
             assert!(model.staged.is_empty());
             let mut untracked: Vec<_> = model
                 .untracked

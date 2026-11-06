@@ -98,8 +98,8 @@ pub fn run(force: bool, dry_run: bool, quiet: bool) -> Result<RepackOutcome> {
     let repo = context::discover()?;
     let mut opts = RepackOptions::with_dry_run(dry_run);
     opts.force_recompress = force;
-    let interrupt = crate::interrupt::InterruptCancel::install();
-    let stats = repack_all_with_cancel(&repo, &opts, &interrupt)
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let stats = repack_all_with_cancel(&repo, &opts, &crate::interrupt::process_cancel_token())
         .map_err(crate::json_error::map_lib_error)?;
     Ok((stats, dry_run, quiet).into())
 }

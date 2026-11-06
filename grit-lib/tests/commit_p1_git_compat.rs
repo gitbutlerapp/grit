@@ -105,7 +105,7 @@ fn grit_commit_signoff_and_trailer_body_matches_git() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let mut req = commit_req("subject\n");
@@ -122,7 +122,7 @@ fn grit_commit_signoff_and_trailer_body_matches_git() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -189,7 +189,7 @@ fn grit_commit_amend_reuse_message_matches_git() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let mut req = commit_req("");
@@ -201,7 +201,7 @@ fn grit_commit_amend_reuse_message_matches_git() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -224,7 +224,7 @@ fn grit_commit_date_and_author_match_git_log() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let mut req = commit_req("dated commit\n");
@@ -238,7 +238,7 @@ fn grit_commit_date_and_author_match_git_log() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -259,7 +259,7 @@ fn grit_commit_reuse_message_matches_git_c() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let mut first = commit_req("original subject\n\nbody\n");
@@ -272,7 +272,7 @@ fn grit_commit_reuse_message_matches_git_c() {
         &repo,
         &first,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 
@@ -281,7 +281,7 @@ fn grit_commit_reuse_message_matches_git_c() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let mut req = commit_req("");
@@ -291,7 +291,7 @@ fn grit_commit_reuse_message_matches_git_c() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
 

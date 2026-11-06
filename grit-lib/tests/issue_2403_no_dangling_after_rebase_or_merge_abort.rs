@@ -7,7 +7,7 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::merge::{abort_branch_merge, integrate_branch, IntegrateBranchOutcome};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     start_rebase, ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
@@ -151,7 +151,7 @@ fn clean_add_only_rebase_leaves_no_dangling_empty_objects() {
             pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }));
@@ -192,7 +192,7 @@ fn conflicted_merge_abort_leaves_no_dangling_empty_objects() {
         oid(root, "side"),
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -253,7 +253,7 @@ fn conflict_with_clean_auto_merge_keeps_stage0_blob_reachable() {
         oid(root, "side"),
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -325,7 +325,7 @@ fn sha256_rebase_and_merge_abort_leave_no_dangling_empty_objects() {
             pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("rebase");
     assert!(matches!(outcome, RebaseOutcome::Done { .. }));
@@ -349,7 +349,7 @@ fn sha256_rebase_and_merge_abort_leave_no_dangling_empty_objects() {
         oid(root, "side"),
         "side",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));

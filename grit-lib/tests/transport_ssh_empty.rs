@@ -13,8 +13,6 @@ use std::process::Command;
 
 use grit_lib::error::{Error, RemoteUnreadableReason};
 use grit_lib::prelude::Environment;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::push::push_remote;
@@ -156,8 +154,8 @@ fn fetch_empty_bare_over_ssh_is_noop() {
         &local.join(".git"),
         &mut *conn,
         &mut opts,
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("fetch against empty remote");
 }
@@ -188,8 +186,8 @@ fn clone_empty_bare_over_ssh_succeeds() {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
 
-    let outcome =
-        clone(opts, &mut NullProgress, &NeverCancel, None).expect("clone empty bare over ssh");
+    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None)
+        .expect("clone empty bare over ssh");
 
     assert!(outcome.branches_with_commits.is_empty());
     assert!(dest.join(".git").is_dir());
@@ -243,8 +241,8 @@ fn push_to_empty_bare_over_ssh_without_hung_up_stderr() {
         &mut *conn,
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push to empty bare");
     drop(conn);
@@ -349,7 +347,7 @@ fn clone_empty_bare_over_ssh_flush_only_v0_succeeds() {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
 
-    let outcome = clone(opts, &mut NullProgress, &NeverCancel, None)
+    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None)
         .expect("clone flush-only empty over ssh");
     assert!(outcome.branches_with_commits.is_empty());
     assert!(dest.join(".git").is_dir());
@@ -435,8 +433,8 @@ fn fetch_empty_bare_over_ssh_flush_only_v0_is_noop() {
         &local.join(".git"),
         &mut *conn,
         &mut opts,
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("fetch against flush-only empty remote");
 }
@@ -506,7 +504,7 @@ fn ssh_connect_system_git_empty_bare_v0_then_fsck() {
         )],
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
-    clone(opts, &mut NullProgress, &NeverCancel, None).expect("clone");
+    clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
     let fsck = Command::new("git")
         .args(["-C", dest.to_str().expect("utf8"), "fsck"])
         .status()

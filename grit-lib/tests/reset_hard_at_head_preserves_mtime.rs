@@ -88,7 +88,7 @@ fn hard_reset_at_head_preserves_file_mtimes_on_clean_tree() {
         &repo,
         &reset_opts(head, ResetMode::Hard),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("hard reset at HEAD");
 

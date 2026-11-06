@@ -10,7 +10,8 @@ use std::time::Duration;
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
-use grit_lib::progress::{CancelToken, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::{NullProgress, Token};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse::resolve_revision_for_verify;
 

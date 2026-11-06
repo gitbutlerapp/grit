@@ -564,8 +564,8 @@ fn run_unsupported_atomic_matrix(
                 dry_run,
                 ..Default::default()
             },
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -596,8 +596,8 @@ fn run_unsupported_atomic_matrix(
         &mut *conn,
         &specs,
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert_eq!(out.results.len(), 2);
@@ -911,8 +911,8 @@ fn push_matrix_over_git_daemon() {
             &mut *conn,
             specs,
             opts,
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push_remote over git daemon")
     };
@@ -977,8 +977,8 @@ fn push_matrix_over_ssh() {
             &mut *conn,
             specs,
             opts,
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push_remote over ssh")
     };
@@ -1053,8 +1053,8 @@ fn push_matrix_over_smart_http() {
             &url,
             specs,
             opts,
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push_http over grit-http-server")
     };
@@ -1148,8 +1148,8 @@ fn remote_rejection_surfaces_over_git_daemon() {
         &mut *conn,
         &[spec(Some(graph.c2), "refs/heads/main")],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push against declining hook completes");
     drop(conn);
@@ -1206,8 +1206,8 @@ fn remote_rejection_surfaces_over_ssh() {
         &mut *conn,
         &[spec(Some(graph.c2), "refs/heads/main")],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("ssh push against declining hook completes");
     drop(conn);
@@ -1444,8 +1444,8 @@ fn report_status_v1_and_v2_both_parse_over_ssh() {
             &mut *conn,
             &push_specs,
             &PushOptions::default(),
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push reading a v1 report");
         drop(conn);
@@ -1488,8 +1488,8 @@ fn report_status_v1_and_v2_both_parse_over_ssh() {
             &mut *conn,
             &push_specs,
             &PushOptions::default(),
-            &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut NoProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push reading a v2 report");
         drop(conn);
@@ -1554,8 +1554,8 @@ fn push_succeeds_when_fake_receive_pack_exits_immediately_after_report() {
         &mut *conn,
         &push_specs,
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push must succeed when report-status was complete before reset");
     drop(conn);

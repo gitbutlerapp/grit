@@ -64,7 +64,7 @@ use crate::porcelain::tree_merge_checkout::{
     write_index_after_merge_checkout,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::refs;
 use crate::refs::store::RawRef;
 use crate::refs::{
@@ -933,7 +933,7 @@ pub fn integrate_branch(
     other_oid: ObjectId,
     label: &str,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     integrate_branch_with(
         repo,
@@ -980,7 +980,7 @@ pub fn integrate_branch_with(
     label: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     let outcome = integrate_branch_without_hooks(
         repo, into_ref, into_oid, other_oid, label, options, progress, cancel,
@@ -1041,7 +1041,7 @@ pub fn integrate_detached_head(
     other_oid: ObjectId,
     label: &str,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     integrate_detached_head_with(
         repo,
@@ -1065,7 +1065,7 @@ pub fn integrate_detached_head_with(
     label: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     let outcome = integrate_at_tip_without_hooks(
         repo,
@@ -1105,7 +1105,7 @@ fn integrate_branch_without_hooks(
     label: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     let into_ref = canonical_integrate_into_ref(repo, into_ref)?;
     integrate_at_tip_without_hooks(
@@ -1129,7 +1129,7 @@ fn integrate_at_tip_without_hooks(
     label: &str,
     options: &MergeOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     if into_oid == other_oid || is_ancestor(repo, other_oid, into_oid)? {
         write_orig_head(repo, into_oid)?;
@@ -1332,7 +1332,7 @@ pub fn integrate_branch_with_options(
     label: &str,
     options: IntegrateBranchOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<IntegrateBranchOutcome> {
     integrate_branch_with(
         repo,
@@ -1565,7 +1565,7 @@ pub fn continue_merge(
     repo: &Repository,
     options: &ContinueOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<ContinueOutcome, ContinueMergeError> {
     let merge_heads = read_merge_heads(repo.git_dir())?;
     if merge_heads.is_empty() {
@@ -1858,7 +1858,7 @@ fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
         &changes,
         &mut index,
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
         checkout::CheckoutApplyOptions {
             parallel_prepare_blobs: false,
             checkout_parallel_threshold: None,
@@ -1950,7 +1950,7 @@ fn merge_checkout_tree_transition(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     prepare_tree_checkout(repo, from_tree, to_tree)?;
     let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new())
@@ -1983,7 +1983,7 @@ pub(crate) fn apply_conflict_merge_worktree(
     head_tree: &ObjectId,
     merged: &TreeMergeOutput,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     let _overlay = MemOverlayGuard::enter(repo.odb());
     let materialized = materialized_merge_result_tree(repo.odb(), merged)?;
@@ -2030,7 +2030,7 @@ fn run_merge_commit_hooks(
     other_oid: ObjectId,
     tree: ObjectId,
     message: String,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(ObjectId, String)> {
     let git_dir = repo.git_dir();
     let index_path = repo.index_path();
@@ -2357,7 +2357,7 @@ mod integrate_tests {
             head,
             "topic",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("up");
         assert_eq!(up, IntegrateBranchOutcome::UpToDate);
@@ -2368,7 +2368,7 @@ mod integrate_tests {
             tip,
             "topic",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("ff");
         assert!(matches!(ff, IntegrateBranchOutcome::FastForward { .. }));
@@ -2457,7 +2457,7 @@ mod integrate_tests {
             topic,
             "topic",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("merge");
         let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -2513,7 +2513,7 @@ mod integrate_tests {
             other,
             "other",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("short into_ref");
         let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -2560,7 +2560,7 @@ mod integrate_tests {
             other_full,
             "other",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("full into_ref");
         assert!(matches!(
@@ -2599,7 +2599,7 @@ mod integrate_tests {
             main2,
             "main",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("nested short name");
         let IntegrateBranchOutcome::Merged {
@@ -2635,7 +2635,7 @@ mod integrate_tests {
             head,
             "other",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("missing branch");
         assert!(matches!(err, Error::BranchNotFound { branch } if branch == "no-such-branch"));
@@ -2654,7 +2654,7 @@ mod integrate_tests {
             other,
             "other",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect_err("stale tip");
         assert!(
@@ -2703,7 +2703,7 @@ mod integrate_tests {
             topic,
             "topic",
             &mut crate::progress::NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("merge");
         let IntegrateBranchOutcome::Conflicts { paths, .. } = outcome else {

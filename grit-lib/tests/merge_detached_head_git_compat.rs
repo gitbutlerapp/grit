@@ -78,7 +78,7 @@ fn fast_forward_moves_only_head_and_matches_git() {
         topic,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
     assert!(matches!(
@@ -129,7 +129,7 @@ fn no_ff_merge_commit_on_detached_head() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Merged { oid, change_id } = outcome else {
@@ -173,7 +173,7 @@ fn conflict_then_continue_and_abort_on_detached_head() {
         topic,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -190,7 +190,7 @@ fn conflict_then_continue_and_abort_on_detached_head() {
             committer: Some(id.parse().expect("sig")),
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("continue");
     assert_ne!(cont.oid, head_at_conflict_start);
@@ -223,7 +223,7 @@ fn conflict_then_continue_and_abort_on_detached_head() {
         topic2,
         "topic",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     abort_branch_merge(&repo2).expect("abort");

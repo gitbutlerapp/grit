@@ -288,8 +288,8 @@ fn push_after_set_url_uses_new_pushurl() {
                 ..Default::default()
             }],
             grit_lib::remote::transfer::PushOptions::default(),
-            &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &mut grit_lib::remote::fetch::NoProgress,
+            &grit_lib::progress::CancelToken::never(),
             None,
         )
         .expect("push");

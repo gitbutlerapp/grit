@@ -12,8 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::bundle_uri::bundle_cache_path;
 use grit_lib::remote::resumable::{download_resumable, ResumableError};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
@@ -342,7 +341,13 @@ fn clones_start_from_the_server_bundle_and_resume_its_download() {
         budget: Arc::new(AtomicU64::new(200_000)),
     };
     let dest = bundle_cache_path(&cache, &uri);
-    let first = download_resumable(&dropped, &uri, &dest, &mut NullProgress, &NeverCancel);
+    let first = download_resumable(
+        &dropped,
+        &uri,
+        &dest,
+        &mut NoProgress,
+        &CancelToken::never(),
+    );
     assert!(
         matches!(first, Err(ResumableError::Exhausted { .. })),
         "{first:?}"

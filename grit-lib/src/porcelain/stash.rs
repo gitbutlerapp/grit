@@ -73,7 +73,7 @@ use crate::porcelain::status::{
 };
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use crate::progress::{
-    poll_cancel, Cancel, NeverCancel, NullProgress, ProgressPhase, ProgressScope, ProgressSink,
+    poll_cancel, CancelToken, NullProgress, ProgressPhase, ProgressScope, ProgressSink,
 };
 
 fn poll_stash(scope: &mut ProgressScope<'_>) -> StashResult<()> {
@@ -1124,7 +1124,7 @@ fn apply_staged_worktree_only_reset(
     head_tree: &ObjectId,
     staged_paths: &[String],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     if staged_paths.is_empty() {
         return Ok(());
@@ -1169,7 +1169,7 @@ fn apply_staged_only_reset(
     staged_paths: &[String],
     lock: &mut IndexLock,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     if staged_paths.is_empty() {
         return Ok(());
@@ -1483,7 +1483,7 @@ fn reset_stash_push_pathspecs_to_head(
     pathspecs: &[String],
     lock: &mut IndexLock,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     if pathspecs.is_empty() {
         return Ok(());
@@ -1724,7 +1724,7 @@ pub(crate) fn create_stash(
 ) -> StashResult<Option<ObjectId>> {
     let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     let mut progress = NullProgress;
-    let mut scope = ProgressScope::new(&mut progress, &NeverCancel);
+    let mut scope = ProgressScope::new(&mut progress, CancelToken::never_ref());
     Ok(build_stash_commit(repo, work_tree, options, &mut scope)?.map(|b| b.w_commit))
 }
 
@@ -1797,8 +1797,8 @@ pub(crate) fn push_stash(
     repo: &Repository,
     options: &StashPushOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<Option<StashPushResult>> {
+    cancel: &CancelToken,
+) -> Result<Option<StashPushResult>> {
     if options.dry_run {
         return Err(StashError::PushValidation(
             StashPushValidationError::DryRunUsePreview,
@@ -1840,8 +1840,8 @@ fn reset_after_stash_push(
     built: &BuiltStash,
     lock: &mut IndexLock,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<()> {
+    cancel: &CancelToken,
+) -> Result<()> {
     if !built.untracked_paths.is_empty() {
         remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
     }
@@ -2137,7 +2137,7 @@ pub(crate) fn stash_branch(
             hooks: crate::hooks::PostOperationHooks::Run,
         },
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )?;
 
     let applied = apply_stash_entry(
@@ -2148,7 +2148,7 @@ pub(crate) fn stash_branch(
             ..Default::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     )?;
     if !applied.has_conflicts() {
         drop_stash(repo, n)?;
@@ -2201,7 +2201,7 @@ fn stash_branch_from_commit(
             hooks: crate::hooks::PostOperationHooks::Run,
         },
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )?;
 
     let applied = apply_stash_oid(
@@ -2212,7 +2212,7 @@ fn stash_branch_from_commit(
             ..Default::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     )?;
     Ok(StashBranchOutcome {
         branch: name.to_owned(),
@@ -2230,8 +2230,8 @@ pub(crate) fn apply_stash_reference(
     reference: StashReference,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<StashApplyOutcome> {
+    cancel: &CancelToken,
+) -> Result<StashApplyOutcome> {
     match reference {
         StashReference::Index(n) => apply_stash_entry(repo, n, options, progress, cancel),
         StashReference::Commit(oid) => apply_stash_oid(repo, &oid, options, progress, cancel),
@@ -2244,8 +2244,8 @@ pub(crate) fn pop_stash_reference(
     reference: StashReference,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<StashApplyOutcome> {
+    cancel: &CancelToken,
+) -> Result<StashApplyOutcome> {
     let index = match reference {
         StashReference::Index(n) => n,
         StashReference::Commit(oid) => {
@@ -2669,9 +2669,9 @@ pub(crate) fn apply_stash_oid(
     stash_oid: &ObjectId,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<StashApplyOutcome> {
-    let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
+    cancel: &CancelToken,
+) -> Result<StashApplyOutcome> {
+    let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
     apply_stash_commit(repo, work_tree, stash_oid, options, progress, cancel)
 }
 
@@ -2710,8 +2710,8 @@ pub(crate) fn apply_stash_entry(
     n: usize,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<StashApplyOutcome> {
+    cancel: &CancelToken,
+) -> Result<StashApplyOutcome> {
     let oid = stash_oid_at(repo, n)?;
     apply_stash_oid(repo, &oid, options, progress, cancel)
 }
@@ -2726,8 +2726,8 @@ pub(crate) fn pop_stash_entry(
     n: usize,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<StashApplyOutcome> {
+    cancel: &CancelToken,
+) -> Result<StashApplyOutcome> {
     let outcome = apply_stash_entry(repo, n, options, progress, cancel)?;
     if !outcome.has_conflicts() {
         drop_stash(repo, n)?;
@@ -2741,8 +2741,8 @@ fn apply_stash_commit(
     stash_oid: &ObjectId,
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
-) -> StashResult<StashApplyOutcome> {
+    cancel: &CancelToken,
+) -> Result<StashApplyOutcome> {
     let restore_index = options.restore_index;
     let stash_commit = repo.odb().read_commit(stash_oid)?;
 
@@ -3487,7 +3487,7 @@ pub(crate) fn push_operation_autostash(
             mode: StashMode::default(),
         },
         &mut NullProgress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     )?
     .map(|r| r.oid))
 }
@@ -3507,7 +3507,7 @@ pub(crate) fn apply_operation_autostash(repo: &Repository, stash_oid: &ObjectId)
         stash_oid,
         &StashApplyOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     )?
     .has_conflicts();
     if !conflicts {
@@ -3527,7 +3527,7 @@ pub(crate) fn restore_operation_autostash(repo: &Repository, stash_oid: &ObjectI
         stash_oid,
         &StashApplyOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     )?
     .has_conflicts();
     if !conflicts {
@@ -3598,7 +3598,7 @@ pub(crate) fn apply_merge_autostash(repo: &Repository) -> Result<bool> {
         &stash_oid,
         &StashApplyOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        CancelToken::never_ref(),
     )?
     .has_conflicts();
     let _ = fs::remove_file(&path);
@@ -3689,7 +3689,7 @@ mod coverage_tests {
     #[test]
     fn push_stash_refreshes_index_stat_for_clean_status() {
         use crate::porcelain::status::{status, StatusOptions};
-        use crate::progress::{NeverCancel, NullProgress};
+        use crate::progress::NullProgress;
 
         let tmp = TempDir::new().unwrap();
         let repo = init_repo(tmp.path());
@@ -3732,7 +3732,7 @@ mod coverage_tests {
             dry_run: false,
             mode: StashMode::default(),
         };
-        push_stash(&repo, &opts, &mut NullProgress, &NeverCancel)
+        push_stash(&repo, &opts, &mut NullProgress, CancelToken::never_ref())
             .expect("push")
             .expect("oid");
 
@@ -3743,7 +3743,7 @@ mod coverage_tests {
             &repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("status");
         assert!(
@@ -3766,9 +3766,11 @@ mod coverage_tests {
             dry_run: false,
             mode: StashMode::default(),
         };
-        assert!(push_stash(&repo, &opts, &mut NullProgress, &NeverCancel)
-            .expect("push")
-            .is_none());
+        assert!(
+            push_stash(&repo, &opts, &mut NullProgress, CancelToken::never_ref())
+                .expect("push")
+                .is_none()
+        );
     }
 
     #[test]
@@ -3801,7 +3803,7 @@ mod coverage_tests {
         let mut pushed = 0usize;
         while !dropper.is_finished() {
             fs::write(tmp.path().join("f"), format!("v{pushed}\n")).unwrap();
-            if push_stash(&repo, &opts, &mut NullProgress, &NeverCancel)
+            if push_stash(&repo, &opts, &mut NullProgress, CancelToken::never_ref())
                 .expect("push")
                 .is_some()
             {
@@ -3954,7 +3956,7 @@ mod coverage_tests {
             dry_run: false,
             mode: StashMode::default(),
         };
-        push_stash(&repo, &opts, &mut NullProgress, &NeverCancel)
+        push_stash(&repo, &opts, &mut NullProgress, CancelToken::never_ref())
             .expect("push")
             .expect("oid");
         fs::write(tmp.path().join("u.txt"), b"precious\n").unwrap();
@@ -3964,7 +3966,7 @@ mod coverage_tests {
             &oid,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect_err("collision");
         assert!(matches!(
@@ -4118,7 +4120,7 @@ mod hunk_push_tests {
                 mode: StashMode::default(),
             },
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("push")
         .expect("oid");
@@ -4157,7 +4159,7 @@ mod hunk_push_tests {
                 mode: StashMode::default(),
             },
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("push")
         .expect("oid");
@@ -4192,7 +4194,7 @@ mod hunk_push_tests {
                 mode: StashMode::default(),
             },
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("push")
         .expect("oid");
@@ -4225,7 +4227,7 @@ mod hunk_push_tests {
                 mode: StashMode::default(),
             },
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("push")
         .expect("oid");
@@ -4307,7 +4309,7 @@ mod hunk_push_tests {
             &repo,
             &options_with(Some(selection), false),
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("push")
         .expect("stashed");
@@ -4333,7 +4335,7 @@ mod hunk_push_tests {
             &repo,
             &options_with(None, false),
             &mut NullProgress,
-            &NeverCancel,
+            CancelToken::never_ref(),
         )
         .expect("push")
         .expect("stashed");

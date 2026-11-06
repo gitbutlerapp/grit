@@ -62,7 +62,7 @@ fn restore_with_grit(root: &Path) {
             remerge: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit restore");
 }

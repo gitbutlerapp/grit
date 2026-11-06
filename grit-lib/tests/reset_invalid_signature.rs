@@ -13,7 +13,8 @@ use grit_lib::error::Error;
 use grit_lib::ident::{Signature, SignatureError, SignatureField};
 use grit_lib::porcelain::reset::{preview_reset, reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::resolve_revision_spec;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git_cmd;
 use reset_snapshot::{assert_unchanged, snapshot};
@@ -100,7 +101,7 @@ fn hard_reset_invalid_name_preserves_head_and_valuable_edit() {
         &repo,
         &ResetOptions::new(target, ResetMode::Hard, identity, "reset probe"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     );
     assert_invalid(
         result.unwrap_err(),
@@ -152,15 +153,16 @@ fn check_invalid_signatures(mode: ResetMode) {
                     assert_unchanged(root, &files);
                     for dry_run in [true, false] {
                         opts.dry_run = dry_run;
-                        let error = reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel)
-                            .unwrap_err();
+                        let error =
+                            reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never())
+                                .unwrap_err();
                         assert_invalid(error, &expected);
                         assert_unchanged(root, &files);
                         assert_eq!(resolve_revision_spec(&repo, "HEAD").unwrap(), head);
                     }
                 }
                 let opts = ResetOptions::new(target, mode, identity(), "valid reset");
-                reset_to_commit(&repo, &opts, &mut NullProgress, &NeverCancel).unwrap();
+                reset_to_commit(&repo, &opts, &mut NullProgress, &CancelToken::never()).unwrap();
                 assert_eq!(resolve_revision_spec(&repo, "HEAD").unwrap(), target);
                 assert_eq!(
                     git_cmd(&["rev-parse", "HEAD"])

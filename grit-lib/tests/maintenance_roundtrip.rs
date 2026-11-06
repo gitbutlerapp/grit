@@ -11,9 +11,10 @@ use grit_lib::maintenance::repository_fsck::{fsck, FsckIssue, FsckOptions};
 use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions, MidxOptions, PackRefsOptions};
 use grit_lib::objects::commit_graph::CommitGraphChain;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
+use grit_lib::progress::CancelToken;
 use support::{git_init_reftable_repo, git_refs_verify, require_reftable_git};
 
 fn git_available() -> bool {
@@ -236,7 +237,7 @@ fn midx_git_verify_clean() {
     assert!(report.pack_count >= 1);
     let fsck_opts = FsckOptions::connectivity_and_refs(true);
     let report_fsck =
-        fsck(&repo, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck midx");
+        fsck(&repo, &fsck_opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck midx");
     assert!(
         !report_fsck
             .issues
@@ -643,7 +644,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     let wt = repo.work_tree().expect("worktree");
     fs::write(wt.join("a.txt"), b"a\n").unwrap();
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "T <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
@@ -658,7 +659,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 

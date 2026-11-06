@@ -9,7 +9,8 @@ use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::RawRef;
 use grit_lib::repo::{InitOptions, Repository};
@@ -82,7 +83,7 @@ fn switch(path: &Path, mode: SwitchMode) {
             hooks: PostOperationHooks::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap();
 }

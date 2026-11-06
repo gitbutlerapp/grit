@@ -44,7 +44,7 @@ fn status_path_can_be_passed_to_blame() {
         &repo,
         &StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     let reported = model

@@ -4,8 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::{ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -81,7 +80,13 @@ fn fetch_from_git_bundle_matches_git_fetch() {
     fetch_opts.refspecs = vec!["+refs/heads/main:refs/remotes/origin/main".to_owned()];
     fetch_opts.tags = TagMode::None;
     let outcome = remote
-        .fetch(&repo, fetch_opts, &mut progress, &NeverCancel, None)
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut progress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("fetch bundle");
 
     assert!(git_in(
@@ -131,7 +136,7 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
         environment: grit_lib::config::environment::Environment::empty(),
         ..CloneOptions::new(full_bundle.to_str().unwrap(), dest.path().to_path_buf())
     };
-    clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("clone full bundle");
+    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone full bundle");
 
     let git_dir = dest.path().join(".git");
     let objects_before = count_in_pack_objects(&git_dir);
@@ -146,7 +151,13 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
     let mut fetch_opts = FetchOptions::default();
     fetch_opts.tags = TagMode::None;
     let err = remote
-        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect_err("range bundle without HEAD must not succeed");
 
     assert!(
@@ -220,7 +231,7 @@ fn range_bundle_fetch_with_explicit_refspec_updates_tracking_ref() {
         environment: grit_lib::config::environment::Environment::empty(),
         ..CloneOptions::new(full_bundle.to_str().unwrap(), dest.path().to_path_buf())
     };
-    clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("clone full bundle");
+    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone full bundle");
 
     let remote = Remote::from_url(incr_bundle.to_str().unwrap()).expect("bundle url");
     let repo = Repository::open(
@@ -232,7 +243,13 @@ fn range_bundle_fetch_with_explicit_refspec_updates_tracking_ref() {
     fetch_opts.refspecs = vec!["main:refs/remotes/bundle/main".to_owned()];
     fetch_opts.tags = TagMode::None;
     let outcome = remote
-        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("explicit refspec fetch");
     assert!(
         outcome
@@ -293,7 +310,13 @@ fn literal_bundle_fetch_writes_fetch_head() {
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.tags = TagMode::None;
     remote
-        .fetch(&repo, fetch_opts, &mut NullProgress, &NeverCancel, None)
+        .fetch(
+            &repo,
+            fetch_opts,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("anonymous bundle fetch");
 
     let grit_fetch_head = std::fs::read_to_string(dest.path().join(".git/FETCH_HEAD"))
@@ -394,8 +417,8 @@ fn clone_from_bundle_matches_git_default_branch_when_head_not_first() {
             grit_dest.path().to_path_buf(),
         )
     };
-    let outcome =
-        clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("grit clone from bundle");
+    let outcome = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None)
+        .expect("grit clone from bundle");
 
     assert_eq!(outcome.head.branch_name(), Some(git_branch.as_str()));
     assert_eq!(outcome.checkout_oid.to_hex(), git_head);
@@ -424,7 +447,7 @@ fn clone_from_bundle_reports_transfer_stats() {
         ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
     };
     let outcome =
-        clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("clone from bundle");
+        clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone from bundle");
 
     let count_out = Command::new("git")
         .args(["count-objects", "-v"])
@@ -479,7 +502,7 @@ fn clone_from_bundle_passes_git_fsck() {
         environment: Environment::empty(),
         ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
     };
-    clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("clone from bundle");
+    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone from bundle");
 
     assert!(git_in(dest.path(), &["fsck"]));
 }
@@ -562,7 +585,7 @@ fn bundle_clone_reports_progress() {
         ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
     };
     let mut rec = PhaseRecorder::default();
-    clone_repo(opts, &mut rec, &NeverCancel, None).expect("clone from bundle");
+    clone_repo(opts, &mut rec, &CancelToken::never(), None).expect("clone from bundle");
 
     assert!(
         phase_started_and_finished(&rec, ProgressPhase::ReceivingObjects),

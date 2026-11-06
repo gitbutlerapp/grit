@@ -48,7 +48,7 @@ use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stat
 use crate::porcelain::merge::squash_conflict_merge_in_progress;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::replay_sequence::finish_replay_commit_state;
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -118,7 +118,7 @@ pub(crate) fn run_commit_message_hooks(
     verify: HookPolicy,
     commit_env: &CommitHookEnv<'_>,
     hooks_run: &mut Vec<HookName>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<Option<String>> {
     let path_arg = commit_editmsg_hook_argument(repo, msg_path);
     let source_oid;
@@ -503,7 +503,7 @@ pub fn commit_with_scope(
     req: &CommitRequest,
     scope: CommitScope,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     guard_incomplete_rewrite_apply(repo)?;
     match scope {
@@ -541,7 +541,7 @@ pub fn commit_with_patch(
     input: CommitPatchInput,
     pathspecs: &[String],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<CommitOutcome, CommitPatchError> {
     guard_incomplete_rewrite_apply(repo).map_err(CommitPatchError::Commit)?;
     commit_patch_scope(repo, req, input, pathspecs, progress, cancel)
@@ -553,7 +553,7 @@ fn commit_patch_scope(
     input: CommitPatchInput,
     pathspecs: &[String],
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<CommitOutcome, CommitPatchError> {
     if !read_merge_heads(repo.git_dir())?.is_empty() {
         return Err(Error::PartialCommitDuringMerge.into());
@@ -630,7 +630,7 @@ pub fn plan_commit(
     req: &CommitRequest,
     scope: CommitScope,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CommitPlan> {
     let mut req = req.clone();
     req.dry_run = true;
@@ -689,7 +689,7 @@ fn commit_paths_scope(
     req: &CommitRequest,
     paths: &ResolvedPathspecs,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     if paths.specs.is_empty() {
         return Err(Error::CommitPathsRequired);
@@ -835,7 +835,7 @@ fn run_commit_hook_recorded(
     args: &[&str],
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<bool> {
     crate::hooks::run_commit_hook_with_cancel(
         repo,
@@ -999,7 +999,7 @@ pub fn create_commit(
     repo: &Repository,
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     guard_incomplete_rewrite_apply(repo)?;
     let head = resolve_head_for_repository(repo)?;
@@ -1035,7 +1035,7 @@ pub fn commit_worktree(
     repo: &Repository,
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     guard_incomplete_rewrite_apply(repo)?;
     let index_lock = (!req.dry_run)
@@ -1549,7 +1549,7 @@ pub(crate) fn create_commit_with_loaded_index(
     index: &mut Index,
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
@@ -1574,7 +1574,7 @@ fn create_commit_with_index(
     index: &mut Index,
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     persist_index: Option<LockedIndex>,
 ) -> Result<CommitOutcome> {
     poll_cancel(progress, cancel)?;
@@ -2322,7 +2322,7 @@ mod tests {
             &repo,
             &commit_req("base"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let before = repo_snapshot(&repo);
@@ -2336,7 +2336,7 @@ mod tests {
             &repo,
             &dry_run_req("mode"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(preview.changes, 1);
@@ -2360,7 +2360,7 @@ mod tests {
             &repo,
             &dry_run_req("mixed"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(preview.changes, 2);
@@ -2372,7 +2372,7 @@ mod tests {
             &repo,
             &commit_req("mixed"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(committed.files, preview.files);
@@ -2402,7 +2402,7 @@ mod tests {
             &repo,
             &commit_req("initial"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut index = repo.load_index().unwrap();
@@ -2425,7 +2425,7 @@ mod tests {
                 &repo,
                 &dry_run_req("clean"),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap_err();
             assert!(matches!(err, Error::NothingToCommit), "{err:?}");
@@ -2455,7 +2455,7 @@ mod tests {
                 &repo,
                 &dry_run_req("retarget"),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             assert_eq!(preview.changes, 3);
@@ -2473,7 +2473,7 @@ mod tests {
             &repo,
             &commit_req("retarget"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(Some(committed.files), preview_files);
@@ -2489,7 +2489,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2497,7 +2497,7 @@ mod tests {
             &repo,
             &commit_req("initial"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(outcome.parent.is_none());
@@ -2518,7 +2518,7 @@ mod tests {
             &repo,
             &commit_req("empty"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::NothingToCommit));
@@ -2535,14 +2535,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2551,14 +2551,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let outcome = create_commit(
             &repo,
             &commit_req("second"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.changes, 1);
@@ -2575,14 +2575,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2590,7 +2590,7 @@ mod tests {
             &repo,
             &commit_req("noop"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::NothingToCommit));
@@ -2606,7 +2606,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let objects_before = fs::read_dir(repo.git_dir().join("objects"))
@@ -2620,7 +2620,7 @@ mod tests {
                 ..CommitRequest::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -2663,7 +2663,7 @@ mod tests {
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2676,7 +2676,7 @@ mod tests {
             &repo,
             &dry_run_req("noop"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::NothingToCommit));
@@ -2686,7 +2686,7 @@ mod tests {
             &repo,
             &commit_req("noop"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::NothingToCommit));
@@ -2705,14 +2705,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let first = create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(repo.git_dir().join("HEAD"), first.oid.to_hex()).unwrap();
@@ -2722,14 +2722,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let second = create_commit(
             &repo,
             &commit_req("second"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(second.branch, None);
@@ -2751,14 +2751,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let outcome = create_commit(
             &repo,
             &commit_req("subject line"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2782,7 +2782,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2791,7 +2791,7 @@ mod tests {
             &repo,
             &commit_req("fail"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         set_test_inject_index_write_fail(false);
@@ -2813,7 +2813,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2822,7 +2822,7 @@ mod tests {
             &repo,
             &commit_req("fail"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         set_test_inject_reflog_fail(None);
@@ -2852,7 +2852,7 @@ mod tests {
             &repo,
             &commit_req("tree"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2877,14 +2877,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("a.txt"), b"2\n").unwrap();
@@ -2892,14 +2892,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("second"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -2910,7 +2910,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(
@@ -2934,14 +2934,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("oneline subject"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let baseline = {
@@ -2957,7 +2957,7 @@ mod tests {
                 &repo,
                 &StageOptions::default(),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             let mut req = commit_req("");
@@ -2966,7 +2966,7 @@ mod tests {
                 &repo,
                 &req,
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             let oid = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -2986,7 +2986,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("nope");
@@ -2995,7 +2995,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::AmendUnborn));
@@ -3011,14 +3011,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3029,7 +3029,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.changes, 0);
@@ -3048,14 +3048,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3070,7 +3070,7 @@ mod tests {
             &commit_req("only a"),
             CommitScope::Staged,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.changes, 1);
@@ -3091,14 +3091,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("initial"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         bytes.push(b'y');
@@ -3113,7 +3113,7 @@ mod tests {
                 scoped: true,
             }),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(result.changes, 1);
@@ -3136,14 +3136,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("initial"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3156,7 +3156,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3170,7 +3170,7 @@ mod tests {
             &commit_req("file only"),
             CommitScope::Paths(paths),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3189,14 +3189,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3213,7 +3213,7 @@ mod tests {
             &commit_req("add and remove"),
             CommitScope::Paths(paths),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3283,7 +3283,7 @@ mod tests {
                 scoped: true,
             }),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3313,14 +3313,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3334,7 +3334,7 @@ mod tests {
             &commit_req("nope"),
             CommitScope::Paths(paths),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::PathspecNoMatch { .. }));
@@ -3350,14 +3350,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -3373,7 +3373,7 @@ mod tests {
             &commit_req("partial"),
             CommitScope::Paths(paths),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::PartialCommitDuringMerge));
@@ -3476,7 +3476,7 @@ mod tests {
                 &repo,
                 &dry_run_req("mixed"),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             assert_eq!(repo_snapshot(&repo), before, "dry run must not write");
@@ -3502,7 +3502,7 @@ mod tests {
                 &repo,
                 &commit_req("mixed"),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             assert_eq!(committed.files, preview.files);
@@ -3527,7 +3527,7 @@ mod tests {
                 repo,
                 &dry_run_req("preview"),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             let listed: Vec<(String, DiffStatus)> = preview
@@ -3545,7 +3545,7 @@ mod tests {
                 repo,
                 &commit_req("commit"),
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
             assert_eq!(committed.files, preview.files);
@@ -3563,7 +3563,7 @@ mod tests {
             &repo,
             &commit_req("initial"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3602,7 +3602,7 @@ mod tests {
             &repo,
             &dry_run_req("root"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let listed: Vec<(&str, DiffStatus)> = preview
@@ -3646,7 +3646,7 @@ mod tests {
             &commit_req("x"),
             scope,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         match &err {
@@ -3705,7 +3705,7 @@ mod tests {
             &commit_req("x"),
             CommitScope::Paths(f1_paths()),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(!repo.git_dir().join("index.lock").exists());
@@ -3737,7 +3737,7 @@ mod tests {
             &commit_req("x"),
             CommitScope::Staged,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -3786,7 +3786,7 @@ mod tests {
             &commit_req("x"),
             scope,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(!repo.git_dir().join("index.lock").exists());
@@ -3839,7 +3839,7 @@ mod tests {
                 scoped: true,
             }),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3886,7 +3886,7 @@ mod tests {
             &repo,
             &commit_req("one file"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3940,7 +3940,7 @@ mod tests {
             &repo,
             &commit_req("many new files"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -3999,7 +3999,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .is_err());
 
@@ -4040,7 +4040,7 @@ mod tests {
                 &commit_req("g"),
                 CommitScope::AutoStage,
                 &mut NullProgress,
-                &crate::progress::NeverCancel,
+                &crate::progress::CancelToken::never(),
             )
             .unwrap();
 
@@ -4186,7 +4186,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4196,7 +4196,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel
+            &crate::progress::CancelToken::never()
         )
         .is_err());
 
@@ -4205,7 +4205,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(outcome.hooks_run.is_empty());
@@ -4228,14 +4228,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let outcome = create_commit(
             &repo,
             &commit_req("after post"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(
@@ -4262,14 +4262,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let outcome = create_commit(
             &repo,
             &commit_req("hooks"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(
@@ -4289,7 +4289,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("skip verify");
@@ -4298,7 +4298,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(
@@ -4317,7 +4317,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("dated");
@@ -4326,7 +4326,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.author.date, "946684800 +0000");
@@ -4342,7 +4342,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("trailers");
@@ -4354,7 +4354,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let msg = parse_commit(&repo.odb().read(&outcome.oid).unwrap().data)
@@ -4373,7 +4373,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("signoff");
@@ -4387,7 +4387,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let msg = parse_commit(&repo.odb().read(&outcome.oid).unwrap().data)
@@ -4406,7 +4406,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("subject\n");
@@ -4421,7 +4421,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let msg = parse_commit(&repo.odb().read(&outcome.oid).unwrap().data)
@@ -4442,7 +4442,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut source = commit_req("source subject\n");
@@ -4456,7 +4456,7 @@ mod tests {
             &repo,
             &source,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4465,7 +4465,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut tip = commit_req("tip subject\n");
@@ -4478,7 +4478,7 @@ mod tests {
             &repo,
             &tip,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4487,7 +4487,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut amend = commit_req("");
@@ -4498,7 +4498,7 @@ mod tests {
             &repo,
             &amend,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let author = author_info_from_commit(&repo, outcome.oid);
@@ -4521,7 +4521,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut source = commit_req("source subject\n");
@@ -4534,7 +4534,7 @@ mod tests {
             &repo,
             &source,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4543,14 +4543,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("tip"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4559,7 +4559,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut amend = commit_req("");
@@ -4576,7 +4576,7 @@ mod tests {
             &repo,
             &amend,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let author = author_info_from_commit(&repo, outcome.oid);
@@ -4594,7 +4594,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut first = commit_req("source");
@@ -4608,7 +4608,7 @@ mod tests {
             &repo,
             &first,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4617,7 +4617,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("");
@@ -4627,7 +4627,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let author = author_info_from_commit(&repo, outcome.oid);
@@ -4646,7 +4646,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut first = commit_req("source");
@@ -4655,7 +4655,7 @@ mod tests {
             &repo,
             &first,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4664,14 +4664,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("second"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4688,7 +4688,7 @@ mod tests {
             &repo,
             &amend,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let author = author_info_from_commit(&repo, outcome.oid);
@@ -4732,14 +4732,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let source = create_commit(
             &repo,
             &commit_req("source"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let source_data = parse_commit(&repo.odb().read(&source.oid).unwrap().data).unwrap();
@@ -4758,7 +4758,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = commit_req("");
@@ -4768,7 +4768,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let copy_data = parse_commit(&repo.odb().read(&copy.oid).unwrap().data).unwrap();
@@ -4786,14 +4786,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let first = create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4802,14 +4802,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let second = create_commit(
             &repo,
             &commit_req("second"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -4823,14 +4823,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let merge = create_commit(
             &repo,
             &commit_req("merge"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(merge.parents.len(), 2);
@@ -4869,14 +4869,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("new.txt"), b"new\n").unwrap();
@@ -4891,7 +4891,7 @@ mod tests {
             &dry_run_req("add new"),
             CommitScope::Paths(paths),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(plan.files.len(), 1);
@@ -4909,14 +4909,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("first"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("a.txt"), b"2\n").unwrap();
@@ -4924,7 +4924,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let mut req = dry_run_req("amend");
@@ -4939,7 +4939,7 @@ mod tests {
             &req,
             CommitScope::Staged,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.author.email, "o@example.com");
@@ -4996,14 +4996,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("init"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), edited).unwrap();
@@ -5025,7 +5025,7 @@ mod tests {
             }),
             &[],
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -5061,14 +5061,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("init"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), edited).unwrap();
@@ -5090,7 +5090,7 @@ mod tests {
             }),
             &[],
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -5187,14 +5187,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("init"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), edited.clone()).unwrap();
@@ -5226,7 +5226,7 @@ mod tests {
             CommitPatchInput::Patches(patch),
             &[],
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let grit_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -5275,14 +5275,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("init"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), edited).unwrap();
@@ -5318,7 +5318,7 @@ mod tests {
             CommitPatchInput::Patches(patch),
             &[],
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
 
@@ -5343,14 +5343,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("init"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let before_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -5366,7 +5366,7 @@ mod tests {
             }),
             &[],
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, CommitPatchError::Select(_)));
@@ -5391,7 +5391,7 @@ mod tests {
             &commit_req("first"),
             CommitScope::AutoStage,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let before_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -5410,7 +5410,7 @@ mod tests {
                 pathspecs: Vec::new(),
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         match &err {
@@ -5436,7 +5436,7 @@ mod tests {
                 pathspecs: Vec::new(),
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -5460,14 +5460,14 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         create_commit(
             &repo,
             &commit_req("init"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         fs::write(root.join("f.txt"), edited).unwrap();
@@ -5500,7 +5500,7 @@ mod tests {
             &commit_req("first hunk"),
             patch_scope(patch.clone()),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let before_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -5511,7 +5511,7 @@ mod tests {
             &commit_req("again"),
             patch_scope(patch),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::Apply(_)), "got {err:?}");
@@ -5533,7 +5533,7 @@ mod tests {
             &commit_req("first"),
             CommitScope::AutoStage,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let before_tip = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
@@ -5544,7 +5544,7 @@ mod tests {
             &commit_req("x"),
             CommitScope::Paths(ResolvedPathspecs::default()),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, Error::CommitPathsRequired), "got {err:?}");
@@ -5597,7 +5597,7 @@ mod tests {
             &repo,
             &commit_req("seed"),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("seed commit");
 
@@ -5612,7 +5612,7 @@ mod tests {
             &repo,
             &req,
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("dry-run commit with embedded repo");
         assert_eq!(outcome.embedded_gitlinks, vec!["vendor".to_owned()]);

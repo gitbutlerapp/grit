@@ -87,7 +87,7 @@ fn history_drop_emptied_subdirectory_fsck_clean() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     assert_head_has_no_empty_subtree_dirs(wt);
@@ -111,7 +111,7 @@ fn replay_revert_emptied_subdirectory_fsck_clean() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("revert c2");
     assert!(matches!(outcome, ReplayOutcome::Committed { .. }));
@@ -143,7 +143,7 @@ fn replay_pick_dir_delete_fsck_clean() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("pick delete");
     assert!(matches!(outcome, ReplayOutcome::Committed { .. }));

@@ -166,8 +166,8 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         &mut *conn,
         &[spec_update(main_oid, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_remote over ssh");
     drop(conn);
@@ -242,8 +242,8 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         &mut *conn2,
         &[spec_update(diverged, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_remote over ssh completes");
     drop(conn2);
@@ -280,8 +280,8 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         &mut *conn3,
         &[spec_update(diverged, "refs/heads/main", true)],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_remote over ssh completes");
     drop(conn3);
@@ -365,8 +365,8 @@ fn incremental_ssh_push_with_advertised_blob_and_tree_tags() {
         &mut *conn,
         &[spec_update(tip, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("incremental push with non-commit tags");
     drop(conn);
@@ -439,8 +439,8 @@ fn one_commit_ssh_push_over_many_advertised_tips_sends_a_thin_pack() {
         &mut *conn,
         &[spec_update(tip, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push one commit");
     drop(conn);

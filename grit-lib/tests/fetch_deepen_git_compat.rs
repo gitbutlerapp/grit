@@ -8,9 +8,8 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
-use grit_lib::remote::fetch::fetch_remote;
+use grit_lib::progress::CancelToken;
+use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::transfer::{fetch_local, FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -291,8 +290,8 @@ fn grit_fetch_daemon_refspec(
         &git_dir,
         &mut *conn,
         &mut opts,
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
     )
     .expect("fetch_remote")
 }

@@ -15,9 +15,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{
-    Cancel, CancelToken, NeverCancel, NullProgress, ProgressPhase, ProgressSink,
-};
+use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::repo::Repository;
 
 /// Raises `cancel` on the `limit`-th checkout progress increment, after running `at_cancel`.
@@ -318,7 +316,7 @@ fn full_switch_incs(fx: &Fixture) -> u64 {
         &open(copy.path()),
         &detach_to(fx.next),
         &mut count,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("full switch on the copy");
     count.seen
@@ -377,7 +375,7 @@ fn cancelled_switch_rolls_back(shape: Shape) {
         &open(&fx.root),
         &detach_to(fx.next),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("retry after cancelled switches");
     assert_eq!(outcome.commit, fx.next);
@@ -484,7 +482,7 @@ fn cancelled_initial_checkout_leaves_work_tree_empty() {
         None,
         &tree,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("retry");
     let status = git(&target, &["status", "--porcelain", "--untracked-files=all"]);
@@ -700,7 +698,7 @@ fn cancelled_cross_tree_hard_reset_keeps_dirty_tree_diff_paths() {
         &open(&fx.root),
         &ResetOptions::new(fx.next, ResetMode::Hard, signature, "reset"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("uncancelled reset");
     assert_clean(&fx.root, "after reset --hard next");

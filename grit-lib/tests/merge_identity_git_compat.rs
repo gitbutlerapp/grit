@@ -68,7 +68,7 @@ fn clean_merge_missing_identity_leaves_repo_unchanged() {
         feature_oid,
         "feature",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("merge without identity");
     assert!(

@@ -87,7 +87,7 @@ fn merge_conflict_child() {
             wb,
             "wb",
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("merge");
         abort_branch_merge(&repo).expect("abort");
@@ -104,7 +104,7 @@ fn merge_conflict_child() {
         wb,
         "wb",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -184,7 +184,7 @@ fn wide_conflict_merge_memory_and_git_compatibility() {
         oid(root, "wb"),
         "wb",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge");
     let IntegrateBranchOutcome::Conflicts { paths, .. } = outcome else {

@@ -141,7 +141,7 @@ fn push_outcome_summaries_match_the_remote_refs() {
             &remote,
             &[spec(src)],
             &PushOptions::default(),
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")
     };

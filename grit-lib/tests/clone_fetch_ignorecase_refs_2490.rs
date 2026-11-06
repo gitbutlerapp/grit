@@ -8,8 +8,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
@@ -87,7 +86,8 @@ fn clone_stores_casefold_remote_refs_in_packed_refs() {
     opts.config
         .push(("core.ignorecase".to_owned(), "true".to_owned()));
     opts.checkout = false;
-    clone(opts, &mut NullProgress, &NeverCancel, None).expect("clone with casefold remote refs");
+    clone(opts, &mut NoProgress, &CancelToken::never(), None)
+        .expect("clone with casefold remote refs");
 
     assert!(dest.join(".git").is_dir(), "clone destination must remain");
     let git_dir = dest.join(".git");

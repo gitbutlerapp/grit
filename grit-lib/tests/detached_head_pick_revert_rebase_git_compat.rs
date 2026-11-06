@@ -9,7 +9,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayRequest};
 use grit_lib::porcelain::replay_sequence::{ReplayOptions, ReplaySequenceRequest};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     continue_rebase, skip_rebase, start_rebase, ApplyOptions, PreRebase, RebaseOntoOptions,
@@ -160,7 +160,7 @@ fn grit_pick_on_detached_head_matches_git() {
             message_override: None,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("pick on detached HEAD");
     let grit_lib::porcelain::replay::ReplayOutcome::Committed { oid, .. } = outcome else {
@@ -192,7 +192,7 @@ fn grit_revert_on_detached_head_matches_git() {
             message_override: None,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("revert on detached HEAD");
     assert!(matches!(
@@ -214,7 +214,7 @@ fn grit_rebase_upstream_on_detached_head_matches_git() {
     let repo = open_grit(root.path());
     let head_before = ObjectId::from_hex(&git(root.path(), &["rev-parse", "HEAD"])).unwrap();
     let opts = start_rebase_opts(side_tip, head_before);
-    start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("rebase detached");
+    start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("rebase detached");
 
     assert_head_detached(root.path());
     assert_ne!(
@@ -232,7 +232,7 @@ fn detached_rebase_continue_after_conflict() {
     let repo = open_grit(root.path());
     let mut opts = start_rebase_opts(upstream, tip);
     opts.request.onto = Some(onto);
-    let out = start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("start");
+    let out = start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("start");
     assert!(matches!(out, RebaseOutcome::Stopped(_)));
     assert_head_detached(root.path());
     assert_eq!(
@@ -242,7 +242,7 @@ fn detached_rebase_continue_after_conflict() {
     );
     std::fs::write(root.path().join("f.txt"), b"resolved\n").unwrap();
     git(root.path(), &["add", "f.txt"]);
-    continue_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("continue");
+    continue_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("continue");
     assert_head_detached(root.path());
     assert_ne!(git(root.path(), &["rev-parse", "HEAD"]), orig_tip.to_hex());
     assert_git_fsck(root.path());
@@ -255,9 +255,9 @@ fn detached_rebase_skip_after_conflict() {
     let repo = open_grit(root.path());
     let mut opts = start_rebase_opts(upstream, tip);
     opts.request.onto = Some(onto);
-    let _ = start_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("start");
+    let _ = start_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("start");
     let head_at_stop = git(root.path(), &["rev-parse", "HEAD"]);
-    skip_rebase(&repo, &opts, &mut NullProgress, &NeverCancel).expect("skip");
+    skip_rebase(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("skip");
     assert_head_detached(root.path());
     assert_eq!(git(root.path(), &["rev-parse", "HEAD"]), head_at_stop);
     assert_eq!(git(root.path(), &["rev-parse", "topic"]), orig_tip.to_hex());

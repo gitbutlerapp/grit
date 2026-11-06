@@ -345,11 +345,11 @@ mod checkout_blob_tests {
     use super::*;
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::{CancelToken, NullProgress};
     use crate::repo::InitOptions;
 
     fn commit_all(repo: &Repository, message: &str) {
-        stage_for_commit(repo, &mut NullProgress, &NeverCancel).unwrap();
+        stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).unwrap();
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             repo,
@@ -360,7 +360,7 @@ mod checkout_blob_tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .unwrap();
     }
@@ -376,7 +376,7 @@ mod checkout_blob_tests {
         std::fs::write(work.join("a"), b"new\n").unwrap();
         commit_all(&repo, "two");
         std::fs::write(work.join("a"), b"staged\n").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).unwrap();
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).unwrap();
 
         let needed = blobs_needed_by_checkouts(&repo).unwrap();
         assert!(needed.contains(&blob(b"staged\n")), "index");

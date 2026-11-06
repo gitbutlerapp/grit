@@ -308,7 +308,7 @@ fn cache_tree_after_add_matches_git_write_tree() {
         &grit,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 
@@ -350,7 +350,7 @@ fn add_untracked_path_keeps_index_entries_canonical() {
         &grit,
         &opts,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit add");
 

@@ -15,8 +15,9 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
+use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
@@ -156,15 +157,20 @@ fn add_and_commit_write_into_env_object_directory() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     assert_eq!(loose_objects(&objq).len(), 1, "blob lands in the env dir");
     assert!(loose_objects(&dot_git_objects).is_empty());
 
     fs::write(work.join("second"), "two\n").unwrap();
-    let outcome = commit_worktree(&repo, &commit_request("x"), &mut NullProgress, &NeverCancel)
-        .expect("commit");
+    let outcome = commit_worktree(
+        &repo,
+        &commit_request("x"),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect("commit");
     // Two blobs, one tree, one commit.
     assert_eq!(loose_objects(&objq).len(), 4);
     assert!(
@@ -228,7 +234,7 @@ fn env_object_directory_with_alternate_main_store_keeps_history_readable() {
         &repo,
         &commit_request("on top"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(outcome.parents, vec![base.parse::<ObjectId>().unwrap()]);
@@ -398,7 +404,13 @@ fn fetch_into_quarantine(root: &Path, url: &str) {
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     repo.remotes()
-        .fetch(&remote, fetch_opts, &mut NullProgress, &NeverCancel, None)
+        .fetch(
+            &remote,
+            fetch_opts,
+            &mut NoProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("grit fetch");
 }
 
@@ -528,7 +540,7 @@ fn commit_and_push_from_quarantine(root: &Path, url: &str) -> ObjectId {
         &repo,
         &commit_request("local"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     let plain = git_with(&work, &[], &["cat-file", "-e", &outcome.oid.to_hex()]);
@@ -547,8 +559,8 @@ fn commit_and_push_from_quarantine(root: &Path, url: &str) -> ObjectId {
                 ..Default::default()
             }],
             PushOptions::default(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("grit push");

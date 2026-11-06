@@ -58,18 +58,7 @@ METRIC_KEYS = (
 ERROR_CATCH_ALL_VARIANTS = frozenset({"Message", "Other", "Generic", "Custom", "Msg"})
 UMBRELLA_ERROR_PATH = "grit_lib::error::Error"
 
-CANCEL_FAMILY_NAMES = frozenset(
-    {
-        "Cancel",
-        "CancelToken",
-        "NeverCancel",
-        "CancelProgress",
-        "cancel_watch_arc",
-        "poll_watch",
-        "poll_cancel_watch",
-        "mirror_stack_cancel",
-    }
-)
+CANCEL_FAMILY_NAMES = frozenset({"CancelToken"})
 
 REFNAME_PARAM_NAMES = frozenset({"name", "refname", "ref_name", "target_ref"})
 REFNAME_FN_NAME_RE = re.compile(r"refname|ref_name|ref_format", re.IGNORECASE)

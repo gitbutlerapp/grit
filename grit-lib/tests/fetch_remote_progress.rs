@@ -186,7 +186,7 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
         &mut conn,
         &mut opts,
         &mut cap,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("fetch");
 

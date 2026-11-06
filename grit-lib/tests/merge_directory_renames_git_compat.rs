@@ -501,7 +501,7 @@ fn integrate_branch_stops_and_git_reads_the_result() {
         "theirs",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Conflicts { paths, details, .. } = outcome else {
@@ -546,7 +546,7 @@ fn split_directory_stops_without_unmerged_paths() {
         "theirs",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Conflicts { details, .. } = outcome else {
@@ -600,7 +600,7 @@ fn pick_of_the_added_file_follows_the_rename() {
             message_override: None,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("pick");
     let ReplayOutcome::Conflicts { paths } = outcome else {
@@ -651,7 +651,7 @@ fn abort_removes_files_that_only_exist_as_conflict_stages() {
         "theirs",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -686,7 +686,7 @@ fn abort_removes_files_that_only_exist_as_conflict_stages() {
         "topic",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));

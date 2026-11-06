@@ -10,7 +10,8 @@ use std::process::Command;
 use filetime::{set_file_mtime, FileTime};
 use grit_lib::index::{Index, MODE_REGULAR};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::test_support::counters::PARALLEL_STAT_MIN_ENTRIES;
@@ -98,7 +99,7 @@ fn seed_tracked_repo(root: &Path, files: usize) {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     grit_in(root, &["commit", "-qm", "initial"]);

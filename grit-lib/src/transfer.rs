@@ -28,7 +28,7 @@ use crate::fetch::{NoProgress, Progress};
 use crate::fetch_request::FetchRefspecError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
+use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::remote::RemoteError;
@@ -1188,7 +1188,7 @@ fn copy_objects_for_local_fetch(
     pack_build: &PackBuildOptions,
     fetch_opts: &FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
     prep_enumerating: bool,
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
     use crate::local_object_copy::{
@@ -1447,7 +1447,7 @@ fn copy_objects_for_local_push(
     have_shallow: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<TransferStats> {
     use crate::local_object_copy::{
         link_loose_objects_for_oids, link_packs_within, refresh_local_odb_after_link,
@@ -1882,7 +1882,7 @@ pub fn fetch_local(
         remote_git_dir,
         opts,
         &mut NoProgress,
-        &crate::progress::NeverCancel,
+        crate::progress::CancelToken::never_ref(),
     )
 }
 
@@ -2035,7 +2035,7 @@ pub fn fetch_local_with_progress(
     remote_git_dir: &Path,
     opts: &FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<FetchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
     ensure_local_remote_repository(remote_git_dir)?;
@@ -2049,7 +2049,7 @@ pub(crate) fn fetch_local_into(
     remote_git_dir: &Path,
     opts: &FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<FetchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
     ensure_local_remote_repository(remote_git_dir)?;
@@ -2550,7 +2550,7 @@ pub fn push_local(
     remote_git_dir: &Path,
     refs: &[PushRefSpec],
     opts: &PushOptions,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<PushOutcome> {
     let local = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
     push_local_from(
@@ -2574,7 +2574,7 @@ pub(crate) fn push_local_from(
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn crate::fetch::Progress,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
     pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
     let local_git_dir = local.git_dir();
@@ -2757,7 +2757,7 @@ pub(crate) fn push_local_from(
         &remote_repo,
         &opts.push_options,
         hook_extra,
-        &crate::progress::NeverCancel,
+        crate::progress::CancelToken::never_ref(),
     );
     let mut remote_messages = Vec::new();
     if !received.is_empty() {
@@ -4639,7 +4639,7 @@ mod tests {
                     atomic,
                     ..Default::default()
                 },
-                &crate::progress::NeverCancel,
+                crate::progress::CancelToken::never_ref(),
             )
             .expect("push call");
 
@@ -4694,7 +4694,7 @@ mod tests {
                     ..Default::default()
                 }],
                 &PushOptions::default(),
-                &crate::progress::NeverCancel,
+                crate::progress::CancelToken::never_ref(),
             )
             .expect("push call");
 
@@ -4801,7 +4801,7 @@ mod tests {
             &tmp.path().join(".git"),
             &opts,
             &mut PhaseRecorder::default(),
-            &crate::progress::NeverCancel,
+            crate::progress::CancelToken::never_ref(),
         )
         .unwrap();
         assert_eq!(outcome.transfer.objects, 0);
@@ -4879,7 +4879,7 @@ mod tests {
             remote.path(),
             &opts,
             &mut rec,
-            &crate::progress::NeverCancel,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("fetch_local");
         assert!(
@@ -4944,7 +4944,7 @@ mod tests {
             remote.path(),
             &opts,
             &mut rec,
-            &crate::progress::NeverCancel,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("fetch_local");
         assert!(
@@ -5038,7 +5038,7 @@ mod tests {
                 remote.path(),
                 &opts,
                 &mut rec,
-                &crate::progress::NeverCancel,
+                crate::progress::CancelToken::never_ref(),
             )
             .expect("fetch_local");
 
@@ -5100,7 +5100,7 @@ mod tests {
             remote.path(),
             &opts,
             &mut rec,
-            &crate::progress::NeverCancel,
+            crate::progress::CancelToken::never_ref(),
         )
         .expect("fetch_local");
 
@@ -5163,7 +5163,7 @@ mod tests {
             }],
             &PushOptions::default(),
             &mut rec,
-            &crate::progress::NeverCancel,
+            crate::progress::CancelToken::never_ref(),
             None,
         )
         .expect("push_local_from");

@@ -8,8 +8,6 @@ use std::process::{Command, Stdio};
 use grit_lib::config::environment::Environment;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::FilterError;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::worktree::crlf::{
     convert_to_git, convert_to_worktree_eager, ConversionConfig, FileAttrs,
@@ -346,7 +344,7 @@ fn grit_clone_checkouts_latin1_from_git_repo() {
         environment: Environment::empty(),
         ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
     };
-    clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("grit clone");
+    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
 
     let bytes = fs::read(dest.path().join("a.l1")).expect("read a.l1");
     assert_eq!(bytes, LATIN1_HELLO_WORKTREE);

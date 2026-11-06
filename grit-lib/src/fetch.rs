@@ -25,15 +25,14 @@ type LsRefsAdvertised = (
     std::collections::HashMap<String, ObjectId>,
     Option<ObjectId>,
 );
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
-use crate::remote::RemoteError;
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::transfer::{
     classify_update, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
     validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
 };
 use crate::transport::Connection;
 
-fn http_writer_flush(conn: &mut dyn Connection, cancel: &dyn Cancel) -> Result<()> {
+fn http_writer_flush(conn: &mut dyn Connection, cancel: &CancelToken) -> Result<()> {
     conn.mirror_http_cancel(cancel);
     conn.writer().flush()?;
     conn.drain_pending_http(cancel)?;
@@ -298,7 +297,7 @@ fn read_sideband_pack(
     r: &mut dyn Read,
     target: &mut crate::pack_receive::PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<()> {
     crate::pack_receive::read_sideband_pack_to(r, target, progress, cancel)
 }
@@ -395,7 +394,7 @@ fn negotiate_pack(
     local_shallow: &[ObjectId],
     wire_filter: Option<&str>,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     skip_local_haves: bool,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     crate::trace::trace_span!("grit.fetch.negotiate");
@@ -1085,7 +1084,7 @@ fn negotiate_pack_v2(
     deepen: &V2DeepenArgs,
     wire_filter: Option<&str>,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     mode: V2FetchMode<'_>,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     if wants.is_empty() {
@@ -1432,7 +1431,7 @@ pub(crate) fn read_v2_fetch_pack_response(
     pack_sink: Option<&mut crate::pack_receive::TempPackReceive>,
     shallow_out: &mut ShallowUpdate,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
     sideband_all: bool,
 ) -> Result<()> {
     loop {
@@ -1587,7 +1586,7 @@ pub fn fetch_remote(
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
     let local = open_fetch_target(local_git_dir, opts)?;
     fetch_remote_into(&local, conn, opts, progress, cancel)
@@ -1613,7 +1612,7 @@ pub fn fetch_remote_into(
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
     let local_git_dir = local.git_dir();
@@ -2224,7 +2223,7 @@ fn fetch_remote_object_wants(
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
     progress: &mut dyn Progress,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
 
@@ -3013,7 +3012,7 @@ mod fetch_advertised_ref_tests {
             None,
             &mut super::ShallowUpdate::default(),
             &mut crate::fetch::NoProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
             false,
         )
         .unwrap_err();
@@ -3680,7 +3679,6 @@ mod v0_negotiation_tests {
 mod v2_negotiation_tests {
     use super::*;
     use crate::objects::ObjectKind;
-    use crate::progress::NeverCancel;
     use crate::repo::{InitOptions, Repository};
     use std::io::Cursor;
 
@@ -3803,7 +3801,7 @@ mod v2_negotiation_tests {
             &V2DeepenArgs::default(),
             None,
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             V2FetchMode::Refs {
                 promisor_reply: None,
             },
@@ -3881,7 +3879,14 @@ mod v2_negotiation_tests {
             ..FetchOptions::default()
         };
         let mut recorder = MilestoneRecorder::default();
-        fetch_remote_into(&dst, &mut *conn, &mut opts, &mut recorder, &NeverCancel).unwrap();
+        fetch_remote_into(
+            &dst,
+            &mut *conn,
+            &mut opts,
+            &mut recorder,
+            &CancelToken::never(),
+        )
+        .unwrap();
         conn.finish().unwrap();
         recorder.events
     }
@@ -3915,7 +3920,6 @@ mod v2_negotiation_tests {
 mod remote_fatal_fetch_tests {
     use super::*;
     use crate::objects::ObjectId;
-    use crate::progress::NeverCancel;
     use crate::refs::resolve_ref;
     use crate::repo::{InitOptions, Repository};
     use crate::transfer::{FetchOptions, TagMode};
@@ -3999,7 +4003,7 @@ mod remote_fatal_fetch_tests {
             &mut conn,
             &mut opts,
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("the server aborted the fetch");
         (err, local_git, tmp)

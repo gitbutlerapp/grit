@@ -3,8 +3,7 @@
 use std::process::Command;
 
 use grit_lib::config::environment::Environment;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
 fn have_git_lfs() -> bool {
@@ -74,7 +73,7 @@ fn clone_lfs_repo_materializes_smudged_blob() {
         environment: env,
         ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
     };
-    clone_repo(opts, &mut NullProgress, &NeverCancel, None).expect("grit clone");
+    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
 
     let len = std::fs::metadata(dest.join("a.dat"))
         .expect("a.dat exists")

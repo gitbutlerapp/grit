@@ -54,7 +54,7 @@ fn write_entry_under_lock(dir: &Path, path: &str, lock: &mut grit_lib::index::In
         &mut index,
         &stage_paths(&[path]),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage in memory");
     handle
@@ -79,7 +79,7 @@ fn run_parallel_stage(dir: &Path, writers: usize) -> Vec<(String, Result<(), Err
                     &repo,
                     &stage_paths(&[&path]),
                     &mut NullProgress,
-                    &grit_lib::progress::NeverCancel,
+                    &grit_lib::progress::CancelToken::never(),
                 )
                 .map(|_| ());
                 (path, res)
@@ -157,7 +157,7 @@ fn stage_reads_index_after_waiting_for_lock() {
             &repo,
             &stage_paths(&["b.txt"]),
             &mut NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .map(|o| o.added)
     });
@@ -196,7 +196,7 @@ fn remove_reads_index_after_waiting_for_lock() {
             force: true,
             ..RemoveOptions::default()
         };
-        remove_paths(&repo, &opts, &grit_lib::progress::NeverCancel).map(|o| o.removed)
+        remove_paths(&repo, &opts, &grit_lib::progress::CancelToken::never()).map(|o| o.removed)
     });
     thread::sleep(HOLD_LOCK_FOR);
     write_entry_under_lock(dir, "a.txt", &mut lock);
@@ -262,7 +262,7 @@ fn stage_fails_without_writing_when_lock_stays_held() {
         &repo,
         &stage_paths(&["a.txt"]),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("stage must not proceed while index.lock is held");
     assert!(is_lock_contention(&err), "unexpected error {err}");

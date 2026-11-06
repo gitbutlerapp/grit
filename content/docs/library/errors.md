@@ -17,7 +17,7 @@ Grit-lib returns **structured errors**, not strings. Each functional area gets i
 | --- | --- |
 | [`LockHeldError`](rustdoc:grit_lib::error::LockHeldError) | Lock file exists; optional [`LockHolder`](rustdoc:grit_lib::lockfile::LockHolder) from the pid sidecar |
 | [`PathIoError`](rustdoc:grit_lib::error::PathIoError) | Worktree or git-dir path I/O with [`PathIoOperation`](rustdoc:grit_lib::error::PathIoOperation) |
-| [`Cancelled`](rustdoc:grit_lib::error::Cancelled) | Operation stopped via [`Cancel`](rustdoc:grit_lib::progress::Cancel) |
+| [`Cancelled`](rustdoc:grit_lib::error::Cancelled) | Operation stopped via [`CancelToken`](rustdoc:grit_lib::progress::CancelToken) |
 
 ## Area map (target)
 

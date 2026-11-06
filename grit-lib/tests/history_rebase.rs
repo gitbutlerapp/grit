@@ -117,7 +117,7 @@ fn apply_plan(repo: &Repository, plan: &grit_lib::revwalk::history::RewritePlan)
             hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
 }

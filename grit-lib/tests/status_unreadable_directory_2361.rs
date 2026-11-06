@@ -11,7 +11,7 @@ mod unix {
     use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticsHandle, Warning};
     use grit_lib::porcelain::commit::{commit_worktree, CommitRequest};
     use grit_lib::porcelain::status::{status, StatusOptions};
-    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
 
@@ -67,7 +67,7 @@ mod unix {
             &fx.repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status must succeed");
         assert!(
@@ -121,7 +121,7 @@ mod unix {
             &fx.repo,
             &StatusOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("status must succeed");
         assert!(
@@ -157,7 +157,7 @@ mod unix {
 
         let fx = open_repo(root);
         let req = CommitRequest::new("second\n");
-        commit_worktree(&fx.repo, &req, &mut NullProgress, &NeverCancel)
+        commit_worktree(&fx.repo, &req, &mut NullProgress, &CancelToken::never())
             .expect("commit must succeed");
 
         set_mode(&root.join("d"), 0o755);

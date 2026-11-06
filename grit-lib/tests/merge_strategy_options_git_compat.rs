@@ -163,7 +163,7 @@ fn diff3_markers_byte_equal_git() {
             ..MergeOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -191,7 +191,7 @@ fn zdiff3_markers_byte_equal_git() {
             ..MergeOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -222,7 +222,7 @@ fn conflict_style_from_config() {
             ..MergeOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
@@ -259,7 +259,7 @@ fn unrelated_refused_by_default() {
         "orphan",
         &MergeOptions::default(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("unrelated without flag");
     assert!(matches!(err, Error::Message(_)));
@@ -334,7 +334,7 @@ fn allow_unrelated_matches_git_tree() {
             ..MergeOptions::default()
         },
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("allow unrelated");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {

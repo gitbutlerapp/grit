@@ -10,7 +10,7 @@ mod unix {
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::diagnostics::{CollectingDiagnostics, DiagnosticsHandle, Warning};
     use grit_lib::diff::{DiffOptions, DiffStatus, DiffTarget};
-    use grit_lib::progress::{NeverCancel, NullProgress};
+    use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_lib::stash::StashPushOptions;
     use grit_test_support::git;
@@ -159,7 +159,7 @@ mod unix {
         };
         fx.repo
             .stash()
-            .push(&opts, &mut NullProgress, &NeverCancel)
+            .push(&opts, &mut NullProgress, &CancelToken::never())
             .expect("stash must succeed");
 
         set_mode(&root.join("priv"), 0o755);

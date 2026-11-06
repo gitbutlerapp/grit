@@ -122,7 +122,7 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -142,7 +142,7 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
             req
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("create_commit");
 

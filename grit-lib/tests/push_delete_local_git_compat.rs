@@ -3,8 +3,6 @@
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::remote::push_plan::{
     load_push_plan_context, open_push_destination, resolve_push, PushPlanError, PushPlanKind,
@@ -80,8 +78,8 @@ fn delete_push_removes_every_named_ref_like_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
             None,
         )
         .expect("push");
@@ -189,7 +187,7 @@ fn push_delete_tag_on_local_remote() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push tag");
     assert!(refs::resolve_ref(&origin, "refs/tags/v1").is_ok());
@@ -208,7 +206,7 @@ fn push_delete_tag_on_local_remote() {
             ..Default::default()
         }],
         &PushOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete tag");
     assert!(refs::resolve_ref(&origin, "refs/tags/v1").is_err());

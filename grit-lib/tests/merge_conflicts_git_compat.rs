@@ -102,7 +102,7 @@ fn grit_merge_leaves_conflict_markers_and_clean_side_files() {
         feature_oid,
         "feature-x",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
     assert!(
@@ -197,7 +197,7 @@ fn resolve_and_commit_matches_git_merge() {
         feature_oid,
         "feature-x",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
 
@@ -219,7 +219,7 @@ fn resolve_and_commit_matches_git_merge() {
         &repo,
         &commit_req("Merge feature-x"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 
@@ -270,7 +270,7 @@ fn grit_merge_keeps_identical_non_conflict_files() {
         side_oid,
         "side",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
     assert!(
@@ -331,7 +331,7 @@ fn issue_1090_resolve_commit_keeps_non_conflict_files() {
         side_oid,
         "side",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
 
@@ -341,7 +341,7 @@ fn issue_1090_resolve_commit_keeps_non_conflict_files() {
         &repo,
         &commit_req("resolved"),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge commit");
 
@@ -445,7 +445,7 @@ fn merge_sibling_dirs_a_and_a0_reports_conflicts() {
         two_oid,
         "two",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate merge two into one");
     assert!(
@@ -515,7 +515,7 @@ fn pick_sibling_dirs_a_and_a0_reports_conflicts() {
             options: ReplayOptions::default(),
         },
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("pick two onto one");
     assert!(
@@ -546,7 +546,7 @@ fn merge_abort_restores_pre_merge_state() {
         feature_oid,
         "feature-x",
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
 

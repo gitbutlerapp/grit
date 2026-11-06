@@ -104,7 +104,7 @@ fn switch_create_over_a_ref_directory_names_the_ref() {
                 hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
             },
             &mut grit_lib::progress::NullProgress,
-            &grit_lib::progress::NeverCancel,
+            &grit_lib::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert_names_blocking_ref(&err, "refs/heads/rel/1.0", "refs/heads/rel");

@@ -6,8 +6,7 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone as clone_repo, CloneError, CloneOptions};
 
 fn grit_bin() -> std::path::PathBuf {
@@ -64,8 +63,8 @@ fn parallel_clone_library_exactly_one_winner() {
         handles.push(thread::spawn(move || {
             clone_repo(
                 CloneOptions::new(url, dest),
-                &mut NullProgress,
-                &NeverCancel,
+                &mut NoProgress,
+                &CancelToken::never(),
                 None,
             )
         }));

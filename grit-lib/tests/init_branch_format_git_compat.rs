@@ -142,7 +142,7 @@ fn init_sha256_then_commit_git_fsck_clean() {
         &repo,
         &grit_lib::porcelain::add::StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     let req = {
@@ -159,7 +159,7 @@ fn init_sha256_then_commit_git_fsck_clean() {
         &repo,
         &req,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
     git_fsck_ok(repo.git_dir());

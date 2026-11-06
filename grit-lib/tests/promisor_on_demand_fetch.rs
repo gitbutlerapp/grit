@@ -23,8 +23,6 @@ use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::DefaultHttpClientFactory;
@@ -102,8 +100,8 @@ fn grit_blobless_clone(
             checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("clone");
@@ -754,7 +752,7 @@ fn hard_reset(repo: &Repository, target: ObjectId) -> grit_lib::error::Result<()
         repo,
         &ResetOptions::new(target, ResetMode::Hard, identity, "reset"),
         &mut grit_lib::progress::NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .map(|_| ())
 }
@@ -1142,7 +1140,7 @@ fn chunked_hard_reset_fetches_attribute_blobs_with_the_batch() {
             "reset",
         ),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset");
 

@@ -26,6 +26,7 @@ use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, stage_hunks, HunkSelection,
 };
 use crate::porcelain::index_from_tree::index_from_tree;
+use crate::progress::CancelToken;
 use crate::repo::Repository;
 
 /// Options for [`fixup`].
@@ -182,7 +183,7 @@ pub fn apply_fixup_hunk_selection(
         apply_opts,
         selection,
         pathspecs,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
 }
 
@@ -193,7 +194,7 @@ pub fn apply_fixup_hunk_selection_with_cancel(
     apply_opts: &ApplyOptions,
     selection: &HunkSelection,
     pathspecs: &[String],
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<AppliedRewrite, HistoryError> {
     let paths = fixup_selection_paths(repo, selection, pathspecs)?;
     let snapshot = capture_hunk_fixup_apply_snapshot(repo, &paths)?;
@@ -574,7 +575,7 @@ mod hunk_selection_restore_tests {
             &[],
             DiffOptions::default(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("stage line-5");
         let selection = HunkSelection {
@@ -611,7 +612,7 @@ mod hunk_selection_restore_tests {
             &[],
             DiffOptions::default(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .expect("stage line-18");
         let apply_opts = ApplyOptions {

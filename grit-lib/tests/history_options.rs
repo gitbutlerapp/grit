@@ -140,7 +140,7 @@ fn drop_keep_empty_keeps_replayed_empty_commit() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     git_fsck_strict(wt);
@@ -287,7 +287,7 @@ fn reword_keep_committer_preserves_committer_line() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("apply");
     git_fsck_strict(wt);

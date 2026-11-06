@@ -57,7 +57,7 @@ use crate::pack_object_select::{
 };
 use crate::pack_objects::{PackBuildOptions, SerializedDeltaPack};
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
-use crate::progress::{poll_cancel, Cancel, NeverCancel, NullProgress};
+use crate::progress::{poll_cancel, CancelToken, NullProgress};
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::reflog::{
     expire_reflog_git_with_cache, load_gc_reflog_expire_config, reflog_refs_on_store,
@@ -897,13 +897,13 @@ pub struct GcStats {
 ///
 /// Propagates pack build/install failures, unsupported custom ODB backends, and I/O errors.
 pub fn repack(repo: &Repository, opts: &RepackOptions) -> Result<RepackReport> {
-    Ok(repack_detail(repo, opts, &NeverCancel)?.report)
+    Ok(repack_detail(repo, opts, &CancelToken::never())?.report)
 }
 
 fn repack_detail(
     repo: &Repository,
     opts: &RepackOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RepackDetail> {
     poll_cancel(&mut NullProgress, cancel)?;
     let odb = repo.odb();
@@ -1208,14 +1208,14 @@ fn repack_detail(
 
 /// Like [`repack`], with legacy [`RepackStats`] fields for the CLI.
 pub fn repack_all(repo: &Repository, opts: &RepackOptions) -> Result<RepackStats> {
-    repack_all_with_cancel(repo, opts, &NeverCancel)
+    repack_all_with_cancel(repo, opts, &CancelToken::never())
 }
 
 /// Like [`repack_all`], but returns [`Error::Cancelled`] before publishing a new pack.
 pub fn repack_all_with_cancel(
     repo: &Repository,
     opts: &RepackOptions,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RepackStats> {
     let odb = repo.odb();
     let objects_dir = odb
@@ -1642,12 +1642,16 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 /// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock, plus failures
 /// from each maintenance step.
 pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
-    gc_with_cancel(repo, opts, &NeverCancel)
+    gc_with_cancel(repo, opts, &CancelToken::never())
 }
 
 /// Like [`gc`], but returns [`Error::Cancelled`] between maintenance phases and before
 /// publishing a new pack.
-pub fn gc_with_cancel(repo: &Repository, opts: &GcOptions, cancel: &dyn Cancel) -> Result<GcStats> {
+pub fn gc_with_cancel(
+    repo: &Repository,
+    opts: &GcOptions,
+    cancel: &CancelToken,
+) -> Result<GcStats> {
     repo.odb().require_files_primary("gc")?;
     let now = gc_now_unix(opts.now_unix);
     let _lock = if opts.repack.dry_run {
@@ -1810,7 +1814,7 @@ pub fn gc_auto(repo: &Repository, opts: &GcOptions) -> Result<AutoGcOutcome> {
         run_opts.repack.incremental = true;
         run_opts.repack.write_bitmap = false;
     }
-    let stats = gc_locked(repo, &run_opts, now, &NeverCancel)?;
+    let stats = gc_locked(repo, &run_opts, now, &CancelToken::never())?;
     Ok(AutoGcOutcome::Ran {
         reason,
         stats: Box::new(stats),
@@ -1973,7 +1977,7 @@ fn gc_locked(
     repo: &Repository,
     opts: &GcOptions,
     now: i64,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<GcStats> {
     poll_cancel(&mut NullProgress, cancel)?;
     let mut stats = GcStats::default();
@@ -2777,7 +2781,7 @@ mod tests {
     use crate::index_pack::install_pack_bytes;
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
-    use crate::progress::{NeverCancel, NullProgress};
+    use crate::progress::NullProgress;
     use crate::repo::InitOptions;
     use filetime::FileTime;
     use std::time::SystemTime;
@@ -2971,7 +2975,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -2988,7 +2992,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
         git_cmd(dir.path(), &["repack", "-a", "-d"]);
@@ -3225,7 +3229,8 @@ mod tests {
 
     fn assert_fsck_clean(repo: &Repository) {
         let opts = repo_fsck::FsckOptions::full_repository(true).with_check_dangling(false);
-        let report = repo_fsck::fsck(repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
+        let report =
+            repo_fsck::fsck(repo, &opts, &mut NullProgress, &CancelToken::never()).expect("fsck");
         assert!(
             report.ok(&repo.config().snapshot().expect("config"), &opts),
             "{:?}",
@@ -3238,7 +3243,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -3255,7 +3260,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
         assert_fsck_clean(&repo);
@@ -3267,7 +3272,7 @@ mod tests {
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let wt = repo.work_tree().unwrap();
         std::fs::write(wt.join("base"), b"v1").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -3284,7 +3289,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
         repack_all(
@@ -3299,7 +3304,7 @@ mod tests {
         assert_eq!(count_pack_files(&pack_dir), 1);
 
         std::fs::write(wt.join("child"), b"v2").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage child");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage child");
         create_commit(
             &repo,
             &CommitRequest {
@@ -3315,7 +3320,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("child commit");
         assert!(count_loose_objects(repo.odb()).expect("loose") >= 2);
@@ -3366,7 +3371,7 @@ mod tests {
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let wt = repo.work_tree().unwrap();
         std::fs::write(wt.join("base"), b"v1").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -3383,7 +3388,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
         repack_all(
@@ -3413,7 +3418,7 @@ mod tests {
                     ..Default::default()
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("empty");
         }
@@ -3440,7 +3445,7 @@ mod tests {
         let wt = repo.work_tree().unwrap();
         for i in 0..5 {
             std::fs::write(wt.join(format!("f{i}.txt")), format!("{i}\n")).unwrap();
-            stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+            stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
             let ident = "Test <t@example.com> 1 +0000".to_string();
             create_commit(
                 &repo,
@@ -3457,7 +3462,7 @@ mod tests {
                     ..Default::default()
                 },
                 &mut NullProgress,
-                &NeverCancel,
+                &CancelToken::never(),
             )
             .expect("commit");
         }
@@ -3832,7 +3837,7 @@ mod tests {
 
         let (dir, repo) = repo_with_config("");
         std::fs::write(repo.work_tree().unwrap().join("a"), b"x").unwrap();
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "Test <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -3849,7 +3854,7 @@ mod tests {
                 ..Default::default()
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
         let main_git = repo.git_dir().to_path_buf();

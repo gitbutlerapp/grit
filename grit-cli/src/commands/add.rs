@@ -243,7 +243,7 @@ pub fn run_hunks(
     unified_context: Option<usize>,
     dry_run: bool,
 ) -> Result<AddOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let resolved = args.resolve(&repo)?;
     let (pathspecs, _) = resolved.into_pathspec_lists();
@@ -261,7 +261,7 @@ pub fn run_hunks(
         &pathspecs,
         diff_options,
         dry_run,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(map_hunk_error)?;
     Ok(AddOutcome::from_hunks(outcome).with_path_display(&repo))
@@ -272,7 +272,7 @@ fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
 }
 
 pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let repo = context::discover()?;
     let patches = crate::patch_selection::parse_patch_file(patch_file)?;
     let outcome = apply_patch_to_index_and_write(
@@ -282,7 +282,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
             dry_run,
             ..IndexApplyOptions::default()
         },
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(map_apply_error)?;
     let count = outcome.added.len() + outcome.modified.len() + outcome.removed.len();
@@ -313,7 +313,7 @@ pub fn run(
     non_executable: bool,
     progress: &mut dyn ProgressSink,
 ) -> Result<AddOutcome> {
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     if executable && non_executable {
         bail!("--executable and --non-executable cannot be used together");
     }
@@ -348,7 +348,7 @@ pub fn run(
             StageExecutableHint::None
         },
         progress,
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )?;
     Ok(AddOutcome::from_stage(outcome, dry_run, no_paths).with_path_display(&repo))
 }
@@ -363,7 +363,7 @@ fn stage_with_hint(
     force_ignored: bool,
     executable_hint: StageExecutableHint,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn grit_lib::progress::Cancel,
+    cancel: &grit_lib::progress::CancelToken,
 ) -> Result<StageOutcome> {
     let (pathspecs, pathspec_sources) = resolved.into_pathspec_lists();
     #[allow(clippy::field_reassign_with_default)]

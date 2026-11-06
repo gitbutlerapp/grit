@@ -20,7 +20,7 @@ use crate::porcelain::worktree_guard::{
     ensure_safe_for_rebase_stop, ensure_worktree_clean_for_rebase_exec,
 };
 use crate::progress::{
-    poll_cancel, Cancel, NeverCancel, NullProgress, ProgressSink, UncancellableProgress,
+    poll_cancel, CancelToken, NullProgress, ProgressSink, UncancellableProgress,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -270,7 +270,7 @@ pub fn start_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     super::ensure_rewrite_apply_ready(repo)?;
     if let Some(active) = active_rebase(repo.git_dir()) {
@@ -354,7 +354,7 @@ pub fn start_rebase_with_exec(
     spec: &super::ExecSpec,
     runner: &dyn crate::command_runner::CommandRunner,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     super::ensure_rewrite_apply_ready(repo)?;
     if let Some(active) = active_rebase(repo.git_dir()) {
@@ -590,7 +590,7 @@ fn advance_after_user_resolution_commit(
     head_oid: ObjectId,
     rerere: Vec<crate::rerere::RerereEvent>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     let head_oid = run_exec_after_resolution(repo, state, head_oid)?;
     let current_data = load_commit(repo, current)?;
@@ -657,7 +657,7 @@ pub fn continue_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     if matches!(active_rebase(repo.git_dir()), Some(ActiveRebase::Exec)) {
         return super::exec::resume_exec_rebase(repo, &opts.apply, false, progress, cancel);
@@ -803,7 +803,7 @@ pub fn skip_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     if matches!(active_rebase(repo.git_dir()), Some(ActiveRebase::Exec)) {
         return super::exec::resume_exec_rebase(repo, &opts.apply, true, progress, cancel);
@@ -1337,7 +1337,7 @@ fn install_stopped_rebase(
     partial: super::plan::PartialRewritePlan,
     exec_commands: Vec<String>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseStop, RebaseSessionError> {
     poll_cancel(progress, cancel).map_err(map_lib)?;
     let effective_onto = request.onto.unwrap_or(request.upstream);
@@ -1396,14 +1396,19 @@ fn install_stopped_rebase(
     // With the stop state and HEAD published, a half-installed stop would let continue commit
     // without the conflict stages, so the checkouts below run to completion.
     let mut progress = UncancellableProgress::new(progress);
-    reset_index_worktree_to_head(repo, conflict.replayed_parent, &mut progress, &NeverCancel)?;
+    reset_index_worktree_to_head(
+        repo,
+        conflict.replayed_parent,
+        &mut progress,
+        &CancelToken::never(),
+    )?;
     let ours_tree = commit_tree(repo, conflict.replayed_parent)?;
     apply_conflict_merge_worktree(
         repo,
         &ours_tree,
         &conflict.merge,
         &mut progress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .map_err(map_lib)?;
 
@@ -1431,7 +1436,7 @@ fn advance_after_plan(
     head_before: ObjectId,
     rerere: Vec<crate::rerere::RerereEvent>,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
     poll_cancel(progress, cancel).map_err(map_lib)?;
     match outcome {
@@ -1500,7 +1505,12 @@ fn advance_after_plan(
                 applied.head
             };
             // The refs already moved: finish the rebase even if a cancel arrives now.
-            reset_index_worktree_to_head(repo, final_head, &mut NullProgress, &NeverCancel)?;
+            reset_index_worktree_to_head(
+                repo,
+                final_head,
+                &mut NullProgress,
+                &CancelToken::never(),
+            )?;
             applied.head = final_head;
             if let Some(operation) = apply.record_operation.as_deref() {
                 let head_old_tree = commit_tree(repo, prev.orig_head)?;
@@ -1732,7 +1742,7 @@ fn reset_index_worktree_to_head(
     repo: &Repository,
     head_oid: ObjectId,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<(), RebaseSessionError> {
     let head_tree = commit_tree(repo, head_oid)?;
     // Paths tracked before the move but absent from `head_oid` must go too; leaving them as
@@ -1776,7 +1786,7 @@ fn hard_reset_head(
         repo,
         &ResetOptions::new(target, ResetMode::Hard, identity.clone(), "rebase (abort)"),
         &mut crate::progress::NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
     .map_err(map_lib)?;
     Ok(())

@@ -105,7 +105,7 @@ fn paths_commit_fails_when_branch_moves_after_head_was_read() {
             scoped: true,
         }),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("moved branch must fail the commit");
 
@@ -127,7 +127,7 @@ fn auto_stage_commit_fails_when_branch_moves_after_head_was_read() {
         &commit_req("mine"),
         CommitScope::AutoStage,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("moved branch must fail the commit");
 

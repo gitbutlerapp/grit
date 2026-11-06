@@ -17,7 +17,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
@@ -54,7 +54,7 @@ fn apply(
     plan: &RewritePlan,
     opts: &ApplyOptions,
 ) -> Result<AppliedRewrite, HistoryError> {
-    apply_rewrite(repo, plan, opts, &mut NullProgress, &NeverCancel)
+    apply_rewrite(repo, plan, opts, &mut NullProgress, &CancelToken::never())
 }
 
 /// Repository with memory object and ref stores and an on-disk work tree only.
@@ -111,7 +111,7 @@ fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> Objec
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     commit_with_scope(
@@ -124,7 +124,7 @@ fn commit_file(repo: &Repository, wt: &Path, name: &str, message: &str) -> Objec
         },
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
@@ -270,7 +270,7 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
                 hooks: Default::default(),
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("switch");
     };
@@ -295,7 +295,7 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
             pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("start_rebase");
     let RebaseOutcome::Done { applied, .. } = outcome else {

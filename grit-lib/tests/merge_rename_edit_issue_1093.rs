@@ -124,7 +124,7 @@ fn integrate_branch_rename_on_theirs_edit_on_ours_clean_index() {
         ren_oid,
         "ren",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("merge");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -307,7 +307,7 @@ fn predict_merge_rename_on_theirs_delete_on_ours_reports_conflicts() {
         ren_oid,
         "ren",
         &mut grit_lib::progress::NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("integrate");
     assert!(

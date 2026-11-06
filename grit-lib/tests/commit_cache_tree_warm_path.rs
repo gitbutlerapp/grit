@@ -111,7 +111,7 @@ fn allow_empty_commit_preserves_cache_tree_without_full_restage() {
         &repo,
         &commit_worktree_req("empty", true),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("allow-empty commit");
 

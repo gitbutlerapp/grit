@@ -23,7 +23,7 @@ use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_objec
 use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
-use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::refs::{
     should_autocreate_reflog_with_config, update_branch_for_commit_on_store,
     update_detached_head_for_commit_on_store, BranchCommitRefLock, BranchCommitRefUpdate,
@@ -102,7 +102,7 @@ pub fn replay_commit(
     repo: &Repository,
     req: &ReplayRequest,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> Result<ReplayOutcome> {
     ensure_worktree_clean_for_pick(repo)?;
 

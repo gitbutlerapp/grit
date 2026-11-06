@@ -4,8 +4,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::CancelToken;
 use grit_lib::refs;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 
@@ -122,8 +121,8 @@ fn clone_fetches_tags_on_unreachable_commits() {
                 grit_dest.path().to_path_buf(),
             )
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone");
@@ -152,8 +151,8 @@ fn clone_file_url_fetches_unreachable_tags() {
         CloneOptions {
             ..CloneOptions::new(url, grit_dest.path().to_path_buf())
         },
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
         None,
     )
     .expect("grit clone file://");

@@ -16,9 +16,9 @@ Every API that reports conflicts uses [`operation::Conflict`](rustdoc:grit_lib::
 ```rust
 use grit_lib::operation::ConflictKind;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 
-let model = status(&repo, &StatusOptions::default(), &mut NullProgress, &NeverCancel)?;
+let model = status(&repo, &StatusOptions::default(), &mut NullProgress, &CancelToken::never())?;
 for conflict in &model.conflict_details {
     if conflict.kind == ConflictKind::DeletedByUs {
         println!("{}: deleted here, changed on the incoming side", conflict.path);

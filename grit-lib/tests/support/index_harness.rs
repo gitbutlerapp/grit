@@ -9,11 +9,11 @@ use std::process::Command;
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::status::{format_porcelain_v2, status, StatusOptions};
-use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
 use super::history_harness::{git, git_ls_files_stage, HistoryRepo};
+use grit_lib::progress::CancelToken;
 
 /// Run `git fsck --strict` in `worktree` (panics on failure).
 pub fn assert_git_fsck_strict(worktree: &Path) {
@@ -116,7 +116,7 @@ pub fn grit_status_porcelain_v2_lines(repo: &Repository) -> Vec<String> {
         repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("grit status");
     format_porcelain_v2(&model, repo.odb(), repo.work_tree())

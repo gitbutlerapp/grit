@@ -5,7 +5,8 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::log::{load_commits_with_decorations, DecorationMap};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -42,7 +43,7 @@ fn status_model_of_git_paused_merge_serializes_operation_and_conflicts() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let json = serde_json::to_value(&model).expect("serialize status");

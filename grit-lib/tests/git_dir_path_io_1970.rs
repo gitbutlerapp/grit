@@ -98,14 +98,14 @@ fn seed_commit(repo: &Repository, root: &Path, message: &str) {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         repo,
         &commit_request(message),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("commit");
 }
@@ -116,7 +116,7 @@ fn commit_should_fail_with_git_dir_io(repo: &Repository, root: &Path) -> Error {
         repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     commit_with_scope(
@@ -124,7 +124,7 @@ fn commit_should_fail_with_git_dir_io(repo: &Repository, root: &Path) -> Error {
         &commit_request("next"),
         CommitScope::Staged,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit should fail")
 }
@@ -142,7 +142,7 @@ fn read_only_objects_on_commit_names_git_path() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("stage");
     assert_git_dir_io(&err);
@@ -289,7 +289,7 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
         &linked_repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
 
@@ -306,7 +306,7 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
         &commit_request("linked"),
         CommitScope::Staged,
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit should fail");
     let path = assert_git_dir_path_io(&err);

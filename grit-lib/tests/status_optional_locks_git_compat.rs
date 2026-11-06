@@ -10,7 +10,8 @@ use std::time::Duration;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::status::{status, InterruptedRewrite, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -72,7 +73,7 @@ fn status_write_index_false_leaves_index_bytes_and_mtime() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(model.unstaged.is_empty());
@@ -120,7 +121,7 @@ fn status_honors_git_optional_locks_zero_in_environment() {
         &grit_repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
 
@@ -265,8 +266,14 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     .expect("plan");
     let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(true);
-    let _err = apply_rewrite(&grit, &plan, &apply_opts(), &mut NullProgress, &NeverCancel)
-        .expect_err("injected abort");
+    let _err = apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .expect_err("injected abort");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
     assert!(rewrite_apply_journal_active(grit.git_dir()));
     assert_ne!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
@@ -278,7 +285,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
             ..StatusOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert_eq!(model.interrupted_rewrite, Some(InterruptedRewrite::Pending));

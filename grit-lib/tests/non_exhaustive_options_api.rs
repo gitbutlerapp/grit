@@ -4,7 +4,8 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diagnostics::NullDiagnostics;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::maintenance::{repack_all, GcOptions, RepackOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use std::sync::Arc;
@@ -137,8 +138,8 @@ fn maintenance_constructors_run_on_empty_repo() {
     let tmp = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(tmp.path(), &InitOptions::new()).expect("init");
     let opts = FsckOptions::full_repository(false);
-    let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
-    assert!(report.ok(&repo.config().snapshot().expect("config"), &opts));
+    let report = fsck(&repo, &opts, &mut NullProgress, &CancelToken::never()).expect("fsck");
+    assert!(report.ok(&repo.config().expect("config"), &opts));
     let stats = repack_all(&repo, &RepackOptions::with_dry_run(true)).expect("repack dry-run");
     assert!(stats.objects_packed.is_none());
 }

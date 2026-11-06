@@ -1158,9 +1158,9 @@ pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
         progress(mode, "Running garbage collection…");
     }
     let opts = GcOptions::full_run(dry_run, now);
-    let interrupt = crate::interrupt::InterruptCancel::install();
-    let stats =
-        gc_with_cancel(&repo, &opts, &interrupt).map_err(crate::json_error::map_lib_error)?;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
+    let stats = gc_with_cancel(&repo, &opts, &crate::interrupt::process_cancel_token())
+        .map_err(crate::json_error::map_lib_error)?;
     let timings = stats.phase_timings;
     let tasks = tasks_from_gc_stats(stats, timings);
     Ok(GcOutcome {
@@ -1321,9 +1321,10 @@ pub fn run_repack(
     let mut opts = RepackOptions::with_dry_run(dry_run);
     opts.write_bitmap = bitmaps;
     opts.force_recompress = force;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let (stats, elapsed) = timed(mode, "Repacking objects…", || {
-        repack_all_with_cancel(&repo, &opts, &interrupt).map_err(crate::json_error::map_lib_error)
+        repack_all_with_cancel(&repo, &opts, &crate::interrupt::process_cancel_token())
+            .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
         quiet,

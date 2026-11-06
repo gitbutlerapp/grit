@@ -18,7 +18,7 @@ use grit_lib::objects::pack::{
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefTransaction, RefUpdate, ReflogUpdate,
 };
@@ -119,7 +119,7 @@ fn init_repo() -> (TempDir, Repository) {
 fn one_commit(repo: &Repository) -> ObjectId {
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("f.txt"), b"hello\n").expect("write");
-    stage_for_commit(repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "T <t@example.com> 1 +0000".to_string();
     create_commit(
         repo,
@@ -134,14 +134,14 @@ fn one_commit(repo: &Repository) -> ObjectId {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit")
     .oid
 }
 
 fn grit_fsck(repo: &Repository, opts: &FsckOptions) -> fsck::FsckReport {
-    fsck::fsck(repo, opts, &mut NullProgress, &NeverCancel).expect("grit fsck")
+    fsck::fsck(repo, opts, &mut NullProgress, &CancelToken::never()).expect("grit fsck")
 }
 
 fn git_dangling_set(root: &std::path::Path) -> Vec<(ObjectKind, ObjectId)> {
@@ -387,7 +387,7 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
     for i in 0..50 {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join(format!("file-{i}.txt")), format!("payload {i}\n")).expect("write");
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -402,7 +402,7 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
                 req
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -439,7 +439,7 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
     for i in 0..50 {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join(format!("file-{i}.txt")), format!("payload {i}\n")).expect("write");
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
         let ident = "T <t@example.com> 1 +0000".to_string();
         create_commit(
             &repo,
@@ -454,7 +454,7 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
                 req
             },
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect("commit");
     }
@@ -585,7 +585,7 @@ fn missing_blob_reported_as_missing_object() {
     one_commit(&repo);
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("orphan.txt"), b"x").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let index = Index::load(&repo.git_dir().join("index")).expect("index");
     let staged = index
         .entries()
@@ -1503,7 +1503,7 @@ fn reflog_and_index_roots_are_not_dangling() {
     git(dir.path(), &["commit", "--allow-empty", "-m", "e2"]);
     git(dir.path(), &["reset", "--hard", "HEAD~1"]);
     std::fs::write(repo.work_tree().expect("wt").join("idx-only"), b"z").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
 
     let git_set = git_dangling_set(dir.path());
     let report = grit_fsck(
@@ -1752,7 +1752,7 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
     let (dir, repo) = init_repo();
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("abcde日.txt"), b"x\n").expect("write");
-    stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage");
+    stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage");
     let ident = "T <t@example.com> 1 +0000".to_string();
     create_commit(
         &repo,
@@ -1767,7 +1767,7 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
             req
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 

@@ -50,8 +50,6 @@ use std::time::{Duration, Instant};
 use grit_lib::error::{Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::progress::NeverCancel;
-use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::fetch_remote;
 use grit_lib::remote::pkt_line;
@@ -232,8 +230,8 @@ fn fetch_v0_sideband_band3_fatal_is_typed_error_not_hang() {
             &local_git_for_thread,
             &mut conn,
             &mut opts,
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
         )
         .expect_err("a band-3 fatal must surface as an error")
     });
@@ -278,8 +276,8 @@ fn fetch_v0_err_after_done_is_typed_remote_error() {
             &local_git_for_thread,
             &mut conn,
             &mut opts,
-            &mut NullProgress,
-            &NeverCancel,
+            &mut NoProgress,
+            &CancelToken::never(),
         )
         .expect_err("an ERR after done must surface as an error")
     });
@@ -369,8 +367,8 @@ fn push_remote_rejects_protocol_v2_typed_before_touching_refs() {
         &mut conn,
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("a v2 push must be rejected in this phase");
     let msg = format!("{err}");
@@ -433,8 +431,8 @@ fn push_remote_unpack_failure_report_demotes_all_sent_refs() {
         &mut conn,
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_remote completes and parses the report");
 
@@ -565,8 +563,8 @@ fn push_http_rejects_v2_receive_pack_advertisement_typed() {
         "http://example.invalid/repo.git",
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("a v2 receive-pack advertisement must be rejected");
     let msg = format!("{err}");
@@ -611,8 +609,8 @@ fn push_http_propagates_discovery_transport_error_typed() {
         "http://127.0.0.1:1/repo.git",
         &[spec],
         &PushOptions::default(),
-        &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &mut NoProgress,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("a discovery transport failure must surface as an error");
     let msg = format!("{err}");
@@ -849,8 +847,8 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
         &local_git,
         &mut *conn,
         &mut opts,
-        &mut NullProgress,
-        &NeverCancel,
+        &mut NoProgress,
+        &CancelToken::never(),
     )
     .expect("shallow+tags fetch over git daemon");
     drop(conn);

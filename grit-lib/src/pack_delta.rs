@@ -22,6 +22,7 @@ use crate::pack_objects::{
 };
 use crate::parallel::{ParallelOp, ParallelOptions, ThreadPolicy};
 use crate::progress::CancelSignal;
+use crate::progress::CancelToken;
 
 /// Resolve [`ParallelOptions`] for windowed delta search from repo config.
 pub(crate) fn pack_delta_search_parallel_options(

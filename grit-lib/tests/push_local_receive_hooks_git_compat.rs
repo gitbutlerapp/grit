@@ -76,7 +76,7 @@ fn push(
         &setup.remote,
         &specs,
         &opts,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
 }
 

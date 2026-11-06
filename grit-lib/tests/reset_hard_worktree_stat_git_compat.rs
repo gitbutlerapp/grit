@@ -8,7 +8,8 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 use tempfile::TempDir;
@@ -29,7 +30,7 @@ fn hard_reset_to_head(dir: &Path) {
         &repo,
         &ResetOptions::new(head, ResetMode::Hard, ident(), "reset: moving to HEAD"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("hard reset");
 }

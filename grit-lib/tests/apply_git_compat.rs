@@ -82,7 +82,7 @@ fn mixed_text_and_binary_patch_writes_git_compatible_index() {
         &repo,
         &patches,
         &IndexApplyOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert_eq!(git(root, &["write-tree"]), expected_tree);
@@ -136,7 +136,7 @@ fn quoted_patch_paths_roundtrip_through_git_index() {
         &repo,
         &patches,
         &IndexApplyOptions::default(),
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
     assert_eq!(git(root, &["write-tree"]), expected_tree);

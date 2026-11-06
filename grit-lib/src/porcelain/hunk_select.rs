@@ -34,7 +34,7 @@ use crate::porcelain::checkout::{
     write_to_worktree_cached, LeadingDirCache,
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
-use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
@@ -1164,7 +1164,7 @@ pub fn restore_hunks(
                 reverse: true,
                 head_tree_oid: repo.head_tree()?,
             },
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )?;
         outcome
             .restored
@@ -1397,7 +1397,7 @@ pub fn reverse_apply_patches_to_worktree(
     patches: &[FilePatch],
     opts: &WorktreeReverseApplyOptions,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn Cancel,
+    cancel: &CancelToken,
 ) -> std::result::Result<(), ApplyError> {
     let work_tree = repo.work_tree().ok_or_else(|| ApplyError::Failed {
         path: String::new(),
@@ -1540,7 +1540,7 @@ pub fn stage_hunks(
     pathspecs: &[String],
     diff_options: DiffOptions,
     dry_run: bool,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<StageHunksOutcome, HunkSelectError> {
     // Lock first so the selection is resolved against the index the patches are applied to. The
     // index is reloaded rather than kept across the diff, which would add it to the diff's peak.
@@ -1719,7 +1719,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let grit_tree =
@@ -1820,7 +1820,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         stage_hunks(
@@ -1833,7 +1833,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -1880,7 +1880,7 @@ mod tests {
             &[],
             opts,
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -1920,7 +1920,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -1953,7 +1953,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, HunkSelectError::StaleId { .. }));
@@ -1977,7 +1977,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let staged_files =
@@ -1995,7 +1995,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(
@@ -2143,7 +2143,7 @@ mod tests {
                 ..StageOptions::default()
             },
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let (files, peers) =
@@ -2172,7 +2172,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(repo
@@ -2215,7 +2215,7 @@ mod tests {
             &[path.into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let grit_tree =
@@ -2260,7 +2260,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(
@@ -2306,7 +2306,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let file_pathspec = vec!["pkg/a.txt".to_string()];
@@ -2470,7 +2470,7 @@ mod tests {
             &[":(glob)*.txt".into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -2511,7 +2511,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         git(root, &["fsck"]);
@@ -2549,7 +2549,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(
@@ -2584,7 +2584,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
         assert!(matches!(err, HunkSelectError::RangeOutOfBounds { .. }));
@@ -2647,7 +2647,7 @@ mod tests {
             &repo,
             &StageOptions::default(),
             &mut NullProgress,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         std::fs::write(root.join("f.txt"), edit_every_tenth_line(&base)).unwrap();
@@ -2669,7 +2669,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             true,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert!(outcome.dry_run);
@@ -2684,7 +2684,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         assert_eq!(outcome.staged_lines["f.txt"], ["1-15"]);
@@ -2788,7 +2788,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         git(root, &["commit", "-qm", "partial"]);
@@ -2806,7 +2806,7 @@ mod tests {
             &["f.txt".into()],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         stage_lines_and_compare_git(
@@ -2854,7 +2854,7 @@ mod tests {
             &[],
             hunk_diff_opts(),
             false,
-            &crate::progress::NeverCancel,
+            &crate::progress::CancelToken::never(),
         )
         .unwrap();
         let grit_tree =

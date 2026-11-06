@@ -227,7 +227,7 @@ pub fn run_add(
     let repo = context::discover()?;
     let relative_to = std::env::current_dir().context("could not read working directory")?;
     let path = resolve_linked_worktree_add_path(&path, &relative_to).map_err(anyhow::Error::new)?;
-    let interrupt = crate::interrupt::InterruptCancel::install();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let entry = add_linked_worktree_with_cancel(
         &repo,
         &AddLinkedWorktreeOptions {
@@ -241,7 +241,7 @@ pub fn run_add(
             no_checkout,
             track,
         },
-        &interrupt,
+        &crate::interrupt::process_cancel_token(),
     )
     .map_err(anyhow::Error::new)?;
     let (branch_name, head_hex) = head_summary(&entry.head);

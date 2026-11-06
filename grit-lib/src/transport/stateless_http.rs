@@ -6,8 +6,7 @@
 
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
-use crate::progress::{Cancel, NeverCancel};
-use crate::remote::RemoteError;
+use crate::progress::CancelToken;
 use crate::transport::http::HttpClient;
 use crate::transport::pending_http::{PendingHttp, HTTP_CANCEL_POLL};
 use crate::transport::{Connection, Service};
@@ -157,7 +156,7 @@ impl StreamingPost {
     }
 
     /// Queue `item` while the upload thread makes room, unless `cancel` fires first.
-    fn send_until(&self, mut item: BodyChunk, cancel: &dyn Cancel) -> Result<()> {
+    fn send_until(&self, mut item: BodyChunk, cancel: &CancelToken) -> Result<()> {
         loop {
             match self.chunks.try_send(item) {
                 Ok(()) => return Ok(()),
@@ -175,7 +174,7 @@ impl StreamingPost {
 
     /// Why a request whose body could not be queued ended.
     fn ended_early(&self) -> Error {
-        match self.response.wait(&NeverCancel) {
+        match self.response.wait(&CancelToken::never()) {
             Err(e) => e,
             Ok(Err(e)) => e,
             Ok(Ok(_)) => Error::Remote(RemoteError::Http(
@@ -186,7 +185,7 @@ impl StreamingPost {
 
     /// Queue the last `chunk`, end the body and wait for the response. When
     /// `cancel` fires before the body ended, dropping `self` abandons it.
-    fn finish(self, chunk: Vec<u8>, cancel: &dyn Cancel) -> Result<ReadResponse> {
+    fn finish(self, chunk: Vec<u8>, cancel: &CancelToken) -> Result<ReadResponse> {
         self.send_until(BodyChunk::Data(chunk), cancel)?;
         self.send_until(BodyChunk::End, cancel)?;
         self.response.wait(cancel).and_then(|reader| {
@@ -223,7 +222,7 @@ pub struct StatelessHttpConnection<C: HttpClient> {
     recv_body: Vec<u8>,
     recv_stream: Option<StreamingPost>,
     recv_posted: bool,
-    cancel: Option<Arc<dyn Cancel + Send + Sync>>,
+    cancel: Option<Arc<crate::progress::CancelToken>>,
     stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Upload-pack POST started on flush; finished in [`Connection::drain_pending_http`].
     in_flight_upload: Option<PendingHttp<Box<dyn Read + Send>>>,
@@ -245,7 +244,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         object_format: String,
         saw_ref_advertisement_flush: bool,
         git_protocol: Option<String>,
-        cancel: Option<Arc<dyn Cancel + Send + Sync>>,
+        cancel: Option<Arc<crate::progress::CancelToken>>,
         stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let wire = service.wire_name();
@@ -284,8 +283,8 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
     fn wait_http<T: Send + 'static>(
         &self,
         pending: PendingHttp<T>,
-        cancel: &dyn Cancel,
-        owner: Option<&dyn Cancel>,
+        cancel: &CancelToken,
+        owner: Option<&CancelToken>,
     ) -> Result<T> {
         pending.wait_with_watch(
             cancel,
@@ -297,8 +296,8 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
 
     fn finish_in_flight_upload(
         &mut self,
-        owner: Option<&dyn Cancel>,
-        operation: &dyn Cancel,
+        owner: Option<&CancelToken>,
+        operation: &CancelToken,
     ) -> Result<()> {
         let Some(pending) = self.in_flight_upload.take() else {
             return Ok(());
@@ -313,14 +312,12 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
         Ok(())
     }
 
-    fn operation_cancel(&self) -> Option<Arc<dyn Cancel + Send + Sync>> {
+    fn operation_cancel(&self) -> Option<Arc<crate::progress::CancelToken>> {
         self.cancel.clone()
     }
 
-    fn cancel_ref(cancel: &Option<Arc<dyn Cancel + Send + Sync>>) -> &dyn Cancel {
-        cancel
-            .as_deref()
-            .map_or(&NeverCancel as &dyn Cancel, |c| c as &dyn Cancel)
+    fn cancel_ref<'a>(cancel: &'a Option<Arc<CancelToken>>) -> &'a CancelToken {
+        cancel.as_deref().unwrap_or(CancelToken::never_ref())
     }
 
     /// Repository URL used for subsequent POSTs.
@@ -404,7 +401,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
 
     /// Send the receive-pack request (or the rest of its streamed body) and wait
     /// for the report, giving up once `cancel` fires.
-    fn post_receive_pack(&mut self, cancel: &dyn Cancel) -> Result<()> {
+    fn post_receive_pack(&mut self, cancel: &CancelToken) -> Result<()> {
         if self.recv_posted {
             return Ok(());
         }
@@ -496,7 +493,7 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
     fn ensure_response_for_read(&mut self) -> Result<()> {
         self.finish_in_flight_upload(None, Self::cancel_ref(&self.operation_cancel()))?;
         if self.service == Service::ReceivePack && !self.recv_posted {
-            self.post_receive_pack(&NeverCancel)?;
+            self.post_receive_pack(&CancelToken::never())?;
         }
         Ok(())
     }
@@ -574,23 +571,23 @@ impl<C: HttpClient + 'static> Connection for StatelessHttpConnection<C> {
         true
     }
 
-    fn mirror_http_cancel(&mut self, cancel: &dyn Cancel) {
+    fn mirror_http_cancel(&mut self, cancel: &CancelToken) {
         crate::progress::mirror_stack_cancel(cancel, self.stack_watch.as_ref());
     }
 
-    fn drain_pending_http(&mut self, cancel: &dyn Cancel) -> Result<()> {
+    fn drain_pending_http(&mut self, cancel: &CancelToken) -> Result<()> {
         self.finish_in_flight_upload(Some(cancel), Self::cancel_ref(&self.operation_cancel()))
     }
 
     fn finish_send(&mut self) {
         if self.service == Service::ReceivePack && !self.recv_posted {
-            if let Err(e) = self.post_receive_pack(&NeverCancel) {
+            if let Err(e) = self.post_receive_pack(&CancelToken::never()) {
                 self.set_transport_err(&e);
             }
         }
     }
 
-    fn wait_for_response(&mut self, cancel: &dyn Cancel) -> Result<()> {
+    fn wait_for_response(&mut self, cancel: &CancelToken) -> Result<()> {
         if self.service == Service::ReceivePack {
             self.post_receive_pack(cancel)?;
         }

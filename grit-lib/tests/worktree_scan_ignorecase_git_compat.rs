@@ -6,7 +6,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{diff_index_to_worktree, DiffStatus};
 use grit_lib::porcelain::stage_tracked::stage_tracked_modifications;
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::{
     reset_worktree_metadata_probe, worktree_path_resolve_probe_count,
@@ -113,7 +113,7 @@ fn clean_ignorecase_scan_resolves_paths_per_directory() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     assert!(model.unstaged.is_empty(), "clean status");

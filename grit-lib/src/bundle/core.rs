@@ -19,7 +19,7 @@ use crate::index_pack::{ingest_received_pack_path_with_progress, IngestPackOptio
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pack_objects::PackStats;
-use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
+use crate::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
 use crate::rev_list::{
     FilterObjectKind, MissingAction, ObjectFilter, RevListOptions, RevListResult,
@@ -378,7 +378,11 @@ impl Bundle {
         repo: &Repository,
     ) -> std::result::Result<Vec<UnbundledRef>, BundleError> {
         Ok(self
-            .unbundle_with_progress(repo, &mut NullProgress, &crate::progress::NeverCancel)?
+            .unbundle_with_progress(
+                repo,
+                &mut NullProgress,
+                &crate::progress::CancelToken::never(),
+            )?
             .refs)
     }
 
@@ -391,7 +395,7 @@ impl Bundle {
         &self,
         repo: &Repository,
         progress: &mut dyn ProgressSink,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> std::result::Result<UnbundleOutcome, BundleError> {
         crate::progress::poll_cancel(progress, cancel).map_err(bundle_ingest_error)?;
         if self.header.object_format != repo.odb().hash_algo() {
@@ -444,7 +448,7 @@ impl Bundle {
         &self,
         repo: &Repository,
         progress: &mut dyn ProgressSink,
-        cancel: &dyn crate::progress::Cancel,
+        cancel: &crate::progress::CancelToken,
     ) -> std::result::Result<crate::index_pack::IngestedPack, BundleError> {
         let pack_bytes = std::fs::metadata(&self.path)
             .map(|m| m.len().saturating_sub(self.pack_offset))
@@ -746,7 +750,7 @@ fn write_bundle_pack(
         spec,
         out,
         &mut NullProgress,
-        &crate::progress::NeverCancel,
+        &crate::progress::CancelToken::never(),
     )
 }
 
@@ -755,7 +759,7 @@ fn write_bundle_pack_with_cancel(
     spec: &BundleSpec,
     out: &mut dyn Write,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<PackStats, BundleError> {
     let stop = crate::progress::CancelSignal::new(cancel);
     let io_err = map_pack_error;
@@ -836,7 +840,7 @@ pub fn write_bundle(
     spec: &BundleSpec,
     out: &mut dyn Write,
 ) -> std::result::Result<(), BundleError> {
-    write_bundle_with_cancel(repo, spec, out, &crate::progress::NeverCancel)
+    write_bundle_with_cancel(repo, spec, out, &crate::progress::CancelToken::never())
 }
 
 /// Like [`write_bundle`], but stops pack generation when `cancel` is set.
@@ -848,7 +852,7 @@ pub fn write_bundle_with_cancel(
     repo: &Repository,
     spec: &BundleSpec,
     out: &mut dyn Write,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<(), BundleError> {
     write_bundle_with_cancel_and_progress(repo, spec, out, &mut NullProgress, cancel)
 }
@@ -863,7 +867,7 @@ pub fn write_bundle_with_cancel_and_progress(
     spec: &BundleSpec,
     out: &mut dyn Write,
     progress: &mut dyn ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
+    cancel: &crate::progress::CancelToken,
 ) -> std::result::Result<(), BundleError> {
     if spec.include.is_empty() {
         return Err(BundleError::EmptyRefs);

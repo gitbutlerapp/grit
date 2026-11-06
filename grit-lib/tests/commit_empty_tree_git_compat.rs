@@ -77,7 +77,7 @@ fn grit_allow_empty_root_commit_git_fsck_clean() {
         &repo,
         &commit_req("empty root", true),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("allow-empty root commit");
 
@@ -106,14 +106,14 @@ fn grit_remove_everything_commit_git_fsck_clean() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("stage");
     create_commit(
         &repo,
         &commit_req("one", false),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("first");
 
@@ -123,14 +123,14 @@ fn grit_remove_everything_commit_git_fsck_clean() {
             pathspecs: vec!["a".into()],
             ..RemoveOptions::default()
         },
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm a");
     let outcome = create_commit(
         &repo,
         &commit_req("remove everything", false),
         &mut NullProgress,
-        &grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect("empty tree commit");
 

@@ -11,7 +11,7 @@ use filetime::{set_file_mtime, FileTime};
 
 use crate::environment::RepositoryOptions;
 use crate::porcelain::status::{status, StatusOptions, UntrackedMode};
-use crate::progress::{NeverCancel, NullProgress};
+use crate::progress::{CancelToken, NullProgress};
 use crate::repo::Repository;
 use crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 
@@ -97,7 +97,7 @@ fn status_counting_reads(repo: &Repository, threads: usize) -> (Vec<String>, usi
     let metrics = repo.odb().hot_path_metrics();
     metrics.reset_blob_content_reads();
     metrics.set_blob_counting(true);
-    let model = status(repo, &options, &mut NullProgress, &NeverCancel).expect("status");
+    let model = status(repo, &options, &mut NullProgress, &CancelToken::never()).expect("status");
     metrics.set_blob_counting(false);
     let unstaged = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     (unstaged, metrics.blob_content_reads())
@@ -231,7 +231,7 @@ fn status_skips_index_rewrite_within_the_second_of_racy_entries() {
         now_unix_seconds: Some(OLD_MTIME),
         ..StatusOptions::default()
     };
-    let model = status(&repo, &options, &mut NullProgress, &NeverCancel).expect("status");
+    let model = status(&repo, &options, &mut NullProgress, &CancelToken::never()).expect("status");
     assert!(model.unstaged.is_empty());
     assert_eq!(
         fs::metadata(&index_path).and_then(|m| m.modified()).ok(),
@@ -548,7 +548,7 @@ fn untracked_walk_matches_git_around_submodules_and_tracked_dirs() {
         &repo,
         &StatusOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("status");
     let mut untracked = model.untracked.clone();
