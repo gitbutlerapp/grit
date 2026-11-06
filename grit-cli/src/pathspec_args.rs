@@ -145,7 +145,7 @@ impl TrailingPathspecArgs {
             .map_err(map_pathspec_from_file_parse)
     }
 
-    /// Path limit for rev walks ([`RevWalkListOptions::pathspec`]).
+    /// Path limit for rev walks ([`grit_lib::revwalk::RevWalkListOptions::pathspec`]).
     pub fn rev_walk_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
         if !self.has_any() {
             return Ok(Pathspec::entire_tree(
