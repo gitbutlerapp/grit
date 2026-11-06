@@ -5,17 +5,19 @@
 use crate::error::{
     maintenance_running_message, remote_unreadable_message, restore_unmerged_message, ApplyError,
     AttrPathspecError, AuthFailure, ConfigError, FilterError, LockHeldError, MidxError,
-    NotARepositoryReason, OverwriteReason, PathOutsideRepoError, PathspecFromFileParseError,
-    RefLockError, RemoteUnreadableReason, SubmoduleError, WorktreeOperation,
+    NotARepositoryReason, OverwriteReason, PathIoOperation, PathOutsideRepoError,
+    PathspecFromFileParseError, RefLockError, RemoteUnreadableReason, SubmoduleError,
+    WorktreeOperation,
 };
 use crate::git_dir::GitDirPathOperation;
+use crate::repo::error::FilesOnlyOperation;
 use crate::worktree::io_error::WorktreePathOperation;
 
 use super::PlanningError;
 
 fn promisor_fetch_failed_engine_message(
     missing: &crate::objects::ObjectId,
-    failures: &[(String, HistoryEngineError)],
+    failures: &[(String, Box<HistoryEngineError>)],
 ) -> String {
     let causes = failures
         .iter()
@@ -25,25 +27,154 @@ fn promisor_fetch_failed_engine_message(
     format!("could not fetch promised object {missing} ({causes})")
 }
 
+fn path_io_to_engine(err: crate::error::PathIoError) -> HistoryEngineError {
+    let path = err
+        .path
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    match err.operation {
+        PathIoOperation::GitDir(operation) => HistoryEngineError::GitDirPathIo {
+            path,
+            operation,
+            source: err.source,
+        },
+        PathIoOperation::Worktree(operation) => HistoryEngineError::WorktreePathIo {
+            path,
+            operation,
+            source: err.source,
+        },
+    }
+}
+
+fn repository_error_to_engine(err: crate::repo::RepositoryError) -> HistoryEngineError {
+    use crate::repo::RepositoryError;
+    match err {
+        RepositoryError::NotARepository(reason) => HistoryEngineError::NotARepository(reason),
+        RepositoryError::ForbiddenBareRepository { path } => {
+            HistoryEngineError::ForbiddenBareRepository(path)
+        }
+        RepositoryError::DubiousOwnership { path, .. } => {
+            HistoryEngineError::DubiousOwnership(path)
+        }
+        RepositoryError::UnsupportedRepositoryFormatVersion { version } => {
+            HistoryEngineError::UnsupportedRepositoryFormatVersion(version)
+        }
+        RepositoryError::InvalidRefStorageFormat { value } => {
+            HistoryEngineError::InvalidRefStorageFormat { value }
+        }
+        RepositoryError::InitObjectFormatChange => HistoryEngineError::InitObjectFormatChange,
+        RepositoryError::InitBareWithSeparateGitDir => {
+            HistoryEngineError::InitBareWithSeparateGitDir
+        }
+        RepositoryError::RequiresWorkTree => HistoryEngineError::RequiresWorkTree,
+        RepositoryError::GitDirPathIo(err) => path_io_to_engine(err),
+        RepositoryError::UnsupportedObjectStore { operation } => {
+            HistoryEngineError::UnsupportedObjectStore { operation }
+        }
+        RepositoryError::PreciousObjectsRepository { operation } => {
+            HistoryEngineError::PreciousObjectsRepository { operation }
+        }
+        RepositoryError::OdbObjectsDirMismatch {
+            builder,
+            repository,
+        } => HistoryEngineError::OdbObjectsDirMismatch {
+            builder,
+            repository,
+        },
+        RepositoryError::ObjectFormatMismatch { repository, store } => {
+            HistoryEngineError::ObjectFormatMismatch { repository, store }
+        }
+        other => HistoryEngineError::UmbrellaMessage(other.to_string()),
+    }
+}
+
+fn index_error_to_engine(err: crate::index::IndexError) -> HistoryEngineError {
+    use crate::index::IndexError;
+    match err {
+        IndexError::Corrupt { detail, .. } => HistoryEngineError::IndexError(detail),
+        IndexError::Unmerged { .. } => HistoryEngineError::IndexUnmerged,
+        IndexError::PathPrefixConflict { directory, file } => {
+            HistoryEngineError::IndexPathPrefixConflict { directory, file }
+        }
+        IndexError::FsmonitorExtensionTruncated => {
+            HistoryEngineError::IndexFsmonitorExtensionTruncated
+        }
+        IndexError::FsmonitorExtensionBadVersion(version) => {
+            HistoryEngineError::IndexFsmonitorExtensionBadVersion(version)
+        }
+        IndexError::FsmonitorExtensionEwahInvalid => {
+            HistoryEngineError::IndexFsmonitorExtensionEwahInvalid
+        }
+        IndexError::CacheTreeCorrupt => HistoryEngineError::CacheTreeCorrupt,
+        IndexError::LockHeld(err) => HistoryEngineError::LockHeld(err),
+        IndexError::PathIo(err) => path_io_to_engine(err),
+        IndexError::Nested(err) => error_to_engine(*err),
+        other => HistoryEngineError::UmbrellaMessage(other.to_string()),
+    }
+}
+
+fn remote_error_to_engine(err: crate::remote::RemoteError) -> HistoryEngineError {
+    use crate::remote::RemoteError;
+    match err {
+        RemoteError::Auth { url, reason } => HistoryEngineError::Auth { url, reason },
+        RemoteError::CredentialsUnavailable { helpers } => {
+            HistoryEngineError::CredentialsUnavailable { helpers }
+        }
+        RemoteError::PushAtomicUnsupported => HistoryEngineError::PushAtomicUnsupported,
+        RemoteError::PushOptionsUnsupported => HistoryEngineError::PushOptionsUnsupported,
+        RemoteError::FetchUnshallowNotShallow => HistoryEngineError::FetchUnshallowNotShallow,
+        RemoteError::FetchShallowUnsupported => HistoryEngineError::FetchShallowUnsupported,
+        RemoteError::FetchDeepenRelativeUnsupported => {
+            HistoryEngineError::FetchDeepenRelativeUnsupported
+        }
+        RemoteError::ReceivedPackTempMissing { path } => {
+            HistoryEngineError::ReceivedPackTempMissing { path }
+        }
+        RemoteError::Unreadable { url, reason } => {
+            HistoryEngineError::RemoteUnreadable { url, reason }
+        }
+        RemoteError::Fatal { message } => HistoryEngineError::RemoteFatal { message },
+        RemoteError::LocalUploadPack(err) => HistoryEngineError::LocalUploadPack(err),
+        RemoteError::LocalUploadPackPanicked => HistoryEngineError::LocalUploadPackPanicked,
+        RemoteError::Resumable(err) => HistoryEngineError::Resumable(err),
+        RemoteError::FetchRefspec(err) => HistoryEngineError::FetchRefspec(err),
+        RemoteError::FetchIntoCheckedOutBranch { branch } => {
+            HistoryEngineError::FetchIntoCheckedOutBranch { branch }
+        }
+        RemoteError::Cancelled => HistoryEngineError::Cancelled,
+        RemoteError::Nested(err) => error_to_engine(*err),
+        other => HistoryEngineError::UmbrellaMessage(other.to_string()),
+    }
+}
+
+fn object_read_failure_to_engine(err: crate::error::ObjectReadFailure) -> HistoryEngineError {
+    use crate::error::ObjectReadFailure;
+    match err {
+        ObjectReadFailure::Io(err) => HistoryEngineError::Io(err),
+        ObjectReadFailure::Zlib(err) => HistoryEngineError::Zlib(err),
+        ObjectReadFailure::CorruptObject(err) => HistoryEngineError::CorruptObject(err),
+        ObjectReadFailure::ObjectStreamTruncated { expected, actual } => {
+            HistoryEngineError::ObjectStreamTruncated { expected, actual }
+        }
+        ObjectReadFailure::UnknownObjectType(err) => HistoryEngineError::UnknownObjectType(err),
+        ObjectReadFailure::ObjectHeaderTooLong { oid } => {
+            HistoryEngineError::ObjectHeaderTooLong { oid }
+        }
+        ObjectReadFailure::DeltaChainTooDeep { limit } => {
+            HistoryEngineError::DeltaChainTooDeep { limit }
+        }
+        ObjectReadFailure::InvalidObject { kind, check } => {
+            HistoryEngineError::InvalidObject { kind, check }
+        }
+    }
+}
+
 /// Convert a top-level library error into the history engine mirror.
+#[allow(deprecated)]
 pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
     match err {
         crate::error::Error::History(h) => *super::error::history_error_to_engine_box(h),
-        crate::error::Error::NotARepository(v) => HistoryEngineError::NotARepository(v),
-        crate::error::Error::ForbiddenBareRepository(v) => {
-            HistoryEngineError::ForbiddenBareRepository(v)
-        }
-        crate::error::Error::DubiousOwnership(v) => HistoryEngineError::DubiousOwnership(v),
-        crate::error::Error::UnsupportedRepositoryFormatVersion(v) => {
-            HistoryEngineError::UnsupportedRepositoryFormatVersion(v)
-        }
-        crate::error::Error::InvalidRefStorageFormat { value } => {
-            HistoryEngineError::InvalidRefStorageFormat { value }
-        }
-        crate::error::Error::InitObjectFormatChange => HistoryEngineError::InitObjectFormatChange,
-        crate::error::Error::InitBareWithSeparateGitDir => {
-            HistoryEngineError::InitBareWithSeparateGitDir
-        }
+        crate::error::Error::Repository(err) => repository_error_to_engine(err),
         crate::error::Error::InvalidObjectId(v) => HistoryEngineError::InvalidObjectId(v),
         crate::error::Error::HashCollision { oid } => HistoryEngineError::HashCollision { oid },
         crate::error::Error::ObjectNotFound(v) => HistoryEngineError::ObjectNotFound(v),
@@ -103,15 +234,6 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
             operation,
             source,
         },
-        crate::error::Error::GitDirPathIo {
-            path,
-            operation,
-            source,
-        } => HistoryEngineError::GitDirPathIo {
-            path,
-            operation,
-            source,
-        },
         crate::error::Error::ObjectStreamTruncated { expected, actual } => {
             HistoryEngineError::ObjectStreamTruncated { expected, actual }
         }
@@ -139,6 +261,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
             HistoryEngineError::IndexFsmonitorExtensionEwahInvalid
         }
         crate::error::Error::CacheTreeCorrupt => HistoryEngineError::CacheTreeCorrupt,
+        crate::error::Error::Index(err) => index_error_to_engine(err),
         crate::error::Error::InvalidRef(v) => HistoryEngineError::InvalidRef(v),
         crate::error::Error::PackedRefsUnexpectedLine { path, line } => {
             HistoryEngineError::PackedRefsUnexpectedLine { path, line }
@@ -160,25 +283,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
         crate::error::Error::Filter(v) => HistoryEngineError::Filter(v),
         crate::error::Error::Apply(v) => HistoryEngineError::Apply(v),
         crate::error::Error::PathOutsideRepo(v) => HistoryEngineError::PathOutsideRepo(v),
-        crate::error::Error::Auth { url, reason } => HistoryEngineError::Auth { url, reason },
-        crate::error::Error::CredentialsUnavailable { helpers } => {
-            HistoryEngineError::CredentialsUnavailable { helpers }
-        }
-        crate::error::Error::PushAtomicUnsupported => HistoryEngineError::PushAtomicUnsupported,
-        crate::error::Error::PushOptionsUnsupported => HistoryEngineError::PushOptionsUnsupported,
-        crate::error::Error::FetchUnshallowNotShallow => {
-            HistoryEngineError::FetchUnshallowNotShallow
-        }
-        crate::error::Error::FetchShallowUnsupported => HistoryEngineError::FetchShallowUnsupported,
-        crate::error::Error::FetchDeepenRelativeUnsupported => {
-            HistoryEngineError::FetchDeepenRelativeUnsupported
-        }
-        crate::error::Error::BundleMissingPrerequisites => {
-            HistoryEngineError::BundleMissingPrerequisites
-        }
-        crate::error::Error::ReceivedPackTempMissing { path } => {
-            HistoryEngineError::ReceivedPackTempMissing { path }
-        }
+        crate::error::Error::Remote(err) => remote_error_to_engine(err),
         crate::error::Error::InvalidAttrPathspec { spec, reason } => {
             HistoryEngineError::InvalidAttrPathspec { spec, reason }
         }
@@ -216,7 +321,6 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
         crate::error::Error::NotRemovingRecursively(v) => {
             HistoryEngineError::NotRemovingRecursively(v)
         }
-        crate::error::Error::RequiresWorkTree => HistoryEngineError::RequiresWorkTree,
         crate::error::Error::RemovePathsRequired => HistoryEngineError::RemovePathsRequired,
         crate::error::Error::MoveSourceNotTracked { src } => {
             HistoryEngineError::MoveSourceNotTracked { src }
@@ -244,17 +348,6 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
         }
         crate::error::Error::MoveMissingIndexEntry { path } => {
             HistoryEngineError::MoveMissingIndexEntry { path }
-        }
-        crate::error::Error::RemoteUnreadable { url, reason } => {
-            HistoryEngineError::RemoteUnreadable { url, reason }
-        }
-        crate::error::Error::RemoteFatal { message } => HistoryEngineError::RemoteFatal { message },
-        crate::error::Error::LocalUploadPack(v) => HistoryEngineError::LocalUploadPack(v),
-        crate::error::Error::LocalUploadPackPanicked => HistoryEngineError::LocalUploadPackPanicked,
-        crate::error::Error::Resumable(v) => HistoryEngineError::Resumable(v),
-        crate::error::Error::FetchRefspec(v) => HistoryEngineError::FetchRefspec(v),
-        crate::error::Error::FetchIntoCheckedOutBranch { branch } => {
-            HistoryEngineError::FetchIntoCheckedOutBranch { branch }
         }
         crate::error::Error::WouldOverwrite {
             reason,
@@ -286,11 +379,6 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
         crate::error::Error::BranchListNamesDateSort => HistoryEngineError::BranchListNamesDateSort,
         crate::error::Error::Tag(v) => HistoryEngineError::Tag(v),
         crate::error::Error::Worktree(v) => HistoryEngineError::Worktree(v),
-        crate::error::Error::CorruptStash(v) => HistoryEngineError::CorruptStash(v),
-        crate::error::Error::StashNotFound { n } => HistoryEngineError::StashNotFound { n },
-        crate::error::Error::StashCommitNotOnStack { oid } => {
-            HistoryEngineError::StashCommitNotOnStack { oid }
-        }
         crate::error::Error::ReflogUnknownRef { refname } => {
             HistoryEngineError::ReflogUnknownRef { refname }
         }
@@ -303,23 +391,10 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
         crate::error::Error::ReflogIndexOutOfRange { refname, index } => {
             HistoryEngineError::ReflogIndexOutOfRange { refname, index }
         }
-        crate::error::Error::StashNoInitialCommit => HistoryEngineError::StashNoInitialCommit,
-        crate::error::Error::StashBareRepository => HistoryEngineError::StashBareRepository,
         crate::error::Error::BlameWorktreeBareRepository => {
             HistoryEngineError::BlameWorktreeBareRepository
         }
-        crate::error::Error::StashIndexConflict => HistoryEngineError::StashIndexConflict,
-        crate::error::Error::StashOptionConflict(v) => HistoryEngineError::StashOptionConflict(v),
         crate::error::Error::HunkSelection(v) => HistoryEngineError::HunkSelection(v),
-        crate::error::Error::StashMissingHead => HistoryEngineError::StashMissingHead,
-        crate::error::Error::StashWouldOverwriteLocalChanges { paths } => {
-            HistoryEngineError::StashWouldOverwriteLocalChanges { paths }
-        }
-        crate::error::Error::StashIndexWrite(v) => HistoryEngineError::StashIndexWrite(v),
-        crate::error::Error::StashSymlinkNotUtf8 => HistoryEngineError::StashSymlinkNotUtf8,
-        crate::error::Error::StashCouldNotRestoreUntracked { path } => {
-            HistoryEngineError::StashCouldNotRestoreUntracked { path }
-        }
         crate::error::Error::NoteAlreadyExists { object } => {
             HistoryEngineError::NoteAlreadyExists { object }
         }
@@ -348,24 +423,8 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
         crate::error::Error::RevParse(v) => HistoryEngineError::RevParse(v),
         crate::error::Error::RevList(v) => HistoryEngineError::RevList(v),
         crate::error::Error::Hook(v) => HistoryEngineError::Hook(v),
-        crate::error::Error::UnsupportedObjectStore { operation } => {
-            HistoryEngineError::UnsupportedObjectStore { operation }
-        }
         crate::error::Error::NoPromisorRemote { operation } => {
             HistoryEngineError::NoPromisorRemote { operation }
-        }
-        crate::error::Error::PreciousObjectsRepository { operation } => {
-            HistoryEngineError::PreciousObjectsRepository { operation }
-        }
-        crate::error::Error::OdbObjectsDirMismatch {
-            builder,
-            repository,
-        } => HistoryEngineError::OdbObjectsDirMismatch {
-            builder,
-            repository,
-        },
-        crate::error::Error::ObjectFormatMismatch { repository, store } => {
-            HistoryEngineError::ObjectFormatMismatch { repository, store }
         }
         crate::error::Error::TreeSha256InvalidHex => HistoryEngineError::TreeSha256InvalidHex,
         crate::error::Error::TreeSha256InvalidRevision { found } => {
@@ -401,7 +460,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
                 missing,
                 failures: failures
                     .into_iter()
-                    .map(|(name, e)| (name, error_to_engine(e)))
+                    .map(|(name, e)| (name, Box::new(error_to_engine(*e))))
                     .collect(),
             }
         }
@@ -415,7 +474,7 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
             HistoryEngineError::CorruptLooseObject {
                 oid,
                 path,
-                source: Box::new(error_to_engine(*source)),
+                source: Box::new(object_read_failure_to_engine(*source)),
             }
         }
         crate::error::Error::CorruptPackedObject {
@@ -427,8 +486,9 @@ pub(crate) fn error_to_engine(err: crate::error::Error) -> HistoryEngineError {
             oid,
             pack,
             offset,
-            source: Box::new(error_to_engine(*source)),
+            source: Box::new(object_read_failure_to_engine(*source)),
         },
+        other => HistoryEngineError::UmbrellaMessage(other.to_string()),
     }
 }
 
@@ -460,11 +520,11 @@ pub enum HistoryEngineError {
         value: String,
     },
 
-    /// [`crate::repo::Repository::init_with_outcome`] refused to change object format on reinit.
+    /// [`crate::repo::Repository::init`] refused to change object format on reinit.
     #[error("cannot change object format in an existing repository")]
     InitObjectFormatChange,
 
-    /// [`crate::repo::Repository::init_with_outcome`] with incompatible `--bare` and separate git dir.
+    /// [`crate::repo::Repository::init`] with incompatible `--bare` and separate git dir.
     #[error("cannot combine bare repository with separate git directory")]
     InitBareWithSeparateGitDir,
 
@@ -501,7 +561,7 @@ pub enum HistoryEngineError {
         missing: crate::objects::ObjectId,
         /// One entry per remote that failed, in the order they were tried: the remote's
         /// name and its first error.
-        failures: Vec<(String, HistoryEngineError)>,
+        failures: Vec<(String, Box<HistoryEngineError>)>,
     },
 
     /// An object's stored data is corrupt or malformed.
@@ -1183,6 +1243,10 @@ pub enum HistoryEngineError {
     #[error(transparent)]
     Planning(#[from] PlanningError),
 
+    /// A resumable rebase session failed outside the core rewrite operation.
+    #[error(transparent)]
+    RebaseSession(Box<super::RebaseSessionError>),
+
     /// Catch-all text from the umbrella [`crate::error::Error::Message`] (no `Error::History` recursion).
     #[error("{0}")]
     UmbrellaMessage(String),
@@ -1416,8 +1480,8 @@ pub enum HistoryEngineError {
     /// store. Nothing was written; use a files-backed repository for this operation.
     #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
     UnsupportedObjectStore {
-        /// Operation that was refused (for example `"fetch"`, `"push"`, `"gc"`).
-        operation: &'static str,
+        /// Operation that was refused.
+        operation: FilesOnlyOperation,
     },
 
     /// The operation fetches objects back from a promisor remote, and the repository
@@ -1438,9 +1502,10 @@ pub enum HistoryEngineError {
         operation: &'static str,
     },
 
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) rooted somewhere other than the repository's
-    /// `objects/` directory.
+    /// [`Repository::open`](crate::repo::Repository::open) was given an
+    /// [`OdbBuilder`](crate::odb::OdbBuilder) through
+    /// [`RepositoryOptions::with_odb_builder`](crate::config::environment::RepositoryOptions::with_odb_builder)
+    /// rooted somewhere other than the repository's `objects/` directory.
     #[error(
         "object database {} is not the repository's objects directory {}",
         builder.display(),
@@ -1453,10 +1518,11 @@ pub enum HistoryEngineError {
         repository: std::path::PathBuf,
     },
 
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) whose custom primary or read source hashes
-    /// objects with a different algorithm than the repository's `extensions.objectformat`
-    /// (SHA-1 when unset).
+    /// [`Repository::open`](crate::repo::Repository::open) was given an
+    /// [`OdbBuilder`](crate::odb::OdbBuilder) through
+    /// [`RepositoryOptions::with_odb_builder`](crate::config::environment::RepositoryOptions::with_odb_builder)
+    /// whose custom primary or read source hashes objects with a different algorithm than the
+    /// repository's `extensions.objectformat` (SHA-1 when unset).
     #[error(
         "object store hashes with {} but the repository's object format is {}",
         store.name(),
@@ -1552,6 +1618,6 @@ impl From<crate::error::Error> for HistoryEngineError {
 
 impl From<HistoryEngineError> for crate::error::Error {
     fn from(err: HistoryEngineError) -> Self {
-        Self::History(super::HistoryError::Engine(err))
+        Self::History(super::HistoryError::Engine(Box::new(err)))
     }
 }

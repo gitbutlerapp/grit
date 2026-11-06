@@ -70,13 +70,34 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "config",
     "submodule",
     "branch",
+    "empty_commit_message",
+    "commit_paths_required",
+    "partial_commit_during_merge",
+    "partial_commit_during_replay",
+    "nothing_to_commit",
+    "nothing_staged_to_commit",
+    "amend_unborn",
+    "invalid_identity",
+    "identity",
+    "signing",
+    "hunk_selection",
+    "apply",
+    "not_fast_forward",
+    "unrelated_histories",
+    "merge_commit",
+    "replay_source_at_head",
+    "sequencer_unknown_command",
+    "replay_continue_unmerged",
+    "replay_continue_dirty_index",
+    "replay_skip_already_committed",
+    "no_replay_in_progress",
+    "no_merge_in_progress",
+    "operation_in_progress",
     "ref_lock",
     "ref_store",
     "reftable",
     "filter",
-    "apply",
     "path_outside_repo",
-    "signing",
     "invalid_attr_pathspec",
     "pathspec_no_match",
     "restore_conflict_with_staged",
@@ -104,10 +125,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "would_overwrite",
     "dirty_worktree",
     "cancelled",
-    "identity",
-    "not_fast_forward",
-    "nothing_to_commit",
-    "unrelated_histories",
     "object_format_mismatch",
     "checkout_rollback_incomplete",
     "detached_head",
@@ -123,8 +140,6 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
     "reflog_invalid_index",
     "reflog_index_out_of_range",
     "blame_worktree_bare_repository",
-    "hunk_selection",
-    "amend_unborn",
     "note_already_exists",
     "invalid_notes_ref",
     "notes_rewrite_mode",
@@ -156,7 +171,7 @@ const EXPECTED_KIND_NAMES: &[&str] = &[
 ];
 
 /// Size of [`Error`] when the error-contract step landed (area enums must stay ≤ this until step 12).
-const ERROR_SIZE_CEILING: usize = 120;
+const ERROR_SIZE_CEILING: usize = 112;
 
 fn extract_kind_name_match_body<'a>(src: &'a str, impl_anchor: &str) -> &'a str {
     let idx = src
@@ -210,10 +225,19 @@ fn literal_slugs_from_kind_match(body: &str) -> Vec<String> {
 }
 
 fn expanded_kind_name_slugs() -> Vec<String> {
-    let umbrella = extract_kind_name_match_body(include_str!("../src/error.rs"), "impl Error {");
+    let umbrella =
+        extract_kind_name_match_body(include_str!("../src/error/mod.rs"), "impl Error {");
     let index_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
         include_str!("../src/index/error.rs"),
         "impl IndexError {",
+    ));
+    let commit_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
+        include_str!("../src/porcelain/commit_error.rs"),
+        "impl CommitError {",
+    ));
+    let merge_slugs = literal_slugs_from_kind_match(extract_kind_name_match_body(
+        include_str!("../src/porcelain/merge_error.rs"),
+        "impl MergeError {",
     ));
 
     let mut expanded: Vec<String> = Vec::new();
@@ -222,6 +246,22 @@ fn expanded_kind_name_slugs() -> Vec<String> {
         let trimmed = line.trim();
         if trimmed.contains("Self::Index(") && trimmed.contains("kind_name()") {
             for s in &index_slugs {
+                if seen.insert(s.clone()) {
+                    expanded.push(s.clone());
+                }
+            }
+            continue;
+        }
+        if trimmed.contains("Self::Commit(") && trimmed.contains("kind_name()") {
+            for s in &commit_slugs {
+                if seen.insert(s.clone()) {
+                    expanded.push(s.clone());
+                }
+            }
+            continue;
+        }
+        if trimmed.contains("Self::Merge(") && trimmed.contains("kind_name()") {
+            for s in &merge_slugs {
                 if seen.insert(s.clone()) {
                     expanded.push(s.clone());
                 }

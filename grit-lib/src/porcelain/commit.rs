@@ -991,7 +991,7 @@ impl CommitOutcome {
 ///   after hooks leave the on-disk index unchanged when the caller holds an index lock (for
 ///   example [`commit_worktree`] and path-scoped commits).
 /// - [`Error::AmendUnborn`] when [`CommitRequest::amend`] is set but the branch has no commits yet.
-/// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
+/// - [`CommitError::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
 /// - [`IndexError::unmerged()`] when the index has conflict stages.
 /// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
 /// - Ref/reflog failures from [`crate::refs::update_branch_for_commit_on_store`]; the branch tip is not left advanced without reflogs when logging is enabled.

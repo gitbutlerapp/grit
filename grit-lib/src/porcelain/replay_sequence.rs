@@ -1781,15 +1781,10 @@ fn parse_sequencer_todo(repo: &Repository, path: &Path) -> Result<Vec<TodoEntry>
             .ok_or_else(|| MergeError::SequencerUnknownCommand {
                 command: cmd.to_owned(),
             })?;
-        let oid = repo.rev_walk().resolve(oid_token).map_err(|_| {
-            MergeError::SequencerUnknownCommand {
-                command: cmd.to_owned(),
-            }
-        })?;
         let oid =
             repo.revwalk()
                 .resolve(oid_token)
-                .map_err(|_| Error::SequencerUnknownCommand {
+                .map_err(|_| MergeError::SequencerUnknownCommand {
                     command: cmd.to_owned(),
                 })?;
         let subject = parts.collect::<Vec<_>>().join(" ");

@@ -376,7 +376,11 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "operation_in_progress",
-        build: || Error::new(LibError::OperationInProgress(InProgressOperation::Merge)),
+        build: || {
+            Error::new(LibError::Merge(MergeError::OperationInProgress(
+                InProgressOperation::Merge,
+            )))
+        },
         kind: Some(ErrorKind::OperationInProgress),
         exit: ExitStatus::Failure,
         human: || "cannot proceed while a merge is in progress".to_owned(),
@@ -492,7 +496,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "no_replay_in_progress",
-        build: || Error::new(LibError::NoReplayInProgress),
+        build: || Error::new(LibError::Merge(MergeError::NoReplayInProgress)),
         kind: Some(ErrorKind::NoOperationInProgress),
         exit: ExitStatus::Failure,
         human: || "no cherry-pick or revert in progress".to_owned(),
@@ -1166,6 +1170,14 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
     ControlFlowAllowance {
         file: "src/commands/history.rs",
         line_contains: "LibError::Hook(_)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "HistoryEngineError::Cancelled => anyhow::Error::new(LibError::Cancelled)",
+    },
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "HistoryEngineError::Hook(hook) => anyhow::Error::new(LibError::Hook(hook))",
     },
     ControlFlowAllowance {
         file: "src/cli_messages.rs",

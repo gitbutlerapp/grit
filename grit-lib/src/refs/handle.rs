@@ -2,7 +2,7 @@
 use std::ops::ControlFlow;
 
 use crate::config::ident_resolve::IdentRole;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::porcelain::CommitError;
@@ -301,8 +301,8 @@ impl<'repo> References<'repo> {
             .identity(IdentRole::Committer, self.repo.identity_now())
         {
             Ok(sig) => Some(sig),
-            Err(Error::Commit(CommitError::Identity(_))) => None,
-            Err(err) => return Err(err),
+            Err(CommitError::Identity(_)) => None,
+            Err(err) => return Err(err.into()),
         };
         let reflog_for = |target: &str| -> Result<Option<ReflogUpdate>> {
             let Some(sig) = signature.as_ref() else {

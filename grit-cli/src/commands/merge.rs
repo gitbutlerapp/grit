@@ -27,6 +27,7 @@ use grit_lib::porcelain::merge::{
     IntegrateBranchOutcome, MergeCommitMode, MergeDryRunPlan, MergeOptions, MergePrediction,
     MergePredictionOptions,
 };
+use grit_lib::porcelain::MergeError;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::ProgressSink;
 use grit_lib::repo::Repository;

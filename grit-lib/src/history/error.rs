@@ -17,7 +17,7 @@ pub enum HistoryError {
     /// Repository read, revision walk, ref resolution, or other engine-level failure without an
     /// umbrella [`crate::error::Error`] wrapper (see [`HistoryEngineError`]).
     #[error(transparent)]
-    Engine(#[from] HistoryEngineError),
+    Engine(Box<HistoryEngineError>),
 
     /// Wraps a top-level library failure when no more specific [`HistoryError`] applies.
     #[error(transparent)]
@@ -26,6 +26,10 @@ pub enum HistoryError {
     /// Invalid or inconsistent planning inputs (distinct from [`Self::Engine`]).
     #[error(transparent)]
     Planning(#[from] PlanningError),
+
+    /// A resumable rebase session failed before or after invoking the rewrite engine.
+    #[error(transparent)]
+    RebaseSession(Box<super::RebaseSessionError>),
 
     /// The replacement commit message is empty after whitespace cleanup.
     #[error("commit message cannot be empty")]
@@ -86,7 +90,7 @@ pub enum HistoryError {
         /// First line of that commit's message.
         subject: String,
         /// Conflicted paths and how they conflicted, sorted by path.
-        conflicts: Vec<Conflict>,
+        conflicts: Box<Vec<Conflict>>,
         /// Full names of the scoped branches whose replay failed, sorted, when `commit` is not
         /// on `HEAD`'s history: under [`RefScope::Branches`](super::RefScope::Branches) another
         /// branch built on the edited commits could not be moved onto the new history, and
@@ -165,7 +169,7 @@ pub enum HistoryError {
         /// Subprocess exit status when the program ran.
         status: Option<i32>,
         /// Subprocess stderr (or a short summary when spawn failed).
-        stderr: String,
+        stderr: Box<String>,
     },
 
     /// Applying the plan would overwrite staged or unstaged worktree changes on affected paths.
@@ -206,7 +210,7 @@ pub enum HistoryError {
         /// Original commit that could not be replayed cleanly.
         commit: ObjectId,
         /// Conflicted paths and how they conflicted, sorted by path.
-        conflicts: Vec<Conflict>,
+        conflicts: Box<Vec<Conflict>>,
         /// Captured invocations before the conflict, in execution order.
         runs: Vec<super::ExecRunRecord>,
     },
@@ -335,7 +339,7 @@ pub enum HistoryError {
 /// Map a top-level library error into [`HistoryEngineError`] for [`HistoryError::Engine`].
 #[must_use]
 pub(crate) fn engine_err(err: Error) -> HistoryError {
-    HistoryError::Engine(error_to_engine(err))
+    HistoryError::Engine(Box::new(error_to_engine(err)))
 }
 
 /// Map I/O failure into [`HistoryError::WorktreeApply`].
@@ -348,9 +352,9 @@ pub(crate) fn worktree_apply_io(err: std::io::Error) -> HistoryError {
 
 /// Map a library error into [`HistoryError::WorktreeApply`].
 #[must_use]
-pub(crate) fn worktree_apply_engine(err: Error) -> HistoryError {
+pub(crate) fn worktree_apply_engine(err: impl Into<Error>) -> HistoryError {
     HistoryError::WorktreeApply {
-        source: Box::new(error_to_engine(err)),
+        source: Box::new(error_to_engine(err.into())),
     }
 }
 
@@ -400,8 +404,9 @@ pub(crate) fn undo_record_write_str(message: impl Into<String>) -> HistoryError 
 #[must_use]
 pub(crate) fn history_error_to_engine_box(err: HistoryError) -> Box<HistoryEngineError> {
     match err {
-        HistoryError::Engine(e) => Box::new(e),
+        HistoryError::Engine(e) => e,
         HistoryError::Planning(p) => Box::new(HistoryEngineError::Planning(p)),
+        HistoryError::RebaseSession(err) => Box::new(HistoryEngineError::RebaseSession(err)),
         HistoryError::Nested(boxed) => match *boxed {
             Error::History(inner) => history_error_to_engine_box(inner),
             other => Box::new(error_to_engine(other)),
@@ -412,6 +417,12 @@ pub(crate) fn history_error_to_engine_box(err: HistoryError) -> Box<HistoryEngin
     }
 }
 
+impl From<HistoryEngineError> for HistoryError {
+    fn from(err: HistoryEngineError) -> Self {
+        Self::Engine(Box::new(err))
+    }
+}
+
 impl HistoryError {
     /// Whether the rewrite was cancelled ([`Error::Cancelled`]).
     #[must_use]
@@ -419,6 +430,7 @@ impl HistoryError {
         match self {
             Self::Engine(e) => e.is_cancelled(),
             Self::Nested(e) => e.is_cancelled(),
+            Self::RebaseSession(e) => e.is_cancelled(),
             Self::WorktreeApply { source } => source.is_cancelled(),
             Self::UndoRecordRead { source } | Self::UndoRecordWrite { source } => {
                 source.is_cancelled()

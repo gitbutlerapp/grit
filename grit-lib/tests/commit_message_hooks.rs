@@ -656,7 +656,10 @@ fn rebase(
 
 fn history_hook_failed(err: &HistoryError) -> Option<&str> {
     match err {
-        HistoryError::Engine(HistoryEngineError::Hook(h)) => hook_failed_from_hook(h),
+        HistoryError::Engine(e) => match e.as_ref() {
+            HistoryEngineError::Hook(h) => hook_failed_from_hook(h),
+            _ => None,
+        },
         _ => None,
     }
 }

@@ -266,12 +266,16 @@ fn split_rejects_non_commit_with_typed_error() {
     )
     .unwrap_err();
     assert!(matches!(
-        err,
-        HistoryError::Engine(grit_lib::revwalk::history::HistoryEngineError::UnexpectedObjectKind {
-            oid,
-            expected: ObjectKind::Commit,
-            actual: ObjectKind::Tree,
-        }) if oid == tree
+        &err,
+        HistoryError::Engine(e)
+            if matches!(
+                e.as_ref(),
+                grit_lib::revwalk::history::HistoryEngineError::UnexpectedObjectKind {
+                    oid,
+                    expected: ObjectKind::Commit,
+                    actual: ObjectKind::Tree,
+                } if *oid == tree
+            )
     ));
 }
 

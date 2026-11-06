@@ -11,7 +11,6 @@ use grit_lib::porcelain::commit::{
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::CommitError;
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::counters::{
     reset_worktree_metadata_probe, worktree_metadata_probe_count,

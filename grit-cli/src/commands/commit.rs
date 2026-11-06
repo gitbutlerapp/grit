@@ -665,8 +665,10 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         Error::Index(IndexError::Unmerged { .. }) => {
             anyhow::Error::new(Error::Index(IndexError::unmerged()))
         }
-        Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
-        Error::PartialCommitDuringMerge => {
+        Error::Commit(CommitError::AmendUnborn) => {
+            anyhow::anyhow!("cannot amend: no commits on this branch yet")
+        }
+        Error::Commit(CommitError::PartialCommitDuringMerge) => {
             anyhow::anyhow!("cannot do a partial commit during a merge")
         }
         Error::Commit(CommitError::PartialCommitDuringReplay) => {

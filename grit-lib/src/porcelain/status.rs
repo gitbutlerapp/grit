@@ -2416,7 +2416,9 @@ pub fn status(
     let interrupted_rewrite = if persist_index_to_disk {
         match crate::history::recover_interrupted_rewrite_apply(repo) {
             Ok(recovery) => recovery.map(InterruptedRewrite::from),
-            Err(crate::history::HistoryError::Engine(HistoryEngineError::LockHeld(_))) => {
+            Err(crate::history::HistoryError::Engine(e))
+                if matches!(*e, HistoryEngineError::LockHeld(_)) =>
+            {
                 Some(InterruptedRewrite::Pending)
             }
             Err(err) => return Err(crate::error::Error::History(err)),

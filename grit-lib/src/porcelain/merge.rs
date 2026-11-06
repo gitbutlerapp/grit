@@ -79,7 +79,6 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
-use thiserror::Error;
 
 use crate::hooks::{CommitHookEnv, HookName};
 use crate::porcelain::add::stage_for_commit_on_index;
@@ -1572,10 +1571,7 @@ pub fn continue_merge(
         return Err(MergeError::NoMergeInProgress);
     }
 
-    let config = repo
-        .config()
-        .snapshot()
-        .map_err(ContinueMergeError::Repository)?;
+    let config = repo.config().snapshot().map_err(MergeError::from)?;
     let auto_stage = default_commit_scope_from_config(config.as_ref()) == CommitScope::AutoStage;
 
     let mut index = repo.load_index()?;

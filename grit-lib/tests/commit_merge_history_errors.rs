@@ -15,10 +15,10 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
 };
 use grit_lib::porcelain::{CommitError, MergeError};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::state::InProgressOperation;
-use grit_lib::worktree::pathspec::ResolvedPathspecs;
+use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
 use std::path::Path;
 use std::process::Command;
 
@@ -93,7 +93,7 @@ fn commit_error_variants() {
         &CommitRequest::new("   \n".to_owned()),
         CommitScope::Staged,
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, CommitError::EmptyCommitMessage));
@@ -101,9 +101,9 @@ fn commit_error_variants() {
     let err = commit_with_scope(
         &repo,
         &CommitRequest::new("x".to_owned()),
-        CommitScope::Paths(ResolvedPathspecs::default()),
+        CommitScope::Paths(Pathspec::entire_tree(PathspecGlobalFlags::default())),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, CommitError::CommitPathsRequired));
@@ -126,7 +126,7 @@ fn merge_error_variants() {
             ..MergeOptions::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(err, Error::Merge(MergeError::NotFastForward)));
@@ -138,13 +138,18 @@ fn merge_error_variants() {
         topic,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
 
-    let err =
-        continue_merge(&repo, &continue_options(), &mut NullProgress, &NeverCancel).unwrap_err();
+    let err = continue_merge(
+        &repo,
+        &continue_options(),
+        &mut NullProgress,
+        &CancelToken::never(),
+    )
+    .unwrap_err();
     assert!(matches!(
         err,
         MergeError::ContinueUnmergedPaths { .. } | MergeError::Library(_)
@@ -163,7 +168,7 @@ fn merge_error_variants() {
             },
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .unwrap_err();
     assert!(matches!(

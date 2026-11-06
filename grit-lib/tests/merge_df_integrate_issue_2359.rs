@@ -80,7 +80,11 @@ fn integrate_branch_df_conflict_parks_file_and_keeps_directory() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("staged commit with unmerged paths");
-    assert!(matches!(err, Error::Index(IndexError::Unmerged { .. })));
+    assert!(matches!(
+        err,
+        grit_lib::porcelain::CommitError::Library(inner)
+            if matches!(*inner, Error::Index(IndexError::Unmerged { .. }))
+    ));
 
     abort_branch_merge(&repo).expect("abort");
     assert!(tmp.path().join("f/i").is_file());

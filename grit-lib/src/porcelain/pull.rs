@@ -27,6 +27,7 @@ use crate::porcelain::merge::{
     ensure_branch_tip, integrate_branch_with_options, predict_merge, update_checked_out_branch,
     IntegrateBranchOptions, IntegrateBranchOutcome, MergePrediction, MergePredictionOptions,
 };
+use crate::porcelain::merge_error::MergeError;
 use crate::porcelain::stash::{
     apply_operation_autostash, push_operation_autostash, record_merge_autostash,
     restore_operation_autostash,
@@ -271,6 +272,12 @@ impl From<Error> for PullError {
     }
 }
 
+impl From<crate::porcelain::commit_error::CommitError> for PullError {
+    fn from(err: crate::porcelain::commit_error::CommitError) -> Self {
+        Error::from(err).into()
+    }
+}
+
 impl From<crate::index::IndexError> for PullError {
     fn from(err: crate::index::IndexError) -> Self {
         Error::from(err).into()
@@ -389,7 +396,9 @@ impl PullOptions {
         cli_mode: Option<PullMode>,
     ) -> std::result::Result<Self, PullError> {
         if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
-            return Err(PullError::from(Error::OperationInProgress(op)));
+            return Err(PullError::from(Error::from(
+                MergeError::OperationInProgress(op),
+            )));
         }
         let short_name = match resolve_head_for_repository(repo)? {
             HeadState::Branch { short_name, .. } => short_name,
@@ -486,7 +495,9 @@ where
     P: Progress,
 {
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
-        return Err(PullError::from(Error::OperationInProgress(op)));
+        return Err(PullError::from(Error::from(
+            MergeError::OperationInProgress(op),
+        )));
     }
     let (refname, short_name, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
@@ -1076,7 +1087,7 @@ fn map_history_error(err: HistoryError) -> PullError {
         HistoryError::LocalChangesWouldBeOverwritten { paths } => {
             PullError::from(local_changes_would_be_overwritten(paths))
         }
-        other => PullError::Repository(Error::History(other)),
+        other => PullError::from(Error::History(other)),
     }
 }
 

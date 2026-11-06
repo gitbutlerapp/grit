@@ -619,8 +619,9 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// [`CommitError::Identity`](crate::porcelain::CommitError::Identity) when no usable name, email, or date
-    /// is configured (wrapped in [`Error::Commit`]), and config load failures.
+    /// [`CommitError::Identity`](crate::porcelain::CommitError::Identity) when no usable name,
+    /// email, or date is configured, and [`CommitError::Library`](crate::porcelain::CommitError::Library)
+    /// for config load failures.
     ///
     /// # Examples
     ///
@@ -632,8 +633,8 @@ impl Repository {
     /// let (repo, _outcome) = Repository::init(dir.path(), &InitOptions::default())?;
     /// match repo.identity(IdentRole::Author, repo.identity_now()) {
     ///     Ok(author) => assert!(!author.email.is_empty()),
-    ///     Err(grit_lib::error::Error::Commit(grit_lib::porcelain::CommitError::Identity(_))) => {}
-    ///     Err(other) => return Err(other),
+    ///     Err(grit_lib::porcelain::CommitError::Identity(_)) => {}
+    ///     Err(other) => return Err(other.into()),
     /// }
     /// # Ok(())
     /// # }
@@ -642,8 +643,12 @@ impl Repository {
         &self,
         role: crate::config::ident_resolve::IdentRole,
         now: time::OffsetDateTime,
-    ) -> Result<crate::ident::Signature> {
-        let config = self.config().snapshot()?;
+    ) -> std::result::Result<crate::ident::Signature, crate::porcelain::commit_error::CommitError>
+    {
+        let config = self
+            .config()
+            .snapshot()
+            .map_err(crate::porcelain::commit_error::CommitError::from)?;
         Ok(crate::config::ident_resolve::resolve_signature_with(
             self.environment(),
             &config,

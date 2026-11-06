@@ -1394,7 +1394,7 @@ pub enum Error {
         missing: crate::objects::ObjectId,
         /// One entry per remote that failed, in the order they were tried: the remote's
         /// name and its first error.
-        failures: Vec<(String, Error)>,
+        failures: Vec<(String, Box<Error>)>,
     },
 
     /// An object's stored data is corrupt or malformed.
@@ -1702,14 +1702,12 @@ pub enum Error {
     Branch(#[from] crate::porcelain::branch_error::BranchError),
 
     /// Commit, identity, signing, and patch-scoped commit failures.
-    ///
-    /// [`From`] unwraps [`crate::porcelain::commit_error::CommitError::Library`]; other variants stay here.
     #[error(transparent)]
     Commit(crate::porcelain::commit_error::CommitError),
 
     /// Merge, cherry-pick, revert, and in-progress operation failures.
     #[error(transparent)]
-    Merge(#[from] crate::porcelain::merge_error::MergeError),
+    Merge(crate::porcelain::merge_error::MergeError),
 
     /// Reference lock failure while updating refs.
     #[error(transparent)]
@@ -2349,9 +2347,6 @@ impl Error {
             | Self::Repository(RepositoryError::PromisorFetcherMissing)
             | Self::Repository(RepositoryError::UnknownRepositoryExtensions(_))
             | Self::Repository(RepositoryError::V1OnlyExtensionsInFormatZero(_)) => "message",
-            Self::NotFastForward => "not_fast_forward",
-            Self::NothingToCommit => "nothing_to_commit",
-            Self::UnrelatedHistories { .. } => "unrelated_histories",
             Self::Repository(RepositoryError::ObjectFormatMismatch { .. }) => {
                 "object_format_mismatch"
             }
@@ -2519,10 +2514,8 @@ impl Error {
             Self::Cancelled => true,
             Self::Remote(e) => e.is_cancelled(),
             Self::History(e) => e.is_cancelled(),
-            Self::Commit(crate::porcelain::commit_error::CommitError::Library(e))
-            | Self::Merge(crate::porcelain::merge_error::MergeError::Library(e)) => {
-                e.is_cancelled()
-            }
+            Self::Commit(e) => e.is_cancelled(),
+            Self::Merge(e) => e.is_cancelled(),
             Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
             Self::Io(err)
                 if err.to_string() == crate::transport::stateless_http::TRANSPORT_IO_CANCELLED =>
@@ -2662,9 +2655,9 @@ impl From<crate::porcelain::commit_error::CommitError> for Error {
         use crate::porcelain::commit_error::CommitError;
         match err {
             CommitError::Library(boxed) => match *boxed {
-                inner @ (Self::Cancelled | Self::IndexUnmerged | Self::GitDirPathIo { .. }) => {
-                    inner
-                }
+                inner @ Self::Cancelled
+                | inner @ Self::Index(crate::index::IndexError::Unmerged { .. })
+                | inner @ Self::Repository(RepositoryError::GitDirPathIo(_)) => inner,
                 other => Self::Commit(CommitError::Library(Box::new(other))),
             },
             other => Self::Commit(other),
@@ -2677,9 +2670,9 @@ impl From<crate::porcelain::merge_error::MergeError> for Error {
         use crate::porcelain::merge_error::MergeError;
         match err {
             MergeError::Library(boxed) => match *boxed {
-                inner @ (Self::Cancelled | Self::IndexUnmerged | Self::GitDirPathIo { .. }) => {
-                    inner
-                }
+                inner @ Self::Cancelled
+                | inner @ Self::Index(crate::index::IndexError::Unmerged { .. })
+                | inner @ Self::Repository(RepositoryError::GitDirPathIo(_)) => inner,
                 other => Self::Merge(MergeError::Library(Box::new(other))),
             },
             other => Self::Merge(other),
@@ -2759,7 +2752,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub(crate) fn promisor_fetch_failed_message(
     missing: &crate::objects::ObjectId,
-    failures: &[(String, Error)],
+    failures: &[(String, Box<Error>)],
 ) -> String {
     let causes = failures
         .iter()

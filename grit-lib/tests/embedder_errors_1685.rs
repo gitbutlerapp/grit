@@ -147,5 +147,8 @@ fn empty_commit_message_is_typed() {
     let mut empty = CommitRequest::new("");
     empty.allow_empty = true;
     let err = create_commit(&repo, &empty, &mut NullProgress, &CancelToken::never()).unwrap_err();
-    assert!(matches!(err, Error::EmptyCommitMessage), "got {err:?}");
+    assert!(
+        matches!(err, Error::Commit(CommitError::EmptyCommitMessage)),
+        "got {err:?}"
+    );
 }

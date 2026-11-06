@@ -460,7 +460,7 @@ pub fn plan_rebase_with_hook(
         }) => Ok(RebasePlan::Conflict {
             commit,
             subject,
-            conflicts,
+            conflicts: conflicts.as_ref().clone(),
             refs,
         }),
         Err(other) => Err(other),

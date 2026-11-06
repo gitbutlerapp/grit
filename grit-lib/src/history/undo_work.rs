@@ -430,7 +430,7 @@ fn hash_blob(algo: HashAlgo, data: &[u8]) -> Result<ObjectId, HistoryError> {
     algo.hash_object(ObjectKind::Blob, data).map_err(apply_err)
 }
 
-fn apply_err(err: crate::error::Error) -> HistoryError {
+fn apply_err(err: impl Into<crate::error::Error>) -> HistoryError {
     worktree_apply_engine(err)
 }
 

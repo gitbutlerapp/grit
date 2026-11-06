@@ -607,7 +607,7 @@ fn execute_plan(
                         spec,
                         rewrite,
                         row,
-                        conflicts,
+                        conflicts.as_ref().clone(),
                         runs,
                         preserve_grit_rebase,
                     )
@@ -899,7 +899,7 @@ fn stop_on_replay_conflict(
     session.active = false;
     HistoryError::ExecConflict {
         commit: plan.commits[row].old,
-        conflicts,
+        conflicts: Box::new(conflicts),
         runs,
     }
 }

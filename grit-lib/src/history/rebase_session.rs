@@ -1829,9 +1829,7 @@ impl From<RebaseSessionError> for crate::error::Error {
             RebaseSessionError::Library(e) => e,
             RebaseSessionError::History(h) => Self::History(h),
             RebaseSessionError::NothingToCommit => Self::Commit(CommitError::NothingToCommit),
-            other => Self::History(HistoryError::Nested(Box::new(
-                crate::error::Error::Message(other.to_string()),
-            ))),
+            other => Self::History(HistoryError::RebaseSession(Box::new(other))),
         }
     }
 }

@@ -1031,9 +1031,11 @@ fn interrupted_rewrite_apply_with_lockfile_pid_disabled_leaves_foreign_lock() {
     let err = recover_interrupted_rewrite_apply(&grit).expect_err("foreign lock");
     assert!(matches!(
         &err,
-        grit_lib::revwalk::history::HistoryError::Engine(
-            grit_lib::revwalk::history::HistoryEngineError::LockHeld(_)
-        )
+        grit_lib::revwalk::history::HistoryError::Engine(e)
+            if matches!(
+                e.as_ref(),
+                grit_lib::revwalk::history::HistoryEngineError::LockHeld(_)
+            )
     ));
     assert_eq!(
         git_rev_parse(wt, "refs/heads/main"),
@@ -1074,11 +1076,13 @@ fn interrupted_rewrite_apply_waits_for_index_lock_holder() {
     assert!(
         matches!(
             &err,
-            grit_lib::revwalk::history::HistoryError::Engine(
-                grit_lib::revwalk::history::HistoryEngineError::LockHeld(
-                    grit_lib::error::LockHeldError { path, holder: Some(h) }
+            grit_lib::revwalk::history::HistoryError::Engine(e)
+                if matches!(
+                    e.as_ref(),
+                    grit_lib::revwalk::history::HistoryEngineError::LockHeld(
+                        grit_lib::error::LockHeldError { path, holder: Some(h) }
+                    ) if *path == lock && h.running
                 )
-            ) if *path == lock && h.running
         ),
         "{err:?}"
     );

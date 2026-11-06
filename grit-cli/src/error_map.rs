@@ -10,10 +10,11 @@ use grit_lib::command_runner::hooks::HookError;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::config::ConfigSet;
-use grit_lib::error::{ConfigError, Error as LibError};
+use grit_lib::error::{ConfigError, Error as LibError, LockHeldError};
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
+use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::porcelain::paths::BlockedRemoval;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::porcelain::{CommitError, MergeError};
@@ -21,6 +22,7 @@ use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
 use grit_lib::repo::{Repository, RepositoryError};
+use grit_lib::revwalk::history::{HistoryEngineError, HistoryError};
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 use time::OffsetDateTime;
@@ -29,8 +31,7 @@ use crate::error_kind::ErrorKind;
 use crate::exit_status::ExitStatus;
 use crate::json_error::operation_in_progress_for_repo;
 use crate::json_error::{
-    hash_collision, lock_held, operation_in_progress, would_overwrite_error, StructuredCliError,
-    StructuredJsonError,
+    hash_collision, lock_held, would_overwrite_error, StructuredCliError, StructuredJsonError,
 };
 use crate::ui::PathDisplayOptions;
 
@@ -160,7 +161,9 @@ pub fn human_message_for_lib(err: &LibError) -> String {
             message
         }
         LibError::RemoveBlocked { paths } => remove_blocked_human(paths, false, None),
-        LibError::OperationInProgress(kind) => operation_in_progress_human("proceed", *kind),
+        LibError::Merge(MergeError::OperationInProgress(kind)) => {
+            operation_in_progress_human("proceed", *kind)
+        }
         other => other.git_stderr_message(),
     }
 }
@@ -284,6 +287,190 @@ pub fn stage_conflict_markers_human(paths: &[String]) -> String {
         msg.pop();
     }
     msg
+}
+
+/// Map [`RevParseError`] from `grit resolve` ref resolution.
+#[must_use]
+pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
+    if matches!(
+        err,
+        RevParseError::AmbiguousChangeId { .. }
+            | RevParseError::InvalidObjectName { .. }
+            | RevParseError::AmbiguousArgument { .. }
+            | RevParseError::ReflogDateUnparseable { .. }
+    ) {
+        Error::msg(human_message_for_lib(&LibError::RevParse(err)))
+    } else {
+        Error::msg(format!("could not resolve ref '{spec}': {err}"))
+    }
+}
+
+/// Map an error from expanding commit arguments (`grit pick` / `grit revert`).
+#[must_use]
+pub fn map_commit_spec_error(err: LibError) -> Error {
+    match err {
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
+        }
+        LibError::RevParse(e @ RevParseError::AmbiguousArgument { .. }) => {
+            crate::json_error::structured_revision_not_found(e.to_string())
+        }
+        LibError::ObjectNotFound(spec) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
+        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
+            Error::msg(format_ambiguous_change_id(&prefix, &candidates))
+        }
+        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+            Error::msg(format!("invalid reflog date '{date}'"))
+        }
+        LibError::InvalidRef(msg) => Error::msg(msg),
+        other => map_lib_error(other),
+    }
+}
+
+/// Map a library error from `grit switch` (includes in-progress operation hints from repo state).
+#[must_use]
+pub fn map_switch_lib_error(repo: &grit_lib::repo::Repository, err: LibError) -> Error {
+    if let LibError::Merge(MergeError::OperationInProgress(kind)) = err {
+        return operation_in_progress_for_repo(repo, "switch branches", kind);
+    }
+    map_lib_error(err)
+}
+
+/// Map [`PullError`] after the remote reauth path during `grit pull`.
+#[must_use]
+pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
+    match err {
+        PullError::Remote(remote) => map_remote_error(remote),
+        PullError::Nested(boxed) => match *boxed {
+            LibError::Merge(MergeError::OperationInProgress(kind)) => {
+                operation_in_progress_for_repo(repo, "pull", kind)
+            }
+            hook @ LibError::Hook(_) => {
+                if repo.git_dir().join("MERGE_HEAD").is_file() {
+                    crate::json_error::hook_failed_with_hint(
+                        hook,
+                        "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
+                    )
+                } else {
+                    Error::new(hook)
+                }
+            }
+            lib => map_lib_error(lib),
+        },
+        rest => Error::new(rest),
+    }
+}
+
+/// Map errors while building [`PullOptions`](grit_lib::porcelain::pull::PullOptions) for `grit pull`.
+#[must_use]
+pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
+    match err {
+        PullError::Nested(boxed) => {
+            if let LibError::Merge(MergeError::OperationInProgress(kind)) = *boxed {
+                operation_in_progress_for_repo(repo, "pull", kind)
+            } else {
+                Error::new(PullError::Nested(boxed))
+            }
+        }
+        other => Error::new(other),
+    }
+}
+
+/// Map [`remove_paths`](grit_lib::porcelain::paths::remove_paths) failures for `grit rm`.
+#[must_use]
+pub fn map_remove_paths_error(
+    err: LibError,
+    cached: bool,
+    path_display: Option<&PathDisplayOptions>,
+) -> Error {
+    match err {
+        LibError::RemoveBlocked { paths } => {
+            Error::msg(remove_blocked_human(&paths, cached, path_display))
+        }
+        other => map_lib_error(other),
+    }
+}
+
+fn remove_blocked_human(
+    paths: &[BlockedRemoval],
+    cached: bool,
+    path_display: Option<&PathDisplayOptions>,
+) -> String {
+    let format_path = |p: &str| {
+        path_display
+            .map(|opts| opts.format_path_for_human(p))
+            .unwrap_or_else(|| p.to_owned())
+    };
+    let mut msg = String::from("not removed, these files have content that would be lost:\n");
+    for blocked in paths {
+        msg.push_str(&format!(
+            "    {} ({})\n",
+            format_path(&blocked.path),
+            blocked.reason
+        ));
+    }
+    let cached_would_help = !cached
+        && paths
+            .iter()
+            .all(|blocked| blocked.reason.allowed_with_cached());
+    msg.push_str(if cached_would_help {
+        "(use --cached to stop tracking them and keep the files, or --force to remove them anyway)"
+    } else {
+        "(use --force to remove them anyway)"
+    });
+    msg
+}
+
+/// Append would-overwrite path names when reporting integrate follow-up failures.
+#[must_use]
+pub fn integrate_failure_text(err: &Error) -> String {
+    let text = format!("{err:#}");
+    let paths = err.chain().find_map(|cause| {
+        let lib = match cause.downcast_ref::<PullError>() {
+            Some(PullError::Nested(e)) => Some(e.as_ref()),
+            _ => cause.downcast_ref::<LibError>(),
+        };
+        match lib {
+            Some(LibError::WouldOverwrite { paths, .. }) if !paths.is_empty() => {
+                Some(paths.join(", "))
+            }
+            _ => None,
+        }
+    });
+    match paths {
+        Some(paths) => format!("{text}: {paths}"),
+        None => text,
+    }
+}
+
+/// Map repository identity resolution failures to structured CLI errors.
+#[must_use]
+pub fn map_repo_identity_error(err: CommitError) -> Error {
+    match err {
+        CommitError::Identity(identity) => identity_error(identity),
+        other => Error::new(other),
+    }
+}
+
+/// Committer for reflog entries when configured identity is missing.
+pub fn committer_reflog_signature(
+    repo: &grit_lib::repo::Repository,
+    config: &ConfigSet,
+    now: OffsetDateTime,
+) -> Result<Signature, Error> {
+    use grit_lib::config::ident_resolve::resolve_loose_committer_identity_with;
+
+    match repo.identity(IdentRole::Committer, now) {
+        Ok(sig) => Ok(sig),
+        Err(CommitError::Identity(_)) => {
+            let line = resolve_loose_committer_identity_with(repo.environment(), config, now);
+            line.parse()
+                .map_err(|err| Error::new(LibError::InvalidSignature(err)))
+        }
+        Err(other) => Err(Error::new(other)),
+    }
 }
 
 /// Map library errors from [`grit_lib::porcelain::add::stage`] (via `grit add`) to structured CLI errors.
@@ -422,6 +609,74 @@ fn peel_lib_error<'a>(cause: &'a (dyn StdError + 'static)) -> Option<&'a LibErro
     cause.downcast_ref::<LibError>()
 }
 
+/// Walk the same wrappers as [`peel_lib_error`], then [`HistoryError`] / [`HistoryEngineError`],
+/// to find a [`LockHeldError`] for structured `lock_held` JSON (commit may fail only through history).
+fn peel_lock_held(cause: &(dyn StdError + 'static)) -> Option<LockHeldError> {
+    if let Some(LibError::Commit(CommitError::Library(boxed))) = cause.downcast_ref::<LibError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(LibError::Merge(MergeError::Library(boxed))) = cause.downcast_ref::<LibError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(CommitError::Library(boxed)) = cause.downcast_ref::<CommitError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(MergeError::Library(boxed)) = cause.downcast_ref::<MergeError>() {
+        return peel_lock_held(boxed.as_ref());
+    }
+    if let Some(LibError::LockHeld(lock)) = cause.downcast_ref::<LibError>() {
+        return Some(lock.clone());
+    }
+    if let Some(LibError::History(h)) = cause.downcast_ref::<LibError>() {
+        return lock_from_history_error(h);
+    }
+    cause
+        .downcast_ref::<HistoryError>()
+        .and_then(lock_from_history_error)
+}
+
+fn lock_from_history_error(history: &HistoryError) -> Option<LockHeldError> {
+    match history {
+        HistoryError::Nested(boxed) => peel_lock_held(boxed.as_ref()),
+        HistoryError::Engine(engine) => lock_from_history_engine(engine),
+        HistoryError::WorktreeApply { source } => lock_from_history_engine(source),
+        HistoryError::UndoRecordRead { source } | HistoryError::UndoRecordWrite { source } => {
+            lock_from_history_engine(source)
+        }
+        HistoryError::ApplyRollbackIncomplete {
+            checkout,
+            ref_rollback,
+            worktree_restore,
+        } => lock_from_history_engine(checkout)
+            .or_else(|| ref_rollback.as_deref().and_then(lock_from_history_engine))
+            .or_else(|| {
+                worktree_restore
+                    .as_deref()
+                    .and_then(lock_from_history_engine)
+            }),
+        _ => None,
+    }
+}
+
+fn lock_from_history_engine(engine: &HistoryEngineError) -> Option<LockHeldError> {
+    match engine {
+        HistoryEngineError::LockHeld(lock) => Some(lock.clone()),
+        HistoryEngineError::CorruptLooseObject { source, .. }
+        | HistoryEngineError::CorruptPackedObject { source, .. } => {
+            lock_from_history_engine(source)
+        }
+        HistoryEngineError::CheckoutRollbackIncomplete { source, .. } => {
+            lock_from_history_engine(source)
+        }
+        HistoryEngineError::PromisorFetchFailed { failures, .. } => failures
+            .iter()
+            .find_map(|(_, e)| lock_from_history_engine(e)),
+        HistoryEngineError::Commit(CommitError::Library(boxed)) => peel_lock_held(boxed.as_ref()),
+        HistoryEngineError::Merge(MergeError::Library(boxed)) => peel_lock_held(boxed.as_ref()),
+        _ => None,
+    }
+}
+
 fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
     let hook = peel_lib_error(cause)
         .and_then(|lib| match lib {
@@ -449,13 +704,8 @@ fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Structure
 }
 
 fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
-    match peel_lib_error(cause)? {
-        LibError::LockHeld(lock) => Some(classified_from_structured_error(&lock_held(
-            &lock.path,
-            lock.holder,
-        ))),
-        _ => None,
-    }
+    peel_lock_held(cause)
+        .map(|lock| classified_from_structured_error(&lock_held(&lock.path, lock.holder)))
 }
 
 fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
@@ -791,12 +1041,6 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             ),
             None,
         )),
-        LibError::NoMergeInProgress | LibError::NoReplayInProgress => {
-            Some(no_operation_in_progress(err.to_string()))
-        }
-        LibError::OperationInProgress(kind) => {
-            Some(operation_in_progress("proceed", *kind, None))
-        }
         LibError::RemoveBlocked { paths } => {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
@@ -993,7 +1237,7 @@ fn guide_merge(err: &MergeError) -> Option<Error> {
             Some(paths.clone()),
         )),
         MergeError::OperationInProgress(op) => Some(crate::json_error::operation_in_progress(
-            "complete this command",
+            "proceed",
             *op,
             None,
         )),
