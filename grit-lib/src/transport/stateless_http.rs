@@ -5,6 +5,7 @@
 //! smart HTTP without a separate negotiation implementation.
 
 use crate::error::{Error, Result};
+use crate::remote::RemoteError;
 use crate::objects::ObjectId;
 use crate::progress::{Cancel, NeverCancel};
 use crate::transport::http::HttpClient;
@@ -177,7 +178,9 @@ impl StreamingPost {
         match self.response.wait(&NeverCancel) {
             Err(e) => e,
             Ok(Err(e)) => e,
-            Ok(Ok(_)) => Error::Message("server answered before the request body was sent".into()),
+            Ok(Ok(_)) => Error::Remote(RemoteError::Http(
+                "server answered before the request body was sent".into(),
+            )),
         }
     }
 
@@ -435,9 +438,9 @@ impl<C: HttpClient + 'static> StatelessHttpConnection<C> {
     /// [`LARGE_POST`].
     fn write_receive_pack(&mut self, buf: &[u8]) -> Result<()> {
         if self.recv_posted {
-            return Err(Error::Message(
+            return Err(Error::Remote(RemoteError::Http(
                 "receive-pack request already sent".to_owned(),
-            ));
+            )));
         }
         self.recv_body.extend_from_slice(buf);
         if self.recv_stream.is_none() {

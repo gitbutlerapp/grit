@@ -273,7 +273,7 @@ fn pkt_line_payload_len(len_buf: &[u8; 4]) -> Result<usize> {
             b'0'..=b'9' => (b - b'0') as usize,
             b'a'..=b'f' => (b - b'a' + 10) as usize,
             b'A'..=b'F' => (b - b'A' + 10) as usize,
-            _ => return Err(Error::Message("bad pkt length".to_owned())),
+            _ => return Err(Error::CorruptObject("bad pkt length".to_owned())),
         };
         len = (len << 4) | digit;
     }
@@ -455,7 +455,7 @@ fn read_sideband_pack_tail_buffered(
                 continue;
             }
             n if n <= 4 => {
-                return Err(Error::Message(format!(
+                return Err(Error::CorruptObject(format!(
                     "invalid pkt-line length in side-band stream: {n}"
                 )))
             }
@@ -544,7 +544,7 @@ fn read_sideband_pack_tail_read_exact_loop(
             }
             1 | 2 => continue,
             n if n <= 4 => {
-                return Err(Error::Message(format!(
+                return Err(Error::CorruptObject(format!(
                     "invalid pkt-line length in side-band stream: {n}"
                 )))
             }

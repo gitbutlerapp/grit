@@ -114,7 +114,11 @@ impl Session {
         }
         let mut header = Vec::new();
         crate::bundle::write_bundle_header(&mut header, odb.hash_algo(), &prerequisites, tips)
-            .map_err(|e| Error::Message(format!("bundle: {e}")))?;
+            .map_err(|e| {
+                Error::Remote(crate::remote::RemoteError::Fatal {
+                    message: format!("bundle: {e}"),
+                })
+            })?;
         let mut spool = SpooledPack::create(self.dir.join("push.bundle.tmp"))?;
         let mut out = std::io::BufWriter::new(&spool.file);
         out.write_all(&header)?;
@@ -148,7 +152,7 @@ impl Session {
             url: upload.url.clone(),
             length: upload.length,
         };
-        let bytes = serde_json::to_vec(&saved).map_err(|e| Error::Message(e.to_string()))?;
+        let bytes = serde_json::to_vec(&saved).map_err(|e| Error::PathError(e.to_string()))?;
         std::fs::write(self.upload_path(), bytes)?;
         Ok(())
     }
@@ -261,7 +265,7 @@ pub(crate) fn push(
         .header("Accept", "application/x-git-receive-pack-result")
         .body(commands)
         .long_running();
-    let response = client.send(&request).map_err(remote_from_err)?;
+    let response = client.send(&request)?;
     if !response.is_success() {
         let status = response.status;
         let detail = response
@@ -336,7 +340,7 @@ mod tests {
         ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
-        fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+        fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
             let header = |name: &str| {
                 request
                     .headers
@@ -366,7 +370,10 @@ mod tests {
                 (HttpMethod::Head, _) => reply(200, offset(stored.len()), vec![]),
                 (HttpMethod::Patch, _) => {
                     if self.failing.load(Ordering::SeqCst) && !stored.is_empty() {
-                        return Err(Error::Message("connection reset".to_owned()));
+                        return Err(crate::remote::RemoteError::Transport {
+                            url: None,
+                            detail: "connection reset".to_owned(),
+                        });
                     }
                     if header("Upload-Offset") != Some(stored.len()) {
                         return Ok(reply(409, vec![], vec![]));
@@ -380,8 +387,10 @@ mod tests {
                     *self.applied.lock().unwrap_or_else(|e| e.into_inner()) =
                         Some(request.body.to_vec());
                     let mut report = Vec::new();
-                    crate::pkt_line::write_line_to_vec(&mut report, "unpack ok")?;
-                    crate::pkt_line::write_line_to_vec(&mut report, "ok refs/heads/main")?;
+                    crate::pkt_line::write_line_to_vec(&mut report, "unpack ok")
+                        .map_err(crate::remote::RemoteError::from_io)?;
+                    crate::pkt_line::write_line_to_vec(&mut report, "ok refs/heads/main")
+                        .map_err(crate::remote::RemoteError::from_io)?;
                     report.extend_from_slice(b"0000");
                     reply(200, vec![], report)
                 }
@@ -560,7 +569,7 @@ mod tests {
         let result =
             session.write_bundle(&odb, &[], &[(tip, "refs/heads/main".to_owned())], 0, |w| {
                 w.write_all(b"PACK")?;
-                Err(Error::Message("object went missing".to_owned()))
+                Err(Error::ObjectNotFound("object went missing".to_owned()))
             });
         assert!(result.is_err());
         assert!(!session.has_bundle());

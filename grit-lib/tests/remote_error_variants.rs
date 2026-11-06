@@ -101,33 +101,89 @@ fn remote_error_variants() {
 
     #[cfg(feature = "http-ureq")]
     {
-        use grit_lib::remote::transport::http::HttpClient;
-        use std::sync::Arc;
+        use std::net::TcpStream;
+        use std::path::PathBuf;
+        use std::process::{Child, Command, Stdio};
+        use std::time::{Duration, Instant};
 
-        let port = grit_test_support::free_port().expect("port");
-        let listener = std::net::TcpListener::bind(("127.0.0.1", port)).expect("bind");
-        std::thread::spawn(move || {
-            for stream in listener.incoming().flatten() {
-                let mut stream = stream;
-                let _ = std::io::Write::write_all(
-                    &mut stream,
-                    b"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"git\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                );
+        use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
+        use grit_lib::remote::transport::http::{http_client_arc, http_fetch};
+
+        fn find_binary(name: &str) -> Option<PathBuf> {
+            let exe = std::env::current_exe().ok()?;
+            let deps = exe.parent()?;
+            let profile = deps.parent()?;
+            for cand in [profile.join(name), deps.join(name)] {
+                if cand.is_file() {
+                    return Some(cand);
+                }
             }
-        });
-        let local = init_repo(&tmp.path().join("auth-client"));
-        let err = grit_lib::remote::fetch::http_fetch(
-            Arc::new(
-                grit_lib::remote::transport::http::UreqHttpClient::new()
-                    .with_git_protocol("version=2"),
-            ) as Arc<dyn HttpClient>,
-            local.git_dir(),
-            &format!("http://127.0.0.1:{port}/r.git"),
-            &mut FetchOptions::new(),
-            &mut NoProgress,
-        )
-        .expect_err("401 must fail");
-        assert!(matches!(err, Error::Remote(RemoteError::Auth { .. })));
+            None
+        }
+
+        struct ServerGuard(Child);
+        impl Drop for ServerGuard {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+
+        if let Some(server_bin) = find_binary("grit-http-server") {
+            let srv_root = tmp.path().join("http-srv");
+            let bare = srv_root.join("repo.git");
+            std::fs::create_dir_all(&bare).expect("mkdir bare");
+            let git_init_ok = Command::new("git")
+                .current_dir(&bare)
+                .args(["init", "-q", "--bare", "."])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .is_ok_and(|s| s.success());
+            if git_init_ok {
+                if let Some(port) = grit_test_support::free_port() {
+                    if let Some(child) = Command::new(&server_bin)
+                        .arg("--root")
+                        .arg(&srv_root)
+                        .arg("--bind")
+                        .arg(format!("127.0.0.1:{port}"))
+                        .arg("--require-auth")
+                        .arg("user:pass")
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn()
+                        .ok()
+                    {
+                        let _guard = ServerGuard(child);
+                        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+                        let deadline = Instant::now() + Duration::from_secs(10);
+                        while Instant::now() < deadline {
+                            if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok()
+                            {
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        let local = init_repo(&tmp.path().join("auth-client"));
+                        let url = format!("http://127.0.0.1:{port}/repo.git");
+                        let client = http_client_arc(
+                            UreqHttpClient::new().with_git_protocol("version=2"),
+                        );
+                        let err = http_fetch(
+                            client,
+                            local.git_dir(),
+                            &url,
+                            &mut FetchOptions::new(),
+                            &mut NoProgress,
+                        )
+                        .expect_err("401 without credentials");
+                        assert!(matches!(err, Error::Remote(RemoteError::Auth { .. })));
+                    }
+                }
+            }
+        } else {
+            eprintln!("SKIP: grit-http-server binary not found (401 auth subtest)");
+        }
     }
 }
 

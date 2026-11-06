@@ -176,7 +176,7 @@ impl std::fmt::Display for OverwriteReason {
     }
 }
 
-/// Why a remote could not be read or written ([`Error::RemoteUnreadable`]).
+/// Why a remote could not be read or written ([`RemoteError::Unreadable`](crate::remote::RemoteError::Unreadable)).
 ///
 /// Every reason is a failure to talk to the remote at all, as opposed to the remote refusing
 /// an update. [`Self::Transport`] is the one usually worth retrying on a flaky network.
@@ -193,7 +193,7 @@ pub enum RemoteUnreadableReason {
         detail: String,
     },
     /// A smart-HTTP server answered with an error status other than an authentication
-    /// challenge (those are [`Error::Auth`]).
+    /// challenge (those are [`RemoteError::Auth`](crate::remote::RemoteError::Auth)).
     HttpStatus {
         /// HTTP status code (`>= 400`).
         status: u16,
@@ -269,7 +269,23 @@ pub(crate) fn remote_unreadable_message(
     }
 }
 
-/// Why an HTTP remote refused access ([`Error::Auth`]).
+/// Display text for [`RemoteError::Transport`].
+pub(crate) fn remote_transport_message(url: Option<&str>, detail: &str) -> String {
+    match url {
+        Some(u) => format!("could not reach {u}: {detail}"),
+        None => format!("transport failure: {detail}"),
+    }
+}
+
+/// Display text for [`RemoteError::HttpStatus`].
+pub(crate) fn remote_http_status_message(url: Option<&str>, status: u16) -> String {
+    match url {
+        Some(u) => format!("HTTP {status} from {u}"),
+        None => format!("HTTP {status} from the remote"),
+    }
+}
+
+/// Why an HTTP remote refused access ([`RemoteError::Auth`](crate::remote::RemoteError::Auth)).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum AuthFailure {
@@ -284,7 +300,7 @@ pub enum AuthFailure {
         /// prompting is disabled).
         detail: String,
         /// The `credential.helper` programs the provider asked, when it reported them
-        /// (see [`Error::CredentialsUnavailable`]); empty when none is configured or
+        /// (see [`RemoteError::CredentialsUnavailable`](crate::remote::RemoteError::CredentialsUnavailable)); empty when none is configured or
         /// the provider is not helper-based.
         helpers: Vec<String>,
     },
@@ -316,7 +332,7 @@ impl AuthFailure {
     /// [`fill`](crate::credentials::CredentialProvider::fill) fails with `err`.
     ///
     /// Always [`AuthFailure::CredentialsUnavailable`]: `detail` is `err`'s message,
-    /// and `helpers` is the list an [`Error::CredentialsUnavailable`] carries (empty
+    /// and `helpers` is the list [`RemoteError::CredentialsUnavailable`](crate::remote::RemoteError::CredentialsUnavailable) carries (empty
     /// for any other error). Custom [`HttpClient`](crate::transport::http::HttpClient)
     /// implementations use it to report fill failures the way the built-in client does.
     #[must_use]
@@ -2458,13 +2474,13 @@ impl Error {
         }
     }
 
-    /// Build [`RemoteError::Unreadable`] for `url`.
+    /// Build [`crate::remote::RemoteError::Unreadable`] for `url`.
     #[must_use]
     pub fn remote_unreadable(url: impl Into<String>, reason: RemoteUnreadableReason) -> Self {
         Self::Remote(crate::remote::RemoteError::unreadable(url, reason))
     }
 
-    /// Whether this is an unreadable remote failure (see [`RemoteError::is_remote_unreadable`]).
+    /// Whether this is an unreadable remote failure (see [`crate::remote::RemoteError::is_remote_unreadable`]).
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
         match self {

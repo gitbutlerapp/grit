@@ -197,7 +197,7 @@ impl HttpClient for MockHttp {
         &self,
         _url: &str,
         _git_protocol: Option<&str>,
-    ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
+    ) -> crate::remote::RemoteResult<(Vec<u8>, Option<String>)> {
         Ok((self.body.clone(), None))
     }
 }

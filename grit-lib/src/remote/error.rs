@@ -141,6 +141,22 @@ pub enum RemoteError {
     /// SSH subprocess or URL setup failed.
     #[error("{0}")]
     Ssh(String),
+    /// Low-level transport failure (connection, DNS, TLS, or I/O outside HTTP status handling).
+    #[error("{}", crate::error::remote_transport_message(.url.as_deref(), &.detail))]
+    Transport {
+        /// Redacted repository URL when known.
+        url: Option<String>,
+        /// What failed (for example `connection refused`).
+        detail: String,
+    },
+    /// HTTP status from an embedder [`HttpClient`](crate::transport::http::HttpClient) outside auth/unreadable mapping.
+    #[error("{}", crate::error::remote_http_status_message(.url.as_deref(), *status))]
+    HttpStatus {
+        /// Redacted repository URL when known.
+        url: Option<String>,
+        /// Response status code.
+        status: u16,
+    },
     /// HTTP client or worker failure outside unreadable/auth classification.
     #[error("{0}")]
     Http(String),
@@ -159,6 +175,14 @@ pub enum RemoteError {
 }
 
 impl RemoteError {
+    /// Map a low-level I/O error to [`RemoteError::Transport`].
+    pub fn from_io(err: std::io::Error) -> Self {
+        Self::Transport {
+            url: None,
+            detail: err.to_string(),
+        }
+    }
+
     /// Whether the remote could not be read or written at all.
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
@@ -206,6 +230,8 @@ impl RemoteError {
             Self::PushPlan(_) => "push_plan",
             Self::PartialClone(_) => "partial_clone",
             Self::MalformedTransportUrl { .. } => "malformed_transport_url",
+            Self::Transport { .. } => "transport",
+            Self::HttpStatus { .. } => "http_status",
             Self::Ssh(_) => "ssh",
             Self::Http(_) => "http",
             Self::HttpWorkerPanicked => "http_worker_panicked",

@@ -110,6 +110,7 @@ pub mod transfer {
 pub mod transport {
     //! transport API (re-exported at this path).
     pub use crate::transport::*;
+    pub use crate::transport::http::{http_client_arc, http_fetch};
 }
 pub mod transport_path {
     //! transport_path API (re-exported at this path).

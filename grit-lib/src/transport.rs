@@ -38,6 +38,28 @@ use crate::pkt_line;
 use crate::progress::Cancel;
 use crate::remote::RemoteError;
 
+fn remote_err(err: RemoteError) -> Error {
+    Error::Remote(err)
+}
+
+fn git_url_err(detail: impl Into<String>) -> Error {
+    remote_err(RemoteError::MalformedTransportUrl {
+        scheme: "git",
+        detail: detail.into(),
+    })
+}
+
+fn ssh_transport_err(detail: impl Into<String>) -> Error {
+    remote_err(RemoteError::Ssh(detail.into()))
+}
+
+fn transport_io_err(detail: impl Into<String>) -> Error {
+    remote_err(RemoteError::Transport {
+        url: None,
+        detail: detail.into(),
+    })
+}
+
 pub mod http;
 pub(crate) mod pending_http;
 pub(crate) mod stateless_http;
@@ -326,7 +348,7 @@ fn verify_ssh_child_after_advertisement(
             Ok(Some(_)) => return Err(no_handshake()),
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => {
-                return Err(Error::Message(format!("ssh wait failed: {e}")));
+                return Err(transport_io_err(format!("ssh wait failed: {e}")));
             }
         }
     }
@@ -479,13 +501,13 @@ pub(crate) struct GitDaemonUrl {
 pub(crate) fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
     let rest = url
         .strip_prefix("git://")
-        .ok_or_else(|| Error::Message(format!("not a git:// URL: {url}")))?;
+        .ok_or_else(|| git_url_err(format!("not a git:// URL: {url}")))?;
     let (authority, path_part) = rest
         .find('/')
         .map(|i| (&rest[..i], &rest[i..]))
         .unwrap_or((rest, "/"));
     if path_part.is_empty() || path_part == "/" {
-        return Err(Error::Message(
+        return Err(transport_io_err(
             "git:// URL missing repository path".to_owned(),
         ));
     }
@@ -493,12 +515,12 @@ pub(crate) fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
     let (host, port) = if let Some(stripped) = authority.strip_prefix('[') {
         let end = stripped
             .find(']')
-            .ok_or_else(|| Error::Message(format!("invalid git:// authority: {authority}")))?;
+            .ok_or_else(|| git_url_err(format!("invalid git:// authority: {authority}")))?;
         let host = stripped[..end].to_string();
         let after = &stripped[end + 1..];
         let port = if let Some(p) = after.strip_prefix(':') {
             p.parse::<u16>()
-                .map_err(|_| Error::Message(format!("invalid port in git:// URL: {url}")))?
+                .map_err(|_| git_url_err(format!("invalid port in git:// URL: {url}")))?
         } else {
             9418
         };
@@ -511,7 +533,7 @@ pub(crate) fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
             (
                 h.to_string(),
                 p.parse::<u16>()
-                    .map_err(|_| Error::Message(format!("invalid port in git:// URL: {url}")))?,
+                    .map_err(|_| git_url_err(format!("invalid port in git:// URL: {url}")))?,
             )
         } else {
             (authority.to_string(), 9418)
@@ -520,7 +542,7 @@ pub(crate) fn parse_git_url(url: &str) -> Result<GitDaemonUrl> {
         (authority.to_string(), 9418)
     };
     if host.is_empty() {
-        return Err(Error::Message("git:// URL has empty host".to_owned()));
+        return Err(git_url_err("git:// URL has empty host"));
     }
     Ok(GitDaemonUrl { host, port, path })
 }
@@ -653,7 +675,7 @@ impl Transport for GitDaemonTransport {
             })?
             .next()
             .ok_or_else(|| {
-                Error::Message(format!(
+                transport_io_err(format!(
                     "no addresses for git://{}:{}",
                     parsed.host, parsed.port
                 ))
@@ -678,7 +700,7 @@ impl Transport for GitDaemonTransport {
 
         let mut writer = stream
             .try_clone()
-            .map_err(|e| Error::Message(format!("dup git:// socket: {e}")))?;
+            .map_err(|e| transport_io_err(format!("dup git:// socket: {e}")))?;
         let broken_connection = |e: Error| match e {
             Error::Io(io) => Error::remote_unreadable(
                 url,
@@ -799,7 +821,7 @@ fn parse_ssh_url_form(rest: &str) -> Result<SshUrl> {
     let (authority, path_with_sep) = split_ssh_authority_and_path(after_slashes);
     let (user_host, port) = parse_authority_host_port(authority)?;
     if user_host.starts_with('-') {
-        return Err(Error::Message("ssh: hostname starts with '-'".to_owned()));
+        return Err(ssh_transport_err("ssh: hostname starts with '-'".to_owned()));
     }
     // Git: for PROTO_SSH, if `path[1] == '~'`, advance past the leading separator
     // so `ssh://host/~repo` yields `~repo` (server-side home-dir expansion).
@@ -918,7 +940,7 @@ fn get_port(host: String) -> (String, Option<String>) {
 fn parse_authority_host_port(authority: &str) -> Result<(String, Option<String>)> {
     let auth = authority.trim();
     if auth.is_empty() {
-        return Err(Error::Message("ssh: empty host".to_owned()));
+        return Err(ssh_transport_err("ssh: empty host".to_owned()));
     }
     let (ssh_host, port) = get_host_and_port(host_end_remove_brackets(auth));
     let (ssh_host, port) = match port {
@@ -926,10 +948,10 @@ fn parse_authority_host_port(authority: &str) -> Result<(String, Option<String>)
         None => get_port(ssh_host),
     };
     if ssh_host.is_empty() {
-        return Err(Error::Message("ssh: empty host".to_owned()));
+        return Err(ssh_transport_err("ssh: empty host".to_owned()));
     }
     if ssh_host.starts_with('-') {
-        return Err(Error::Message("ssh: hostname starts with '-'".to_owned()));
+        return Err(ssh_transport_err("ssh: hostname starts with '-'".to_owned()));
     }
     Ok((ssh_host, port))
 }
@@ -939,28 +961,28 @@ fn parse_scp_style(u: &str) -> Result<SshUrl> {
     let sep_search_start = if he.bracketed {
         u.find(']')
             .map(|i| i + 1)
-            .ok_or_else(|| Error::Message("ssh: malformed host".to_owned()))?
+            .ok_or_else(|| ssh_transport_err("ssh: malformed host".to_owned()))?
     } else {
         0
     };
     let rel_colon = u[sep_search_start..]
         .find(':')
-        .ok_or_else(|| Error::Message("ssh: no ':' in scp-style url".to_owned()))?;
+        .ok_or_else(|| ssh_transport_err("ssh: no ':' in scp-style url".to_owned()))?;
     let colon_pos = sep_search_start + rel_colon;
     let host = &u[..colon_pos];
     let mut path = &u[colon_pos + 1..];
 
     if host.is_empty() || path.is_empty() {
-        return Err(Error::Message("ssh: empty host or path".to_owned()));
+        return Err(ssh_transport_err("ssh: empty host or path".to_owned()));
     }
     if host.starts_with('-') {
-        return Err(Error::Message("ssh: hostname starts with '-'".to_owned()));
+        return Err(ssh_transport_err("ssh: hostname starts with '-'".to_owned()));
     }
     if path.as_bytes().get(1) == Some(&b'~') {
         path = &path[1..];
     }
     if path.starts_with('-') {
-        return Err(Error::Message("ssh: path starts with '-'".to_owned()));
+        return Err(ssh_transport_err("ssh: path starts with '-'".to_owned()));
     }
     let (ssh_host, port) = parse_authority_host_port(host)?;
     Ok(SshUrl {
@@ -977,7 +999,7 @@ fn normalize_ssh_url_path(path_part: &str) -> Result<String> {
     }
     let decoded = percent_decode_path(path_part)?;
     if decoded.starts_with('-') {
-        return Err(Error::Message("ssh: path starts with '-'".to_owned()));
+        return Err(ssh_transport_err("ssh: path starts with '-'".to_owned()));
     }
     Ok(decoded)
 }
@@ -989,12 +1011,12 @@ fn percent_decode_path(path: &str) -> Result<String> {
         if c == '%' {
             let h1 = chars
                 .next()
-                .ok_or_else(|| Error::Message("ssh: bad % escape".to_owned()))?;
+                .ok_or_else(|| ssh_transport_err("ssh: bad % escape".to_owned()))?;
             let h2 = chars
                 .next()
-                .ok_or_else(|| Error::Message("ssh: bad % escape".to_owned()))?;
+                .ok_or_else(|| ssh_transport_err("ssh: bad % escape".to_owned()))?;
             let byte = u8::from_str_radix(&format!("{h1}{h2}"), 16)
-                .map_err(|_| Error::Message("ssh: bad % escape".to_owned()))?;
+                .map_err(|_| ssh_transport_err("ssh: bad % escape".to_owned()))?;
             out.push(byte as char);
         } else {
             out.push(c);
@@ -1218,7 +1240,7 @@ pub(crate) fn connect_local_upload_pack(
 ) -> Result<Box<dyn Connection>> {
     use crate::serve::{ProtocolVersion, ServeOptions};
     if service != Service::UploadPack {
-        return Err(Error::Message(
+        return Err(transport_io_err(
             "local upload-pack connect supports fetch only".to_owned(),
         ));
     }
@@ -1607,14 +1629,14 @@ impl Transport for SshTransport {
         let spec = parse_ssh_url(url)?;
         let cmd_spec = self.ssh_command_spec(&spec, service, opts);
         let running = self.command_runner.spawn(&cmd_spec).map_err(|e| {
-            Error::Message(format!("failed to spawn ssh for {}: {e}", spec.ssh_host))
+            transport_io_err(format!("failed to spawn ssh for {}: {e}", spec.ssh_host))
         })?;
         let (mut child, writer, reader, _stderr) = running
             .into_system_parts()
-            .map_err(|_| Error::Message("ssh child is not backed by a live process".to_owned()))?;
-        let writer = writer.ok_or_else(|| Error::Message("ssh child has no stdin".to_owned()))?;
+            .map_err(|_| transport_io_err("ssh child is not backed by a live process".to_owned()))?;
+        let writer = writer.ok_or_else(|| transport_io_err("ssh child has no stdin".to_owned()))?;
         let mut reader = BufReader::new(
-            reader.ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?,
+            reader.ok_or_else(|| transport_io_err("ssh child has no stdout".to_owned()))?,
         );
 
         let adv = read_advertisement(&mut reader)?;

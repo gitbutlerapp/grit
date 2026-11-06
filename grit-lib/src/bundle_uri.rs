@@ -88,7 +88,7 @@ impl BundleList {
     ///
     /// # Errors
     ///
-    /// [`Error::Message`] when `bundle.version` is present and is not `1`.
+    /// [`crate::bundle::BundleError::MalformedLine`] when `bundle.version` is present and is not `1`.
     pub fn parse<'a>(lines: impl IntoIterator<Item = &'a str>) -> Result<Self> {
         let mut list = Self::default();
         let mut entries: Vec<(String, Option<String>, Option<u64>)> = Vec::new();
@@ -101,8 +101,8 @@ impl BundleList {
             };
             match key.to_ascii_lowercase().as_str() {
                 "version" if value != "1" => {
-                    return Err(Error::Message(format!(
-                        "unsupported bundle list version {value}"
+                    return Err(bundle_error(crate::bundle::BundleError::MalformedLine(
+                        format!("unsupported bundle list version {value}"),
                     )))
                 }
                 "mode" => {
@@ -234,7 +234,9 @@ pub(crate) fn fetch_bundle_list(
         match packet {
             Packet::Data(line) => {
                 if let Some(msg) = line.strip_prefix("ERR ") {
-                    return Err(Error::Message(format!("bundle-uri: {msg}")));
+                    return Err(Error::Remote(crate::remote::RemoteError::Fatal {
+                        message: format!("bundle-uri: {msg}"),
+                    }));
                 }
                 lines.push(line);
             }
@@ -375,8 +377,8 @@ fn seed_from(
     if !bundle.header().prerequisites.is_empty() {
         // An incremental bundle cannot seed an empty repository.
         discard_download(&dest)?;
-        return Err(Error::Message(
-            "the advertised bundle needs history this clone does not have".to_owned(),
+        return Err(bundle_error(
+            crate::bundle::BundleError::PrerequisitesNotConnected,
         ));
     }
     // Unpacking copies the bundle's pack locally; only indexing it is news.
@@ -458,7 +460,12 @@ impl ProgressSink for WithoutReceiving<'_> {
 }
 
 fn bundle_error(e: crate::bundle::BundleError) -> Error {
-    Error::Message(format!("bundle: {e}"))
+    match e {
+        crate::bundle::BundleError::Cancelled => Error::Cancelled,
+        e => Error::Remote(crate::remote::RemoteError::Fatal {
+            message: format!("bundle: {e}"),
+        }),
+    }
 }
 
 /// Delete the `refs/bundles/*` refs [`seed_from_bundle_uri`] wrote, once the
@@ -576,7 +583,7 @@ mod tests {
                 unreachable!()
             }
 
-            fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
+            fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
                 assert_eq!(request.url, self.url);
                 Ok(HttpResponse {
                     status: 200,

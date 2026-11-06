@@ -248,9 +248,9 @@ pub(crate) fn push_remote_with(
         opts.push_options.len()
     );
     if conn.protocol_version() >= 2 {
-        return Err(Error::Message(
-            "push_remote: protocol v2 not supported in this phase (use v0/v1)".to_owned(),
-        ));
+        return Err(Error::Remote(crate::remote::RemoteError::Fatal {
+            message: "push_remote: protocol v2 not supported in this phase (use v0/v1)".to_owned(),
+        }));
     }
 
     let algo = local.odb().hash_algo();
@@ -940,13 +940,13 @@ fn decide_push_wire(
     }
 
     let Some(src) = spec.src else {
-        return Err(Error::Message(format!(
+        return Err(Error::InvalidRef(format!(
             "push to '{}' has no source object and is not a deletion",
             spec.dst
         )));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::Message(format!(
+        return Err(Error::ObjectNotFound(format!(
             "source object {src} for '{}' is missing from the local object store",
             spec.dst
         )));
@@ -1122,7 +1122,7 @@ pub(crate) fn read_receive_pack_response(
         }
     }
     if !receive_pack_response_complete(&raw, sent_refs, server_sideband)? {
-        return Err(Error::Message(
+        return Err(Error::CorruptObject(
             "receive-pack response ended before a complete report-status".to_owned(),
         ));
     }

@@ -132,7 +132,7 @@ pub trait HttpClient: Send + Sync {
         git_protocol: Option<&str>,
     ) -> RemoteResult<Box<dyn Read + Send>> {
         let mut buffered = Vec::new();
-        body.read_to_end(&mut buffered).map_err(Error::Io)?;
+        body.read_to_end(&mut buffered).map_err(RemoteError::from_io)?;
         self.post_into_reader(url, content_type, accept, &buffered, git_protocol)
     }
 
@@ -155,7 +155,7 @@ pub trait HttpClient: Send + Sync {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         Ok((self.get(url, git_protocol)?, None))
     }
 
@@ -165,7 +165,7 @@ pub trait HttpClient: Send + Sync {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         self.get_with_final_url(url, git_protocol)
     }
 
@@ -196,14 +196,14 @@ pub trait HttpClient: Send + Sync {
     /// resolve, is an error. Clients that authenticate should do so here as
     /// they do for [`Self::get`].
     ///
-    /// The default implementation reports [`Error::Message`] saying the client
+    /// The default implementation reports [`RemoteError::Http`] saying the client
     /// cannot send such requests, which turns resumable transfers off.
     ///
     /// # Errors
     ///
     /// A transport or authentication failure.
-    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
-        Err(Error::Message(format!(
+    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
+        Err(RemoteError::Http(format!(
             "this HTTP client cannot send {} requests",
             request.method.as_str()
         )))
@@ -397,7 +397,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         (**self).get_with_final_url(url, git_protocol)
     }
 
@@ -405,7 +405,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         (**self).get_with_final_url_exact(url, git_protocol)
     }
 
@@ -421,7 +421,7 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
         (**self).reset_auth_after_redirect_rebase();
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
         (**self).send(request)
     }
 
@@ -472,7 +472,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         (**self).get_with_final_url(url, git_protocol)
     }
 
@@ -480,7 +480,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         (**self).get_with_final_url_exact(url, git_protocol)
     }
 
@@ -496,7 +496,7 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
         (**self).reset_auth_after_redirect_rebase();
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
         (**self).send(request)
     }
 
@@ -680,7 +680,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
         }
         Some(pkt_line::Packet::Data(s)) => s,
         Some(other) => {
-            return Err(Error::Message(format!(
+            return Err(Error::CorruptObject(format!(
                 "unexpected first advertisement packet: {other:?}"
             )))
         }
@@ -764,7 +764,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                     continue;
                 }
                 let oid = ObjectId::from_hex(oid_hex).map_err(|e| {
-                    Error::Message(format!("bad oid in advertisement: {oid_hex}: {e}"))
+                    Error::InvalidObjectId(format!("bad oid in advertisement: {oid_hex}: {e}"))
                 })?;
                 let valid_ref = refname == "HEAD"
                     || crate::refs::is_valid_fetch_advertised_ref(refname)
@@ -779,7 +779,7 @@ fn parse_advertisement(body: &[u8]) -> Result<Discovery> {
                 }
             }
             Some(other) => {
-                return Err(Error::Message(format!(
+                return Err(Error::CorruptObject(format!(
                     "unexpected packet in advertisement: {other:?}"
                 )))
             }
@@ -1114,7 +1114,9 @@ fn get_with_final_url_interruptible<C: HttpClient + Clone + 'static>(
     let url = url.to_owned();
     let git_protocol = git_protocol.map(str::to_owned);
     PendingHttp::spawn("grit-http-get", move || {
-        client.get_with_final_url(&url, git_protocol.as_deref())
+        client
+            .get_with_final_url(&url, git_protocol.as_deref())
+            .map_err(Error::Remote)
     })
     .map_err(Error::Io)?
     .wait_with_watch(cancel, Some(owner), Some(stack_watch), None)

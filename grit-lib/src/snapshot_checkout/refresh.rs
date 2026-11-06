@@ -714,7 +714,7 @@ mod tests {
         fn send(
             &self,
             request: &crate::transport::http::HttpRequest<'_>,
-        ) -> crate::error::Result<crate::transport::http::HttpResponse> {
+        ) -> crate::remote::RemoteResult<crate::transport::http::HttpResponse> {
             self.seen.lock().expect("lock").push(format!(
                 "{} {} {}",
                 request.method.as_str(),

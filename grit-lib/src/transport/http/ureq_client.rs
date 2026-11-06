@@ -16,7 +16,7 @@
 //! When authentication is required but cannot be satisfied — no provider wired,
 //! the provider cannot supply a usable username/password, an unsupported auth
 //! scheme, or rejected credentials — the request fails with the typed
-//! [`Error::Auth`] (never a hang), so embedders can detect an auth failure and
+//! [`RemoteError::Auth`](crate::remote::RemoteError::Auth) (never a hang), so embedders can detect an auth failure and
 //! fall back (e.g. to an interactive/subprocess path) without string-matching.
 //!
 //! ## Proxy, cookies, and extra headers (config-driven)
@@ -60,7 +60,7 @@ use crate::environment::Environment;
 use crate::error::{AuthFailure, Error, RemoteUnreadableReason, Result};
 use crate::progress::Cancel;
 use crate::protocol::client_git_protocol_header_from_config;
-use crate::remote::RemoteError;
+use crate::remote::{RemoteError, RemoteResult};
 use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
 
@@ -720,18 +720,20 @@ fn build_proxy(config: &ConfigSet) -> Result<Option<ureq::Proxy>> {
         .map(|(s, _)| s.to_ascii_lowercase())
         .unwrap_or_default();
     if scheme.starts_with("socks") {
-        return Err(Error::Message(format!(
+        return Err(Error::Remote(RemoteError::Http(format!(
             "http.proxy '{raw}': SOCKS proxies are not supported by the default ureq HTTP client; \
              implement a custom HttpClient or use an HTTP proxy"
-        )));
+        ))));
     }
     if scheme != "http" && scheme != "https" {
-        return Err(Error::Message(format!(
+        return Err(Error::Remote(RemoteError::Http(format!(
             "http.proxy '{raw}': unsupported proxy scheme '{scheme}'"
-        )));
+        ))));
     }
     let proxy = ureq::Proxy::new(&with_scheme)
-        .map_err(|e| Error::Message(format!("invalid http.proxy '{raw}': {e}")))?;
+        .map_err(|e| {
+            Error::Remote(RemoteError::Http(format!("invalid http.proxy '{raw}': {e}")))
+        })?;
     Ok(Some(proxy))
 }
 
@@ -1283,18 +1285,20 @@ impl HttpClient for UreqHttpClient {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, final_url)| (body, Some(final_url)))
+            .map_err(RemoteError::from)
     }
 
     fn get_with_final_url_exact(
         &self,
         url: &str,
         git_protocol: Option<&str>,
-    ) -> Result<(Vec<u8>, Option<String>)> {
+    ) -> RemoteResult<(Vec<u8>, Option<String>)> {
         self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
             .map(|(body, final_url)| (body, Some(final_url)))
+            .map_err(RemoteError::from)
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -1305,8 +1309,9 @@ impl HttpClient for UreqHttpClient {
         self.clear_auth_header();
     }
 
-    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+    fn send(&self, request: &HttpRequest<'_>) -> RemoteResult<HttpResponse> {
         self.send_with_auth_retry(request)
+            .map_err(RemoteError::from)
     }
 
     fn set_operation_cancel(&self, cancel: Option<std::sync::Arc<dyn Cancel + Send + Sync>>) {
@@ -1657,7 +1662,12 @@ fn build_cookie_specs(path: Option<&std::path::Path>) -> Result<Vec<CookieSpec>>
         return Ok(Vec::new());
     }
     let data = std::fs::read_to_string(path)
-        .map_err(|e| Error::Message(format!("read cookie file '{}': {e}", path.display())))?;
+        .map_err(|e| {
+            Error::Remote(RemoteError::Http(format!(
+                "read cookie file '{}': {e}",
+                path.display()
+            )))
+        })?;
     let mut out = Vec::new();
     for line in data.lines() {
         let trimmed = line.trim();
@@ -2609,10 +2619,7 @@ mod tests {
         let send_url = format!("{base}/git-upload-pack");
         let request = HttpRequest::new(HttpMethod::Get, &send_url);
         let send_err = client.send(&request).expect_err("send");
-        assert_rejected(match send_err {
-            Error::Remote(remote) => remote,
-            other => panic!("expected remote auth error, got {other:?}"),
-        });
+        assert_rejected(send_err);
 
         assert_rejected(
             client

@@ -7,6 +7,11 @@ use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
 use crate::progress::{mirror_stack_cancel, Cancel, CancelSignal};
+use crate::remote::RemoteError;
+
+fn remote_err(err: RemoteError) -> Error {
+    Error::Remote(err)
+}
 
 /// How often a wait for an HTTP worker checks for cancellation.
 pub(crate) const HTTP_CANCEL_POLL: Duration = Duration::from_millis(20);
@@ -84,13 +89,15 @@ impl<T: Send + 'static> PendingHttp<T> {
                 return Err(Error::Cancelled);
             }
             if low_speed_window.is_some_and(|window| started.elapsed() >= window) {
-                return Err(Error::Message(LOW_SPEED_STALL_MSG.to_owned()));
+                return Err(remote_err(RemoteError::HttpLowSpeedStall(
+                    LOW_SPEED_STALL_MSG.to_owned(),
+                )));
             }
             match self.0.recv_timeout(HTTP_CANCEL_POLL) {
                 Ok(response) => return response,
                 Err(RecvTimeoutError::Timeout) => signal.poll()?,
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(Error::Message("HTTP worker thread panicked".to_owned()));
+                    return Err(remote_err(RemoteError::HttpWorkerPanicked));
                 }
             }
         }
@@ -117,13 +124,15 @@ mod tests {
         let started = Instant::now();
         loop {
             if started.elapsed() >= low_speed_window {
-                return Err(Error::Message(LOW_SPEED_STALL_MSG.to_owned()));
+                return Err(remote_err(RemoteError::HttpLowSpeedStall(
+                    LOW_SPEED_STALL_MSG.to_owned(),
+                )));
             }
             match rx.recv_timeout(HTTP_CANCEL_POLL) {
                 Ok(response) => return response,
                 Err(RecvTimeoutError::Timeout) => signal.poll()?,
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(Error::Message("HTTP worker thread panicked".to_owned()));
+                    return Err(remote_err(RemoteError::HttpWorkerPanicked));
                 }
             }
         }
@@ -140,7 +149,10 @@ mod tests {
         let err = wall_clock_low_speed_wait(&rx, Duration::from_secs(1), &NeverCancel)
             .expect_err("wall-clock low-speed must abort before the worker finishes");
         assert!(
-            matches!(&err, Error::Message(msg) if msg == LOW_SPEED_STALL_MSG),
+            matches!(
+                &err,
+                Error::Remote(RemoteError::HttpLowSpeedStall(msg)) if msg == LOW_SPEED_STALL_MSG
+            ),
             "unexpected error: {err:?}"
         );
         assert!(

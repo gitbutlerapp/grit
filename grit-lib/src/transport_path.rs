@@ -6,6 +6,14 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::error::Error;
+use crate::remote::RemoteError;
+
+fn file_url_err(detail: impl Into<String>) -> Error {
+    Error::Remote(RemoteError::MalformedTransportUrl {
+        scheme: "file",
+        detail: detail.into(),
+    })
+}
 
 /// Repository root used to resolve relative `remote.<name>.url` values — the linked or main
 /// worktree directory when known, otherwise inferred from `git_dir` (including linked
@@ -162,19 +170,18 @@ fn absolute_local_clone_source_url_from(source_path: &Path, cwd: &Path) -> Strin
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when a `%` escape is truncated or invalid.
+/// Returns [`RemoteError::MalformedTransportUrl`] when a `%` escape is truncated or invalid.
 pub(crate) fn file_url_to_local_path(url: &str) -> Result<String, Error> {
     let trimmed = url.trim();
     let mut path_part = trimmed
         .strip_prefix("file://")
-        .ok_or_else(|| Error::Message("not a file:// URL".to_owned()))?;
+        .ok_or_else(|| file_url_err("not a file:// URL"))?;
     if path_part.starts_with("localhost") {
         path_part = &path_part["localhost".len()..];
     }
     let decoded = percent_decode_path(path_part)?;
-    let decoded = String::from_utf8(decoded).map_err(|_| {
-        Error::Message("file URL path is not valid UTF-8 after decoding".to_owned())
-    })?;
+    let decoded = String::from_utf8(decoded)
+        .map_err(|_| file_url_err("file URL path is not valid UTF-8 after decoding"))?;
     Ok(dos_file_url_path_to_local(&decoded))
 }
 
@@ -203,16 +210,16 @@ fn percent_decode_path(path: &str) -> Result<Vec<u8>, Error> {
         if bytes[i] == b'%' {
             let h1 = bytes
                 .get(i + 1)
-                .ok_or_else(|| Error::Message("bad % escape in file URL".to_owned()))?;
+                .ok_or_else(|| file_url_err("bad % escape in file URL"))?;
             let h2 = bytes
                 .get(i + 2)
-                .ok_or_else(|| Error::Message("bad % escape in file URL".to_owned()))?;
+                .ok_or_else(|| file_url_err("bad % escape in file URL"))?;
             let byte = u8::from_str_radix(
                 std::str::from_utf8(&[*h1, *h2])
-                    .map_err(|_| Error::Message("bad % escape in file URL".to_owned()))?,
+                    .map_err(|_| file_url_err("bad % escape in file URL"))?,
                 16,
             )
-            .map_err(|_| Error::Message("bad % escape in file URL".to_owned()))?;
+            .map_err(|_| file_url_err("bad % escape in file URL"))?;
             out.push(byte);
             i += 3;
         } else {
@@ -238,7 +245,7 @@ fn local_path_from_remote_url(url: &str) -> Result<PathBuf, Error> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when a `file://` URL is malformed.
+/// Returns [`RemoteError::MalformedTransportUrl`] when a `file://` URL is malformed.
 pub(crate) fn resolve_local_clone_source_path(
     url: &str,
     discovery_cwd: &Path,

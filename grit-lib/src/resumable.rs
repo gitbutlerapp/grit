@@ -155,6 +155,12 @@ impl From<crate::error::Error> for ResumableError {
     }
 }
 
+impl From<crate::remote::RemoteError> for ResumableError {
+    fn from(e: crate::remote::RemoteError) -> Self {
+        Self::Http(Box::new(crate::error::Error::Remote(e)))
+    }
+}
+
 /// Result alias for resumable transfers.
 pub type Result<T> = std::result::Result<T, ResumableError>;
 
@@ -449,13 +455,8 @@ fn download_attempt(
     }
     let response = match client.send(&request) {
         Ok(r) => r,
-        Err(e)
-            if matches!(
-                e,
-                crate::error::Error::Remote(crate::remote::RemoteError::Auth { .. })
-            ) =>
-        {
-            return Err(ResumableError::Http(Box::new(e)));
+        Err(e) if matches!(e, crate::remote::RemoteError::Auth { .. }) => {
+            return Err(ResumableError::from(e));
         }
         Err(e) => return Ok(AttemptOutcome::Dropped(e.to_string())),
     };
@@ -706,13 +707,8 @@ impl TusUpload {
                 Ok(r) if r.status == 409 => format!("offset {offset} was out of date"),
                 Ok(r) if (400..500).contains(&r.status) => return Err(gone(r.status)),
                 Ok(r) => format!("HTTP {}", r.status),
-                Err(e)
-                    if matches!(
-                        e,
-                        crate::error::Error::Remote(crate::remote::RemoteError::Auth { .. })
-                    ) =>
-                {
-                    return Err(ResumableError::Http(Box::new(e)));
+                Err(e) if matches!(e, crate::remote::RemoteError::Auth { .. }) => {
+                    return Err(ResumableError::from(e));
                 }
                 Err(e) => e.to_string(),
             };
@@ -771,6 +767,7 @@ mod tests {
     use super::*;
     use crate::fetch::NoProgress;
     use crate::progress::{CancelToken, NeverCancel};
+    use crate::remote::RemoteError;
     use std::collections::VecDeque;
     use std::sync::Mutex;
 
@@ -815,7 +812,7 @@ mod tests {
         ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
-        fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
+        fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
             let range = request
                 .headers
                 .iter()
@@ -1105,11 +1102,11 @@ mod tests {
             ) -> crate::remote::RemoteResult<Vec<u8>> {
                 unreachable!()
             }
-            fn send(&self, _: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
-                Err(Error::Remote(RemoteError::Auth {
+            fn send(&self, _: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
+                Err(RemoteError::Auth {
                     url: "http://h/b".to_owned(),
                     reason: AuthFailure::Rejected,
-                }))
+                })
             }
         }
 
@@ -1195,7 +1192,7 @@ mod tests {
         ) -> crate::remote::RemoteResult<Vec<u8>> {
             unreachable!()
         }
-        fn send(&self, request: &HttpRequest<'_>) -> crate::error::Result<HttpResponse> {
+        fn send(&self, request: &HttpRequest<'_>) -> crate::remote::RemoteResult<HttpResponse> {
             let header = |name: &str| {
                 request
                     .headers
@@ -1235,7 +1232,10 @@ mod tests {
                     match cut {
                         Some(keep) => {
                             stored.extend_from_slice(&request.body[..keep]);
-                            return Err(crate::error::Error::Message("reset".to_owned()));
+                            return Err(RemoteError::Transport {
+                                url: None,
+                                detail: "reset".to_owned(),
+                            });
                         }
                         None => {
                             stored.extend_from_slice(request.body);

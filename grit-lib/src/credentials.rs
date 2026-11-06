@@ -28,7 +28,7 @@
 //!
 //! The provider **never** prompts on a TTY. Without an askpass program, or
 //! when it is disabled, [`fill`](CredentialProvider::fill) returns the typed
-//! [`Error::CredentialsUnavailable`] (displayed as [`NON_INTERACTIVE_MESSAGE`],
+//! [`RemoteError::CredentialsUnavailable`](crate::remote::RemoteError::CredentialsUnavailable) (displayed as [`NON_INTERACTIVE_MESSAGE`],
 //! listing the helpers that were asked) rather than blocking on `/dev/tty`.
 //! Callers that want a person to supply a username and password store it up
 //! front with [`CredentialProvider::approve`], as `grit auth <url> --username
@@ -48,7 +48,11 @@ use crate::environment::Environment;
 use crate::error::{Error, Result};
 use crate::remote::RemoteError;
 
-/// How [`Error::CredentialsUnavailable`] displays: credentials are required but
+fn credential_err(message: impl Into<String>) -> Error {
+    Error::Remote(RemoteError::Credential(message.into()))
+}
+
+/// How [`RemoteError::CredentialsUnavailable`](crate::remote::RemoteError::CredentialsUnavailable) displays: credentials are required but
 /// no configured helper could supply a complete username/password and no
 /// askpass program is available to ask for them.
 pub const NON_INTERACTIVE_MESSAGE: &str = "credentials required but unavailable (non-interactive)";
@@ -407,7 +411,7 @@ pub trait CredentialProvider {
 /// If no helper yields a complete credential, [`fill`](CredentialProvider::fill)
 /// asks the [askpass program](HelperCredentialProvider::with_askpass) for the
 /// missing username and password. It never prompts on a terminal: without an
-/// askpass program it returns [`Error::CredentialsUnavailable`] with the
+/// askpass program it returns [`RemoteError::CredentialsUnavailable`](crate::remote::RemoteError::CredentialsUnavailable) with the
 /// helpers it asked.
 pub struct HelperCredentialProvider {
     config: ConfigSet,
@@ -560,7 +564,7 @@ impl CredentialProvider for HelperCredentialProvider {
                 &self.exec_path_candidates(),
             )?;
             if response.wants_quit() {
-                return Err(Error::Message(format!(
+                return Err(credential_err(format!(
                     "credential helper '{helper}' told us to quit"
                 )));
             }
@@ -1015,7 +1019,7 @@ fn invoke_helper(
     exec_path_candidates: &[PathBuf],
 ) -> Result<Credential> {
     let helper_words = shell_words::split(helper)
-        .map_err(|e| Error::Message(format!("invalid credential.helper '{helper}': {e}")))?;
+        .map_err(|e| credential_err(format!("invalid credential.helper '{helper}': {e}")))?;
     let (first_word, extra_args) = match helper_words.split_first() {
         Some((first, rest)) => (first.as_str(), rest),
         None => ("", &[][..]),
@@ -1067,11 +1071,11 @@ fn invoke_helper(
 
     let output = runner
         .spawn(&spec)
-        .map_err(|e| Error::Message(format!("failed to run credential helper '{helper}': {e}")))?
+        .map_err(|e| credential_err(format!("failed to run credential helper '{helper}': {e}")))?
         .wait_with_output()
-        .map_err(|e| Error::Message(format!("credential helper '{helper}' failed: {e}")))?;
+        .map_err(|e| credential_err(format!("credential helper '{helper}' failed: {e}")))?;
     if !output.status.success {
-        return Err(Error::Message(format!(
+        return Err(credential_err(format!(
             "credential helper '{helper}' exited with status {}",
             output.status.code.unwrap_or(-1)
         )));
@@ -1097,13 +1101,13 @@ fn run_askpass(runner: &dyn CommandRunner, program: &Path, prompt: &str) -> Resu
         .spawn(&spec)
         .and_then(|child| child.wait_with_output())
         .map_err(|e| {
-            Error::Message(format!(
+            credential_err(format!(
                 "could not run askpass program '{}': {e}",
                 program.display()
             ))
         })?;
     if !output.status.success {
-        return Err(Error::Message(format!(
+        return Err(credential_err(format!(
             "askpass program '{}' exited with status {}",
             program.display(),
             output.status.code.unwrap_or(-1)
@@ -1201,12 +1205,12 @@ pub mod windows_store {
             .protocol
             .as_deref()
             .filter(|p| !p.is_empty())
-            .ok_or_else(|| Error::Message("credential is missing its protocol".to_owned()))?;
+            .ok_or_else(|| credential_err("credential is missing its protocol".to_owned()))?;
         let host = cred
             .host
             .as_deref()
             .filter(|h| !h.is_empty())
-            .ok_or_else(|| Error::Message("credential is missing its host".to_owned()))?;
+            .ok_or_else(|| credential_err("credential is missing its host".to_owned()))?;
         Ok(format!("git:{protocol}://{host}"))
     }
 
@@ -1247,7 +1251,7 @@ pub mod windows_store {
             if err == ERROR_NOT_FOUND {
                 return Ok(None);
             }
-            return Err(Error::Message(format!(
+            return Err(credential_err(format!(
                 "reading from the Windows Credential Manager failed (error {err})"
             )));
         }
@@ -1305,7 +1309,7 @@ pub mod windows_store {
         if ok == 0 {
             // SAFETY: always safe after a failed Win32 call.
             let err = unsafe { GetLastError() };
-            return Err(Error::Message(format!(
+            return Err(credential_err(format!(
                 "writing to the Windows Credential Manager failed (error {err})"
             )));
         }
@@ -1321,7 +1325,7 @@ pub mod windows_store {
             // SAFETY: always safe after a failed Win32 call.
             let err = unsafe { GetLastError() };
             if err != ERROR_NOT_FOUND {
-                return Err(Error::Message(format!(
+                return Err(credential_err(format!(
                     "deleting from the Windows Credential Manager failed (error {err})"
                 )));
             }
@@ -1821,7 +1825,7 @@ mod tests {
         );
 
         let other =
-            crate::error::AuthFailure::from_fill_error(Error::Message("helper crashed".into()));
+            crate::error::AuthFailure::from_fill_error(credential_err("helper crashed"));
         assert!(matches!(
             other,
             crate::error::AuthFailure::CredentialsUnavailable { detail, helpers }
