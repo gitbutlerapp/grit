@@ -36,6 +36,7 @@ use crate::porcelain::checkout::{
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::worktree_rules::WorktreeRules;
 
 /// New-side line range for partial hunk staging (1-based, inclusive).
@@ -142,7 +143,7 @@ pub enum HunkSelectError {
     /// Repository or diff engine failure (not a hunk-id selection error).
     ///
     /// Match on the boxed [`crate::error::Error`] to branch on the underlying failure, for
-    /// example [`crate::error::Error::RequiresWorkTree`] when the repository is bare.
+    /// example [`RepositoryError::RequiresWorkTree`] when the repository is bare.
     #[error(transparent)]
     Repository(Box<Error>),
     /// Selected hunks could not be turned into an apply patch.
@@ -1261,7 +1262,9 @@ fn plan_worktree_reverse(
     patches: &[FilePatch],
     whole_files: &BTreeSet<String>,
 ) -> std::result::Result<Vec<WorktreeReversePlan>, HunkSelectError> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| HunkSelectError::from(Error::from(RepositoryError::RequiresWorkTree)))?;
     let config = repo.config().map_err(HunkSelectError::from)?;
     let mut out = Vec::with_capacity(patches.len());
     for patch in patches {
@@ -1318,7 +1321,9 @@ fn commit_worktree_reverse(
     planned: &[WorktreeReversePlan],
     outcome: &mut RestoreHunksOutcome,
 ) -> std::result::Result<(), HunkSelectError> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| HunkSelectError::from(Error::from(RepositoryError::RequiresWorkTree)))?;
     let config = repo.config().map_err(HunkSelectError::from)?;
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let has_symlinks = dir_cache.has_symlinks();
@@ -2097,7 +2102,10 @@ mod tests {
             .unwrap();
         match err {
             HunkSelectError::Repository(inner) => {
-                assert!(matches!(*inner, Error::RequiresWorkTree), "{inner:?}");
+                assert!(
+                    matches!(*inner, Error::Repository(RepositoryError::RequiresWorkTree)),
+                    "{inner:?}"
+                );
             }
             other => panic!("expected Repository(RequiresWorkTree), got {other:?}"),
         }

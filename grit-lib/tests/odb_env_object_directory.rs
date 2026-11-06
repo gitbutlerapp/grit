@@ -20,7 +20,7 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::{Repository, RepositoryBuilder, RepositoryError};
 
 const IDENT: &str = "Odb Env <odb-env@example.com> 1700000000 +0000";
 
@@ -267,7 +267,10 @@ fn missing_env_object_directory_is_not_a_repository() {
     let missing = objq.join("missing");
     let err = discover(environment(&work, missing.to_str().unwrap()))
         .expect_err("missing GIT_OBJECT_DIRECTORY");
-    assert!(matches!(err, Error::NotARepository(_)), "{err:?}");
+    assert!(
+        matches!(err, Error::Repository(RepositoryError::NotARepository(_))),
+        "{err:?}"
+    );
     // Git rejects the repository the same way.
     let out = git_with(
         &work,
@@ -281,7 +284,10 @@ fn missing_env_object_directory_is_not_a_repository() {
 fn empty_env_object_directory_is_not_a_repository() {
     let (_tmp, work, _objq) = layout();
     let err = discover(environment(&work, "")).expect_err("empty GIT_OBJECT_DIRECTORY");
-    assert!(matches!(err, Error::NotARepository(_)), "{err:?}");
+    assert!(
+        matches!(err, Error::Repository(RepositoryError::NotARepository(_))),
+        "{err:?}"
+    );
     let out = git_with(
         &work,
         &[("GIT_OBJECT_DIRECTORY", Path::new(""))],
@@ -320,7 +326,10 @@ fn odb_builder_must_name_env_object_directory() {
     assert!(
         matches!(
             mismatch,
-            Err(Error::OdbObjectsDirMismatch { ref repository, .. }) if repository == &objq
+            Err(Error::Repository(RepositoryError::OdbObjectsDirMismatch {
+                ref repository,
+                ..
+            })) if repository == &objq
         ),
         "{mismatch:?}"
     );

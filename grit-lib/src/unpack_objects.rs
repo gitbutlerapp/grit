@@ -25,6 +25,7 @@ use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::odb::{Odb, WriteOptions};
 use crate::pack::{decode_pack_object_size_varint, decode_pack_object_size_varint_from_first};
 use crate::progress::{poll_cancel, Cancel, NullProgress, ProgressPhase, ProgressSink};
+use crate::repo::RepositoryError;
 use crate::zlib_inflate::ZlibInflateScratch;
 use flate2::read::ZlibDecoder;
 use flate2::{Decompress, FlushDecompress, Status};
@@ -275,9 +276,10 @@ trait UnpackSink {
         dry_run: bool,
     ) -> Result<ObjectId> {
         let _ = (kind, size, rd, dry_run);
-        Err(Error::UnsupportedObjectStore {
+        Err(RepositoryError::UnsupportedObjectStore {
             operation: "write_inflated_from_pack",
-        })
+        }
+        .into())
     }
 
     /// Read an object stored before or during this unpack (thin-pack bases, large blobs).

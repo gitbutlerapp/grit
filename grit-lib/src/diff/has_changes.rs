@@ -17,6 +17,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, ObjectId};
 use crate::pathspec::PathspecMatcher;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::state::resolve_head_for_repository;
 use crate::worktree::worktree_rules::WorktreeRules;
 
@@ -200,7 +201,7 @@ fn worktree_has_changes(
     matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let config = repo.config()?;
     let index_mtime = index_mtime_for_diff(index, None);
     let rules_arc = Arc::new(std::sync::Mutex::new(WorktreeRules::from_repository(

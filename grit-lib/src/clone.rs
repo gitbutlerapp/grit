@@ -22,6 +22,7 @@ use crate::refs;
 use crate::remote::{
     fold_peeled_refs, HttpClientFactory, ListRefsOptions, Remote, RemoteError, DEFAULT_REMOTE,
 };
+use crate::repo::RepositoryError;
 use crate::repo::{init_repository_with_object_format, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode, TransferStats};
 use crate::transport_path::{
@@ -693,7 +694,7 @@ pub struct CloneIntoOutcome {
 ///
 /// Same as [`clone`] except [`CloneError::DestNotEmpty`] cannot occur. Local clone sources
 /// whose object format differs from the repository's injected store return
-/// [`Error::ObjectFormatMismatch`](crate::error::Error::ObjectFormatMismatch).
+/// [`RepositoryError::ObjectFormatMismatch`](RepositoryError::ObjectFormatMismatch).
 pub fn clone_into(
     repo: Repository,
     opts: CloneIntoOptions,
@@ -823,10 +824,13 @@ fn ensure_clone_remote_object_format(
     };
     let local = repo.odb().hash_algo();
     if local != remote_algo {
-        return Err(CloneError::Library(Error::ObjectFormatMismatch {
-            repository: local,
-            store: remote_algo,
-        }));
+        return Err(CloneError::Library(
+            RepositoryError::ObjectFormatMismatch {
+                repository: local,
+                store: remote_algo,
+            }
+            .into(),
+        ));
     }
     Ok(())
 }

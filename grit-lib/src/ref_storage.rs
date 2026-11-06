@@ -8,7 +8,9 @@ use std::path::Path;
 use std::str::FromStr;
 
 use crate::error::{Error, Result};
-use crate::repo::{read_repository_format_from_git_dir, validate_repository_format_parsed};
+use crate::repo::{
+    read_repository_format_from_git_dir, validate_repository_format_parsed, RepositoryError,
+};
 
 /// On-disk ref storage backend named by `extensions.refStorage`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -43,7 +45,7 @@ impl RefStorageFormat {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidRefStorageFormat`] when the name is not `files` or `reftable`.
+    /// Returns [`RepositoryError::InvalidRefStorageFormat`] when the name is not `files` or `reftable`.
     pub fn parse_config_value(raw: &str) -> Result<Self> {
         let trimmed = raw.trim();
         let lower = trimmed.to_ascii_lowercase();
@@ -54,9 +56,10 @@ impl RefStorageFormat {
         match name {
             "files" => Ok(Self::Files),
             "reftable" => Ok(Self::Reftable),
-            _ => Err(Error::InvalidRefStorageFormat {
+            _ => Err(RepositoryError::InvalidRefStorageFormat {
                 value: trimmed.to_owned(),
-            }),
+            }
+            .into()),
         }
     }
 
@@ -89,7 +92,7 @@ impl RefStorageFormat {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidRefStorageFormat`] when the value is not recognized.
+    /// Returns [`RepositoryError::InvalidRefStorageFormat`] when the value is not recognized.
     pub fn validate_config_extension(raw: &str) -> Result<()> {
         Self::parse_config_value(raw).map(|_| ())
     }

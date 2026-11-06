@@ -10,7 +10,7 @@ pub(crate) use crate::pack_index::parse_pack_index_bytes;
 pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
 
 #[cfg(test)]
-use crate::pack_index::{compute_fanout_from_oid_slices, parse_pack_index_bytes};
+use crate::pack_index::compute_fanout_from_oid_slices;
 
 use crate::error::{Error, Result};
 use crate::git_path::CanonicalizeExt;

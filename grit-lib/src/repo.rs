@@ -341,10 +341,10 @@ impl RepositoryBuilder {
     /// # Errors
     ///
     /// Same as [`Repository::open`], plus:
-    /// - [`Error::OdbObjectsDirMismatch`] when a files-backed [`Self::odb_builder`] names a
+    /// - [`RepositoryError::OdbObjectsDirMismatch`] when a files-backed [`Self::odb_builder`] names a
     ///   directory other than the repository's `objects/` (or the environment's
     ///   `GIT_OBJECT_DIRECTORY`).
-    /// - [`Error::ObjectFormatMismatch`] when the builder's custom primary, a read source or
+    /// - [`RepositoryError::ObjectFormatMismatch`] when the builder's custom primary, a read source or
     ///   its attached [`commit_graph`](crate::odb::OdbBuilder::commit_graph) reports a
     ///   [`hash_algo`](crate::odb::store::ObjectStore::hash_algo) other than the
     ///   repository's `extensions.objectformat` (SHA-1 when unset or when the git directory
@@ -879,7 +879,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Discovery failures, [`Error::NotARepository`] when `admin_dir` is missing, and
+    /// Discovery failures, [`RepositoryError::NotARepository`] when `admin_dir` is missing, and
     /// [`Error::PathError`] when `work_tree` cannot be canonicalized.
     pub fn open_linked_worktree(&self, admin_dir: &Path, work_tree: &Path) -> Result<Self> {
         let options = self.linked_worktree_discover_options();
@@ -1003,10 +1003,10 @@ impl Repository {
         self.refresh_config_session()?;
         self.config_session
             .lock()
-            .map_err(|e| Error::Message(format!("config session lock poisoned: {e}")))?
+            .map_err(|_| Error::Config(ConfigError::ConfigSessionLockPoisoned))?
             .as_ref()
             .map(|s| Arc::clone(&s.config))
-            .ok_or_else(|| Error::Message("config session missing after refresh".to_owned()))
+            .ok_or_else(|| Error::Config(ConfigError::ConfigSessionMissingAfterRefresh))
     }
 
     fn refresh_config_session(&self) -> Result<()> {
@@ -1061,8 +1061,7 @@ impl Repository {
         *self
             .config_session
             .lock()
-            .map_err(|e| Error::Message(format!("config session lock poisoned: {e}")))? =
-            Some(session);
+            .map_err(|_| Error::Config(ConfigError::ConfigSessionLockPoisoned))? = Some(session);
         Ok(())
     }
 
@@ -1647,7 +1646,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::Error::Message`] when no fetcher is installed, or transport failures.
+    /// Returns [`Error::Message`] when no fetcher is installed, or transport failures from the fetcher.
     pub fn prefetch_promised(&self, oids: &[ObjectId]) -> Result<()> {
         let Some(fetcher) = self.caches().promisor_fetcher() else {
             return Err(Error::Message(
@@ -1700,7 +1699,7 @@ impl Repository {
     /// Propagates filesystem and layout errors from the underlying init helpers.
     pub fn init_with_outcome(path: &Path, options: &InitOptions) -> Result<(Self, InitOutcome)> {
         if options.bare && options.separate_git_dir.is_some() {
-            return Err(Error::InitBareWithSeparateGitDir);
+            return Err(RepositoryError::InitBareWithSeparateGitDir.into());
         }
         let env = options
             .environment
@@ -1712,7 +1711,7 @@ impl Repository {
         let object_format = match (reinitialized, options.object_format) {
             (true, None) => existing_format,
             (true, Some(requested)) if requested != existing_format => {
-                return Err(Error::InitObjectFormatChange);
+                return Err(RepositoryError::InitObjectFormatChange.into());
             }
             (true, Some(requested)) => requested,
             (false, None) => HashAlgo::Sha1,
@@ -1780,7 +1779,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotARepository`] when the layout is invalid.
+    /// Returns [`RepositoryError::NotARepository`] when the layout is invalid.
     pub fn open(path: &Path, options: &RepositoryOptions) -> Result<Self> {
         if options.open_for_serving {
             return Self::open_for_serving_internal(path, options);
@@ -1881,10 +1880,11 @@ impl Repository {
         let objects_dir = canonicalize_existing_prefix(&objects_dir)?;
         let builder_objects = canonicalize_existing_prefix(&cwd.join(builder.objects_dir()))?;
         if builder_objects != objects_dir {
-            return Err(Error::OdbObjectsDirMismatch {
+            return Err(RepositoryError::OdbObjectsDirMismatch {
                 builder: builder_objects,
                 repository: objects_dir,
-            });
+            }
+            .into());
         }
         builder.set_objects_dir(objects_dir);
         let injected_algos: Vec<HashAlgo> = builder.injected_hash_algos().collect();
@@ -1961,7 +1961,7 @@ impl Repository {
         Ok(repo)
     }
 
-    /// Fail with [`Error::ObjectFormatMismatch`] when one of `injected` (the hash algorithms
+    /// Fail with [`RepositoryError::ObjectFormatMismatch`] when one of `injected` (the hash algorithms
     /// of the stores and commit-graph passed to [`RepositoryBuilder::odb_builder`]) differs from
     /// `extensions.objectformat`, SHA-1 when unset.
     ///
@@ -1977,7 +1977,7 @@ impl Repository {
             .and_then(|name| HashAlgo::from_name(&name))
             .unwrap_or(HashAlgo::Sha1);
         match injected.iter().find(|algo| **algo != repository) {
-            Some(&store) => Err(Error::ObjectFormatMismatch { repository, store }),
+            Some(&store) => Err(RepositoryError::ObjectFormatMismatch { repository, store }.into()),
             None => Ok(()),
         }
     }
@@ -1986,7 +1986,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NotARepository`] when no repository is found in the search path.
+    /// Returns [`RepositoryError::NotARepository`] when no repository is found in the search path.
     /// Returns [`Error::Config`] when a config file in the discovery cascade is malformed or
     /// contains an invalid value (for example a non-boolean `core.bare`).
     pub fn discover(start: Option<&Path>, options: &RepositoryOptions) -> Result<Self> {
@@ -3208,9 +3208,10 @@ pub fn validate_repo_format(git_dir: &Path) -> Result<()> {
 /// Validate parsed repository format (version and extensions) before using the repo.
 pub(crate) fn validate_repository_format_parsed(parsed: &RepositoryFormat) -> Result<()> {
     if parsed.repo_version > 1 {
-        return Err(Error::UnsupportedRepositoryFormatVersion(
-            parsed.repo_version,
-        ));
+        return Err(RepositoryError::UnsupportedRepositoryFormatVersion {
+            version: parsed.repo_version,
+        }
+        .into());
     }
 
     if let Some(raw) = parsed.ref_storage.as_deref() {
@@ -3488,9 +3489,10 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
             let target_special = ft.is_symlink()
                 && fs::metadata(&dot_git).is_ok_and(|target| is_special(target.file_type()));
             if is_special(ft) || target_special {
-                return Err(Error::NotARepository(
+                return Err(RepositoryError::NotARepository(
                     NotARepositoryReason::GitfileNotRegularFile { path: dot_git },
-                ));
+                )
+                .into());
             }
         }
     }
@@ -3568,7 +3570,7 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
                     gitfile: None,
                 }));
             }
-            Err(Error::NotARepository(_)) => return Ok(None),
+            Err(Error::Repository(RepositoryError::NotARepository(_))) => return Ok(None),
             Err(e) => return Err(e),
         }
     }
@@ -3592,7 +3594,10 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
             if let Ok(cfg) = crate::config::ConfigSet::load(env, None, true) {
                 if let Some(val) = cfg.get("safe.bareRepository") {
                     if val.eq_ignore_ascii_case("explicit") {
-                        return Err(Error::ForbiddenBareRepository(path_for_error_message(dir)));
+                        return Err(RepositoryError::ForbiddenBareRepository {
+                            path: path_for_error_message(dir.into()),
+                        }
+                        .into());
                     }
                 }
             }
@@ -3649,7 +3654,12 @@ fn ensure_safe_directory_allows(
     {
         return Ok(());
     }
-    Err(Error::DubiousOwnership(path_for_error_message(checked)))
+    Err(RepositoryError::DubiousOwnership {
+        path: path_for_error_message(checked.into()),
+        owner_uid: None,
+        effective_uid: None,
+    }
+    .into())
 }
 
 fn path_owned(
@@ -3975,7 +3985,7 @@ fn resolve_git_dir_env_path(git_dir: &Path) -> Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::NotARepository`] for invalid gitfile content.
+/// Returns [`RepositoryError::NotARepository`] for invalid gitfile content.
 pub fn resolve_git_directory_arg(git_dir: &Path) -> Result<PathBuf> {
     resolve_git_dir_env_path(git_dir)
 }
@@ -3984,7 +3994,7 @@ pub fn resolve_git_directory_arg(git_dir: &Path) -> Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::NotARepository`] when `.git` is missing, invalid, or the gitfile target is absent.
+/// Returns [`RepositoryError::NotARepository`] when `.git` is missing, invalid, or the gitfile target is absent.
 pub fn resolve_dot_git(dot_git: &Path) -> Result<PathBuf> {
     if dot_git.is_dir() {
         return dot_git
@@ -3998,9 +4008,10 @@ pub fn resolve_dot_git(dot_git: &Path) -> Result<PathBuf> {
 }
 
 fn not_a_repository_at(path: &Path) -> Error {
-    Error::NotARepository(NotARepositoryReason::NoRepositoryAt {
+    RepositoryError::NotARepository(NotARepositoryReason::NoRepositoryAt {
         path: path.to_path_buf(),
     })
+    .into()
 }
 
 /// Canonicalize the longest existing prefix of `path` and append the rest unchanged, so a
@@ -4099,7 +4110,7 @@ fn linked_worktree_view(
 /// Read `gitfile` and resolve its `gitdir:` target.
 fn resolve_gitfile(gitfile: &Path) -> Result<PathBuf> {
     let content = fs::read_to_string(gitfile).map_err(|error| {
-        Error::NotARepository(NotARepositoryReason::GitfileUnreadable {
+        RepositoryError::NotARepository(NotARepositoryReason::GitfileUnreadable {
             path: gitfile.to_path_buf(),
             error,
         })
@@ -4114,11 +4125,12 @@ fn parse_gitfile(content: &str, gitfile: &Path) -> Result<PathBuf> {
         .lines()
         .find_map(|line| line.strip_prefix("gitdir:"))
     else {
-        return Err(Error::NotARepository(
-            NotARepositoryReason::GitfileMissingGitdir {
+        return Err(
+            RepositoryError::NotARepository(NotARepositoryReason::GitfileMissingGitdir {
                 path: gitfile.to_path_buf(),
-            },
-        ));
+            })
+            .into(),
+        );
     };
     let path = gitfile
         .parent()
@@ -4317,7 +4329,7 @@ fn write_fresh_git_directory(
 ///
 /// # Errors
 ///
-/// Returns [`Error::WorktreePathIo`] or [`Error::GitDirPathIo`] on filesystem failures.
+/// Returns [`Error::WorktreePathIo`] or [`RepositoryError::git_dir_path_io`] on filesystem failures.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn init_repository_separate_git_dir(
     work_tree: &Path,
@@ -4501,7 +4513,7 @@ pub(crate) fn init_repository_with_object_format(
 ///
 /// # Errors
 ///
-/// Returns [`Error::WorktreePathIo`] or [`Error::GitDirPathIo`] on filesystem failures.
+/// Returns [`Error::WorktreePathIo`] or [`RepositoryError::git_dir_path_io`] on filesystem failures.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn init_bare_with_env_worktree(
     git_dir: &Path,
@@ -4610,7 +4622,7 @@ fn parse_ceiling_directories(env: &Environment) -> (Vec<PathBuf>, bool) {
 
 /// Validate the repository format version from config text.
 /// Returns Ok if the format is supported, Err with message if not.
-pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), String> {
+pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), ConfigError> {
     let mut version: u32 = 0;
     let mut in_core = false;
     for line in config_text.lines() {
@@ -4629,7 +4641,7 @@ pub fn validate_repo_config(config_text: &str) -> std::result::Result<(), String
         }
     }
     if version >= 2 {
-        return Err(format!("unknown repository format version: {version}"));
+        return Err(ConfigError::UnsupportedRepositoryFormatVersion { version });
     }
     Ok(())
 }
@@ -4664,6 +4676,10 @@ fn test_inject_index_write_fail() -> Result<()> {
         Ok(())
     }
 }
+
+#[path = "repo/repository_error.rs"]
+pub mod error;
+pub use error::{RepositoryError, RepositoryResult};
 
 #[path = "repo_location.rs"]
 mod location;

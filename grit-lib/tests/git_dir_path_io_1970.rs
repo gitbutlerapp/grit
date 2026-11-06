@@ -9,7 +9,7 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, create_commit, CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::{write_ref, write_ref_cas};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::state::{resolve_head, HeadState};
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, AddLinkedWorktreeOptions, WorktreeBranch,
@@ -54,14 +54,20 @@ fn assert_git_dir_io(err: &Error) {
     );
 }
 
-fn assert_git_dir_path_io(err: &Error) -> String {
+fn git_dir_path_io_path(err: &Error) -> String {
     match err {
-        Error::GitDirPathIo { path, .. } => {
-            assert_git_dir_io(err);
-            path.clone()
-        }
+        Error::Repository(RepositoryError::GitDirPathIo(io)) => io
+            .path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         other => panic!("expected GitDirPathIo, got {other}"),
     }
+}
+
+fn assert_git_dir_path_io(err: &Error) -> String {
+    assert_git_dir_io(err);
+    git_dir_path_io_path(err)
 }
 
 fn chmod_dir_readonly(path: &Path) {
@@ -189,16 +195,17 @@ fn read_only_existing_pack_dir_on_gc_names_git_path() {
     chmod_tree_readonly(&pack_dir);
     let err = gc(&repo, &GcOptions::full_run(false, now)).expect_err("gc should fail");
     match &err {
-        Error::GitDirPathIo {
-            path,
-            operation: GitDirPathOperation::GcPack,
-            ..
-        } => {
+        Error::Repository(RepositoryError::GitDirPathIo(io)) => {
+            let path = git_dir_path_io_path(&err);
             assert!(
                 path.contains("objects/pack"),
                 "expected pack path in {path}"
             );
             assert!(path.contains(".git/") || path.starts_with("objects/pack"));
+            assert!(matches!(
+                io.operation,
+                grit_lib::error::PathIoOperation::GitDir(GitDirPathOperation::GcPack)
+            ));
         }
         other => panic!("expected GitDirPathIo, got {other}"),
     }
@@ -248,7 +255,8 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
     let err = write_ref_cas(linked_repo.git_dir(), "HEAD", &head_oid, head_oid)
         .expect_err("HEAD update should fail");
     match &err {
-        Error::GitDirPathIo { path, .. } => {
+        Error::Repository(RepositoryError::GitDirPathIo(_)) => {
+            let path = git_dir_path_io_path(&err);
             assert!(
                 path.contains(".git/worktrees/") && path.contains("HEAD.lock"),
                 "expected linked worktree HEAD.lock path, got {path}"
@@ -321,10 +329,10 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
 #[test]
 fn git_dir_path_io_variant_roundtrip() {
     let source = io::Error::from_raw_os_error(libc::EACCES as i32);
-    let err = Error::GitDirPathIo {
-        path: ".git/objects".to_owned(),
-        operation: GitDirPathOperation::WriteObject,
+    let err = Error::Repository(RepositoryError::git_dir_path_io(
+        ".git/objects",
+        GitDirPathOperation::WriteObject,
         source,
-    };
+    ));
     assert_git_dir_io(&err);
 }

@@ -25,6 +25,7 @@ use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, UpdateMode};
 use grit_lib::remote::{Remote, RemoteError};
+use grit_lib::repo::RepositoryError;
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 
 /// Non-bare upstream with two commits on `main`, written by the system `git`.
@@ -477,7 +478,9 @@ fn partial_fetch_custom_primary_is_refused() {
     assert!(
         matches!(
             err,
-            RemoteError::Library(Error::UnsupportedObjectStore { operation }) if operation == "partial fetch"
+            RemoteError::Library(Error::Repository(
+                RepositoryError::UnsupportedObjectStore { operation }
+            )) if operation == "partial fetch"
         ),
         "{err:?}"
     );

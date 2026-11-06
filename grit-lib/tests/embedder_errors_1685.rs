@@ -8,12 +8,15 @@ use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 use std::collections::{HashMap, HashSet};
 fn assert_requires_work_tree(result: Result<(), Error>) {
     assert!(
-        matches!(result, Err(Error::RequiresWorkTree)),
+        matches!(
+            result,
+            Err(Error::Repository(RepositoryError::RequiresWorkTree))
+        ),
         "expected RequiresWorkTree, got {result:?}"
     );
 }

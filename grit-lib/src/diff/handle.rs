@@ -9,6 +9,7 @@ use crate::error::Result;
 use crate::index::Index;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 
 /// Compare trees, the index, and the working tree for one repository.
 #[derive(Debug, Copy, Clone)]
@@ -106,7 +107,7 @@ impl<'repo> Diff<'repo> {
         let work_tree = self
             .repo
             .work_tree()
-            .ok_or(crate::error::Error::RequiresWorkTree)?;
+            .ok_or(RepositoryError::RequiresWorkTree)?;
         diff_index_to_worktree(
             self.repo.odb(),
             index,
@@ -144,7 +145,7 @@ impl<'repo> Diff<'repo> {
     /// # Errors
     ///
     /// Returns object read, rename detection, and pathspec errors, plus
-    /// [`crate::error::Error::RequiresWorkTree`] for a working-tree target in a bare repository.
+    /// [`RepositoryError::RequiresWorkTree`] for a working-tree target in a bare repository.
     pub fn entries(
         &self,
         target: &DiffTarget,

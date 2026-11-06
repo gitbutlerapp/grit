@@ -12,6 +12,7 @@ use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::worktree_guard::{load_worktree_index, prepare_tree_checkout_with_changes};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree::{admin_dirs_match, list_worktrees, worktree_admin_dir, WorktreeEntry};
 
@@ -144,7 +145,7 @@ fn push_to_deploy_builtin(
         .map_err(super::ServeError::Repository)?;
     let index_mtime = crate::diff::index_mtime_for_diff(&index, index_file_mtime(&index_path));
     let work_tree = repo.work_tree().ok_or(super::ServeError::Repository(
-        crate::error::Error::RequiresWorkTree,
+        RepositoryError::RequiresWorkTree.into(),
     ))?;
     let unstaged = diff_index_to_worktree_with_options(
         odb,

@@ -11,6 +11,7 @@ use crate::config::ConfigSet;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::git_path::CanonicalizeExt;
+use crate::repo::RepositoryError;
 
 use super::{
     ensure_valid_ownership, head_file_present, local_config_write_path, parse_repository_format,
@@ -61,11 +62,11 @@ impl RepositoryLocation {
     ///
     /// # Errors
     ///
-    /// The same errors as [`Repository::discover`]: [`crate::error::Error::NotARepository`]
+    /// The same errors as [`Repository::discover`]: [`RepositoryError::NotARepository`]
     /// when no repository is found, [`crate::error::Error::Config`] when a config file in the
-    /// cascade cannot be parsed or contains an invalid value, [`crate::error::Error::DubiousOwnership`] when
+    /// cascade cannot be parsed or contains an invalid value, [`RepositoryError::DubiousOwnership`](crate::repo::RepositoryError::DubiousOwnership) when
     /// `safe.directory` rejects it, and repository format errors such as
-    /// [`crate::error::Error::UnsupportedRepositoryFormatVersion`].
+    /// [`RepositoryError::UnsupportedRepositoryFormatVersion`](crate::repo::RepositoryError::UnsupportedRepositoryFormatVersion).
     pub fn discover(options: &RepositoryOptions) -> Result<Self> {
         Self::discover_with_config(options).map(|(location, _)| location)
     }
@@ -259,7 +260,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let options = options_at(tmp.path(), &[("GIT_CEILING_DIRECTORIES", "/")]);
         let err = RepositoryLocation::discover(&options).unwrap_err();
-        assert!(matches!(err, crate::error::Error::NotARepository(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Repository(RepositoryError::NotARepository(_))
+        ));
     }
 
     #[test]
@@ -274,7 +278,9 @@ mod tests {
         let err = RepositoryLocation::discover(&options_at(tmp.path(), &[])).unwrap_err();
         assert!(matches!(
             err,
-            crate::error::Error::UnsupportedRepositoryFormatVersion(2)
+            crate::error::Error::Repository(RepositoryError::UnsupportedRepositoryFormatVersion {
+                version: 2
+            })
         ));
     }
 

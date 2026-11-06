@@ -29,6 +29,7 @@ use crate::index::Index;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::repo_caches::RepoCaches;
 
 /// Counts disk reads of attribute/ignore pattern files (tests only).
@@ -166,7 +167,7 @@ impl WorktreeRules {
     ) -> Result<Self> {
         let work_tree = repo
             .work_tree()
-            .ok_or(Error::RequiresWorkTree)?
+            .ok_or(RepositoryError::RequiresWorkTree)?
             .to_path_buf();
         let conversion = ConversionConfig::from_config_with_runner(&config, repo.command_runner());
         let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);

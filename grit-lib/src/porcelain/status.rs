@@ -531,7 +531,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
     repo: &Repository,
     index: &mut Index,
 ) -> Result<(usize, usize)> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let index_mtime = index_file_mtime(&repo.index_path());
     let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
     let rules_arc = Arc::new(Mutex::new(worktree_rules));
@@ -2256,6 +2256,7 @@ pub fn normalize_status_conflicts(
 // --- The status operation ---------------------------------------------------
 
 use crate::progress::ProgressSink;
+use crate::repo::RepositoryError;
 
 fn embedded_unregistered_git_repositories(
     work_tree: &Path,
@@ -2330,9 +2331,7 @@ pub fn status(
     let watch = crate::progress::cancel_watch_arc(cancel);
     let mut progress = crate::progress::WatchProgress::new(progress, std::sync::Arc::clone(&watch));
     crate::progress::poll_cancel_watch(&mut progress, cancel, &watch)?;
-    let work_tree = repo
-        .work_tree()
-        .ok_or(crate::error::Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     let head = crate::state::resolve_head_for_repository(repo)?;
     let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;

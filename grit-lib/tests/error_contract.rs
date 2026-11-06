@@ -207,15 +207,32 @@ fn kind_name_slugs_from_source() -> Vec<String> {
         .unwrap_or_else(|| panic!("kind_name match block not found"));
     let block = &src[start + match_start..];
     let mut slugs = Vec::new();
-    for line in block.lines().skip(1) {
-        let trimmed = line.trim();
-        if trimmed == "}" {
+    let mut depth = 0usize;
+    for line in block.lines() {
+        if line.contains("match self {") {
+            depth = 1;
+            continue;
+        }
+        if depth == 0 {
+            continue;
+        }
+        depth += line.matches('{').count();
+        depth = depth.saturating_sub(line.matches('}').count());
+        if depth == 0 {
             break;
         }
         if let Some(pos) = line.find("=> \"") {
             let after = &line[pos + 4..];
             if let Some(end) = after.find('"') {
                 slugs.push(after[..end].to_owned());
+            }
+            continue;
+        }
+        let trimmed = line.trim();
+        if trimmed.starts_with('"') {
+            let inner = trimmed.trim_start_matches('"');
+            if let Some(end) = inner.find('"') {
+                slugs.push(inner[..end].to_owned());
             }
         }
     }
@@ -238,13 +255,14 @@ fn error_kind_names_are_stable() {
 #[test]
 fn path_io_preserves_raw_os_error_identity() {
     use grit_lib::error::{Error, GitDirPathOperation};
+    use grit_lib::repo::RepositoryError;
 
     let source = std::io::Error::from_raw_os_error(libc::EBUSY as i32);
-    let err = Error::GitDirPathIo {
-        path: ".git/index".into(),
-        operation: GitDirPathOperation::WriteIndex,
+    let err = Error::Repository(RepositoryError::git_dir_path_io(
+        ".git/index",
+        GitDirPathOperation::WriteIndex,
         source,
-    };
+    ));
     assert!(err.is_git_dir_file_in_use());
     let leaf = err.path_io().expect("path_io");
     let roundtrip: Error = leaf.into();

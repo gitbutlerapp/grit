@@ -10,7 +10,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
+use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder, RepositoryError};
 
 const MISMATCHED_PAIRS: [(HashAlgo, HashAlgo); 2] = [
     (HashAlgo::Sha256, HashAlgo::Sha1),
@@ -44,9 +44,9 @@ fn expect_format_mismatch(
     store_format: HashAlgo,
 ) {
     match result {
-        Err(Error::ObjectFormatMismatch {
+        Err(Error::Repository(RepositoryError::ObjectFormatMismatch {
             repository, store, ..
-        }) => {
+        })) => {
             assert_eq!(repository, repository_format);
             assert_eq!(store, store_format);
         }

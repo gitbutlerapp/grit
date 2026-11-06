@@ -3,6 +3,7 @@
 use std::fs;
 
 use grit_lib::error::{Error, NotARepositoryReason};
+use grit_lib::repo::RepositoryError;
 use grit_lib::revwalk::rev_parse::discover_optional;
 use grit_test_support::{git, git_cmd};
 use tempfile::TempDir;
@@ -30,8 +31,9 @@ fn malformed_gitfile_below_a_repository_is_not_skipped() {
     assert!(
         matches!(
             &err,
-            Error::NotARepository(NotARepositoryReason::GitfileMissingGitdir { path })
-                if *path == sub.join(".git")
+            Error::Repository(RepositoryError::NotARepository(
+                NotARepositoryReason::GitfileMissingGitdir { path }
+            )) if *path == sub.join(".git")
         ),
         "{err:?}"
     );

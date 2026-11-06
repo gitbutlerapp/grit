@@ -15,6 +15,7 @@ use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::{self, Odb, WriteOptions};
 use crate::progress::poll_watch;
+use crate::repo::RepositoryError;
 use crate::worktree::{io_with_path, map_worktree_io, WorktreePathOperation};
 
 /// One worktree path to read and normalize in parallel.
@@ -228,7 +229,7 @@ fn with_path_context(index_relpath: &str, err: Error) -> Error {
             path: index_relpath.to_owned(),
             source,
         },
-        Error::WorktreePathIo { .. } | Error::GitDirPathIo { .. } => err,
+        Error::WorktreePathIo { .. } | Error::Repository(RepositoryError::GitDirPathIo(_)) => err,
         other => other,
     }
 }

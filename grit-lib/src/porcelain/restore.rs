@@ -33,6 +33,7 @@ use crate::porcelain::pathspec_match::{
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::state::resolve_head_for_repository;
 use crate::worktree_rules::WorktreeRules;
 
@@ -116,7 +117,7 @@ pub fn restore_paths(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<RestoreOutcome> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
         return Err(Error::Message("you must specify path(s) to restore".into()));
@@ -141,7 +142,7 @@ pub(crate) fn restore_paths_with_lock(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<RestoreOutcome> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let pathspec_ctx = repo.pathspec_match_context();
     let pathspec_filter = RepositoryPathspecFilter::try_new(repo, &opts.pathspecs)?;
     let restore_staged = opts.staged;

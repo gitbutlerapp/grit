@@ -21,6 +21,7 @@ use crate::porcelain::status::{
 };
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// Result of [`stage_worktree_changes`].
@@ -41,9 +42,7 @@ pub fn stage_worktree_changes(
     repo: &Repository,
     pathspecs: &[String],
 ) -> Result<StageWorktreeChangesOutcome> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or(crate::error::Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);

@@ -24,6 +24,7 @@ use crate::porcelain::pathspec_match::{
 };
 use crate::progress::{poll_cancel, Cancel, NullProgress};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 
 /// Options for [`remove_paths`].
 #[derive(Debug, Clone, Default)]
@@ -49,7 +50,7 @@ impl RemoveOptions {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::RequiresWorkTree`] when the repository has no work tree.
+    /// Returns [`RepositoryError::RequiresWorkTree`] when the repository has no work tree.
     pub fn resolve_recursive(&mut self, repo: &Repository) -> Result<()> {
         if self.recursive {
             return Ok(());
@@ -191,7 +192,7 @@ pub fn remove_paths(
     opts: &RemoveOptions,
     cancel: &dyn Cancel,
 ) -> Result<RemoveOutcome> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
         return Err(Error::RemovePathsRequired);
@@ -317,7 +318,7 @@ pub fn move_paths(
     opts: &MoveOptions,
     cancel: &dyn Cancel,
 ) -> Result<MoveOutcome> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     if opts.sources.is_empty() {
         return Err(Error::MoveNothingToMove {
             src: opts.destination.clone(),
@@ -735,7 +736,7 @@ fn apply_renames_to_index(index: &mut Index, renames: &[(String, String)]) -> Re
 }
 
 fn infer_remove_recursive(repo: &Repository, sources: &[String], specs: &[String]) -> Result<bool> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let source_labels = if sources.is_empty() { specs } else { sources };
     for (sel, spec) in source_labels.iter().zip(specs.iter()) {
         if sel.ends_with('/') || sel.ends_with('\\') {

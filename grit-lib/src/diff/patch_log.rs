@@ -22,6 +22,7 @@ use crate::pack_store::PackReadContextGuard;
 use crate::parallel::{run_ordered_batches, ParallelOp};
 use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::userdiff::{matcher_for_path_parsed, FuncnameMatcher};
 use crate::worktree_rules::WorktreeRules;
 
@@ -1076,7 +1077,7 @@ pub struct PatchResolvedSide {
 ///
 /// # Errors
 ///
-/// Returns [`Error::RequiresWorkTree`](crate::error::Error::RequiresWorkTree) when a
+/// Returns [`RepositoryError::RequiresWorkTree`](RepositoryError::RequiresWorkTree) when a
 /// [`PatchSide::Worktree`] side is requested in a bare repository, and propagates index, ODB,
 /// work-tree, hashing and I/O errors.
 pub fn write_patch_resolved<W: Write>(
@@ -1159,7 +1160,7 @@ struct WorktreeSideReader<'r> {
 
 impl<'r> WorktreeSideReader<'r> {
     fn open(repo: &'r Repository) -> Result<Self> {
-        let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+        let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
         let index = repo.index_handle().load()?;
         let rules = WorktreeRules::from_repository(repo, &index)?;
         Ok(Self {

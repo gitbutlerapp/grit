@@ -2521,7 +2521,7 @@ pub fn grit_lib::config::ConfigSet::get_all_with_origin(&self, &str) -> grit_lib
 pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Option<core::result::Result<bool, grit_lib::error::ConfigError>>
 pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, grit_lib::error::ConfigError>>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
-pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
+pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
 pub fn grit_lib::config::ConfigSet::ignore_case(&self) -> bool
@@ -14959,7 +14959,7 @@ pub fn grit_lib::config::ConfigSet::get_all_with_origin(&self, &str) -> grit_lib
 pub fn grit_lib::config::ConfigSet::get_bool(&self, &str) -> core::option::Option<core::result::Result<bool, grit_lib::error::ConfigError>>
 pub fn grit_lib::config::ConfigSet::get_i64(&self, &str) -> core::option::Option<core::result::Result<i64, grit_lib::error::ConfigError>>
 pub fn grit_lib::config::ConfigSet::get_last_entry(&self, &str) -> core::option::Option<grit_lib::config::ConfigEntry>
-pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, alloc::string::String>
+pub fn grit_lib::config::ConfigSet::get_regexp(&self, &str) -> core::result::Result<alloc::vec::Vec<&grit_lib::config::ConfigEntry>, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::get_with_origin(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigValueOrigin>>
 pub fn grit_lib::config::ConfigSet::has_key(&self, &str) -> bool
 pub fn grit_lib::config::ConfigSet::ignore_case(&self) -> bool
@@ -22897,7 +22897,7 @@ pub fn grit_lib::repo::repository_format_warning(&std::path::Path) -> grit_lib::
 pub fn grit_lib::repo::resolve_dot_git(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::repo::resolve_git_directory_arg(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::repo::resolve_initial_branch(&grit_lib::config::environment::Environment, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), alloc::string::String>
+pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), grit_lib::error::ConfigError>
 pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool
 pub fn grit_lib::repo::worktree_config_enabled_for_text(core::option::Option<&str>) -> bool

@@ -24,6 +24,7 @@ use crate::porcelain::worktree_guard::{
 };
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::worktree_rules::WorktreeRules;
 
 fn tree_changes_for_clean_merge_with_snapshot(
@@ -90,7 +91,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let tree_changes =
         tree_changes_for_clean_merge_with_snapshot(repo, from_tree, merged, snapshot)?;
     let untracked =
@@ -173,7 +174,7 @@ pub(crate) fn apply_conflict_tree_merge_to_worktree(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<()> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let prepared =
         prepare_tree_transition_allow_local(repo, Some(head_tree), materialized, &HashSet::new())
             .map_err(|err| match err {

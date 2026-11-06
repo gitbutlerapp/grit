@@ -40,6 +40,7 @@ use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::partial_clone::{stored_remote_filter, ObjectFilterSpec};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 
 /// Message written into the `.keep` marker of every pack offload adds to a LOP.
 pub const LOP_KEEP_MESSAGE: &str = "grit offload: large-object promisor pack";
@@ -370,7 +371,7 @@ impl OffloadPack {
 ///
 /// # Errors
 ///
-/// [`Error::Offload`] for the [`OffloadError`] cases, [`Error::UnsupportedObjectStore`]
+/// [`Error::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`]
 /// without a files-backed object store, and read, write and config failures.
 pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();

@@ -30,6 +30,7 @@ use crate::gc::prune_loose_unreachable;
 use crate::objects::HashAlgo;
 use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 
 use super::Odb;
 
@@ -86,7 +87,7 @@ impl OdbBuilder {
     ///
     /// The store's [`ObjectStore::hash_algo`] must match the repository's object format:
     /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
-    /// [`Error::ObjectFormatMismatch`] otherwise. [`Self::build`] does not check, since it
+    /// [`RepositoryError::ObjectFormatMismatch`] otherwise. [`Self::build`] does not check, since it
     /// has no repository config to compare against.
     #[must_use]
     pub fn primary(mut self, store: Arc<dyn WritableObjectStore>) -> Self {
@@ -98,7 +99,7 @@ impl OdbBuilder {
     ///
     /// Like [`Self::primary`], its hash algorithm must match the repository's object format
     /// or [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
-    /// [`Error::ObjectFormatMismatch`].
+    /// [`RepositoryError::ObjectFormatMismatch`].
     #[must_use]
     pub fn push_read_source(mut self, store: Arc<dyn ObjectStore>) -> Self {
         self.read_sources.push(store);
@@ -121,7 +122,7 @@ impl OdbBuilder {
     ///
     /// The graph's [`CommitGraphChain::hash_algo`] must match the repository's object format,
     /// or [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
-    /// [`Error::ObjectFormatMismatch`].
+    /// [`RepositoryError::ObjectFormatMismatch`].
     #[must_use]
     pub fn commit_graph(mut self, chain: Arc<CommitGraphChain>) -> Self {
         self.commit_graph = Some(chain);
@@ -198,7 +199,7 @@ impl Odb {
     /// Filesystem-only helper: error when the primary is not files-backed.
     pub(crate) fn require_files_primary(&self, operation: &'static str) -> Result<()> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore { operation });
+            return Err(RepositoryError::UnsupportedObjectStore { operation }.into());
         }
         Ok(())
     }
@@ -217,7 +218,7 @@ impl Odb {
 
     /// In-process garbage collection for the files-backed object directory.
     ///
-    /// Custom primaries return [`Error::UnsupportedObjectStore`].
+    /// Custom primaries return [`RepositoryError::UnsupportedObjectStore`].
     ///
     /// # Errors
     ///
@@ -225,13 +226,13 @@ impl Odb {
     pub fn gc(&self) -> Result<()> {
         self.require_files_primary("gc")?;
         let Some(git_dir) = self.config_git_dir() else {
-            return Err(Error::UnsupportedObjectStore { operation: "gc" });
+            return Err(RepositoryError::UnsupportedObjectStore { operation: "gc" }.into());
         };
         let opts = crate::environment::RepositoryOptions::empty();
         let repo = if git_dir.file_name().is_some_and(|n| n == ".git") {
             let wt = git_dir
                 .parent()
-                .ok_or(Error::UnsupportedObjectStore { operation: "gc" })?;
+                .ok_or(RepositoryError::UnsupportedObjectStore { operation: "gc" })?;
             Repository::open(git_dir, &opts.with_work_tree(wt))?
         } else {
             Repository::open(git_dir, &opts)?
@@ -254,19 +255,21 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnsupportedObjectStore`] for custom primaries, or errors from graph
+    /// Returns [`RepositoryError::UnsupportedObjectStore`] for custom primaries, or errors from graph
     /// generation or I/O.
     pub fn write_commit_graph(&self) -> Result<()> {
         self.require_files_primary("commit-graph write")?;
         let Some(git_dir) = self.config_git_dir() else {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(RepositoryError::UnsupportedObjectStore {
                 operation: "commit-graph write",
-            });
+            }
+            .into());
         };
         let Some(objects_dir) = self.files_objects_dir() else {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(RepositoryError::UnsupportedObjectStore {
                 operation: "commit-graph write",
-            });
+            }
+            .into());
         };
         let config = ConfigSet::load(
             &crate::environment::Environment::empty(),

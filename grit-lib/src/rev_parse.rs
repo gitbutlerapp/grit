@@ -29,6 +29,7 @@ use crate::reflog::ReflogEntry;
 use crate::refs;
 use crate::refs::store::RawRef;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
 
 /// Return `Some(repo)` when a repository can be discovered at `start`.
@@ -40,7 +41,7 @@ use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
 /// # Errors
 ///
 /// Returns errors other than "not a repository" (for example I/O and path
-/// canonicalization failures). [`Error::NotARepository`] is returned too when discovery
+/// canonicalization failures). [`RepositoryError::NotARepository`] is returned too when discovery
 /// stopped at a malformed gitfile ([`NotARepositoryReason::GitfileNotRegularFile`] or
 /// [`NotARepositoryReason::GitfileMissingGitdir`]) or when `start` itself holds a `.git`
 /// file or symlink.
@@ -51,7 +52,7 @@ pub fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
     };
     // A missing repository is an expected outcome, but a malformed `.git` entry found during
     // discovery, or any `.git` file or symlink at `start`, is reported.
-    let Error::NotARepository(reason) = &err else {
+    let Error::Repository(RepositoryError::NotARepository(reason)) = &err else {
         return Err(err);
     };
     let malformed_gitfile = matches!(

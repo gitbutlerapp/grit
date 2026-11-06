@@ -65,6 +65,7 @@ use crate::reflog::{
 };
 use crate::repack_pack::{write_repack_pack, RepackPackSettings};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::shallow::load_shallow_boundaries;
 use time::OffsetDateTime;
 
@@ -702,7 +703,7 @@ pub(crate) fn build_commit_graph_for_commits(
 ///
 /// # Errors
 ///
-/// Returns [`Error::UnsupportedObjectStore`] for non-files ODB backends, or errors from graph
+/// Returns [`RepositoryError::UnsupportedObjectStore`] for non-files ODB backends, or errors from graph
 /// generation and atomic I/O.
 pub fn write_commit_graph(
     repo: &Repository,
@@ -712,7 +713,7 @@ pub fn write_commit_graph(
     odb.require_files_primary("commit-graph write")?;
     let objects_dir = odb
         .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
+        .ok_or(RepositoryError::UnsupportedObjectStore {
             operation: "commit-graph write",
         })?;
     let path = objects_dir.join("info").join("commit-graph");
@@ -782,7 +783,7 @@ pub fn write_commit_graph(
 ///
 /// # Errors
 ///
-/// Returns [`Error::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
+/// Returns [`RepositoryError::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
 /// `midx.version` is not an integer, [`crate::error::MidxError::UnknownWriteVersion`] (as
 /// [`Error::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
 pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
@@ -795,7 +796,7 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
     let version = Some(midx_write_version(requested)?);
     let objects_dir = odb
         .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
+        .ok_or(RepositoryError::UnsupportedObjectStore {
             operation: "midx write",
         })?;
     let pack_dir = objects_dir.join("pack");
@@ -910,7 +911,7 @@ fn repack_detail(
     odb.require_files_primary("repack")?;
     let objects_dir = odb
         .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
+        .ok_or(RepositoryError::UnsupportedObjectStore {
             operation: "repack",
         })?;
     let pack_dir = objects_dir.join("pack");
@@ -1089,9 +1090,11 @@ fn repack_detail(
         };
         report.packs_written = 1;
         report.objects = ingested.object_ids.len();
-        let pack_path = ingested.pack_path.ok_or(Error::UnsupportedObjectStore {
-            operation: "repack",
-        })?;
+        let pack_path = ingested
+            .pack_path
+            .ok_or(RepositoryError::UnsupportedObjectStore {
+                operation: "repack",
+            })?;
 
         let idx_path = pack_path.with_extension("idx");
         if cfg
@@ -1220,7 +1223,7 @@ pub fn repack_all_with_cancel(
     let odb = repo.odb();
     let objects_dir = odb
         .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
+        .ok_or(RepositoryError::UnsupportedObjectStore {
             operation: "repack",
         })?;
     let pack_dir = objects_dir.join("pack");
@@ -1510,7 +1513,7 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
     )?;
     let objects_dir = odb
         .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
+        .ok_or(RepositoryError::UnsupportedObjectStore {
             operation: "prune temporary objects",
         })?;
     let temp =
@@ -2043,7 +2046,7 @@ fn gc_locked(
         let temp = prune_stale_temporary_objects_with_cutoff(
             repo.odb()
                 .files_objects_dir()
-                .ok_or(Error::UnsupportedObjectStore { operation: "gc" })?,
+                .ok_or(RepositoryError::UnsupportedObjectStore { operation: "gc" })?,
             *keep_newer_than,
             dry_run,
         )?;
@@ -2513,7 +2516,7 @@ pub(crate) enum PromisorRewriteWhen {
 ///
 /// # Errors
 ///
-/// [`Error::UnsupportedObjectStore`] without a files-backed object store, and pack
+/// [`RepositoryError::UnsupportedObjectStore`] without a files-backed object store, and pack
 /// read, write and file removal failures.
 pub(crate) fn rewrite_local_objects_without(
     repo: &Repository,

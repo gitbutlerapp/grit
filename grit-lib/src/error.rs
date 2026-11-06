@@ -19,6 +19,7 @@ use thiserror::Error;
 
 pub use crate::git_dir::GitDirPathOperation;
 pub use crate::midx_error::MidxError;
+pub use crate::repo::RepositoryError;
 pub use crate::worktree::io_error::WorktreePathOperation;
 
 /// Lock file could not be created because another process holds it (or left a stale lock).
@@ -103,7 +104,7 @@ impl PathIoError {
         }
     }
 
-    /// Human-readable summary (same text as [`Error::WorktreePathIo`] / [`Error::GitDirPathIo`]).
+    /// Human-readable summary (same text as [`Error::WorktreePathIo`] / [`RepositoryError::git_dir_path_io`]).
     #[must_use]
     pub fn message(&self) -> String {
         let path = self
@@ -119,6 +120,12 @@ impl PathIoError {
                 crate::git_dir::io_error::format_git_dir_io_message(&path, op, &self.source)
             }
         }
+    }
+}
+
+impl std::fmt::Display for PathIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message())
     }
 }
 
@@ -476,6 +483,34 @@ pub enum ConfigError {
         /// Why the regular expression engine rejected it.
         reason: String,
     },
+
+    /// A config key regexp (for example `git config --get-regexp`) is not valid.
+    #[error("invalid key pattern '{pattern}': {reason}")]
+    InvalidPattern {
+        /// Pattern as given.
+        pattern: String,
+        /// Why the regular expression engine rejected it.
+        reason: String,
+    },
+
+    /// Parsed config text declares an unsupported `core.repositoryformatversion`.
+    #[error("unknown repository format version: {version}")]
+    UnsupportedRepositoryFormatVersion {
+        /// Parsed format version.
+        version: u32,
+    },
+
+    /// A repository-local config cache mutex was poisoned.
+    #[error("config cache lock poisoned")]
+    ConfigCacheLockPoisoned,
+
+    /// Repository config session mutex was poisoned.
+    #[error("config session lock poisoned")]
+    ConfigSessionLockPoisoned,
+
+    /// Config session state was missing after refresh.
+    #[error("config session missing after refresh")]
+    ConfigSessionMissingAfterRefresh,
 
     /// A list prefix is empty or is not `section.` / `section.subsection.`.
     #[error("invalid list prefix '{prefix}'")]
@@ -1146,7 +1181,7 @@ pub enum PathOutsideRepoError {
     },
 }
 
-/// Why a path could not be opened as a Git repository; carried by [`Error::NotARepository`].
+/// Why a path could not be opened as a Git repository; carried by [`RepositoryError::NotARepository`].
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NotARepositoryReason {
@@ -1218,36 +1253,9 @@ fn restore_unmerged_message(paths: &[String]) -> String {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// A repository could not be found or is structurally invalid.
-    #[error("not a git repository (or any of the parent directories): {0}")]
-    NotARepository(NotARepositoryReason),
-
-    /// A bare repository was found but access is forbidden by safe.bareRepository.
-    #[error("cannot use bare repository '{0}' (safe.bareRepository is 'explicit')")]
-    ForbiddenBareRepository(String),
-
-    /// The repository is owned by a different user (safe.directory).
-    #[error("detected dubious ownership in repository at '{0}'")]
-    DubiousOwnership(String),
-
-    /// Repository format version is not supported by this implementation.
-    #[error("unsupported repository format version '{0}'")]
-    UnsupportedRepositoryFormatVersion(u32),
-
-    /// `extensions.refStorage` names an unsupported backend.
-    #[error("invalid value for 'extensions.refstorage': '{value}'")]
-    InvalidRefStorageFormat {
-        /// Raw `extensions.refStorage` value from the repository config.
-        value: String,
-    },
-
-    /// [`crate::repo::Repository::init_with_outcome`] refused to change object format on reinit.
-    #[error("cannot change object format in an existing repository")]
-    InitObjectFormatChange,
-
-    /// [`crate::repo::Repository::init_with_outcome`] with incompatible `--bare` and separate git dir.
-    #[error("cannot combine bare repository with separate git directory")]
-    InitBareWithSeparateGitDir,
+    /// Repository layout, discovery, init, and embedding failures.
+    #[error(transparent)]
+    Repository(#[from] RepositoryError),
 
     /// A supplied object ID string was not valid hex or the wrong length.
     #[error("invalid object id '{0}'")]
@@ -1464,17 +1472,6 @@ pub enum Error {
         path: String,
         /// What the operation was trying to do when I/O failed.
         operation: WorktreePathOperation,
-        /// Underlying OS error.
-        source: std::io::Error,
-    },
-
-    /// Filesystem I/O failed on a path under the repository git directory (objects, refs, logs, …).
-    #[error("{}", crate::git_dir::io_error::format_git_dir_io_message(.path, *operation, .source))]
-    GitDirPathIo {
-        /// Display path such as `.git/objects` or `.git/refs/heads/main`.
-        path: String,
-        /// What the operation was trying to do when I/O failed.
-        operation: GitDirPathOperation,
         /// Underlying OS error.
         source: std::io::Error,
     },
@@ -1809,10 +1806,6 @@ pub enum Error {
     /// A directory pathspec was used without `recursive` ([`crate::porcelain::paths::remove_paths`]).
     #[error("not removing '{0}' recursively without -r")]
     NotRemovingRecursively(String),
-
-    /// A porcelain path operation requires a checked-out work tree.
-    #[error("this operation must be run in a work tree")]
-    RequiresWorkTree,
 
     /// A commit was requested with an empty message body after normalization.
     #[error("empty commit message")]
@@ -2292,15 +2285,6 @@ pub enum Error {
     #[error(transparent)]
     History(#[from] crate::history::HistoryError),
 
-    /// The operation needs the files-backed `objects/` directory, but the repository's
-    /// [`Odb`](crate::odb::Odb) uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
-    /// store. Nothing was written; use a files-backed repository for this operation.
-    #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
-    UnsupportedObjectStore {
-        /// Operation that was refused (for example `"fetch"`, `"push"`, `"gc"`).
-        operation: &'static str,
-    },
-
     /// The operation fetches objects back from a promisor remote, and the repository
     /// has none: no `remote.<name>.promisor = true` and no `extensions.partialClone`.
     /// Nothing was changed.
@@ -2308,48 +2292,6 @@ pub enum Error {
     NoPromisorRemote {
         /// Operation that was refused (for example `"drop-large-blobs"`).
         operation: &'static str,
-    },
-
-    /// The operation would delete objects, and `extensions.preciousObjects` says this
-    /// repository never loses any (it may be shared as an alternate). Nothing was
-    /// changed.
-    #[error("{operation} deletes objects, which extensions.preciousObjects forbids here")]
-    PreciousObjectsRepository {
-        /// Operation that was refused (for example `"drop-large-blobs"`).
-        operation: &'static str,
-    },
-
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) rooted somewhere other than the repository's
-    /// `objects/` directory.
-    #[error(
-        "object database {} is not the repository's objects directory {}",
-        builder.display(),
-        repository.display()
-    )]
-    OdbObjectsDirMismatch {
-        /// The builder's objects directory, canonicalized when it exists.
-        builder: std::path::PathBuf,
-        /// The repository's canonical objects directory.
-        repository: std::path::PathBuf,
-    },
-
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) whose custom primary or read source hashes
-    /// objects with a different algorithm than the repository's `extensions.objectformat`
-    /// (SHA-1 when unset).
-    #[error(
-        "object store hashes with {} but the repository's object format is {}",
-        store.name(),
-        repository.name()
-    )]
-    #[non_exhaustive]
-    ObjectFormatMismatch {
-        /// The repository's object format from its config.
-        repository: crate::objects::HashAlgo,
-        /// The first injected store's [`hash_algo`](crate::odb::store::ObjectStore::hash_algo)
-        /// that differs from `repository`.
-        store: crate::objects::HashAlgo,
     },
 
     /// Parsing a [`crate::tree_sha256::TreeSha256`] from hex failed (expected 64 hex digits).
@@ -2437,13 +2379,23 @@ impl Error {
     #[must_use]
     pub fn kind_name(&self) -> &'static str {
         match self {
-            Self::NotARepository(..) => "not_a_repository",
-            Self::ForbiddenBareRepository(..) => "forbidden_bare_repository",
-            Self::DubiousOwnership(..) => "dubious_ownership",
-            Self::UnsupportedRepositoryFormatVersion(..) => "unsupported_repository_format_version",
-            Self::InvalidRefStorageFormat { .. } => "invalid_ref_storage_format",
-            Self::InitObjectFormatChange => "init_object_format_change",
-            Self::InitBareWithSeparateGitDir => "init_bare_with_separate_git_dir",
+            Self::Repository(RepositoryError::NotARepository(..)) => "not_a_repository",
+            Self::Repository(RepositoryError::ForbiddenBareRepository { .. }) => {
+                "forbidden_bare_repository"
+            }
+            Self::Repository(RepositoryError::DubiousOwnership { .. }) => "dubious_ownership",
+            Self::Repository(RepositoryError::UnsupportedRepositoryFormatVersion { .. }) => {
+                "unsupported_repository_format_version"
+            }
+            Self::Repository(RepositoryError::InvalidRefStorageFormat { .. }) => {
+                "invalid_ref_storage_format"
+            }
+            Self::Repository(RepositoryError::InitObjectFormatChange) => {
+                "init_object_format_change"
+            }
+            Self::Repository(RepositoryError::InitBareWithSeparateGitDir) => {
+                "init_bare_with_separate_git_dir"
+            }
             Self::InvalidObjectId(..) => "invalid_object_id",
             Self::HashCollision { .. } => "hash_collision",
             Self::ObjectNotFound(..) => "object_not_found",
@@ -2470,7 +2422,7 @@ impl Error {
             Self::LooseHashMismatch { .. } => "loose_hash_mismatch",
             Self::LooseObjectWrite { .. } => "loose_object_write",
             Self::WorktreePathIo { .. } => "worktree_path_io",
-            Self::GitDirPathIo { .. } => "git_dir_path_io",
+            Self::Repository(RepositoryError::GitDirPathIo(_)) => "git_dir_path_io",
             Self::ObjectStreamTruncated { .. } => "object_stream_truncated",
             Self::WorktreeFileChanged { .. } => "worktree_file_changed",
             Self::IndexError(..) => "index_error",
@@ -2524,7 +2476,7 @@ impl Error {
             Self::PathspecIgnored { .. } => "pathspec_ignored",
             Self::RemoveBlocked { .. } => "remove_blocked",
             Self::NotRemovingRecursively(..) => "not_removing_recursively",
-            Self::RequiresWorkTree => "requires_work_tree",
+            Self::Repository(RepositoryError::RequiresWorkTree) => "requires_work_tree",
             Self::EmptyCommitMessage => "empty_commit_message",
             Self::RemovePathsRequired => "remove_paths_required",
             Self::CommitPathsRequired => "commit_paths_required",
@@ -2553,7 +2505,9 @@ impl Error {
             Self::NotFastForward => "not_fast_forward",
             Self::NothingToCommit => "nothing_to_commit",
             Self::UnrelatedHistories { .. } => "unrelated_histories",
-            Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
+            Self::Repository(RepositoryError::ObjectFormatMismatch { .. }) => {
+                "object_format_mismatch"
+            }
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
             Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
             Self::DetachedHead => "detached_head",
@@ -2603,10 +2557,16 @@ impl Error {
             Self::RevList(..) => "rev_list",
             Self::Hook(..) => "hook",
             Self::History(..) => "history",
-            Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
+            Self::Repository(RepositoryError::UnsupportedObjectStore { .. }) => {
+                "unsupported_object_store"
+            }
             Self::NoPromisorRemote { .. } => "no_promisor_remote",
-            Self::PreciousObjectsRepository { .. } => "precious_objects_repository",
-            Self::OdbObjectsDirMismatch { .. } => "odb_objects_dir_mismatch",
+            Self::Repository(RepositoryError::PreciousObjectsRepository { .. }) => {
+                "precious_objects_repository"
+            }
+            Self::Repository(RepositoryError::OdbObjectsDirMismatch { .. }) => {
+                "odb_objects_dir_mismatch"
+            }
             Self::TreeSha256InvalidHex => "tree_sha256_invalid_hex",
             Self::TreeSha256InvalidRevision { .. } => "tree_sha256_invalid_revision",
             Self::TreeSha256MissingSubmodules(..) => "tree_sha256_missing_submodules",
@@ -2688,15 +2648,11 @@ impl Error {
                 *operation,
                 preserve_io_error(source),
             )),
-            Self::GitDirPathIo {
-                path,
-                operation,
-                source,
-            } => Some(PathIoError::git_dir(
-                path.clone(),
-                *operation,
-                preserve_io_error(source),
-            )),
+            Self::Repository(RepositoryError::GitDirPathIo(io)) => Some(PathIoError {
+                operation: io.operation,
+                path: io.path.clone(),
+                source: preserve_io_error(&io.source),
+            }),
             _ => None,
         }
     }
@@ -2709,18 +2665,19 @@ impl Error {
         matches!(self, Self::WorktreePathIo { source, .. } if crate::worktree::io_error::is_file_in_use(source))
     }
 
-    /// Whether this is [`Error::GitDirPathIo`] caused by another process holding a git-dir file
+    /// Whether this is [`RepositoryError::git_dir_path_io`] caused by another process holding a git-dir file
     /// open (Windows sharing or access-denied during replace, `EBUSY`, …).
     #[must_use]
     pub fn is_git_dir_file_in_use(&self) -> bool {
-        matches!(
-            self,
-            Self::GitDirPathIo {
-                source,
-                operation,
-                ..
-            } if crate::git_dir::io_error::is_git_dir_transient_contention(*operation, source)
-        )
+        match self {
+            Self::Repository(RepositoryError::GitDirPathIo(io)) => match io.operation {
+                PathIoOperation::GitDir(operation) => {
+                    crate::git_dir::io_error::is_git_dir_transient_contention(operation, &io.source)
+                }
+                PathIoOperation::Worktree(_) => false,
+            },
+            _ => false,
+        }
     }
 
     /// Whether this is [`Error::Cancelled`] or a nested history failure that was cancelled.
@@ -2859,11 +2816,12 @@ impl From<crate::refs::store::RefStoreError> for Error {
                 path,
                 operation,
                 os_error,
-            } => Error::GitDirPathIo {
+            } => RepositoryError::git_dir_path_io(
                 path,
                 operation,
-                source: crate::refs::store::RefStoreError::git_dir_io_source(os_error),
-            },
+                crate::refs::store::RefStoreError::git_dir_io_source(os_error),
+            )
+            .into(),
             crate::refs::store::RefStoreError::Hook(hook) => Error::Hook(hook.into_hook_error()),
             other => Error::RefStore(other),
         }
@@ -2889,11 +2847,9 @@ impl From<PathIoError> for Error {
                 operation,
                 source: value.source,
             },
-            PathIoOperation::GitDir(operation) => Self::GitDirPathIo {
-                path,
-                operation,
-                source: value.source,
-            },
+            PathIoOperation::GitDir(operation) => {
+                RepositoryError::git_dir_path_io(path, operation, value.source).into()
+            }
         }
     }
 }

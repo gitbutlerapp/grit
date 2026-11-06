@@ -24,6 +24,7 @@ use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
 use crate::ident_resolve::IdentityEnv;
 use crate::ownership_check::{default_ownership_check, is_default_ownership_check, OwnershipCheck};
 use crate::reftable::ReftableWriteOptions;
+use crate::repo::RepositoryError;
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
 ///
@@ -57,7 +58,7 @@ pub struct Environment {
     /// When set, a [`Repository`](crate::repo::Repository) opened with this environment reads
     /// and writes objects in this directory instead of `<git-dir>/objects` (a relative path
     /// resolves against [`Self::cwd`]). The directory must exist, or opening fails with
-    /// [`Error::NotARepository`](crate::error::Error::NotARepository); an empty value fails
+    /// [`RepositoryError::NotARepository`](RepositoryError::NotARepository); an empty value fails
     /// the same way, as in Git. `<git-dir>/objects` is not consulted unless it is listed in
     /// [`Self::git_alternate_object_directories`] or in this directory's `info/alternates`.
     pub git_object_directory: Option<String>,

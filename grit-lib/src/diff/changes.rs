@@ -33,6 +33,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{FileMode, ObjectId};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::state::resolve_head_for_repository;
 use crate::worktree::fsmonitor::fsmonitor_enabled;
 use crate::worktree::worktree_rules::WorktreeRules;
@@ -552,7 +553,7 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::RequiresWorkTree`] in a bare repository, plus worktree rule, I/O, and
+    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, plus worktree rule, I/O, and
     /// object read errors.
     pub fn unstaged_entries(&mut self, renames: RenameDetection) -> Result<Vec<DiffEntry>> {
         self.unstaged_entries_for_paths(renames, None)
@@ -585,7 +586,7 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::RequiresWorkTree`] in a bare repository, plus worktree rule, I/O, and
+    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, plus worktree rule, I/O, and
     /// object read errors.
     pub fn worktree_entries(
         &mut self,
@@ -629,7 +630,7 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::RequiresWorkTree`] for a working-tree target in a bare repository, plus
+    /// Returns [`RepositoryError::RequiresWorkTree`] for a working-tree target in a bare repository, plus
     /// `HEAD` resolution, pathspec, worktree rule, I/O, and object read errors.
     pub fn entries(
         &mut self,
@@ -714,7 +715,7 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::RequiresWorkTree`] for staged primaries in a bare repository, plus the
+    /// Returns [`RepositoryError::RequiresWorkTree`] for staged primaries in a bare repository, plus the
     /// errors of [`Self::entries`] and of loading the changes.
     pub fn peer_changes<'a>(
         &mut self,
@@ -758,7 +759,7 @@ impl<'repo> UncommittedDiff<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::RequiresWorkTree`] in a bare repository, plus I/O, filter, and object
+    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, plus I/O, filter, and object
     /// read errors.
     pub fn load_worktree_changes(&mut self, entries: Vec<DiffEntry>) -> Result<Vec<FileChange>> {
         let work_tree = self.work_tree()?;
@@ -772,7 +773,9 @@ impl<'repo> UncommittedDiff<'repo> {
     }
 
     fn work_tree(&self) -> Result<&'repo Path> {
-        self.repo.work_tree().ok_or(Error::RequiresWorkTree)
+        self.repo
+            .work_tree()
+            .ok_or(RepositoryError::RequiresWorkTree.into())
     }
 
     fn rules(&mut self) -> Result<Arc<Mutex<WorktreeRules>>> {
@@ -985,15 +988,15 @@ mod tests {
             .is_ok_and(|e| e.is_empty()));
         assert!(matches!(
             diff.unstaged_entries(RenameDetection::Off),
-            Err(Error::RequiresWorkTree)
+            Err(Error::Repository(RepositoryError::RequiresWorkTree))
         ));
         assert!(matches!(
             diff.worktree_entries(None, RenameDetection::Off),
-            Err(Error::RequiresWorkTree)
+            Err(Error::Repository(RepositoryError::RequiresWorkTree))
         ));
         assert!(matches!(
             diff.load_worktree_changes(Vec::new()),
-            Err(Error::RequiresWorkTree)
+            Err(Error::Repository(RepositoryError::RequiresWorkTree))
         ));
     }
 }

@@ -13,7 +13,7 @@ use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
 };
-use grit_lib::repo::{Repository, RepositoryBuilder};
+use grit_lib::repo::{Repository, RepositoryBuilder, RepositoryError};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 
@@ -163,7 +163,10 @@ fn a_files_object_store_still_needs_its_objects_directory() {
         .ref_store(Arc::new(MemoryRefStore::new()))
         .open(&git_dir, None);
     assert!(
-        matches!(result, Err(Error::NotARepository(_))),
+        matches!(
+            result,
+            Err(Error::Repository(RepositoryError::NotARepository(_)))
+        ),
         "{result:?}"
     );
 }
