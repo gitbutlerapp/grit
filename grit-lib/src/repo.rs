@@ -632,7 +632,7 @@ impl Repository {
     /// let (repo, _outcome) = Repository::init(dir.path(), &InitOptions::default())?;
     /// match repo.identity(IdentRole::Author, repo.identity_now()) {
     ///     Ok(author) => assert!(!author.email.is_empty()),
-    ///     Err(grit_lib::error::CommitError::Identity(_)) => {} // nothing configured
+    ///     Err(grit_lib::error::Error::Commit(grit_lib::porcelain::CommitError::Identity(_))) => {}
     ///     Err(other) => return Err(other),
     /// }
     /// # Ok(())
