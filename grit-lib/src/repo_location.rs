@@ -211,20 +211,17 @@ mod tests {
         );
         let handle = Repository::discover(None, &options).unwrap();
         let location = RepositoryLocation::from(&handle);
-        let config = handle.config().snapshot().unwrap();
-        let expected = ConfigSet::load(
-            &options.environment,
-            Some(location.git_dir()),
-            &LoadConfigOptions::standard(&options.environment, Some(location.git_dir())),
-        )
-        .unwrap();
+        let config = (*handle.config().snapshot().unwrap()).clone();
+        let load_opts = LoadConfigOptions::standard(&options.environment, Some(location.git_dir()));
+        let expected =
+            ConfigSet::load(&options.environment, Some(location.git_dir()), &load_opts).unwrap();
         let keyed = |set: &ConfigSet| -> Vec<(String, Option<String>)> {
             set.entries()
                 .iter()
                 .map(|e| (e.key.clone(), e.value.clone()))
                 .collect()
         };
-        assert_eq!(keyed(config.as_ref()), keyed(&expected));
+        assert_eq!(keyed(&config), keyed(&expected));
         assert_eq!(config.get("user.name").unwrap().as_deref(), Some("Global"));
         assert_eq!(
             config.get("review.cmdline").unwrap().as_deref(),

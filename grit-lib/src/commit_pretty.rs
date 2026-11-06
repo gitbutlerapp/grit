@@ -178,8 +178,8 @@ mod resolve_core_abbrev_tests {
     fn resolve_core_abbrev_default_matches_auto_for_empty_repo() -> crate::error::Result<()> {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-        let config = repo.config().snapshot()?;
-        let len = resolve_core_abbrev_len(config.as_ref(), repo.odb())?;
+        let config = (*repo.config().snapshot()?).clone();
+        let len = resolve_core_abbrev_len(&config, repo.odb())?;
         assert_eq!(len, auto_abbrev_len_for_object_count(0));
         Ok(())
     }
