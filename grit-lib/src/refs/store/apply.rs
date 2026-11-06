@@ -56,7 +56,11 @@ impl<'a> RefMapOverlay<'a> {
         match self.overlay.get(name) {
             Some(None) => None,
             Some(Some(value)) => Some(Cow::Borrowed(value)),
-            None => self.base.get(name).map(Cow::Borrowed),
+            None => {
+                #[cfg(test)]
+                super::probe::record_stored_ref_probe();
+                self.base.get(name).map(Cow::Borrowed)
+            }
         }
     }
 

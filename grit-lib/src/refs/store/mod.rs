@@ -19,6 +19,8 @@ mod linked_worktree;
 mod memory;
 mod open;
 pub mod paths;
+#[cfg(test)]
+mod probe;
 pub(crate) mod reference_transaction;
 mod reftable;
 mod routing;

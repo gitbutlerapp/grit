@@ -148,6 +148,8 @@ pub fn verify_create_conflicts(
         if update.new_value.is_none() || update.flags.log_only {
             continue;
         }
+        #[cfg(test)]
+        super::probe::record_stored_ref_probe();
         if existing.contains_key(update.name.as_str()) {
             continue;
         }
@@ -311,6 +313,8 @@ fn verify_name_available_for_create_in_map(
                 dirname.push('/');
             }
             dirname.push_str(part);
+            #[cfg(test)]
+            super::probe::record_stored_ref_probe();
             if existing.contains_key(&dirname) {
                 return Err(RefnameUnavailable::AncestorExists {
                     blocking: dirname.clone(),
@@ -330,6 +334,8 @@ fn verify_name_available_for_create_in_map(
     leaf_dir.push_str(refname);
     leaf_dir.push('/');
 
+    #[cfg(test)]
+    super::probe::record_stored_ref_probe();
     if let Some((blocking, _)) = existing
         .range::<str, _>((Bound::Included(leaf_dir.as_str()), Bound::Unbounded))
         .next()

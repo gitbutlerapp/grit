@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn check_transaction_cost_is_flat_in_store_size() {
-        use std::time::Instant;
+        use super::super::probe::take_stored_ref_probes;
 
         fn oid_n(n: u32) -> ObjectId {
             let mut b = [0u8; 20];
@@ -400,29 +400,19 @@ mod tests {
                 })
                 .expect("txn")
         };
-        let samples = 30u32;
-        let start = Instant::now();
-        for i in 0..samples {
+        for i in 0..30u32 {
+            take_stored_ref_probes();
             check_transaction(&large, &txn(i)).expect("large");
+            let large_probes = take_stored_ref_probes();
+            check_transaction(&small, &txn(i)).expect("small");
+            let small_probes = take_stored_ref_probes();
+            assert!(large_probes > 0, "stored-ref lookups are not being counted");
+            assert_eq!(
+                large_probes, small_probes,
+                "checking one create against 20000 stored refs must do the same lookups as \
+                 against an empty store"
+            );
         }
-        let large_elapsed = start.elapsed();
-        let start = Instant::now();
-        for i in 0..samples {
-            check_transaction(&small, &txn(i + samples)).expect("small");
-        }
-        let small_elapsed = start.elapsed();
-        assert!(
-            large_elapsed.as_secs() < 1,
-            "large map checks took {:?}",
-            large_elapsed
-        );
-        assert!(
-            large_elapsed
-                <= small_elapsed * 8 + small_elapsed / 2 + std::time::Duration::from_millis(1),
-            "large {:?} vs small {:?}",
-            large_elapsed,
-            small_elapsed
-        );
     }
 
     #[test]
