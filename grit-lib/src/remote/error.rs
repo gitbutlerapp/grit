@@ -142,7 +142,7 @@ pub enum RemoteError {
     #[error("{0}")]
     Ssh(String),
     /// Low-level transport failure (connection, DNS, TLS, or I/O outside HTTP status handling).
-    #[error("{}", crate::error::remote_transport_message(.url.as_deref(), &.detail))]
+    #[error("{}", crate::error::remote_transport_message(.url.as_deref(), .detail))]
     Transport {
         /// Redacted repository URL when known.
         url: Option<String>,
