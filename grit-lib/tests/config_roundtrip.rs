@@ -98,7 +98,7 @@ fn scoped_writes_round_trip_git_list_get_all_fsck() -> grit_lib::error::Result<(
     std::fs::write(&xdg_cfg, "[user]\n\tname = xdg-user\n").expect("xdg global");
 
     let repo_path = tmp.path().join("repo");
-    let repo = Repository::init(&repo_path, &InitOptions::default())?;
+    let (repo, _) = Repository::init(&repo_path, &InitOptions::default())?;
 
     let seed = git_in_repo(&repo_path, &["commit", "--allow-empty", "-m", "seed"]);
     assert!(
