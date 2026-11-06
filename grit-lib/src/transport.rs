@@ -821,7 +821,9 @@ fn parse_ssh_url_form(rest: &str) -> Result<SshUrl> {
     let (authority, path_with_sep) = split_ssh_authority_and_path(after_slashes);
     let (user_host, port) = parse_authority_host_port(authority)?;
     if user_host.starts_with('-') {
-        return Err(ssh_transport_err("ssh: hostname starts with '-'".to_owned()));
+        return Err(ssh_transport_err(
+            "ssh: hostname starts with '-'".to_owned(),
+        ));
     }
     // Git: for PROTO_SSH, if `path[1] == '~'`, advance past the leading separator
     // so `ssh://host/~repo` yields `~repo` (server-side home-dir expansion).
@@ -951,7 +953,9 @@ fn parse_authority_host_port(authority: &str) -> Result<(String, Option<String>)
         return Err(ssh_transport_err("ssh: empty host".to_owned()));
     }
     if ssh_host.starts_with('-') {
-        return Err(ssh_transport_err("ssh: hostname starts with '-'".to_owned()));
+        return Err(ssh_transport_err(
+            "ssh: hostname starts with '-'".to_owned(),
+        ));
     }
     Ok((ssh_host, port))
 }
@@ -976,7 +980,9 @@ fn parse_scp_style(u: &str) -> Result<SshUrl> {
         return Err(ssh_transport_err("ssh: empty host or path".to_owned()));
     }
     if host.starts_with('-') {
-        return Err(ssh_transport_err("ssh: hostname starts with '-'".to_owned()));
+        return Err(ssh_transport_err(
+            "ssh: hostname starts with '-'".to_owned(),
+        ));
     }
     if path.as_bytes().get(1) == Some(&b'~') {
         path = &path[1..];
@@ -1631,9 +1637,9 @@ impl Transport for SshTransport {
         let running = self.command_runner.spawn(&cmd_spec).map_err(|e| {
             transport_io_err(format!("failed to spawn ssh for {}: {e}", spec.ssh_host))
         })?;
-        let (mut child, writer, reader, _stderr) = running
-            .into_system_parts()
-            .map_err(|_| transport_io_err("ssh child is not backed by a live process".to_owned()))?;
+        let (mut child, writer, reader, _stderr) = running.into_system_parts().map_err(|_| {
+            transport_io_err("ssh child is not backed by a live process".to_owned())
+        })?;
         let writer = writer.ok_or_else(|| transport_io_err("ssh child has no stdin".to_owned()))?;
         let mut reader = BufReader::new(
             reader.ok_or_else(|| transport_io_err("ssh child has no stdout".to_owned()))?,

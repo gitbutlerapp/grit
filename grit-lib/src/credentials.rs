@@ -1824,8 +1824,7 @@ mod tests {
             }
         );
 
-        let other =
-            crate::error::AuthFailure::from_fill_error(credential_err("helper crashed"));
+        let other = crate::error::AuthFailure::from_fill_error(credential_err("helper crashed"));
         assert!(matches!(
             other,
             crate::error::AuthFailure::CredentialsUnavailable { detail, helpers }

@@ -730,10 +730,11 @@ fn build_proxy(config: &ConfigSet) -> Result<Option<ureq::Proxy>> {
             "http.proxy '{raw}': unsupported proxy scheme '{scheme}'"
         ))));
     }
-    let proxy = ureq::Proxy::new(&with_scheme)
-        .map_err(|e| {
-            Error::Remote(RemoteError::Http(format!("invalid http.proxy '{raw}': {e}")))
-        })?;
+    let proxy = ureq::Proxy::new(&with_scheme).map_err(|e| {
+        Error::Remote(RemoteError::Http(format!(
+            "invalid http.proxy '{raw}': {e}"
+        )))
+    })?;
     Ok(Some(proxy))
 }
 
@@ -1661,13 +1662,12 @@ fn build_cookie_specs(path: Option<&std::path::Path>) -> Result<Vec<CookieSpec>>
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let data = std::fs::read_to_string(path)
-        .map_err(|e| {
-            Error::Remote(RemoteError::Http(format!(
-                "read cookie file '{}': {e}",
-                path.display()
-            )))
-        })?;
+    let data = std::fs::read_to_string(path).map_err(|e| {
+        Error::Remote(RemoteError::Http(format!(
+            "read cookie file '{}': {e}",
+            path.display()
+        )))
+    })?;
     let mut out = Vec::new();
     for line in data.lines() {
         let trimmed = line.trim();

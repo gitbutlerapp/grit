@@ -132,7 +132,8 @@ pub trait HttpClient: Send + Sync {
         git_protocol: Option<&str>,
     ) -> RemoteResult<Box<dyn Read + Send>> {
         let mut buffered = Vec::new();
-        body.read_to_end(&mut buffered).map_err(RemoteError::from_io)?;
+        body.read_to_end(&mut buffered)
+            .map_err(RemoteError::from_io)?;
         self.post_into_reader(url, content_type, accept, &buffered, git_protocol)
     }
 

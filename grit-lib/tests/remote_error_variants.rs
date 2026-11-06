@@ -166,9 +166,8 @@ fn remote_error_variants() {
                         }
                         let local = init_repo(&tmp.path().join("auth-client"));
                         let url = format!("http://127.0.0.1:{port}/repo.git");
-                        let client = http_client_arc(
-                            UreqHttpClient::new().with_git_protocol("version=2"),
-                        );
+                        let client =
+                            http_client_arc(UreqHttpClient::new().with_git_protocol("version=2"));
                         let err = http_fetch(
                             client,
                             local.git_dir(),
