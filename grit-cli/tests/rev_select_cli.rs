@@ -120,6 +120,63 @@ fn seed_diverged_repo(dir: &Path) {
     assert!(grit_run(dir, &["merge", "side"]).status.success());
 }
 
+/// Issue #2552: three commits, tag on the first only, no remotes.
+fn seed_three_commits_tag_on_first(dir: &Path) {
+    fs::create_dir_all(dir).expect("mkdir");
+    assert!(grit_run(dir, &["init", "."]).status.success());
+    assert!(grit_run(dir, &["config", "user.name", "T"])
+        .status
+        .success());
+    assert!(grit_run(dir, &["config", "user.email", "t@e"])
+        .status
+        .success());
+    assert!(grit_run(dir, &["commit", "--allow-empty", "-m", "one"])
+        .status
+        .success());
+    assert!(grit_run(dir, &["tag", "v1"]).status.success());
+    assert!(grit_run(dir, &["commit", "--allow-empty", "-m", "two"])
+        .status
+        .success());
+    assert!(grit_run(dir, &["commit", "--allow-empty", "-m", "three"])
+        .status
+        .success());
+}
+
+#[test]
+fn log_ref_set_flags_replace_default_head_issue_2552() -> TestResult {
+    let dir = std::env::temp_dir().join(format!("grit-rev-select-2552-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    seed_three_commits_tag_on_first(&dir);
+
+    let git_tags = git_oids(&dir, &["--oneline", "--tags"]);
+    let grit_tags = grit_log_oids(&dir, &["log", "--oneline", "--tags"]);
+    assert_eq!(grit_tags, git_tags);
+
+    let git_rem = git_oids(&dir, &["--oneline", "--remotes"]);
+    let grit_rem = grit_log_oids(&dir, &["log", "--oneline", "--remotes"]);
+    assert_eq!(grit_rem, git_rem);
+    assert!(grit_rem.is_empty());
+
+    let git_br = git_oids(&dir, &["--oneline", "--branches=feat/*"]);
+    let grit_br = grit_log_oids(&dir, &["log", "--oneline", "--branches=feat/*"]);
+    assert_eq!(grit_br, git_br);
+    assert!(grit_br.is_empty());
+
+    let git_union = git_oids(&dir, &["--oneline", "HEAD", "--tags"]);
+    let grit_union = grit_log_oids(&dir, &["log", "--oneline", "HEAD", "--tags"]);
+    assert_eq!(grit_union, git_union);
+
+    let revs_out = grit_run(&dir, &["revs", "--remotes", "--count"]);
+    assert!(
+        revs_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&revs_out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&revs_out.stdout).trim(), "0");
+
+    Ok(())
+}
+
 #[test]
 fn log_range_matches_git() -> TestResult {
     let dir = std::env::temp_dir().join(format!("grit-rev-select-range-{}", std::process::id()));

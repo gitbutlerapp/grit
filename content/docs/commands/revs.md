@@ -23,6 +23,8 @@ grit revs <RANGE>... [-n <N>] [--count] [--left-right] [--cherry-mark]
 
 Walks commits reachable from one or more revision ranges and prints each commit’s full object id and subject (first line of the message), one commit per line. Ranges use the same syntax as Git’s `rev-list`: plain tips, `A..B`, symmetric difference `A...B`, and `^tip` exclusions.
 
+With no revision arguments, `--branches`, `--tags`, and `--remotes` (and optional globs) select only those ref tips—they replace the implicit `HEAD` default, they do not union with it, and if nothing matches the count is `0` with exit **0** (like `git rev-list`).
+
 Use `--count` to print only the number of reachable commits (no subject lines). With `--left-right` and exactly one `A...B` range, `--count` prints left and right counts (same as `git rev-list --left-right --count`). Without `--count`, `--left-right` lists the range with a `<` (left) or `>` (right) prefix on each commit.
 
 ### Reviewing a rewritten branch

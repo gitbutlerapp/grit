@@ -180,7 +180,7 @@ impl RevSelectArgs {
         &self,
         repo: &Repository,
         env: &Environment,
-        default_revs: &[&str],
+        _default_revs: &[&str],
         walk_paths: &[String],
     ) -> Result<RevWalkListOptions> {
         if self.merges && self.no_merges {
@@ -213,7 +213,6 @@ impl RevSelectArgs {
             .build_commit_filter(repo)
             .map_err(invalid_commit_filter)?;
         let pickaxe = self.build_pickaxe().map_err(invalid_pickaxe)?;
-        let _ = default_revs;
         Ok(RevWalkListOptions {
             limit: self.limit.get(),
             skip: self.skip,
@@ -238,10 +237,13 @@ impl RevSelectArgs {
 
     /// Revision tokens passed to the library walk (after applying command defaults).
     pub fn rev_tokens<'a>(&'a self, default_revs: &'a [&'a str]) -> Vec<&'a str> {
-        if self.revs.is_empty() {
-            default_revs.to_vec()
+        if !self.revs.is_empty() {
+            return self.revs.iter().map(String::as_str).collect();
+        }
+        if self.all || self.branches.is_some() || self.tags.is_some() || self.remotes.is_some() {
+            Vec::new()
         } else {
-            self.revs.iter().map(String::as_str).collect()
+            default_revs.to_vec()
         }
     }
 

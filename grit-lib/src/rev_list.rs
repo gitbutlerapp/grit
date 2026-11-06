@@ -5579,6 +5579,10 @@ fn rev_list_result_from_commits_with_linkage(
     }
 }
 
+pub(crate) fn empty_rev_list_result() -> RevListResult {
+    rev_list_result_from_commits(Vec::new())
+}
+
 fn rev_list_acceleration_compatible(options: &RevListOptions) -> bool {
     !options.first_parent
         && !options.ancestry_path
@@ -6426,6 +6430,24 @@ pub(crate) fn open_commit_stream<'repo>(
     exclude: &[ObjectId],
     params: &CommitStreamParams,
 ) -> Result<CommitStream<'repo>> {
+    if include.is_empty() {
+        return Ok(CommitStream {
+            graph: CommitGraph::with_commit_graph(repo, params.first_parent, true),
+            heap: BinaryHeap::new(),
+            excluded: RangeWalkHide::empty(),
+            queued: oid_hash_set(),
+            next_seq: 0,
+            skip: params.skip,
+            limit: params.limit,
+            since: params.since,
+            until: params.until,
+            retain_commit_bytes: params.retain_commit_bytes,
+            seen: 0,
+            emitted: 0,
+            errored: None,
+            _pack: repo.odb().pack_read_context_guard(),
+        });
+    }
     let pack = repo.odb().pack_read_context_guard();
     let mut graph = CommitGraph::with_commit_graph(repo, params.first_parent, true);
     if params.retain_commit_bytes {

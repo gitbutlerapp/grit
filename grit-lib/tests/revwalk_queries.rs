@@ -562,6 +562,34 @@ fn branches_glob_matches_git() {
 }
 
 #[test]
+fn ref_set_only_empty_positive_specs_yields_empty_walk() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let oids = build_commit_dag(wt, &[("a", "root"), ("b", "a"), ("c", "b")], &[]);
+    git(wt, &["update-ref", "refs/heads/main", &oids["c"].to_hex()]);
+    let repo = open_grit(wt);
+
+    for (label, selection) in [
+        ("remotes", RefSelection::Remotes(None)),
+        (
+            "branches-glob",
+            RefSelection::Branches(Some("no-such-branch-*".into())),
+        ),
+        (
+            "tags-glob",
+            RefSelection::Tags(Some("no-such-tag-*".into())),
+        ),
+    ] {
+        let opts = RevWalkListOptions {
+            refs: vec![selection],
+            ..RevWalkListOptions::default()
+        };
+        assert_eq!(grit_rev_list_count(&repo, &[], &opts), 0, "{label}");
+        assert!(grit_rev_list_oids(&repo, &[], &opts).is_empty(), "{label}");
+    }
+}
+
+#[test]
 fn left_right_counts_no_merges_match_git() {
     let hist = HistoryRepo::init();
     let wt = hist.worktree();

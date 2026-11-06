@@ -12,8 +12,8 @@ use crate::repo::Repository;
 use std::sync::Arc;
 
 use crate::rev_list::{
-    open_commit_stream, rev_list, split_revision_token, CommitExtent, CommitStream,
-    CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    empty_rev_list_result, open_commit_stream, rev_list, split_revision_token, CommitExtent,
+    CommitStream, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -38,6 +38,10 @@ pub enum MergeFilter {
 }
 
 /// Positive ref tips to include in a rev walk (Git `--all`, `--branches`, `--tags`, `--remotes`).
+///
+/// When combined with empty revision tokens and without [`RefSelection::All`], these selections
+/// replace any implicit default tip (for example `HEAD`); they do not add to it. If a selection
+/// matches nothing, the walk is empty (count `0`, no commits), not an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefSelection {
     /// All refs, including `HEAD` when it points at a commit (`--all`).
@@ -365,6 +369,9 @@ pub fn rev_list_commits_for_author_group(
     tokens: &[&str],
     walk: &RevWalkListOptions,
 ) -> Result<Vec<ObjectId>> {
+    if ref_walk_is_empty_ref_selection(repo, tokens, walk)? {
+        return Ok(Vec::new());
+    }
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk)?;
     let mut opts = rev_list_options_from_walk(repo, walk, &parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
@@ -381,6 +388,19 @@ pub(crate) fn positive_specs_for_walk(
     let (all_refs, mut positive) = expand_ref_selections(repo, &walk.refs)?;
     positive.extend(parsed.positive.iter().cloned());
     Ok((parsed, positive, all_refs))
+}
+
+fn ref_walk_is_empty_ref_selection(
+    repo: &Repository,
+    tokens: &[&str],
+    walk: &RevWalkListOptions,
+) -> Result<bool> {
+    let parsed = parse_rev_walk_tokens(repo, tokens)?;
+    if !parsed.negative.is_empty() || !parsed.positive.is_empty() {
+        return Ok(false);
+    }
+    let (all_refs, ref_positive) = expand_ref_selections(repo, &walk.refs)?;
+    Ok(!all_refs && ref_positive.is_empty())
 }
 
 fn single_symmetric_range(
@@ -512,6 +532,23 @@ impl<'repo> RevWalk<'repo> {
         if !rev_walk_list_supports_stream(walk) {
             return Ok(None);
         }
+        if ref_walk_is_empty_ref_selection(self.repository(), tokens, walk)? {
+            let params = CommitStreamParams {
+                skip: walk.skip,
+                limit: walk.limit,
+                since: walk.since,
+                until: walk.until,
+                first_parent: walk.first_parent,
+                retain_commit_bytes: walk.retain_commit_data,
+                retained_commit_extent: walk.retained_commit_extent,
+            };
+            return Ok(Some(RevWalkCommitStream(open_commit_stream(
+                self.repository(),
+                &[],
+                &[],
+                &params,
+            )?)));
+        }
         let (tips, hide) = resolve_log_walk_tips_and_hide(self.repository(), tokens, walk)?;
         let params = CommitStreamParams {
             skip: walk.skip,
@@ -565,6 +602,9 @@ impl<'repo> RevWalk<'repo> {
                 return Ok(result);
             }
         }
+        if ref_walk_is_empty_ref_selection(repo, tokens, options)? {
+            return Ok(empty_rev_list_result());
+        }
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         if sides {
             single_symmetric_range(tokens, &parsed)?;
@@ -575,11 +615,18 @@ impl<'repo> RevWalk<'repo> {
 
     /// Count reachable commits without collecting them, using the commit-graph when loaded.
     ///
+    /// When `tokens` is empty, [`RevWalkListOptions::refs`] selects only ref tips (no implicit
+    /// `HEAD`), and every selection matches nothing, this returns `0` (same as `git rev-list
+    /// --count` with only `--remotes` in a repository with no remote-tracking refs).
+    ///
     /// # Errors
     ///
     /// Propagates rev-parse and rev-list errors.
     pub fn count(&self, tokens: &[&str], options: &RevWalkListOptions) -> Result<usize> {
         let repo = self.repository();
+        if ref_walk_is_empty_ref_selection(repo, tokens, options)? {
+            return Ok(0);
+        }
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         if parsed.negative.is_empty()
             && positive.len() == 1
