@@ -19,7 +19,7 @@ fn git_config(repo: &Repository, args: &[&str]) {
 #[test]
 fn bool_int_path_read_through_repo_config() -> grit_lib::error::Result<()> {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 
     git_config(&repo, &["user.name", "Roundtrip"]);
     git_config(&repo, &["grit.testbool", "yes"]);
@@ -50,7 +50,7 @@ fn bool_int_path_read_through_repo_config() -> grit_lib::error::Result<()> {
 #[test]
 fn invalid_bool_yields_config_error() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     git_config(&repo, &["grit.badbool", "maybe"]);
     repo.reload_config().expect("reload");
 
