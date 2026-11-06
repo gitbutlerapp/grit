@@ -810,7 +810,17 @@ pub fn indented_paths(paths: &[String]) -> String {
     out
 }
 
+fn guide_stash(err: &grit_lib::stash::StashError) -> Option<Error> {
+    match err {
+        grit_lib::stash::StashError::NotFound { n } => Some(stash_not_found(*n)),
+        _ => None,
+    }
+}
+
 fn guide_cause(cause: &(dyn StdError + 'static)) -> Option<Error> {
+    if let Some(err) = cause.downcast_ref::<grit_lib::stash::StashError>() {
+        return guide_stash(err);
+    }
     if let Some(err) = cause.downcast_ref::<PushPlanError>() {
         return guide_push_plan(err);
     }
@@ -966,7 +976,6 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::RemoveBlocked { paths } => {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
-        LibError::StashNotFound { .. } => Some(stash_not_found(err)),
         LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
@@ -1252,18 +1261,19 @@ fn no_operation_in_progress(human: String) -> Error {
     guided(ErrorKind::NoOperationInProgress, human, None, None)
 }
 
-fn stash_not_found(err: &LibError) -> Error {
-    let LibError::StashNotFound { n } = err else {
-        unreachable!("stash_not_found called for {:?}", err);
-    };
-    let (human, hint) = if *n == 0 {
+pub(crate) fn stash_not_found_cli(n: usize) -> anyhow::Error {
+    stash_not_found(n)
+}
+
+fn stash_not_found(n: usize) -> Error {
+    let (human, hint) = if n == 0 {
         (
             "no stash entries".to_owned(),
             Some("save local changes with `grit stash push`".to_owned()),
         )
     } else {
         (
-            format!("no stash entry at index {n}"),
+            format!("no stash entry at index {n}",),
             Some("run `grit stash list` to see valid indexes".to_owned()),
         )
     };
@@ -1683,13 +1693,12 @@ mod tests {
     }
 
     fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
+        use grit_lib::error::LockHeldError;
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(WrappedLib(LibError::LockHeld(
-            grit_lib::error::LockHeldError {
-                path: path.clone(),
-                holder,
-            },
-        )))
+        let err = Error::new(WrappedLib(LibError::LockHeld(LockHeldError {
+            path: path.clone(),
+            holder,
+        })))
         .context("staging files");
         (err, path)
     }

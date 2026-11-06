@@ -4,7 +4,6 @@
 //! public stash API; option and result types live in [`crate::stash`].
 
 use crate::diff::{DiffEntry, DiffOptions, DiffStat};
-use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::porcelain::stash::{
     apply_stash_entry, apply_stash_oid, apply_stash_reference, clear_stashes, create_stash,
@@ -15,11 +14,12 @@ use crate::porcelain::stash::{
 };
 use crate::progress::{Cancel, ProgressSink};
 use crate::repo::Repository;
+use crate::stash::StashResult;
 
 /// Stash list/push/apply/pop/drop for one open repository.
 ///
 /// Entries are addressed by their newest-first index (`0` is `stash@{0}`). Operations that touch
-/// the worktree return [`crate::error::Error::StashBareRepository`] on a bare repository.
+/// the worktree return [`crate::stash::StashError::BareRepository`] on a bare repository.
 #[derive(Debug, Copy, Clone)]
 pub struct RepositoryStash<'repo> {
     repo: &'repo Repository,
@@ -37,24 +37,7 @@ impl<'repo> RepositoryStash<'repo> {
     }
 
     /// List stash entries from `refs/stash` reflog (newest first).
-    ///
-    /// # Errors
-    ///
-    /// Propagates reflog read failures.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use grit_lib::repo::Repository;
-    /// # use std::path::Path;
-    /// # fn demo() -> grit_lib::error::Result<()> {
-    /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
-    /// let entries = repo.stash().list()?;
-    /// let _ = entries.len();
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn list(&self) -> Result<Vec<StashEntry>> {
+    pub fn list(&self) -> StashResult<Vec<StashEntry>> {
         list_stashes(self.repo)
     }
 
@@ -68,11 +51,11 @@ impl<'repo> RepositoryStash<'repo> {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::StashOptionConflict`] when [`StashPushOptions::dry_run`] is set
-    ///   (use [`Self::preview`]).
-    /// - [`crate::error::Error::StashNoInitialCommit`] before the first commit.
-    /// - [`crate::error::Error::Cancelled`] when `cancel` or
-    ///   fires. Before `refs/stash` moves, the repository is
+    /// - [`crate::stash::StashPushValidationError::DryRunUsePreview`] when
+    ///   [`StashPushOptions::dry_run`] is set (use [`Self::preview`]).
+    /// - [`crate::stash::StashError::NoInitialCommit`] before the first commit.
+    /// - [`crate::stash::StashError::Cancelled`] when [`crate::progress::Cancel::is_cancelled`]
+    ///   is true on the `cancel` argument. Before `refs/stash` moves, the repository is
     ///   unchanged; once the entry is stored it stays, even when the reset that follows is
     ///   cancelled (the same rule as a failed reset).
     /// - Stash build, ref, and checkout failures.
@@ -103,119 +86,60 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashPushOptions,
         progress: &mut dyn ProgressSink,
         cancel: &dyn Cancel,
-    ) -> Result<Option<StashPushResult>> {
+    ) -> StashResult<Option<StashPushResult>> {
         push_stash(self.repo, options, progress, cancel)
     }
 
     /// Report which paths [`Self::push`] would save, without writing objects, refs, or files.
-    ///
-    /// Returns `None` when there is nothing to stash.
-    ///
-    /// # Errors
-    ///
-    /// Same validation and read failures as [`Self::push`].
-    pub fn preview(&self, options: &StashPushOptions) -> Result<Option<StashPreview>> {
+    pub fn preview(&self, options: &StashPushOptions) -> StashResult<Option<StashPreview>> {
         preview_stash(self.repo, options)
     }
 
     /// Build a stash commit without updating `refs/stash` or touching the worktree.
-    ///
-    /// Returns `None` when there is nothing to stash.
-    ///
-    /// # Errors
-    ///
-    /// Same build failures as [`Self::push`].
-    pub fn create(&self, options: &StashPushOptions) -> Result<Option<ObjectId>> {
+    pub fn create(&self, options: &StashPushOptions) -> StashResult<Option<ObjectId>> {
         create_stash(self.repo, options)
     }
 
     /// Apply `stash@{index}` without dropping it.
-    ///
-    /// # Returns
-    ///
-    /// The conflicted paths and their kinds; [`StashApplyOutcome::has_conflicts`] is false on a
-    /// clean apply.
-    ///
-    /// Progress and cancellation work as in [`Self::apply_commit`].
-    ///
-    /// # Errors
-    ///
-    /// [`crate::error::Error::StashNotFound`] when `index` is out of range, plus the
-    /// [`Self::apply_commit`] errors.
     pub fn apply(
         &self,
         index: usize,
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &dyn Cancel,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         apply_stash_entry(self.repo, index, options, progress, cancel)
     }
 
-    /// Apply any stash-shaped commit (for example one from [`Self::create`]) without touching
-    /// `refs/stash`.
-    ///
-    /// Bulk work-tree writes report [`crate::progress::ProgressPhase::CheckingOutFiles`] to
-    /// `progress`; `cancel` is checked before and while the work tree is written.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::error::Error::CorruptStash`] for a malformed stash commit, plus local-change,
-    /// untracked-overwrite, and index write failures. [`crate::error::Error::Cancelled`] when
-    /// cancelled: the index is not written, `refs/stash` is untouched, and the bulk checkout is
-    /// rolled back; files content-merged onto a moved `HEAD` before the cancel stay written.
+    /// Apply any stash-shaped commit without touching `refs/stash`.
     pub fn apply_commit(
         &self,
         stash: &ObjectId,
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &dyn Cancel,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         apply_stash_oid(self.repo, stash, options, progress, cancel)
     }
 
     /// Apply `stash@{index}` and drop it when it applied without conflicts.
-    ///
-    /// # Returns
-    ///
-    /// The conflicted paths and their kinds. When [`StashApplyOutcome::has_conflicts`] is true
-    /// the entry is kept.
-    ///
-    /// A cancelled apply keeps the entry; see [`Self::apply_commit`].
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::apply`] and [`Self::drop`].
     pub fn pop(
         &self,
         index: usize,
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &dyn Cancel,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         pop_stash_entry(self.repo, index, options, progress, cancel)
     }
 
     /// Remove `stash@{index}`, moving `refs/stash` to the next entry (or deleting it).
-    ///
-    /// # Returns
-    ///
-    /// The W commit object id of the removed entry (for logging or recovery via
-    /// [`Self::apply_commit`]).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`crate::error::Error::StashNotFound`] when `index` is out of range.
-    pub fn drop(&self, index: usize) -> Result<ObjectId> {
+    pub fn drop(&self, index: usize) -> StashResult<ObjectId> {
         drop_stash(self.repo, index)
     }
 
     /// Parse a stash selector (`stash@{{n}}`, decimal index, or commit id).
-    ///
-    /// # Errors
-    ///
-    /// Propagates [`parse_stash_reference`] failures.
-    pub fn parse_reference(&self, spec: Option<&str>) -> Result<StashReference> {
+    pub fn parse_reference(&self, spec: Option<&str>) -> crate::error::Result<StashReference> {
         parse_stash_reference(self.repo, spec)
     }
 
@@ -232,7 +156,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &dyn Cancel,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         apply_stash_reference(self.repo, reference, options, progress, cancel)
     }
 
@@ -243,7 +167,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &dyn Cancel,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         pop_stash_reference(self.repo, reference, options, progress, cancel)
     }
 
@@ -252,27 +176,17 @@ impl<'repo> RepositoryStash<'repo> {
         &self,
         name: &str,
         reference: StashReference,
-    ) -> Result<StashBranchOutcome> {
+    ) -> StashResult<StashBranchOutcome> {
         stash_branch_reference(self.repo, name, reference)
     }
 
     /// Remove every stash entry, returning how many were removed.
-    ///
-    /// # Errors
-    ///
-    /// Propagates ref store and reflog delete failures.
-    pub fn clear(&self) -> Result<usize> {
+    pub fn clear(&self) -> StashResult<usize> {
         clear_stashes(self.repo)
     }
 
-    /// Tree diff of `stash@{index}` against the commit it was made on (`git stash show`), in
-    /// path order.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::error::Error::StashNotFound`] or [`crate::error::Error::CorruptStash`] when the
-    /// entry is missing or malformed.
-    pub fn diff(&self, index: usize, options: &StashDiffOptions) -> Result<Vec<DiffEntry>> {
+    /// Tree diff of `stash@{index}` against the commit it was made on.
+    pub fn diff(&self, index: usize, options: &StashDiffOptions) -> StashResult<Vec<DiffEntry>> {
         stash_diff(self.repo, index, options)
     }
 
@@ -312,19 +226,12 @@ impl<'repo> RepositoryStash<'repo> {
         index: usize,
         options: &StashDiffOptions,
         diff_options: DiffOptions,
-    ) -> Result<DiffStat> {
+    ) -> StashResult<DiffStat> {
         stash_diff_stat(self.repo, index, options, diff_options)
     }
 
-    /// Create branch `name` at the commit `stash@{index}` was made on, switch to it, apply the
-    /// stash with its index, and drop the entry when that applied cleanly.
-    ///
-    /// # Errors
-    ///
-    /// [`crate::porcelain::branch_error::BranchError::AlreadyExists`] when `name` is taken,
-    /// [`crate::error::Error::StashNotFound`] when `index` is out of range, and switch or apply
-    /// failures otherwise.
-    pub fn branch(&self, name: &str, index: usize) -> Result<StashBranchOutcome> {
+    /// Create branch `name` at the stash base, switch, apply with index, drop when clean.
+    pub fn branch(&self, name: &str, index: usize) -> StashResult<StashBranchOutcome> {
         stash_branch(self.repo, name, index)
     }
 }

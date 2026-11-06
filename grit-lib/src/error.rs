@@ -2117,25 +2117,6 @@ pub enum Error {
     #[error(transparent)]
     Worktree(#[from] crate::worktree::WorktreeError),
 
-    /// Stash commit object has fewer parents or an invalid shape for apply/show.
-    #[error("corrupt stash commit: {0}")]
-    CorruptStash(&'static str),
-
-    /// `stash@{{n}}` is out of range for the current stash reflog.
-    #[error("stash entry stash@{{{n}}} not found")]
-    StashNotFound {
-        /// Stash reflog index (`stash@{{n}}`).
-        n: usize,
-    },
-
-    /// A stash commit id was given to [`crate::repo_handles::RepositoryStash::pop`] but is not on
-    /// `refs/stash` (use [`crate::repo_handles::RepositoryStash::apply_commit`] to recover it).
-    #[error("stash commit {oid} is not on the stash stack")]
-    StashCommitNotOnStack {
-        /// Stash W commit object id.
-        oid: crate::objects::ObjectId,
-    },
-
     /// Ref does not exist and has no reflog entries.
     #[error("unknown ref '{refname}'")]
     ReflogUnknownRef {
@@ -2169,58 +2150,13 @@ pub enum Error {
         index: usize,
     },
 
-    /// Pushing or creating a stash ([`crate::repo_handles::RepositoryStash::push`]) requires at least one commit.
-    #[error("cannot stash without a commit")]
-    StashNoInitialCommit,
-
-    /// Stash create/apply/pop requires a working tree (not a bare repository).
-    #[error("cannot stash in a bare repository")]
-    StashBareRepository,
-
     /// [`crate::blame::BlameFinalSource::Worktree`] was requested in a bare repository.
     #[error("cannot blame the working tree of a bare repository")]
     BlameWorktreeBareRepository,
 
-    /// [`crate::repo_handles::RepositoryStash::apply`] with `restore_index` could
-    /// not merge the current index with the stashed index parent.
-    #[error("conflicts in index while applying stash with --index")]
-    StashIndexConflict,
-
-    /// Incompatible [`StashPushOptions`](crate::stash::StashPushOptions) flags.
-    #[error("{0}")]
-    StashOptionConflict(String),
-
-    /// Partial [`crate::repo_handles::RepositoryStash::push`] hunk selection failed.
+    /// Partial hunk selection failed outside the stash stack.
     #[error(transparent)]
     HunkSelection(#[from] crate::porcelain::hunk_select::HunkSelectError),
-
-    /// HEAD does not resolve while applying a stash entry.
-    #[error("missing HEAD while applying stash")]
-    StashMissingHead,
-
-    /// Applying a stash would overwrite locally modified worktree content.
-    #[error(
-        "your local changes to the following files would be overwritten by stash apply: {paths}"
-    )]
-    StashWouldOverwriteLocalChanges {
-        /// Space-separated list of paths that would be overwritten.
-        paths: String,
-    },
-
-    /// The index could not be written after a successful stash apply.
-    #[error("writing index after stash apply: {0}")]
-    StashIndexWrite(String),
-
-    /// A symlink blob in a stash commit is not valid UTF-8.
-    #[error("symlink target is not UTF-8")]
-    StashSymlinkNotUtf8,
-
-    /// Applying a stash with an untracked-files parent would replace an existing worktree path.
-    #[error("stash untracked restore blocked: '{path}' already exists on disk")]
-    StashCouldNotRestoreUntracked {
-        /// Worktree path that already exists and blocks untracked restore.
-        path: String,
-    },
 
     /// [`CommitRequest::amend`](crate::porcelain::commit::CommitRequest::amend) was set on an unborn branch.
     #[error("cannot amend: no commits on this branch yet")]
@@ -2586,24 +2522,12 @@ impl Error {
             Self::BranchListNamesDateSort => "branch_list_names_date_sort",
             Self::Tag(..) => "tag",
             Self::Worktree(..) => "worktree",
-            Self::CorruptStash(..) => "corrupt_stash",
-            Self::StashNotFound { .. } => "stash_not_found",
-            Self::StashCommitNotOnStack { .. } => "stash_commit_not_on_stack",
             Self::ReflogUnknownRef { .. } => "reflog_unknown_ref",
             Self::ReflogInvalidSelector { .. } => "reflog_invalid_selector",
             Self::ReflogInvalidIndex { .. } => "reflog_invalid_index",
             Self::ReflogIndexOutOfRange { .. } => "reflog_index_out_of_range",
-            Self::StashNoInitialCommit => "stash_no_initial_commit",
-            Self::StashBareRepository => "stash_bare_repository",
             Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
-            Self::StashIndexConflict => "stash_index_conflict",
-            Self::StashOptionConflict(..) => "stash_option_conflict",
             Self::HunkSelection(..) => "hunk_selection",
-            Self::StashMissingHead => "stash_missing_head",
-            Self::StashWouldOverwriteLocalChanges { .. } => "stash_would_overwrite_local_changes",
-            Self::StashIndexWrite(..) => "stash_index_write",
-            Self::StashSymlinkNotUtf8 => "stash_symlink_not_utf8",
-            Self::StashCouldNotRestoreUntracked { .. } => "stash_could_not_restore_untracked",
             Self::AmendUnborn => "amend_unborn",
             Self::NoteAlreadyExists { .. } => "note_already_exists",
             Self::InvalidNotesRef(..) => "invalid_notes_ref",
@@ -2985,13 +2909,6 @@ impl serde::Serialize for Error {
                 out.serialize_field("message", &self.to_string())?;
                 out.serialize_field("reason", &reason.to_string())?;
                 out.serialize_field("paths", paths)?;
-                out.end()
-            }
-            Self::StashCouldNotRestoreUntracked { path } => {
-                let mut out = serializer.serialize_struct("Error", 3)?;
-                out.serialize_field("kind", self.kind_name())?;
-                out.serialize_field("message", &self.to_string())?;
-                out.serialize_field("path", path)?;
                 out.end()
             }
             Self::DirtyWorktree { operation, paths } => {

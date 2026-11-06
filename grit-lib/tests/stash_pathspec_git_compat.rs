@@ -193,7 +193,11 @@ fn stash_push_untracked_pathspec_no_match_is_typed_error() {
             &grit_lib::progress::NeverCancel,
         )
         .expect_err("no match with -u");
-    assert!(matches!(err, Error::PathspecNoMatch { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::stash::StashError::Library(boxed)
+            if matches!(boxed.as_ref(), Error::PathspecNoMatch { .. })
+    ));
 }
 
 #[test]
@@ -213,7 +217,11 @@ fn stash_push_paths_no_match_is_typed_error() {
             &grit_lib::progress::NeverCancel,
         )
         .expect_err("no match");
-    assert!(matches!(err, Error::PathspecNoMatch { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::stash::StashError::Library(boxed)
+            if matches!(boxed.as_ref(), Error::PathspecNoMatch { .. })
+    ));
 }
 
 #[test]
@@ -364,7 +372,7 @@ fn stash_pop_index_conflict_keeps_entry() {
         )
         .expect_err("index conflict");
     assert!(
-        matches!(err, Error::StashIndexConflict),
+        matches!(err, grit_lib::stash::StashError::IndexConflict),
         "expected index conflict, got {err:?}"
     );
 

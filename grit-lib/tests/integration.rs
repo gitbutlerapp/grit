@@ -1940,6 +1940,8 @@ mod stash_apply_outcome_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "stash_diff_stat_git_compat.rs"]
 mod stash_diff_stat_git_compat;
+#[path = "stash_error_variants.rs"]
+mod stash_error_variants;
 #[cfg(feature = "full-tests")]
 #[path = "stash_git_compat.rs"]
 mod stash_git_compat;

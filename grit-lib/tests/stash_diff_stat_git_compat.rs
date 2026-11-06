@@ -170,7 +170,7 @@ fn stash_diff_stat_reports_missing_entry() {
         .diff_stat(5, &StashDiffOptions::default(), DiffOptions::default())
         .expect_err("no stash@{5}");
     assert!(
-        matches!(err, grit_lib::error::Error::StashNotFound { .. }),
+        matches!(err, grit_lib::stash::StashError::NotFound { .. }),
         "{err:?}"
     );
 }

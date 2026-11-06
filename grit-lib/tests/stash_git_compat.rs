@@ -1,14 +1,14 @@
 //! Round-trip stash create/list/pop/drop with system `git`.
 
 use grit_lib::diff::DiffStatus;
-use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::stash::{
-    parse_stash_reference, StashApplyOptions, StashDiffOptions, StashPushOptions, StashReference,
+    parse_stash_reference, StashApplyOptions, StashDiffOptions, StashError, StashPushOptions,
+    StashReference,
 };
 use std::process::Command;
 
@@ -523,7 +523,7 @@ fn stash_pop_with_untracked_does_not_overwrite_existing_untracked() {
     assert!(
         matches!(
             err,
-            Error::StashCouldNotRestoreUntracked { ref path } if path == "u.txt"
+            grit_lib::stash::StashError::CouldNotRestoreUntracked { ref path } if path == "u.txt"
         ),
         "unexpected error: {err:?}"
     );
@@ -543,7 +543,10 @@ fn stash_pop_with_untracked_does_not_overwrite_existing_untracked() {
         )
         .expect_err("apply must fail");
     assert!(
-        matches!(err, Error::StashCouldNotRestoreUntracked { .. }),
+        matches!(
+            err,
+            grit_lib::stash::StashError::CouldNotRestoreUntracked { .. }
+        ),
         "apply error: {err:?}"
     );
     assert_eq!(
@@ -603,7 +606,7 @@ fn stash_apply_with_untracked_does_not_overwrite_ignored_path() {
     assert!(
         matches!(
             err,
-            Error::StashCouldNotRestoreUntracked { ref path } if path == "u.txt"
+            grit_lib::stash::StashError::CouldNotRestoreUntracked { ref path } if path == "u.txt"
         ),
         "unexpected: {err:?}"
     );
@@ -658,7 +661,7 @@ fn stash_apply_with_untracked_does_not_overwrite_newly_tracked_path() {
     assert!(
         matches!(
             err,
-            Error::StashCouldNotRestoreUntracked { ref path } if path == "u.txt"
+            grit_lib::stash::StashError::CouldNotRestoreUntracked { ref path } if path == "u.txt"
         ),
         "unexpected: {err:?}"
     );
@@ -1000,7 +1003,10 @@ fn stash_push_u_tracked_file_replaced_by_untracked_dir_pop_refuses() {
         )
         .expect_err("pop must fail like git when untracked dir cannot be restored");
     assert!(
-        matches!(err, Error::StashCouldNotRestoreUntracked { .. }),
+        matches!(
+            err,
+            grit_lib::stash::StashError::CouldNotRestoreUntracked { .. }
+        ),
         "unexpected error: {err:?}"
     );
     assert_eq!(repo.stash().list().expect("list").len(), 1);
@@ -1328,7 +1334,7 @@ fn stash_branch_existing_name_is_typed_error() {
     let err = repo.stash().branch("taken", 0).unwrap_err();
     assert!(matches!(
         err,
-        Error::Branch(BranchError::AlreadyExists { name }) if name == "taken"
+        StashError::Branch(BranchError::AlreadyExists { name }) if name == "taken"
     ));
 }
 
@@ -1632,7 +1638,10 @@ fn stash_pop_refuses_racily_rewritten_same_size_file() {
         )
         .expect_err("pop must refuse to overwrite the local change");
     assert!(
-        matches!(err, Error::StashWouldOverwriteLocalChanges { .. }),
+        matches!(
+            err,
+            grit_lib::stash::StashError::WouldOverwriteLocalChanges { .. }
+        ),
         "unexpected error: {err:?}"
     );
     assert_eq!(
@@ -1902,7 +1911,10 @@ fn apply_stash_still_refuses_differing_untracked_with_overwrite_flag() {
             &NeverCancel,
         )
         .expect_err("differing untracked");
-    assert!(matches!(err, Error::StashCouldNotRestoreUntracked { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::stash::StashError::CouldNotRestoreUntracked { .. }
+    ));
 }
 
 #[test]
@@ -1945,7 +1957,10 @@ fn apply_stash_overwrite_identical_rejects_when_any_collision_differs() {
             &NeverCancel,
         )
         .expect_err("differing z must block apply");
-    assert!(matches!(err, Error::StashCouldNotRestoreUntracked { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::stash::StashError::CouldNotRestoreUntracked { .. }
+    ));
     assert_eq!(
         std::fs::read_to_string(root.path().join("z.txt")).expect("z"),
         "local z\n"

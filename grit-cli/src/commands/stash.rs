@@ -817,14 +817,16 @@ fn resolve_stash_index(repo: &grit_lib::repo::Repository, spec: Option<&str>) ->
     let reference = repo
         .stash()
         .parse_reference(spec)
-        .map_err(map_stash_error)?;
+        .map_err(anyhow::Error::new)?;
     match reference {
         StashReference::Index(n) => Ok(n),
         StashReference::Commit(oid) => {
             if let Some(n) = repo.stash().index_for_oid(&oid) {
                 Ok(n)
             } else {
-                Err(map_stash_error(Error::StashNotFound { n: 0 }))
+                Err(map_stash_error(grit_lib::stash::StashError::NotFound {
+                    n: 0,
+                }))
             }
         }
     }
@@ -843,39 +845,46 @@ fn stash_reference_parts(
                 .into_iter()
                 .find(|e| e.index == n)
                 .map(|e| e.oid)
-                .ok_or(Error::StashNotFound { n })?;
+                .ok_or_else(|| grit_lib::stash::StashError::NotFound { n })
+                .map_err(map_stash_error)?;
             Ok((Some(n), oid))
         }
         StashReference::Commit(oid) => Ok((repo.stash().index_for_oid(&oid), oid)),
     }
 }
 
-fn map_stash_error(err: Error) -> anyhow::Error {
+fn map_stash_error(err: grit_lib::stash::StashError) -> anyhow::Error {
+    use grit_lib::stash::{StashError, StashPushValidationError};
     match err {
-        Error::StashNoInitialCommit => {
+        StashError::NoInitialCommit => {
             anyhow::anyhow!("you do not have the initial commit yet")
         }
-        stash @ Error::StashNotFound { .. } => anyhow::Error::new(stash),
-        Error::StashCommitNotOnStack { oid } => anyhow::anyhow!(
+        StashError::NotFound { n } => crate::error_map::stash_not_found_cli(n),
+        StashError::CommitNotOnStack { oid } => anyhow::anyhow!(
             "stash commit {} is not on the stash stack; use `grit stash apply {}` instead",
             oid.to_short_hex(),
             oid.to_hex()
         ),
-        Error::CorruptStash(msg) => anyhow::anyhow!("corrupt stash commit: {msg}"),
-        Error::StashWouldOverwriteLocalChanges { paths } => {
+        StashError::CorruptStash { reason, .. } => {
+            anyhow::anyhow!("corrupt stash commit: {reason}")
+        }
+        StashError::WouldOverwriteLocalChanges { paths } => {
             anyhow::anyhow!("local changes would be overwritten by stash:\n{paths}")
         }
-        Error::StashCouldNotRestoreUntracked { path } => {
+        StashError::CouldNotRestoreUntracked { path } => {
             anyhow::anyhow!("stash untracked restore blocked: '{path}' already exists on disk")
         }
-        Error::StashBareRepository => anyhow::anyhow!("cannot stash in a bare repository"),
-        Error::StashIndexConflict => {
+        StashError::BareRepository => anyhow::anyhow!("cannot stash in a bare repository"),
+        StashError::IndexConflict => {
             anyhow::anyhow!("conflicts in index while applying stash with --index")
         }
-        pathspec @ Error::PathspecNoMatch { .. } => anyhow::Error::new(pathspec),
-        Error::HunkSelection(err) => anyhow::Error::new(err),
-        Error::StashOptionConflict(msg) => anyhow::anyhow!("{msg}"),
-        Error::Branch(err) => anyhow::Error::new(err),
+        StashError::PushValidation(StashPushValidationError::DryRunUsePreview) => {
+            anyhow::anyhow!("dry-run is not supported on push; use preview instead")
+        }
+        StashError::PushValidation(other) => anyhow::anyhow!("{other}"),
+        StashError::Branch(branch_err) => anyhow::Error::new(Error::Branch(branch_err)),
+        StashError::HunkSelection(hunk_err) => anyhow::Error::new(Error::HunkSelection(hunk_err)),
+        StashError::Library(lib) => crate::json_error::map_lib_error(*lib),
         other => anyhow::Error::new(other),
     }
 }

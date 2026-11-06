@@ -306,7 +306,9 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "stash_not_found",
-        build: || Error::new(LibError::StashNotFound { n: 0 }),
+        build: || {
+            Error::new(grit_lib::stash::StashError::NotFound { n: 0 })
+        },
         kind: Some(ErrorKind::StashNotFound),
         exit: ExitStatus::Failure,
         human: || "no stash entries".to_owned(),
