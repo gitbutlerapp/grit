@@ -224,7 +224,7 @@ pub fn status_diff_entry_matches_pathspec(entry: &DiffEntry, pathspecs: &[String
     status_path_matches(entry.path(), pathspecs)
 }
 
-/// Like [`status_diff_entry_matches_pathspec`], honoring [`Pathspec::globals`].
+/// Like [`status_diff_entry_matches_pathspec`], honoring [`Pathspec::globals`](crate::worktree::pathspec::Pathspec::globals).
 pub fn status_diff_entry_matches_pathspec_typed(
     repo: &Repository,
     entry: &DiffEntry,
