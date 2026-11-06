@@ -65,8 +65,15 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         anyhow::bail!("--check cannot be used with --autostash");
     }
     let repo = context::discover()?;
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     match checkout_pull(&repo, &config, args) {
         Some(CheckoutPull::Refresh(marker)) => {
             return refresh_checkout(&repo, &config, &marker, args, mode)
@@ -112,7 +119,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
     let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
-    let url = config.get(&format!("remote.{remote_name}.url"));
+    let url = crate::context::config_string(&config, &format!("remote.{remote_name}.url"));
     if progress.is_drawing() && remote_name != "." {
         eprintln!(
             "{}",
@@ -168,7 +175,8 @@ fn checkout_pull(
         return None;
     }
     let marker = CheckoutMarker::read(repo.git_dir())?;
-    let remote_url = |remote: &str| config.get(&format!("remote.{remote}.url"));
+    let remote_url =
+        |remote: &str| crate::context::config_string(config, &format!("remote.{remote}.url"));
     let is_server =
         |remote: &str| remote == marker.url || remote_url(remote).as_deref() == Some(&marker.url);
     let branch = match (args.fetch.remote.as_deref(), args.fetch.refspecs.as_slice()) {

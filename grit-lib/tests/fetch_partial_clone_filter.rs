@@ -110,10 +110,13 @@ fn git_config_value(git_dir: &Path, key: &str) -> Option<String> {
     let cfg = ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::capture_process(),
+            Some(git_dir),
+        ),
     )
     .expect("config");
-    cfg.get(key)
+    cfg.get(key).unwrap()
 }
 
 /// `git clone --no-checkout --filter=<filter>`: the clone installs no promisor
@@ -285,7 +288,10 @@ fn refetch_reapplies_stored_filter() {
     let config = ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),
         Some(&git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::capture_process(),
+            Some(&git_dir),
+        ),
     )
     .expect("cfg");
     let remote = Remote::from_config(&config, "origin").expect("remote");
@@ -308,7 +314,7 @@ fn refetch_reapplies_stored_filter() {
 fn grit_fsck(repo: &Repository) -> (FsckReport, bool) {
     let opts = FsckOptions::full_repository(false).with_check_dangling(false);
     let report = fsck(repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let ok = report.ok(&repo.config().expect("config"), &opts);
+    let ok = report.ok(&repo.config().snapshot().expect("config"), &opts);
     (report, ok)
 }
 
@@ -326,7 +332,7 @@ fn fsck_accepts_promised_missing_blobs() {
     .expect("open");
     assert!(repo_treats_promisor_packs(
         &git_dir,
-        &repo.config().expect("cfg")
+        &repo.config().snapshot().expect("cfg")
     ));
     let (report, ok) = grit_fsck(&repo);
     assert!(ok, "{:?}", report.issues);

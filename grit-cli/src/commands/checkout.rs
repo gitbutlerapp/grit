@@ -165,7 +165,12 @@ pub fn run(
 ) -> Result<CheckoutOutcome> {
     let started = Instant::now();
     let env = crate::context::environment();
-    let config = ConfigSet::load(&env, None, true).context("could not load config")?;
+    let config = ConfigSet::load(
+        &env,
+        None,
+        &grit_lib::config::LoadConfigOptions::standard(&env, None),
+    )
+    .context("could not load config")?;
     let http = crate::context::http_client_factory()
         .create(&config)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -223,7 +228,7 @@ pub fn run(
         );
     }
 
-    let email = config.get("user.email");
+    let email = crate::context::config_string(&config, "user.email");
     let request = CheckoutRequest {
         paths: paths.clone(),
         client: dest.file_name().map(|n| n.to_string_lossy().into_owned()),
@@ -331,8 +336,15 @@ pub(crate) fn open_checkout(repo: grit_lib::repo::Repository) -> Result<Option<O
     let Some(marker) = CheckoutMarker::read(repo.git_dir()) else {
         return Ok(None);
     };
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &crate::context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let http = crate::context::http_client_factory()
         .create(&config)
         .map_err(|e| anyhow::anyhow!("{e}"))?;

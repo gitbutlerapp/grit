@@ -49,8 +49,12 @@ pub fn run(
     let options = RepositoryOptions::with_environment(crate::context::environment());
     let repo = Repository::open(Path::new(directory), &options.clone().for_serving())
         .with_context(|| format!("opening repository '{directory}'"))?;
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .unwrap_or_default();
     let hidden_refs = match service {
         Service::UploadPack => grit_lib::refs::hide_refs::hide_ref_patterns_uploadpack(&config),
         Service::ReceivePack => grit_lib::refs::hide_refs::hide_ref_patterns_receive(&config),
@@ -71,7 +75,6 @@ pub fn run(
     if matches!(service, Service::UploadPack) {
         opts.attach_promisor_fetcher(
             &repo,
-            &config,
             Some(std::sync::Arc::new(
                 grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
                     crate::context::http_client_factory(),

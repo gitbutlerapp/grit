@@ -422,7 +422,7 @@ fn move_head_tip(
         Expected::Oid(previous),
         None,
     )?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let identity = opts.identity.header_line();
     for name in logged {
         refs::append_reflog_on_store(

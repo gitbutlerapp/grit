@@ -53,7 +53,10 @@ fn status_model_of_git_paused_merge_serializes_operation_and_conflicts() {
     assert_eq!(json["conflicts"][0], "a.txt");
     assert_eq!(json["conflict_details"][0]["path"], "a.txt");
     assert_eq!(json["conflict_details"][0]["kind"], "both_modified");
-    assert!(json.get("index").is_none(), "the index is not serialized");
+    assert!(
+        json.get("index").unwrap().is_none(),
+        "the index is not serialized"
+    );
 }
 
 /// Author and committer dates match what `git log` reports for the same commit.

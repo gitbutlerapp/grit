@@ -102,7 +102,7 @@ fn fetch_without_remote_updates_branch_remote_tracking_ref_like_git() {
     let (grit_dir, git_dir, tip) = setup("fetch");
     let origin_before = rev(&grit_dir, "refs/remotes/origin/main");
     let repo = open(&grit_dir);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let head = resolve_head_for_repository(&repo).expect("head");
     let invocation = resolve_fetch_invocation(config.as_ref(), None, &[], head.branch_name());
     assert_eq!(invocation.remote, "backup");

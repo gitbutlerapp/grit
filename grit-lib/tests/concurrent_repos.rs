@@ -171,13 +171,13 @@ fn write_non_executable_hook(hook_path: &Path) {
 fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
     for i in 0..ITERS {
         let repo = open_with_env(&fx);
-        let cfg = repo.config().expect("config");
+        let cfg = repo.config().snapshot().expect("config");
         assert_eq!(
-            cfg.get("user.name").as_deref(),
+            cfg.get("user.name").unwrap().as_deref(),
             Some(fx.author.as_str()),
             "iteration {i}: wrong user.name"
         );
-        let autocrlf = cfg.get("core.autocrlf").unwrap_or_default();
+        let autocrlf = cfg.get("core.autocrlf").unwrap().unwrap_or_default();
         let expect_autocrlf = if fx.author == "Alice" {
             "true"
         } else {
@@ -481,8 +481,8 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             fx.reference_unix_time,
             "wall clock must stay on the repository handle"
         );
-        let cfg = repo.config().expect("config");
-        let email = cfg.get("user.email").unwrap_or_default();
+        let cfg = repo.config().snapshot().expect("config");
+        let email = cfg.get("user.email").unwrap().unwrap_or_default();
         let mut fetch_opts = FetchOptions::new();
         fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
         fetch_opts.tags = TagMode::None;

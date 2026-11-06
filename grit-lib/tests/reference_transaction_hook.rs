@@ -156,7 +156,7 @@ fn files_backend_commit_emits_head_and_branch_lines() {
             identity: "T <t@e.x> 1700000000 +0000",
             reflog_message: "commit: c2",
         },
-        &repo.config().expect("config"),
+        &repo.config().snapshot().expect("config"),
     )
     .expect("advance branch");
 
@@ -265,7 +265,7 @@ fn branch_lock_held_during_prepared_blocks_nested_ref_update() {
             identity: "T <t@e.x> 1700000000 +0000",
             reflog_message: "commit: c2",
         },
-        &repo.config().expect("config"),
+        &repo.config().snapshot().expect("config"),
     )
     .expect("outer commit succeeds");
 

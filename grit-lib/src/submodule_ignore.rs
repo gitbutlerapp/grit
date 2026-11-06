@@ -118,7 +118,7 @@ pub fn submodule_ignore_for_path(
 ) -> SubmoduleIgnoreMode {
     let name = submodule_name_for_gitlink_path(cfg, work_tree, gitlink_path);
     let per_name_key = format!("submodule.{name}.ignore");
-    if let Some(v) = cfg.get(&per_name_key) {
+    if let Some(v) = cfg.value(&per_name_key) {
         return parse_submodule_ignore_value(&v);
     }
     if let Some(gm) = GitmodulesFile::load(work_tree) {
@@ -126,7 +126,7 @@ pub fn submodule_ignore_for_path(
             return parse_submodule_ignore_value(&v);
         }
     }
-    if let Some(v) = cfg.get("diff.ignoreSubmodules") {
+    if let Some(v) = cfg.value("diff.ignoreSubmodules") {
         return parse_submodule_ignore_value(&v);
     }
     SubmoduleIgnoreMode::None

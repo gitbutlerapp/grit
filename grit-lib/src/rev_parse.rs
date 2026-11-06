@@ -195,7 +195,7 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
     }
     let config = repo.ensure_config_arc_fast().ok()?;
     let url_key = format!("remote.{name}.url");
-    config.get(&url_key)?;
+    config.value(&url_key)?;
     let head_ref = format!("refs/remotes/{name}/HEAD");
     let target = refs::read_symbolic_ref_for_repository(repo, &head_ref).ok()??;
     Some(target)
@@ -277,7 +277,7 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
     }
     let (branch_key, display_branch) = resolve_upstream_branch_context(repo, base)?;
     let config_path = repo.common_git_dir().join("config");
-    let _ = repo.config()?;
+    let _ = repo.config().snapshot()?;
     let config_content = repo.caches().local_config_text(&config_path)?;
     let Some((remote, merge)) = parse_branch_tracking(&config_content, &branch_key) else {
         return Err(RevParseError::NoUpstream {
@@ -311,7 +311,7 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
 /// `push` refspecs (exact `refs/heads/<branch>:refs/heads/<dest>` mappings).
 pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -> Result<String> {
     let config_path = repo.common_git_dir().join("config");
-    let _ = repo.config()?;
+    let _ = repo.config().snapshot()?;
     let config_content = repo.caches().local_config_text(&config_path)?;
 
     let upstream_tracking =
@@ -769,7 +769,7 @@ impl<'repo> NavParentCache<'repo> {
                 && self.shallow.is_empty()
                 && !crate::promisor::repo_treats_promisor_packs(
                     self.repo.git_dir(),
-                    &self.repo.config().unwrap_or_default(),
+                    &self.repo.config().snapshot().unwrap_or_default(),
                 )
         }) && self.repo.object_id_after_replace(&commit_oid) == commit_oid;
         if share_linkage {
@@ -2178,7 +2178,7 @@ fn read_core_disambiguate(repo: &Repository) -> Option<&'static str> {
     let config = repo
         .ensure_config_arc_fast()
         .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
-    let v = config.get("core.disambiguate")?;
+    let v = config.value("core.disambiguate")?;
     match v.to_ascii_lowercase().as_str() {
         "committish" | "commit" => Some("commit"),
         "treeish" | "tree" => Some("tree"),
@@ -3606,7 +3606,7 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
         repo.index_path()
     };
     use crate::index::Index;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let index = Index::load_expand_sparse_with_config(&index_path, repo.odb(), &config)
         .map_err(|_| Error::ObjectNotFound(format!(":{}:{}", colon.stage, path)))?;
     let entry = index
@@ -3633,7 +3633,7 @@ fn resolve_index_path_at_stage(repo: &Repository, path: &str, stage: u8) -> Resu
     } else {
         repo.index_path()
     };
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let index = Index::load_expand_sparse_with_config(&index_path, repo.odb(), &config)
         .map_err(|_| Error::ObjectNotFound(format!(":{stage}:{path}")))?;
     let lookup_path = if repo.pathspec_precompose_enabled() {

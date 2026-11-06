@@ -111,6 +111,7 @@ fn load_linked_worktree_index(repo: &Repository, admin_dir: &Path) -> Result<Ind
     let parse_ctx = crate::index::IndexParseContext::from_policy(repo.thread_policy());
     let cfg = repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| Arc::new(crate::config::ConfigSet::new()));
     let mut idx = Index::load_preserving_sparse_optional_with_context(
         &index_path,

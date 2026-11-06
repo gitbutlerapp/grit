@@ -1095,7 +1095,7 @@ pub fn fetch_promised_blobs(repo: &Repository, snapshot: ObjectId) -> Result<usi
 
 /// [`fetch_promised_blobs`] for the snapshot tree `tree`.
 fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref()) {
         return Ok(0);
     }

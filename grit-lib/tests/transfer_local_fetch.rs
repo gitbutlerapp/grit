@@ -193,7 +193,12 @@ fn pack_build_honors_explicit_zero_window_and_depth() {
     git(&remote, &["config", "pack.depth", "0"]);
 
     let remote_git = remote.join(".git");
-    let cfg = ConfigSet::load(&Environment::empty(), Some(&remote_git), true).expect("config");
+    let cfg = ConfigSet::load(
+        &Environment::empty(),
+        Some(&remote_git),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(&remote_git)),
+    )
+    .expect("config");
     assert_eq!(cfg.pack_object_window(), 0);
     assert_eq!(cfg.pack_object_depth(), 0);
 

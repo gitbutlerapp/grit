@@ -9,6 +9,9 @@
 //! Modules marked `full-tests` start the system `git` or build heavy fixtures;
 //! they build only with `--features full-tests` (`make test-full`).
 
+// Integration modules refer to `crate::config` for load options and types.
+pub use grit_lib::config;
+
 // Helpers the test modules share, compiled once.
 mod midx_support;
 mod pack_delta_scenarios;
@@ -489,6 +492,8 @@ mod config_parameters_coverage;
 mod config_parse;
 #[path = "config_repo_load_coverage.rs"]
 mod config_repo_load_coverage;
+#[path = "config_roundtrip.rs"]
+mod config_roundtrip;
 #[path = "config_set_getters_coverage.rs"]
 mod config_set_getters_coverage;
 #[cfg(feature = "full-tests")]

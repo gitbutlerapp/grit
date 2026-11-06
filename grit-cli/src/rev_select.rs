@@ -321,10 +321,10 @@ pub(crate) fn log_mailmap_enabled(repo: &Repository, no_mailmap: bool) -> bool {
     if no_mailmap {
         return false;
     }
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         return true;
     };
-    match config.get("log.mailmap") {
+    match crate::context::config_string(config.as_ref(), "log.mailmap") {
         None => true,
         Some(v) => parse_bool(&v).unwrap_or(true),
     }

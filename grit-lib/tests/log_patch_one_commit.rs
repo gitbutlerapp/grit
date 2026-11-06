@@ -48,7 +48,11 @@ fn log_patch_one_commit_env() {
         ],
     );
     let repo = Repository::discover(Some(&corpus), &RepositoryOptions::empty()).expect("open");
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let patch_opts = LogPatchOptions {
         diff: DiffOptions::default(),
         commit_header: LogPatchCommitHeader::FormatPercentH,

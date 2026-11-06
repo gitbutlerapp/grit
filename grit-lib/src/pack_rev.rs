@@ -143,10 +143,14 @@ fn shared_repo_from_pack_index_path(idx_path: &Path) -> i32 {
     let Some(git_dir) = objects_dir.parent() else {
         return PERM_UMASK;
     };
-    let Ok(cfg) = ConfigSet::load(&Environment::empty(), Some(git_dir), true) else {
+    let Ok(cfg) = ConfigSet::load(
+        &Environment::empty(),
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+    ) else {
         return PERM_UMASK;
     };
-    shared_repo::shared_repository_from_config_value(cfg.get("core.sharedRepository").as_deref())
+    shared_repo::shared_repository_from_config_value(cfg.value("core.sharedRepository").as_deref())
         .unwrap_or(PERM_UMASK)
 }
 

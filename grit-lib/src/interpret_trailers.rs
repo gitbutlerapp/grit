@@ -482,7 +482,7 @@ fn parse_trailer<'c>(
 }
 
 fn comment_line_prefix(cfg: &ConfigSet) -> String {
-    match cfg.get("core.commentChar") {
+    match cfg.value("core.commentChar") {
         Some(s) => {
             let t = s.trim();
             if t.is_empty() || t.eq_ignore_ascii_case("auto") {
@@ -877,8 +877,15 @@ pub fn process_trailers(
     new_trailer_args: &[NewTrailerArg],
     git_dir: Option<&Path>,
 ) -> String {
-    let cfg = ConfigSet::load(&crate::environment::Environment::empty(), git_dir, true)
-        .unwrap_or_default();
+    let cfg = ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        git_dir,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            git_dir,
+        ),
+    )
+    .unwrap_or_default();
     let comment_prefix = comment_line_prefix(&cfg);
     let (default_conf, conf_list, separators) = load_trailer_config(&cfg);
 

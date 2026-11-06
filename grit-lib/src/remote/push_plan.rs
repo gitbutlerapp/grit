@@ -241,21 +241,24 @@ pub fn parse_force_mode(
 /// names no ref. Both are reported before the remote is contacted.
 pub fn resolve_push(
     repo: &Repository,
-    config: &ConfigSet,
     request: &PushRequest,
     ctx: &PushPlanContext,
 ) -> PlanResult<ResolvedPush> {
+    let config = repo
+        .config()
+        .snapshot()
+        .map_err(|e| PushPlanError::Message(e.to_string()))?;
     if request.delete_refs || !request.delete.is_empty() {
-        return resolve_delete_push(repo, config, request, ctx);
+        return resolve_delete_push(repo, config.as_ref(), request, ctx);
     }
     if request.tags {
-        return resolve_tags_push(repo, config, request);
+        return resolve_tags_push(repo, config.as_ref(), request);
     }
 
-    let remote = configured_remote_for_push(repo, config, request.remote.as_deref())?;
-    validate_remote(config, &remote)?;
+    let remote = configured_remote_for_push(repo, config.as_ref(), request.remote.as_deref())?;
+    validate_remote(config.as_ref(), &remote)?;
 
-    let follow_tags = request.follow_tags || push_follow_tags_config(config);
+    let follow_tags = request.follow_tags || push_follow_tags_config(config.as_ref());
 
     let force_mode = if request.mirror {
         ForceMode::Force
@@ -268,14 +271,14 @@ pub fn resolve_push(
     } else if request.all && request.refspecs.is_empty() {
         resolve_all_branches_push(repo, &remote, ctx)?
     } else if request.refspecs.is_empty() {
-        resolve_default_push(repo, config, &remote, ctx)?
+        resolve_default_push(repo, config.as_ref(), &remote, ctx)?
     } else {
-        resolve_cli_refspecs_push(repo, config, &remote, &request.refspecs, ctx)?
+        resolve_cli_refspecs_push(repo, config.as_ref(), &remote, &request.refspecs, ctx)?
     };
 
     if request.prune && !request.mirror {
-        let scopes = collect_prune_scopes(config, &remote, request);
-        let negatives = collect_prune_negative_refspecs(config, &remote, request);
+        let scopes = collect_prune_scopes(config.as_ref(), &remote, request);
+        let negatives = collect_prune_negative_refspecs(config.as_ref(), &remote, request);
         apply_prune_scopes(&mut resolved.specs, ctx, &scopes, &negatives);
     }
 
@@ -288,13 +291,7 @@ pub fn resolve_push(
         }
     }
 
-    apply_force_mode(
-        repo,
-        config,
-        &resolved.remote,
-        &mut resolved.specs,
-        &force_mode,
-    )?;
+    apply_force_mode(repo, &resolved.remote, &mut resolved.specs, &force_mode)?;
     Ok(resolved)
 }
 
@@ -427,7 +424,7 @@ fn collect_prune_scopes(
     let mut scopes = positive_prune_scopes_from_refspec_strings(&configured);
     if scopes.is_empty() {
         let push_default = config
-            .get("push.default")
+            .value("push.default")
             .unwrap_or_else(|| "simple".to_owned());
         if push_default == "matching" {
             if let Ok(item) = parse_push_refspec(":") {
@@ -599,7 +596,7 @@ fn append_mirror_prune_deletes(
 #[must_use]
 pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
     config
-        .get("push.followTags")
+        .value("push.followTags")
         .and_then(|v| parse_git_config_maybe_bool(&v))
         .unwrap_or(false)
 }
@@ -753,13 +750,7 @@ fn resolve_delete_push(
         branch_label,
         kind: PushPlanKind::Delete,
     };
-    apply_force_mode(
-        repo,
-        config,
-        &resolved.remote,
-        &mut resolved.specs,
-        &request.force,
-    )?;
+    apply_force_mode(repo, &resolved.remote, &mut resolved.specs, &request.force)?;
     Ok(resolved)
 }
 
@@ -785,13 +776,7 @@ fn resolve_tags_push(
         branch_label: None,
         kind: PushPlanKind::Tags,
     };
-    apply_force_mode(
-        repo,
-        config,
-        &resolved.remote,
-        &mut resolved.specs,
-        &request.force,
-    )?;
+    apply_force_mode(repo, &resolved.remote, &mut resolved.specs, &request.force)?;
     Ok(resolved)
 }
 
@@ -839,7 +824,7 @@ fn resolve_default_push(
     }
 
     let push_default = config
-        .get("push.default")
+        .value("push.default")
         .unwrap_or_else(|| "simple".to_owned());
     if push_default == "matching" {
         return resolve_matching_default_push(repo, remote, ctx);
@@ -920,22 +905,22 @@ pub(crate) fn configured_remote_for_push(
     }
     if let Ok(HeadState::Branch { short_name, .. }) = resolve_head(repo.git_dir()) {
         if let Some(remote) = config
-            .get(&format!("branch.{short_name}.pushremote"))
-            .or_else(|| config.get(&format!("branch.{short_name}.pushRemote")))
+            .value(&format!("branch.{short_name}.pushremote"))
+            .or_else(|| config.value(&format!("branch.{short_name}.pushRemote")))
             .filter(|r| !r.trim().is_empty())
         {
             return Ok(remote);
         }
     }
     if let Some(remote) = config
-        .get("remote.pushDefault")
+        .value("remote.pushDefault")
         .filter(|r| !r.trim().is_empty())
     {
         return Ok(remote);
     }
     if let Ok(HeadState::Branch { short_name, .. }) = resolve_head(repo.git_dir()) {
         if let Some(remote) = config
-            .get(&format!("branch.{short_name}.remote"))
+            .value(&format!("branch.{short_name}.remote"))
             .filter(|r| !r.trim().is_empty() && r != ".")
         {
             return Ok(remote);
@@ -1080,12 +1065,15 @@ impl PushPlanContext {
 /// Only errors from [`configured_remote_for_push`].
 pub fn load_push_plan_context(
     repo: &Repository,
-    config: &ConfigSet,
     remote_override: Option<&str>,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> PlanResult<PushPlanContext> {
-    let remote = configured_remote_for_push(repo, config, remote_override)?;
-    let Ok(handle) = open_push_destination(config, &remote) else {
+    let config = repo
+        .config()
+        .snapshot()
+        .map_err(|e| PushPlanError::Message(e.to_string()))?;
+    let remote = configured_remote_for_push(repo, config.as_ref(), remote_override)?;
+    let Ok(handle) = open_push_destination(config.as_ref(), &remote) else {
         return Ok(PushPlanContext::default());
     };
     let probe = PreflightHttpClientFactory::new(http_factory, repo);
@@ -1107,7 +1095,7 @@ fn looks_like_literal_remote(name: &str) -> bool {
 
 fn has_remote_url(config: &ConfigSet, name: &str) -> bool {
     config
-        .get(&format!("remote.{name}.url"))
+        .value(&format!("remote.{name}.url"))
         .is_some_and(|u| !u.trim().is_empty())
 }
 
@@ -1124,7 +1112,7 @@ fn validate_remote(config: &ConfigSet, name: &str) -> PlanResult<()> {
 
 fn remote_push_refspec_strings(config: &ConfigSet, remote: &str) -> Vec<String> {
     config
-        .get_all(&format!("remote.{remote}.push"))
+        .values_all(&format!("remote.{remote}.push"))
         .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect()
@@ -1138,7 +1126,7 @@ fn default_push_destination(
     _src_ref: &str,
 ) -> PlanResult<String> {
     let push_default = config
-        .get("push.default")
+        .value("push.default")
         .unwrap_or_else(|| "simple".to_owned());
 
     if push_default == "nothing" {
@@ -1147,7 +1135,7 @@ fn default_push_destination(
 
     if push_default.as_str() == "upstream" {
         let merge = config
-            .get(&format!("branch.{branch_short}.merge"))
+            .value(&format!("branch.{branch_short}.merge"))
             .filter(|m| m.starts_with("refs/"));
         return merge.ok_or_else(|| {
             PushPlanError::Message(format!(
@@ -1159,10 +1147,10 @@ fn default_push_destination(
     // `simple`, `current`, and unspecified: grit keeps the historical default of
     // `branch.<name>.merge` when set, else same branch name on the remote.
     if push_default.as_str() == "simple" {
-        let branch_remote = config.get(&format!("branch.{branch_short}.remote"));
+        let branch_remote = config.value(&format!("branch.{branch_short}.remote"));
         if branch_remote.as_deref() == Some(remote) {
             if let Some(merge) = config
-                .get(&format!("branch.{branch_short}.merge"))
+                .value(&format!("branch.{branch_short}.merge"))
                 .filter(|m| m.starts_with("refs/"))
             {
                 let _merge_branch = merge.strip_prefix("refs/heads/").unwrap_or(merge.as_str());
@@ -1550,7 +1538,6 @@ fn guess_qualified_dst(src_full: &str, short_dst: &str) -> Option<String> {
 /// Fill `force`, `expected_old`, and `expect_absent` on planned specs from [`ForceMode`].
 fn apply_force_mode(
     repo: &Repository,
-    config: &ConfigSet,
     remote: &str,
     specs: &mut [PushRefSpec],
     mode: &ForceMode,
@@ -1566,7 +1553,7 @@ fn apply_force_mode(
         }
         ForceMode::Lease(LeaseExpectation::Tracking) => {
             for spec in specs.iter_mut() {
-                apply_tracking_lease(repo, config, remote, spec);
+                apply_tracking_lease(repo, remote, spec);
             }
         }
         ForceMode::Lease(LeaseExpectation::Value(expected)) => {
@@ -1586,16 +1573,14 @@ fn apply_force_mode(
 /// Let `spec` replace the remote ref when it still holds what this clone's
 /// remote-tracking ref for it says (`--force-with-lease` for one ref), or
 /// is absent when there is none.
-pub fn apply_tracking_lease(
-    repo: &Repository,
-    config: &ConfigSet,
-    remote: &str,
-    spec: &mut PushRefSpec,
-) {
+pub fn apply_tracking_lease(repo: &Repository, remote: &str, spec: &mut PushRefSpec) {
     spec.force = true;
     spec.expected_old = None;
     spec.expect_absent = false;
-    if let Some(tracking) = remote_tracking_ref_for_remote_ref(config, remote, &spec.dst) {
+    let Ok(config) = repo.config().snapshot() else {
+        return;
+    };
+    if let Some(tracking) = remote_tracking_ref_for_remote_ref(config.as_ref(), remote, &spec.dst) {
         match refs::resolve_ref(repo.git_dir(), &tracking) {
             Ok(oid) => spec.expected_old = Some(oid),
             Err(_) => spec.expect_absent = true,
@@ -1879,7 +1864,12 @@ mod tests {
         )
         .expect("write config");
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let remote = configured_remote_for_push(&repo, &config, None).expect("remote");
         assert_eq!(remote, "upstream");
     }
@@ -1898,7 +1888,12 @@ mod tests {
         )
         .expect("write config");
         std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let mapped = map_through_remote_push_refspec(&config, "origin", "refs/heads/main");
         assert_eq!(
             mapped.as_deref(),
@@ -1935,11 +1930,15 @@ mod tests {
             format!("{}\n", oid.to_hex()),
         )
         .expect("tracking");
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let ctx = PushPlanContext::default();
         let resolved = resolve_push(
             &repo,
-            &config,
             &PushRequest {
                 force: ForceMode::Lease(LeaseExpectation::Tracking),
                 ..Default::default()
@@ -2062,7 +2061,7 @@ mod tests {
         );
         assert_eq!(PushPlanError::NoRemote.to_string(), "no remote to push to");
         assert_eq!(
-            load_push_plan_context(&repo, &ConfigSet::new(), None, None).map(|_| ()),
+            load_push_plan_context(&repo, None, None).map(|_| ()),
             Err(PushPlanError::NoRemote)
         );
         let named = configured_remote_for_push(&repo, &ConfigSet::new(), Some("upstream"));
@@ -2166,8 +2165,7 @@ mod tests {
     #[test]
     fn plan_context_is_empty_for_unconfigured_remote() {
         let (_tmp, repo) = init_repo();
-        let ctx = load_push_plan_context(&repo, &ConfigSet::new(), Some("nosuch"), None)
-            .expect("context");
+        let ctx = load_push_plan_context(&repo, Some("nosuch"), None).expect("context");
         assert!(ctx.remote_ref_names.is_empty());
         assert!(ctx.remote_branch_tips.is_empty());
         assert_eq!(ctx.remote_tips, None);
@@ -2178,8 +2176,7 @@ mod tests {
         let (tmp, repo) = init_repo();
         let missing = tmp.path().join("missing.git");
         let missing = missing.to_str().expect("utf-8 path");
-        let ctx =
-            load_push_plan_context(&repo, &ConfigSet::new(), Some(missing), None).expect("context");
+        let ctx = load_push_plan_context(&repo, Some(missing), None).expect("context");
         assert!(ctx.remote_ref_names.is_empty());
         assert!(ctx.remote_tips.as_ref().is_none_or(Vec::is_empty));
     }
@@ -2205,11 +2202,15 @@ mod tests {
         .expect("main");
         std::fs::create_dir_all(git_dir.join("refs/tags")).expect("tags");
         std::fs::write(git_dir.join("refs/tags/v1"), format!("{}\n", oid.to_hex())).expect("tag");
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let ctx = PushPlanContext::default();
         let resolved = resolve_push(
             &repo,
-            &config,
             &PushRequest {
                 remote: Some("origin".to_owned()),
                 refspecs: vec!["v1".to_owned()],
@@ -2242,7 +2243,6 @@ mod tests {
         };
         let resolved = resolve_push(
             &repo,
-            &config,
             &delete_request(&["a", "refs/heads/b", "v1", "+c", "HEAD"]),
             &ctx,
         )
@@ -2274,14 +2274,13 @@ mod tests {
             delete: strings(&["a"]),
             ..delete_request(&["b"])
         };
-        let resolved = resolve_push(&repo, &config, &request, &PushPlanContext::default())
+        let resolved = resolve_push(&repo, &request, &PushPlanContext::default())
             .expect("resolve delete push");
         let dsts: Vec<_> = resolved.specs.iter().map(|s| s.dst.as_str()).collect();
         assert_eq!(dsts, ["refs/heads/a", "refs/heads/b"]);
         assert_eq!(
             resolve_push(
                 &repo,
-                &config,
                 &PushRequest {
                     delete_refs: false,
                     ..request
@@ -2300,7 +2299,6 @@ mod tests {
         for spec in ["HEAD:refs/heads/release", ":b", "a:"] {
             let err = resolve_push(
                 &repo,
-                &config,
                 &delete_request(&["ok", spec]),
                 &PushPlanContext::default(),
             )
@@ -2318,13 +2316,8 @@ mod tests {
     #[test]
     fn delete_push_without_refs_is_an_error() {
         let (_tmp, repo) = init_repo();
-        let err = resolve_push(
-            &repo,
-            &ConfigSet::new(),
-            &delete_request(&[]),
-            &PushPlanContext::default(),
-        )
-        .expect_err("empty delete");
+        let err = resolve_push(&repo, &delete_request(&[]), &PushPlanContext::default())
+            .expect_err("empty delete");
         assert_eq!(err, PushPlanError::DeleteWithoutRefs);
     }
 
@@ -2354,11 +2347,15 @@ mod tests {
             )
             .expect("branch");
         }
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let refspecs: Vec<String> = (1..=500).map(|i| format!("b{i}")).collect();
         let resolved = resolve_push(
             &repo,
-            &config,
             &PushRequest {
                 remote: Some("origin".to_owned()),
                 refspecs,
@@ -2403,10 +2400,14 @@ mod tests {
             format!("{}\n", oid.to_hex()),
         )
         .expect("tag");
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let err = resolve_push(
             &repo,
-            &config,
             &PushRequest {
                 remote: Some("origin".to_owned()),
                 refspecs: vec!["release".to_owned()],
@@ -2442,10 +2443,14 @@ mod tests {
             format!("{}\n", oid.to_hex()),
         )
         .expect("main");
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("config");
         let resolved = resolve_push(
             &repo,
-            &config,
             &PushRequest {
                 remote: Some("origin".to_owned()),
                 refspecs: vec!["main".to_owned()],

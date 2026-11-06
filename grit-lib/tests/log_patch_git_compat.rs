@@ -64,7 +64,11 @@ fn grit_log_patch(repo: &Repository, limit: usize, diff: DiffOptions) -> Vec<u8>
         ..Default::default()
     };
     let result = rev_list(repo, &["HEAD".to_owned()], &[], &opts).expect("rev-list");
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let patch_opts = LogPatchOptions {
         diff,
         ..LogPatchOptions::git_default(&config)
@@ -120,7 +124,11 @@ fn log_patch_full_header_separates_commits_like_git() {
         },
     )
     .expect("rev-list");
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let patch_opts = LogPatchOptions::git_default(&config);
     assert_eq!(patch_opts.commit_header, LogPatchCommitHeader::Full);
     let mut out = Cursor::new(Vec::new());
@@ -235,8 +243,13 @@ fn log_patch_git_git_corpus_matches_git_default_and_histogram() {
         );
         let repo =
             Repository::discover(Some(&corpus), &RepositoryOptions::empty()).expect("open git.git");
-        let mut diff =
-            DiffOptions::from_config(&repo.config().map(|c| (*c).clone()).unwrap_or_default());
+        let mut diff = DiffOptions::from_config(
+            &repo
+                .config()
+                .snapshot()
+                .map(|c| (*c).clone())
+                .unwrap_or_default(),
+        );
         if histogram {
             diff.algorithm = DiffAlgorithm::Histogram;
         }

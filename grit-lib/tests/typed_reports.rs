@@ -90,7 +90,10 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
         &grit_lib::config::ConfigSet::load(
             &grit_lib::config::environment::Environment::capture_process(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &grit_lib::config::environment::Environment::capture_process(),
+                Some(&git_dir),
+            ),
         )
         .expect("cfg"),
         now,

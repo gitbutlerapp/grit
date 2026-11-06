@@ -240,13 +240,13 @@ impl DropExpiry {
 ///
 /// [`Error::Config`] when the value is not a boolean.
 pub fn drop_large_blobs_enabled(config: &ConfigSet) -> Result<bool> {
-    Ok(config.get_bool(ENABLED_KEY).transpose()?.unwrap_or(false))
+    Ok(config.get_bool(ENABLED_KEY)?.unwrap_or(false))
 }
 
 /// `expire`, or [`DEFAULT_DROP_EXPIRE`] when unset or empty.
 fn configured_expiry(config: &ConfigSet, now: OffsetDateTime) -> Result<DropExpiry> {
     let spec = config
-        .get(EXPIRE_KEY)
+        .value(EXPIRE_KEY)
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| DEFAULT_DROP_EXPIRE.to_owned());
@@ -439,7 +439,7 @@ pub fn drop_promised_blobs(
     opts: &DropPromisedBlobsOptions,
 ) -> Result<DropPromisedBlobsReport> {
     repo.odb().require_files_primary(OPERATION)?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if let Some(refusal) = gate(repo, &config)? {
         return Err(refusal.into());
     }
@@ -556,7 +556,7 @@ impl From<Refusal> for Error {
 
 /// The checks that must pass before anything is considered: `None` when they do.
 fn gate(repo: &Repository, config: &ConfigSet) -> Result<Option<Refusal>> {
-    if config.bool_or("extensions.preciousobjects", false) {
+    if config.bool_with_default("extensions.preciousobjects", false) {
         return Ok(Some(Refusal::PreciousObjects));
     }
     if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config) {
@@ -760,7 +760,7 @@ impl PromisorSupply {
     /// [`Self::unreadable`].
     fn load(repo: &Repository, config: &ConfigSet) -> Self {
         let recorded: Vec<PathBuf> = config
-            .get_all(LOP_GIT_DIR_KEY)
+            .values_all(LOP_GIT_DIR_KEY)
             .into_iter()
             .filter(|v| !v.trim().is_empty())
             .map(PathBuf::from)

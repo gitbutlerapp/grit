@@ -509,10 +509,18 @@ pub fn run_refs(
     let repo = context::discover().ok();
     let env = crate::context::environment();
     let config = match repo.as_ref() {
-        Some(r) => {
-            ConfigSet::load(&env, Some(r.git_dir()), true).context("could not load config")?
-        }
-        None => ConfigSet::load(&env, None, true).context("could not load config")?,
+        Some(r) => ConfigSet::load(
+            &env,
+            Some(r.git_dir()),
+            &grit_lib::config::LoadConfigOptions::standard(&env, Some(r.git_dir())),
+        )
+        .context("could not load config")?,
+        None => ConfigSet::load(
+            &env,
+            None,
+            &grit_lib::config::LoadConfigOptions::standard(&env, None),
+        )
+        .context("could not load config")?,
     };
     let sort_key = match cli.sort {
         crate::RemoteRefSortArg::Name => SortKey::Name,
@@ -531,7 +539,7 @@ pub fn run_refs(
             reverse: cli.reverse,
         },
         limit: cli.limit,
-        versionsort_suffixes: config.get_all("versionsort.suffix"),
+        versionsort_suffixes: crate::context::config_strings(&config, "versionsort.suffix"),
         protocol_version: Some(protocol_version),
         ..Default::default()
     };

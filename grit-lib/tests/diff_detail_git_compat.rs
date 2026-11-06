@@ -46,7 +46,7 @@ fn grit_numstat_for_trees(
     new: Option<&grit_lib::objects::ObjectId>,
 ) -> Vec<(usize, usize, String)> {
     let entries = repo.diff().tree_to_tree(old, new).expect("tree diff");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let out = build_file_diffs(
         repo.odb(),
         entries,
@@ -132,7 +132,7 @@ fn identical_binary_rename_keeps_binary_flag_in_stat_mode() {
         .expect("entries");
     let counter = Arc::new(AtomicUsize::new(0));
     let _reads = track_blob_reads(Arc::clone(&counter));
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let opts = DiffOptions::default();
     let _ = build_file_diffs(
         repo.odb(),

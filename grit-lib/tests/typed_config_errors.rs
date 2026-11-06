@@ -207,7 +207,14 @@ fn environment_config_errors_are_typed_and_git_rejects_them_too() {
                 _ => unreachable!(),
             }
         }
-        let err = config_error(ConfigSet::load(&env, None, false).expect_err(label));
+        let err = config_error(
+            ConfigSet::load(
+                &env,
+                None,
+                &crate::config::LoadConfigOptions::standard(&env, None),
+            )
+            .expect_err(label),
+        );
         assert_eq!(err, expected, "{label}");
 
         let mut cmd = git_cmd(&["config", "--list"])
@@ -249,7 +256,7 @@ fn relative_include_from_non_file_config_is_typed_or_skipped() {
     let mut set = ConfigSet::new();
     set.merge_file_with_includes(&command_line, true, &IncludeContext::default())
         .expect("relative command-line include is skipped by default");
-    assert_eq!(set.get("x.y"), None);
+    assert_eq!(set.get("x.y").unwrap(), None);
 
     let strict = IncludeContext {
         command_line_relative_include_is_error: true,

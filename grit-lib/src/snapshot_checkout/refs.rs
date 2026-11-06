@@ -71,7 +71,7 @@ pub(crate) fn log_head_move_as(
     identity: &str,
     message: &str,
 ) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD")
         && !repo.refs().reflog_exists("HEAD")?
     {
@@ -104,7 +104,7 @@ pub(crate) fn swap_ref_as(
     identity: &str,
     message: &str,
 ) -> Result<Swap> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let logged =
         crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), refname)
             || repo.refs().reflog_exists(refname)?;

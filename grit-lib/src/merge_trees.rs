@@ -103,9 +103,10 @@ impl DirectoryRenameMode {
     ///
     /// [`ConfigError::InvalidDirectoryRenames`] when the value is not recognised.
     pub fn from_config(config: &ConfigSet) -> std::result::Result<Self, ConfigError> {
-        config
-            .get(Self::CONFIG_KEY)
-            .map_or(Ok(Self::default()), |value| Self::from_config_value(&value))
+        match config.value(Self::CONFIG_KEY) {
+            None => Ok(Self::default()),
+            Some(value) => Self::from_config_value(&value),
+        }
     }
 
     /// [`Self::from_config`] for the configuration of `repo`.
@@ -114,7 +115,7 @@ impl DirectoryRenameMode {
     ///
     /// Config load failures, and [`ConfigError::InvalidDirectoryRenames`].
     pub fn from_repo(repo: &Repository) -> crate::error::Result<Self> {
-        let config = repo.config()?;
+        let config = repo.config().snapshot()?;
         Ok(Self::from_config(&config)?)
     }
 }

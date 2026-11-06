@@ -32,7 +32,12 @@ fn fixture() -> (tempfile::TempDir, Repository, ConfigSet, Vec<String>) {
         )
         .unwrap();
     }
-    let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).unwrap();
+    let config = ConfigSet::load(
+        &Environment::empty(),
+        Some(git_dir),
+        &LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+    )
+    .unwrap();
     let refspecs: Vec<String> = (0..1000).map(|i| format!("b{i}")).collect();
     (tmp, repo, config, refspecs)
 }
@@ -47,13 +52,8 @@ fn bench(c: &mut Criterion) {
                 refspecs: refspecs.clone(),
                 ..Default::default()
             };
-            let resolved = resolve_push(
-                black_box(&repo),
-                black_box(&config),
-                black_box(&request),
-                black_box(&ctx),
-            )
-            .unwrap();
+            let resolved =
+                resolve_push(black_box(&repo), black_box(&request), black_box(&ctx)).unwrap();
             assert_eq!(resolved.specs.len(), 1000);
             black_box(resolved)
         })

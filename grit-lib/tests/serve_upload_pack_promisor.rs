@@ -408,7 +408,7 @@ fn a_session_without_lazy_fetch_drops_the_repositorys_fetcher() {
     let repo = fx.open(Some(fetcher.clone()));
     let config = ConfigSet::new();
     let off = v2(true);
-    assert!(!off.attach_promisor_fetcher(&repo, &config, Some(fetcher.clone())));
+    assert!(!off.attach_promisor_fetcher(&repo, Some(fetcher.clone())));
     // Forcing lazy fetch afterwards finds no fetcher: the session's choice stuck.
     let mut forced = v2(false);
     forced.lazy_fetch = Some(true);
@@ -424,7 +424,7 @@ fn a_session_without_lazy_fetch_drops_the_repositorys_fetcher() {
 
     let mut on = v2(true);
     on.lazy_fetch = Some(true);
-    assert!(on.attach_promisor_fetcher(&repo, &config, Some(fetcher)));
+    assert!(on.attach_promisor_fetcher(&repo, Some(fetcher)));
     let (out, result) = serve(&repo, fetch_request(&[], &[want(fx.tip)]), &mut on);
     result.unwrap();
     assert!(pack_objects(parse_v2(&out).pack.expect("pack")).contains(&fx.big));

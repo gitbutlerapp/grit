@@ -111,7 +111,10 @@ fn cargo_mirror_for_local_copy_options_resolve() {
         grit_lib::config::ConfigSet::load(
             &grit_lib::config::environment::Environment::empty(),
             Some(mirror),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &grit_lib::config::environment::Environment::empty(),
+                Some(mirror),
+            ),
         )
         .ok()
         .as_ref(),
@@ -136,7 +139,10 @@ fn cargo_mirror_local_copy_pack_matches_git_delta_density() {
         grit_lib::config::ConfigSet::load(
             &grit_lib::config::environment::Environment::empty(),
             Some(mirror),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &grit_lib::config::environment::Environment::empty(),
+                Some(mirror),
+            ),
         )
         .ok()
         .as_ref(),

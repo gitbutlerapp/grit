@@ -120,7 +120,7 @@ pub struct StatusOptions {
 pub fn untracked_mode_from_config(
     config: &ConfigSet,
 ) -> std::result::Result<UntrackedMode, ConfigError> {
-    let raw = config.get("status.showUntrackedFiles");
+    let raw = config.value("status.showUntrackedFiles");
     match raw {
         None => Ok(UntrackedMode::Normal),
         Some(v) => untracked_mode_from_config_value(&v)
@@ -187,10 +187,10 @@ pub fn status_options_from_config(
 /// `false`/`no`/`off`/`0` disables detection.
 #[must_use]
 pub fn status_renames_from_config(config: &ConfigSet) -> Option<RenameDetection> {
-    if let Some(v) = config.get("status.renames") {
+    if let Some(v) = config.value("status.renames") {
         return parse_status_renames_config_value(&v);
     }
-    if let Some(v) = config.get("diff.renames") {
+    if let Some(v) = config.value("diff.renames") {
         return parse_status_renames_config_value(&v);
     }
     Some(RenameDetection {
@@ -239,7 +239,7 @@ pub fn status_diff_entry_matches_pathspec_typed(
 /// Apply `status.renameLimit` over `diff.renameLimit` for rename scoring (Git status precedence).
 fn config_for_status_rename_detection(config: &ConfigSet) -> ConfigSet {
     let mut out = config.clone();
-    if let Some(limit) = config.get("status.renameLimit") {
+    if let Some(limit) = config.value("status.renameLimit") {
         let _ = out.add_command_override("diff.renameLimit", &limit);
     }
     out
@@ -554,7 +554,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
         index_mtime,
         ignore_submodule_untracked: false,
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
-        config: repo.config().ok(),
+        config: repo.config().snapshot().ok(),
         worktree_rules: Some(Arc::clone(&rules_arc)),
         ..Default::default()
     };
@@ -565,7 +565,7 @@ pub(crate) fn count_unstaged_and_untracked_paths(
         .filter(|e| e.status != DiffStatus::Unmerged)
         .count();
     let untracked_count = if matches!(
-        untracked_mode_from_config(repo.config()?.as_ref())?,
+        untracked_mode_from_config(repo.config().snapshot()?.as_ref())?,
         UntrackedMode::No
     ) {
         0
@@ -2471,7 +2471,7 @@ pub fn status(
 
     let head = crate::state::resolve_head_for_repository(repo)?;
     let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;
-    let repo_config = repo.config().ok();
+    let repo_config = repo.config().snapshot().ok();
 
     // Load without expanding sparse-directory placeholders; expand only directories
     // a pathspec may reach so read-mostly status stays on Git's sparse index shape.
@@ -2586,6 +2586,7 @@ pub fn status(
         let thread_policy = repo.thread_policy();
         let rename_config = repo
             .config()
+            .snapshot()
             .map(|c| config_for_status_rename_detection(c.as_ref()))
             .unwrap_or_default();
         staged = apply_status_renames(
@@ -3557,7 +3558,10 @@ mod status_op_tests {
         let cfg_all = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(cfg_dir.path()),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(cfg_dir.path()),
+            ),
         )
         .unwrap();
         assert_eq!(
@@ -3574,7 +3578,10 @@ mod status_op_tests {
         let cfg_no = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(cfg_dir.path()),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(cfg_dir.path()),
+            ),
         )
         .unwrap();
         assert_eq!(
@@ -3591,7 +3598,10 @@ mod status_op_tests {
         let cfg_invalid = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(cfg_dir.path()),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(cfg_dir.path()),
+            ),
         )
         .unwrap();
         assert_eq!(
@@ -3608,7 +3618,10 @@ mod status_op_tests {
         let cfg_true = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(cfg_dir.path()),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(cfg_dir.path()),
+            ),
         )
         .unwrap();
         assert_eq!(
@@ -4576,7 +4589,10 @@ mod status_op_tests {
         let cfg = ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(cfg_dir.path()),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(cfg_dir.path()),
+            ),
         )
         .unwrap();
         let opts = status_options_from_config(&cfg).unwrap();
@@ -4864,7 +4880,7 @@ mod status_op_tests {
             &RepositoryOptions::empty().with_work_tree(root),
         )
         .unwrap();
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let opts = StatusOptions {
             renames: status_renames_from_config(config.as_ref()),
             ..StatusOptions::default()

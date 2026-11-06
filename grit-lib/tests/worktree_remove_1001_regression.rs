@@ -117,7 +117,7 @@ fn refresh_index_stat_on_disk(repo: &Repository) {
     let mut index = repo.index_handle().load().expect("load index");
     let rules = WorktreeRules::from_repository(repo, &index).ok();
     let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     refresh_index_stat_content_verified_with_rules(
         repo.odb(),
         repo.git_dir(),
@@ -169,7 +169,7 @@ fn commit_staged_without_index_stat_refresh(
         .write(ObjectKind::Commit, &bytes)
         .expect("write commit");
     repo.index_handle().write(&mut index).expect("write index");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     update_branch_for_commit_with_config(
         repo.git_dir(),
         &BranchCommitRefUpdate {

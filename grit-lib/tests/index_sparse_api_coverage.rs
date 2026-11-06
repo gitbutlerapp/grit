@@ -45,7 +45,12 @@ fn sparse_apply_and_clear_skip_worktree_on_disk() {
     assert_git_fsck_strict(wt);
 
     fs::write(wt.join("a/f0.txt"), "touch\n").expect("write");
-    let cfg = ConfigSet::load(&Environment::empty(), Some(&grit.git_dir()), true).expect("cfg");
+    let cfg = ConfigSet::load(
+        &Environment::empty(),
+        Some(&grit.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(&grit.git_dir())),
+    )
+    .expect("cfg");
     clear_skip_worktree_from_present_files(&grit.git_dir(), wt, &mut index, Some(&cfg));
 }
 

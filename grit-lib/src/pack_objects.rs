@@ -2191,9 +2191,7 @@ fn load_islands_for_pack(
     let Ok(repo) = crate::repo::Repository::open(git_dir, &RepositoryOptions::empty()) else {
         return crate::delta_islands::DeltaIslands::default();
     };
-    let env = crate::environment::Environment::empty();
-    let cfg = crate::config::ConfigSet::load(&env, Some(git_dir), true).unwrap_or_default();
-    crate::delta_islands::load_delta_islands(&repo, &cfg, in_pack)
+    crate::delta_islands::load_delta_islands(&repo, in_pack)
 }
 
 /// zlib-deflate `data` and append it to `buf`.

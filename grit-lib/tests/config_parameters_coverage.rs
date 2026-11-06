@@ -61,7 +61,7 @@ fn load_merges_parameters_with_include_expansion() {
         },
         ..Default::default()
     };
-    let set = ConfigSet::load_with_options(&env, None, &opts).expect("load");
-    assert_eq!(set.get("layer.k").as_deref(), Some("top"));
-    assert_eq!(set.get("frominc.k").as_deref(), Some("1"));
+    let set = ConfigSet::load(&env, None, &opts).expect("load");
+    assert_eq!(set.get("layer.k").unwrap().as_deref(), Some("top"));
+    assert_eq!(set.get("frominc.k").unwrap().as_deref(), Some("1"));
 }

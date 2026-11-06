@@ -31,7 +31,7 @@ pub(crate) struct UploadPackPolicy {
 
 impl UploadPackPolicy {
     pub fn from_config(config: &ConfigSet) -> Self {
-        let flag = |key: &str| config.get_bool(key).and_then(|v| v.ok()).unwrap_or(false);
+        let flag = |key: &str| config.get_bool(key).ok().flatten().unwrap_or(false);
         Self {
             allow_filter: flag("uploadpack.allowfilter"),
             allow_tip_sha1_in_want: flag("uploadpack.allowtipsha1inwant"),

@@ -136,8 +136,8 @@ impl WorktreeRules {
     ///
     /// Returns I/O or config errors from loading global exclude/attribute sources.
     pub fn from_repository(repo: &Repository, index: &Index) -> Result<Self> {
-        let config = repo.config()?.clone();
-        Self::from_parts(repo, index, config)
+        let config = repo.config().snapshot()?.clone();
+        Self::from_parts_with_config(repo, index, config)
     }
 
     /// Build rules when the caller already holds a config snapshot.
@@ -145,7 +145,11 @@ impl WorktreeRules {
     /// # Errors
     ///
     /// Returns I/O errors from loading exclude/attribute files.
-    pub fn from_parts(repo: &Repository, index: &Index, config: Arc<ConfigSet>) -> Result<Self> {
+    pub(crate) fn from_parts_with_config(
+        repo: &Repository,
+        index: &Index,
+        config: Arc<ConfigSet>,
+    ) -> Result<Self> {
         Self::from_parts_with_attribute_source(repo, index, config, false)
     }
 
@@ -211,8 +215,8 @@ impl WorktreeRules {
     pub fn from_checkout_prospective_index(
         repo: &Repository,
         prospective_index: &Index,
-        config: Arc<ConfigSet>,
     ) -> Result<Self> {
+        let config = repo.config().snapshot()?;
         Self::from_parts_index_attributes_only(repo, prospective_index, config)
     }
 
@@ -473,7 +477,7 @@ fn load_attribute_stack_prefix_and_info(
 }
 
 fn global_attributes_path(env: &Environment, config: &ConfigSet) -> Result<Option<PathBuf>> {
-    if let Some(path) = config.get("core.attributesfile") {
+    if let Some(path) = config.value("core.attributesfile") {
         return Ok(Some(PathBuf::from(parse_path(env, &path))));
     }
     Ok(env.default_xdg_config_git_file("attributes"))

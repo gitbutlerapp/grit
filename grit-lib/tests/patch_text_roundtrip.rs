@@ -66,7 +66,7 @@ fn git_diff_binary(dir: &std::path::Path, base: &str, tip: &str) -> Vec<u8> {
 fn grit_patch_structured(repo: &Repository, base: &str, tip: &str) -> Vec<u8> {
     let base_oid = resolve_revision(repo, base).expect("base");
     let tip_oid = resolve_revision(repo, tip).expect("tip");
-    let config = repo.config().expect("config").clone();
+    let config = repo.config().snapshot().expect("config").clone();
     let thread_policy = repo.thread_policy();
     let mut entries = diff_commits_with_renames_and_policy(
         repo.odb(),

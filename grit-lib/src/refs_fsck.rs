@@ -139,7 +139,7 @@ fn fsck_refs_msg_severity(
     strict: bool,
 ) -> Option<RefsFsckSeverity> {
     let key = format!("fsck.{camel_id}");
-    let v = config.get(&key).map(|s| s.to_ascii_lowercase());
+    let v = config.value(&key).map(|s| s.to_ascii_lowercase());
     if matches!(v.as_deref(), Some("ignore")) {
         return None;
     }
@@ -187,12 +187,8 @@ fn push_issue(
 ///
 /// Returns [`crate::error::Error::Io`] when the ref store cannot be read, and propagates
 /// [`Odb::contains`] failures rather than reporting a ref as pointing to a missing object.
-pub fn refs_fsck(
-    repo: &Repository,
-    odb: &Odb,
-    config: &ConfigSet,
-    strict: bool,
-) -> Result<Vec<RefsFsckIssue>> {
+pub fn refs_fsck(repo: &Repository, odb: &Odb, strict: bool) -> Result<Vec<RefsFsckIssue>> {
+    let config = repo.config().snapshot()?;
     let mut issues = Vec::new();
     let common = canonical_git_dir(repo.git_dir());
 
@@ -213,7 +209,7 @@ pub fn refs_fsck(
             wt_id.as_deref(),
             &common,
             odb,
-            config,
+            config.as_ref(),
             strict,
             &mut issues,
         )?;

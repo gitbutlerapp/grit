@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::promisor_remote::{PromisorField, PromisorRejection};
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -398,14 +398,22 @@ fn store_fields_updates_the_known_lop() {
         stored,
         [PromisorField::PartialCloneFilter, PromisorField::Token]
     );
-    let cfg = ConfigSet::load_repo_local_only(client.path()).unwrap();
+    let cfg = ConfigSet::load(
+        &Environment::empty(),
+        Some(client.path()),
+        &crate::config::LoadConfigOptions::repo_local_only(client.path()),
+    )
+    .unwrap();
     assert_eq!(
-        cfg.get("remote.lop.partialclonefilter").as_deref(),
+        cfg.get("remote.lop.partialclonefilter").unwrap().as_deref(),
         Some("blob:limit=5k")
     );
-    assert_eq!(cfg.get("remote.lop.token").as_deref(), Some("s3cret-token"));
     assert_eq!(
-        cfg.get("remote.lop.url").as_deref(),
+        cfg.get("remote.lop.token").unwrap().as_deref(),
+        Some("s3cret-token")
+    );
+    assert_eq!(
+        cfg.get("remote.lop.url").unwrap().as_deref(),
         Some("file:///srv/lop")
     );
     // The reply names the remote, never its token.

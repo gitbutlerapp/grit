@@ -201,7 +201,7 @@ fn worktree_has_changes(
     opts: &DiffOptions,
 ) -> Result<bool> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let index_mtime = index_mtime_for_diff(index, None);
     let rules_arc = Arc::new(std::sync::Mutex::new(WorktreeRules::from_repository(
         repo, index,
@@ -293,7 +293,7 @@ fn staged_has_changes(
 ) -> Result<bool> {
     let head_tree = resolve_head_for_repository(repo)?.tree(repo.odb())?;
     let index = repo.index_handle().load()?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let mut entries = diff_index_to_tree_with_renames(
         repo.odb(),
         &index,
@@ -330,7 +330,7 @@ fn commit_trees_has_changes(
     matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let base_tree = tree_oid_of_commit(repo.odb(), base)?;
     let tip_tree = tree_oid_of_commit(repo.odb(), tip)?;
     let mut entries = diff_trees_with_renames_and_policy(
@@ -393,7 +393,7 @@ impl<'repo> super::handle::Diff<'repo> {
                     .first()
                     .map(|parent| tree_oid_of_commit(repo.odb(), parent))
                     .transpose()?;
-                let config = repo.config()?;
+                let config = repo.config().snapshot()?;
                 let mut entries = diff_trees_with_renames_and_policy(
                     repo.odb(),
                     old_tree.as_ref(),
@@ -421,7 +421,7 @@ impl<'repo> super::handle::Diff<'repo> {
             DiffTarget::Trees { old, new } => match old {
                 Some(base) => commit_trees_has_changes(repo, base, new, &matcher, &opts),
                 None => {
-                    let config = repo.config()?;
+                    let config = repo.config().snapshot()?;
                     let tip_tree = super::core::tree_oid_for_diff_side(repo.odb(), new)?;
                     let mut entries = diff_trees_with_renames_and_policy(
                         repo.odb(),

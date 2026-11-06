@@ -24,6 +24,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use grit_lib::bundle::BundleSpec;
+use grit_lib::config::environment::Environment;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::remote::bundle_uri::{BundleList, BundleListEntry, BundleListMode};
 use grit_lib::repo::Repository;
@@ -182,9 +183,12 @@ pub fn needs_bundle(
 /// Whether the repository has promisor remotes, so some of its objects may be
 /// stored elsewhere (see the module documentation).
 fn has_promisor_remotes(repo: &Repository) -> bool {
-    grit_lib::config::ConfigSet::load_repo_local_only(repo.git_dir()).is_ok_and(|cfg| {
-        grit_lib::objects::promisor::repo_treats_promisor_packs(repo.git_dir(), &cfg)
-    })
+    grit_lib::config::ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::repo_local_only(repo.git_dir()),
+    )
+    .is_ok_and(|cfg| grit_lib::objects::promisor::repo_treats_promisor_packs(repo.git_dir(), &cfg))
 }
 
 /// Remove every bundle and the manifest, so nothing is offered any more.

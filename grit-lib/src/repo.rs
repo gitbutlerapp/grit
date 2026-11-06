@@ -403,7 +403,7 @@ fn seed_unborn_head(store: &dyn crate::refs::store::RefStore, branch: &str) -> R
 ///
 /// Refresh the snapshot when on-disk config may have changed:
 ///
-/// - [`Self::reload_config`] after writing config through [`crate::config::ConfigHandle`] or other
+/// - [`Self::reload_config`] after writing config through [`crate::config::Config`] or other
 ///   in-process library APIs on this handle.
 /// - Hook and filter subprocesses may rewrite config; [`crate::hooks::run_hook_opts`] reloads the
 ///   snapshot after hooks finish when a [`Repository`] is provided.
@@ -583,7 +583,7 @@ impl Repository {
         LoadConfigOptions {
             include_system,
             diagnostics: Some(self.diagnostics()),
-            ..LoadConfigOptions::for_repository(
+            ..crate::config::LoadConfigOptions::for_repository(
                 &self.environment,
                 Some(&self.git_dir),
                 Some(Arc::clone(&self.caches)),
@@ -784,7 +784,7 @@ impl Repository {
         role: crate::config::ident_resolve::IdentRole,
         now: time::OffsetDateTime,
     ) -> Result<crate::ident::Signature> {
-        let config = self.config()?;
+        let config = self.config().snapshot()?;
         Ok(crate::config::ident_resolve::resolve_signature_with(
             self.environment(),
             &config,
@@ -955,7 +955,7 @@ impl Repository {
         cfg: &ConfigSet,
         environment: &Environment,
     ) -> RepoCachedSettings {
-        let use_replace_refs = cfg.bool_or("core.useReplaceRefs", true);
+        let use_replace_refs = cfg.bool_with_default("core.useReplaceRefs", true);
         let replace_ref_base = environment
             .git_replace_ref_base
             .clone()
@@ -972,7 +972,7 @@ impl Repository {
         }
     }
 
-    fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
+    pub(crate) fn ensure_config_arc(&self) -> Result<Arc<ConfigSet>> {
         self.config_arc_with_validation(true)
     }
 
@@ -1084,7 +1084,7 @@ impl Repository {
         cfg: &ConfigSet,
         environment: &Environment,
     ) -> Option<String> {
-        if !cfg.bool_or("core.useReplaceRefs", true) {
+        if !cfg.bool_with_default("core.useReplaceRefs", true) {
             return None;
         }
         let replace_ref_base = environment
@@ -1126,18 +1126,11 @@ impl Repository {
         self.diagnostics.warn(warning);
     }
 
-    /// Return the merged configuration cascade for this repository.
-    ///
-    /// Loads through [`RepoCaches`] on every call so global, system, include, and local
-    /// config stamps stay validated (not only `.git/config` mtime). Prefer
-    /// [`Self::reload_config`] after in-process config writes so related caches update
-    /// immediately.
-    ///
-    /// # Errors
-    ///
-    /// Propagates errors from reading or parsing config files.
-    pub fn config(&self) -> Result<Arc<ConfigSet>> {
-        self.ensure_config_arc()
+    /// Merged configuration read and local config write handle.
+    #[inline]
+    #[must_use]
+    pub fn config(&self) -> crate::config::Config<'_> {
+        crate::config::Config::new(self)
     }
 
     /// Drop the in-memory config snapshot and load a fresh cascade from disk.
@@ -1227,13 +1220,6 @@ impl Repository {
     #[must_use]
     pub fn index_handle(&self) -> crate::index::IndexHandle<'_> {
         crate::index::IndexHandle::new(self)
-    }
-
-    /// Merged config read and local config write handle.
-    #[inline]
-    #[must_use]
-    pub fn config_handle(&self) -> crate::config::ConfigHandle<'_> {
-        crate::config::ConfigHandle::new(self)
     }
 
     /// Revision parse and rev-list handle.
@@ -1560,7 +1546,7 @@ impl Repository {
             Some(work_tree) => self.caches().gitattributes_stack_shared(self, work_tree)?,
             None => self.caches().gitattributes_bare_shared(self)?,
         };
-        let icase = self.config()?.ignore_case();
+        let icase = self.config().snapshot()?.ignore_case();
         Ok(crate::pathspec::PathspecMatcher::new(
             specs,
             precompose,
@@ -1860,7 +1846,7 @@ impl Repository {
 
         let repo = Self::from_canonical_git_dir(options, git_dir, work_tree, injected_refs)?;
         repo.refresh_config_session()?;
-        read_core_bare_and_worktree_from_config(repo.config()?.as_ref())?;
+        read_core_bare_and_worktree_from_config(repo.config().snapshot()?.as_ref())?;
         if options.validate_repository_format {
             repo.validate_repository_format_cached()?;
         }
@@ -2018,7 +2004,7 @@ impl Repository {
         }
         let repository = self
             .ensure_config_arc_fast()?
-            .get("extensions.objectformat")
+            .value("extensions.objectformat")
             .and_then(|name| HashAlgo::from_name(&name))
             .unwrap_or(HashAlgo::Sha1);
         match injected.iter().find(|algo| **algo != repository) {
@@ -2165,7 +2151,7 @@ impl Repository {
                 repo.refresh_config_session()?;
                 repo.validate_repository_format_cached()?;
                 repo.install_config_snapshot();
-                let cfg = repo.config()?;
+                let cfg = repo.config().snapshot()?;
                 repo.set_diagnostics(Arc::clone(&options.diagnostics));
                 if let Some(ref wt) = env_work_tree {
                     repo.work_tree =
@@ -2285,7 +2271,10 @@ impl Repository {
         parse_ctx: crate::index::IndexParseContext,
     ) -> Result<Index> {
         let mut idx = self.load_index_at_preserving_sparse(path, parse_ctx)?;
-        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
+        let cfg = self
+            .config()
+            .snapshot()
+            .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         idx.expand_sparse_directory_placeholders(
             &self.odb,
             crate::path_validate::ProtectOptions::from_config(cfg.as_ref()),
@@ -2310,10 +2299,11 @@ impl Repository {
         parse_ctx: crate::index::IndexParseContext,
     ) -> Result<Index> {
         crate::trace::trace_span!("grit.index.read");
-        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
-        if let Some(res) = cfg.as_ref().get_bool("index.sparse") {
-            res?;
-        }
+        let cfg = self
+            .config()
+            .snapshot()
+            .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
+        cfg.as_ref().get_bool("index.sparse")?;
         let mut idx = Index::load_preserving_sparse_optional_with_context(
             path,
             &self.odb,
@@ -2356,7 +2346,7 @@ impl Repository {
         test_inject_index_write_fail()?;
         let _ = crate::porcelain::commit::reap_stale_next_index_files(self, false)?;
         let path = self.index_path_for_env()?;
-        let cfg = self.config()?;
+        let cfg = self.config().snapshot()?;
         crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
     }
 
@@ -2452,7 +2442,7 @@ impl Repository {
         if !self.environment().git_optional_locks {
             return Ok(false);
         }
-        let cfg = self.config().ok();
+        let cfg = self.config().snapshot().ok();
         let mut lock = match crate::index::IndexLock::acquire(path, cfg.as_deref()) {
             Ok(lock) => lock,
             Err(e) if Self::opportunistic_index_write_skippable(&e) => return Ok(false),
@@ -2632,7 +2622,7 @@ impl Repository {
     /// `core.filesRefLockTimeout` wait, or [`Error::Io`] when the lock cannot be created.
     pub(crate) fn lock_index(&self) -> Result<crate::index::IndexLock> {
         let path = self.index_path_for_env()?;
-        let cfg = self.config()?;
+        let cfg = self.config().snapshot()?;
         crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))
     }
 
@@ -2682,7 +2672,7 @@ impl Repository {
         index.hash_algo = self.odb.hash_algo();
         self.finalize_sparse_index_if_needed(index)?;
         let prev_index_mtime = crate::index::index_file_mtime(path);
-        let cfg = self.config()?;
+        let cfg = self.config().snapshot()?;
         if let Some(work_tree) = self.work_tree.as_deref() {
             if !index.suppress_pre_write_index_housekeeping {
                 crate::untracked_cache::ensure_untracked_cache_shell(
@@ -2745,9 +2735,12 @@ impl Repository {
     }
 
     fn finalize_sparse_index_if_needed(&self, index: &mut Index) -> Result<()> {
-        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
+        let cfg = self
+            .config()
+            .snapshot()
+            .unwrap_or_else(|_| Arc::new(ConfigSet::new()));
         let sparse_enabled = cfg
-            .get("core.sparseCheckout")
+            .value("core.sparseCheckout")
             .map(|v| v == "true")
             .unwrap_or(false);
         if !sparse_enabled {
@@ -2755,11 +2748,11 @@ impl Repository {
             return Ok(());
         }
         let cone_cfg = cfg
-            .get("core.sparseCheckoutCone")
+            .value("core.sparseCheckoutCone")
             .and_then(|v| v.parse::<bool>().ok())
             .unwrap_or(true);
         let sparse_ix = cfg
-            .get("index.sparse")
+            .value("index.sparse")
             .map(|v| v == "true")
             .unwrap_or(false);
         let patterns = read_sparse_checkout_patterns(&self.git_dir);
@@ -2805,8 +2798,8 @@ impl Repository {
     /// opened without a work tree stays `true`.
     #[must_use]
     pub fn is_bare(&self) -> bool {
-        if let Ok(cfg) = self.config() {
-            if !cfg.bool_or("core.bare", true) {
+        if let Ok(cfg) = self.config().snapshot() {
+            if !cfg.bool_with_default("core.bare", true) {
                 return false;
             }
         }
@@ -3634,8 +3627,12 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
         // When set to "explicit", implicit bare repo discovery is forbidden
         // unless GIT_DIR was set (handled earlier in discover()).
         if !is_inside_dot_git(dir) {
-            if let Ok(cfg) = crate::config::ConfigSet::load(env, None, true) {
-                if let Some(val) = cfg.get("safe.bareRepository") {
+            if let Ok(cfg) = crate::config::ConfigSet::load(
+                env,
+                None,
+                &crate::config::LoadConfigOptions::standard(env, None),
+            ) {
+                if let Some(val) = cfg.value("safe.bareRepository") {
                     if val.eq_ignore_ascii_case("explicit") {
                         return Err(Error::ForbiddenBareRepository(path_for_error_message(dir)));
                     }
@@ -3659,8 +3656,12 @@ fn is_inside_dot_git(path: &Path) -> bool {
 /// Collect effective `safe.directory` values from protected config (system/global/command),
 /// applying empty-value resets like Git.
 fn safe_directory_effective_values(git_dir: &Path, env: &Environment) -> Vec<String> {
-    let cfg = crate::config::ConfigSet::load(env, Some(git_dir), true)
-        .unwrap_or_else(|_| crate::config::ConfigSet::new());
+    let cfg = crate::config::ConfigSet::load(
+        env,
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(env, Some(git_dir)),
+    )
+    .unwrap_or_else(|_| crate::config::ConfigSet::new());
     let mut values: Vec<String> = Vec::new();
     for e in cfg.entries() {
         if e.key == "safe.directory"
@@ -3924,8 +3925,8 @@ fn warn_core_bare_worktree_conflict(options: &RepositoryOptions, repo: &Reposito
     let Ok(cfg) = repo.ensure_config_arc_fast() else {
         return;
     };
-    let bare = cfg.bool_or("core.bare", false);
-    let worktree = cfg.get("core.worktree").map(|s| s.to_owned());
+    let bare = cfg.bool_with_default("core.bare", false);
+    let worktree = cfg.value("core.worktree").map(|s| s.to_owned());
     if bare && worktree.is_some() {
         options
             .diagnostics
@@ -3942,11 +3943,11 @@ pub(crate) fn read_core_bare_and_worktree_from_config(
     cfg: &ConfigSet,
 ) -> Result<(bool, Option<String>)> {
     let bare = match cfg.get_bool("core.bare") {
-        None => false,
-        Some(Ok(v)) => v,
-        Some(Err(e)) => return Err(Error::Config(e)),
+        Ok(None) => false,
+        Ok(Some(v)) => v,
+        Err(e) => return Err(Error::Config(e)),
     };
-    let worktree = cfg.get("core.worktree").map(|s| s.to_owned());
+    let worktree = cfg.value("core.worktree").map(|s| s.to_owned());
     Ok((bare, worktree))
 }
 
@@ -3954,7 +3955,10 @@ fn read_core_bare_and_worktree(git_dir: &Path) -> Result<(bool, Option<String>)>
     let cfg = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )?;
     read_core_bare_and_worktree_from_config(&cfg)
 }
@@ -4187,11 +4191,15 @@ fn parse_gitfile(content: &str, gitfile: &Path) -> Result<PathBuf> {
 pub fn resolve_initial_branch(env: &Environment, explicit: Option<&str>) -> Result<String> {
     let name = match explicit {
         Some(name) => name.to_owned(),
-        None => ConfigSet::load(env, None, true)?
-            .get_last_entry("init.defaultBranch")
-            .and_then(|e| e.value.clone())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "main".to_owned()),
+        None => ConfigSet::load(
+            env,
+            None,
+            &crate::config::LoadConfigOptions::standard(env, None),
+        )?
+        .get_last_entry("init.defaultBranch")
+        .and_then(|e| e.value.clone())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "main".to_owned()),
     };
     RefName::branch(&name).map_err(|e| Error::InvalidRef(e.to_string()))?;
     Ok(name)
@@ -4757,13 +4765,17 @@ mod config_session_tests {
         .unwrap();
         let repo = Repository::discover(Some(&work), &options).unwrap();
 
-        let first = repo.config().unwrap();
-        assert_eq!(first.get("user.name").as_deref(), Some("First"));
-        assert!(Arc::ptr_eq(&first, &repo.config().unwrap()));
+        let first = repo.config().snapshot().unwrap();
+        assert_eq!(first.value("user.name").as_deref(), Some("First"));
+        assert!(Arc::ptr_eq(&first, &repo.config().snapshot().unwrap()));
 
         fs::write(&global, "[user]\n\tname = Second one\n").unwrap();
         assert_eq!(
-            repo.config().unwrap().get("user.name").as_deref(),
+            repo.config()
+                .snapshot()
+                .unwrap()
+                .value("user.name")
+                .as_deref(),
             Some("Second one")
         );
 
@@ -4771,13 +4783,13 @@ mod config_session_tests {
         let mut text = fs::read_to_string(&local).unwrap();
         text.push_str("[user]\n\tname = Local\n");
         fs::write(&local, text).unwrap();
-        let reloaded = repo.config().unwrap();
-        assert_eq!(reloaded.get("user.name").as_deref(), Some("Local"));
-        assert!(Arc::ptr_eq(&reloaded, &repo.config().unwrap()));
+        let reloaded = repo.config().snapshot().unwrap();
+        assert_eq!(reloaded.value("user.name").as_deref(), Some("Local"));
+        assert!(Arc::ptr_eq(&reloaded, &repo.config().snapshot().unwrap()));
 
         fs::remove_file(&global).unwrap();
         fs::write(&local, "[core]\n\trepositoryformatversion = 0\n").unwrap();
-        assert_eq!(repo.config().unwrap().get("user.name"), None);
+        assert_eq!(repo.config().snapshot().unwrap().value("user.name"), None);
     }
 
     #[test]
@@ -4796,18 +4808,22 @@ mod config_session_tests {
         )
         .unwrap();
         let mut repo = Repository::discover(Some(&work), &options).unwrap();
-        let before = repo.config().unwrap();
+        let before = repo.config().snapshot().unwrap();
 
         // An equal snapshot in a new allocation passes the full check and keeps the session.
         repo.environment = Arc::new(options.environment.clone());
-        assert!(Arc::ptr_eq(&before, &repo.config().unwrap()));
+        assert!(Arc::ptr_eq(&before, &repo.config().snapshot().unwrap()));
 
         // A snapshot naming another global file must not reuse the old stamps.
         let other = dir.path().join("other.cfg");
         fs::write(&other, "[user]\n\tname = Other\n").unwrap();
         repo.environment = Arc::new(options_with_global(dir.path(), &other).environment);
         assert_eq!(
-            repo.config().unwrap().get("user.name").as_deref(),
+            repo.config()
+                .snapshot()
+                .unwrap()
+                .value("user.name")
+                .as_deref(),
             Some("Other")
         );
     }

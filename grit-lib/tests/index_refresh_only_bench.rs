@@ -39,7 +39,10 @@ fn refresh_index_stat_only_timing() {
     let config = grit_lib::config::ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),
         Some(repo.git_dir()),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::capture_process(),
+            Some(repo.git_dir()),
+        ),
     )
     .unwrap_or_default();
     let start = Instant::now();

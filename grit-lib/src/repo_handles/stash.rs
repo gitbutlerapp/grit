@@ -301,7 +301,7 @@ impl<'repo> RepositoryStash<'repo> {
     /// # use std::path::Path;
     /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
-    /// let diff_options = DiffOptions::from_config(repo.config()?.as_ref());
+    /// let diff_options = DiffOptions::from_config(repo.config().snapshot()?.as_ref());
     /// let stat = repo.stash().diff_stat(0, &StashDiffOptions::default(), diff_options)?;
     /// let _ = stat.totals().insertions;
     /// # Ok(())

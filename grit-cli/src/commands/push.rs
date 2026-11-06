@@ -394,8 +394,15 @@ pub fn run(
     no_verify: bool,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &crate::context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
 
     // `grit push <owner>/<project> main` pushes to that repository on the default grit host.
     let shorthand_url = remote_flag
@@ -410,9 +417,8 @@ pub fn run(
         .map_err(plan_error)?;
 
     let factory = crate::context::http_client_factory();
-    let plan_ctx =
-        load_push_plan_context(&repo, &config, invocation.remote.as_deref(), Some(&factory))
-            .map_err(plan_error)?;
+    let plan_ctx = load_push_plan_context(&repo, invocation.remote.as_deref(), Some(&factory))
+        .map_err(plan_error)?;
 
     let force_mode = parse_force_mode(&repo, force, force_with_lease).map_err(plan_error)?;
 
@@ -432,7 +438,7 @@ pub fn run(
         prune,
     };
 
-    let mut plan = resolve_push(&repo, &config, &push_request, &plan_ctx).map_err(plan_error)?;
+    let mut plan = resolve_push(&repo, &push_request, &plan_ctx).map_err(plan_error)?;
     // Your head of a shared branch is yours alone (grit share): replacing it
     // after an amend or rebase needs no --force, only that it still be the
     // head this clone last fetched.
@@ -445,14 +451,16 @@ pub fn run(
             // A clone of an organization's project pushes `origin` to your
             // space (its pushurl), which the `space` remote fetches.
             let space = crate::commands::sync::SPACE_REMOTE;
-            let pushurl = config.get(&format!("remote.{}.pushurl", plan.remote));
-            let tracking =
-                if pushurl.is_some() && pushurl == config.get(&format!("remote.{space}.url")) {
-                    space
-                } else {
-                    plan.remote.as_str()
-                };
-            grit_lib::remote::push_plan::apply_tracking_lease(&repo, &config, tracking, spec);
+            let pushurl =
+                crate::context::config_string(&config, &format!("remote.{}.pushurl", plan.remote));
+            let tracking = if pushurl.is_some()
+                && pushurl == crate::context::config_string(&config, &format!("remote.{space}.url"))
+            {
+                space
+            } else {
+                plan.remote.as_str()
+            };
+            grit_lib::remote::push_plan::apply_tracking_lease(&repo, tracking, spec);
         }
     }
 
@@ -465,8 +473,7 @@ pub fn run(
     };
     let interrupt = crate::interrupt::InterruptCancel::install();
     let mut progress = quiet.progress(mode).with_overall(false);
-    let url = config
-        .get(&format!("remote.{}.url", plan.remote))
+    let url = crate::context::config_string(&config, &format!("remote.{}.url", plan.remote))
         .or_else(|| shorthand_url.clone());
     if progress.is_drawing() {
         eprintln!(
@@ -491,9 +498,9 @@ pub fn run(
     ) {
         Ok(report) => report,
         Err(err) => {
-            let url = config
-                .get(&format!("remote.{}.url", plan.remote))
-                .unwrap_or_default();
+            let url =
+                crate::context::config_string(&config, &format!("remote.{}.url", plan.remote))
+                    .unwrap_or_default();
             if auth::offer_reauth(&err, &url)? {
                 push_once(
                     &repo,
@@ -610,13 +617,15 @@ pub fn run(
                 continue;
             }
             let space = crate::commands::sync::SPACE_REMOTE;
-            let pushurl = config.get(&format!("remote.{}.pushurl", plan.remote));
-            let tracking =
-                if pushurl.is_some() && pushurl == config.get(&format!("remote.{space}.url")) {
-                    space.to_owned()
-                } else {
-                    plan.remote.clone()
-                };
+            let pushurl =
+                crate::context::config_string(&config, &format!("remote.{}.pushurl", plan.remote));
+            let tracking = if pushurl.is_some()
+                && pushurl == crate::context::config_string(&config, &format!("remote.{space}.url"))
+            {
+                space.to_owned()
+            } else {
+                plan.remote.clone()
+            };
             if crate::commands::sync::fetch_shared_heads(&repo, &tracking, mode).is_err() {
                 continue;
             }
@@ -707,9 +716,8 @@ fn integrated_again(
     remote: &str,
     branch: &str,
 ) -> Option<crate::commands::share::IntegratedJson> {
-    let url = config
-        .get(&format!("remote.{remote}.pushurl"))
-        .or_else(|| config.get(&format!("remote.{remote}.url")))?;
+    let url = crate::context::config_string(config, &format!("remote.{remote}.pushurl"))
+        .or_else(|| crate::context::config_string(config, &format!("remote.{remote}.url")))?;
     let (server, project) = grit_lib::remote::grit_server_space::hosted_project(&url)?;
     let tip = grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{branch}")).ok()?;
     crate::commands::share::integrated_on(repo, config, &server, &project, branch, tip)

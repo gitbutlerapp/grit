@@ -683,7 +683,7 @@ fn outcome_from_entries(
             .collect();
         return Ok(outcome_from_files(files, None, format));
     }
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let output = build_file_diffs(
         repo.odb(),
@@ -847,7 +847,7 @@ pub fn log_patch_options_for_patch_text(
     pathspecs: &[String],
     diff_merges: DiffMerges,
 ) -> Result<LogPatchOptions> {
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     format.apply_context(&mut diff_options);
@@ -937,7 +937,7 @@ fn patch_text_outcome(
 fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     let quiet = opts.quiet;
     let repo = context::discover()?;
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let DiffArguments { target, pathspecs } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
@@ -986,7 +986,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         return run_patch_text(opts);
     }
     let repo = context::discover()?;
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let DiffArguments { target, pathspecs } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
@@ -1157,7 +1157,7 @@ pub fn diff_for_commit(
     oid: &ObjectId,
     opts: CommitDiffOptions,
 ) -> Result<DiffOutcome> {
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let pathspecs = resolve_commit_diff_pathspecs(repo, &opts.paths)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
@@ -1173,7 +1173,6 @@ pub fn diff_for_commit(
         detail,
         &diff_options,
         &pathspecs,
-        config.as_ref(),
         &thread_policy,
     )?;
     Ok(finish_outcome(
@@ -1190,7 +1189,7 @@ pub fn outcome_from_tree_entries(
 ) -> Result<DiffOutcome> {
     sort_entries_by_path(&mut entries);
     let changes = load_object_changes(repo, &entries)?;
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
@@ -1561,7 +1560,7 @@ fn tree_diff_outcome(
                 stream_tree_patch_diff(repo, &entries, diff_options, format, mode)
             }
             DiffBodyDelivery::Collect => {
-                let config = repo.config().context("could not load config")?;
+                let config = repo.config().snapshot().context("could not load config")?;
                 let thread_policy = repo.thread_policy();
                 let structured = tree_diff_structured_parallel(
                     repo.odb(),
@@ -1608,7 +1607,7 @@ fn stream_tree_patch_diff(
     }
     let path_display = PathDisplayOptions::from_repo(repo).ok();
     let color = diff_render::use_color();
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let thread_policy = repo.thread_policy();
     crate::output::with_streaming_stdout(|stdout| {
         let w: &mut dyn Write = stdout;
@@ -2091,7 +2090,7 @@ mod tests {
             mode: OutputMode,
             stream: bool,
         ) -> Vec<u8> {
-            let config = repo.config().expect("config");
+            let config = repo.config().snapshot().expect("config");
             let thread_policy = repo.thread_policy();
             let diff_options = DiffOptions::default().with_word_level_inline(false);
             let path_display = PathDisplayOptions::from_repo(repo).ok();
@@ -2179,7 +2178,7 @@ mod tests {
             }
 
             let (_dir, repo, entries) = repo_with_range();
-            let config = repo.config().expect("config");
+            let config = repo.config().snapshot().expect("config");
             let thread_policy = repo.thread_policy();
             let diff_options = DiffOptions::default().with_word_level_inline(false);
             let structured = tree_diff_structured_parallel(
@@ -2219,7 +2218,7 @@ mod tests {
         #[test]
         fn patch_text_pipeline_matches_collected() {
             let (_dir, repo, entries) = repo_with_range();
-            let config = repo.config().expect("config");
+            let config = repo.config().snapshot().expect("config");
             let thread_policy = repo.thread_policy();
             let diff_options = DiffOptions::default();
             let patch_opts =

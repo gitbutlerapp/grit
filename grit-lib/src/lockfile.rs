@@ -48,7 +48,7 @@ impl LockWait {
     #[must_use]
     pub fn parse_files_ref_lock_timeout_ms(config: Option<&ConfigSet>) -> i64 {
         config
-            .and_then(|cfg| cfg.get("core.filesreflocktimeout"))
+            .and_then(|cfg| cfg.value("core.filesreflocktimeout"))
             .and_then(|v| v.trim().parse::<i64>().ok())
             .unwrap_or(100)
     }
@@ -79,20 +79,30 @@ impl LockWait {
     /// Load repository config from `git_dir` and return [`Self::files_ref_lock`].
     #[must_use]
     pub fn files_ref_lock_for_git_dir(git_dir: &Path) -> Self {
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).ok();
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .ok();
         Self::files_ref_lock(config.as_ref())
     }
 
     /// Load repository config from `git_dir` and return [`Self::packed_refs`].
     #[must_use]
     pub fn packed_refs_for_git_dir(git_dir: &Path) -> Self {
-        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).ok();
+        let config = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .ok();
         Self::packed_refs(config.as_ref())
     }
 
     fn from_milliseconds_config(config: Option<&ConfigSet>, key: &str, default_ms: u64) -> Self {
         let ms = config
-            .and_then(|cfg| cfg.get(key))
+            .and_then(|cfg| cfg.value(key))
             .and_then(|v| v.trim().parse::<i64>().ok())
             .map(|v| v.max(0) as u64)
             .unwrap_or(default_ms);
@@ -578,13 +588,17 @@ impl LockHolder {
 #[must_use]
 pub fn grit_lockfile_pid_enabled(config: Option<&ConfigSet>, git_dir: Option<&Path>) -> bool {
     fn from_config(cfg: &ConfigSet) -> bool {
-        cfg.bool_or("core.lockfilepid", true)
+        cfg.bool_with_default("core.lockfilepid", true)
     }
     if let Some(cfg) = config {
         return from_config(cfg);
     }
     if let Some(dir) = git_dir {
-        if let Ok(cfg) = ConfigSet::load(&Environment::empty(), Some(dir), true) {
+        if let Ok(cfg) = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir)),
+        ) {
             return from_config(&cfg);
         }
     }

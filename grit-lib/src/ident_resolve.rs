@@ -177,13 +177,13 @@ fn non_blank(value: Option<String>) -> Option<String> {
 }
 
 fn use_config_only(config: &ConfigSet) -> bool {
-    config.bool_or("user.useConfigOnly", false)
+    config.bool_with_default("user.useConfigOnly", false)
 }
 
 fn config_mail_given(config: &ConfigSet) -> bool {
     ["user.email", "author.email", "committer.email"]
         .iter()
-        .any(|key| non_blank(config.get(key)).is_some())
+        .any(|key| non_blank(config.value(key)).is_some())
 }
 
 fn ident_name_has_non_crud(name: &str) -> bool {
@@ -228,8 +228,8 @@ pub fn resolve_email_with<E: IdentityEnv>(
     role: IdentRole,
 ) -> Result<String, IdentityError> {
     let configured = non_blank(env.var(role.env_email_key()))
-        .or_else(|| non_blank(config.get(role.config_email_key())))
-        .or_else(|| non_blank(config.get("user.email")));
+        .or_else(|| non_blank(config.value(role.config_email_key())))
+        .or_else(|| non_blank(config.value("user.email")));
     if let Some(email) = configured {
         return Ok(email);
     }
@@ -257,7 +257,7 @@ pub fn resolve_name_with<E: IdentityEnv>(
     let email = resolve_email_with(env, config, role)?;
 
     let name = name_env_with(env, role.env_name_key()).unwrap_or_else(|| {
-        non_blank(config.get(role.config_name_key()))
+        non_blank(config.value(role.config_name_key()))
             .unwrap_or_else(|| ident_default_name(config, env))
     });
 
@@ -364,14 +364,14 @@ pub fn resolve_loose_committer_identity_with<E: IdentityEnv>(
     let name = name_env_with(env, "GIT_COMMITTER_NAME")
         .or_else(|| name_env_with(env, "GIT_AUTHOR_NAME"))
         .filter(|name| !name.is_empty())
-        .or_else(|| non_blank(config.get("committer.name")))
-        .or_else(|| non_blank(config.get("user.name")))
+        .or_else(|| non_blank(config.value("committer.name")))
+        .or_else(|| non_blank(config.value("user.name")))
         .or_else(|| Some(ident_default_name(config, env)).filter(|name| !name.is_empty()))
         .unwrap_or_else(|| "Unknown".to_owned());
     let email = non_blank(env.var("GIT_COMMITTER_EMAIL"))
         .or_else(|| non_blank(env.var("GIT_AUTHOR_EMAIL")))
-        .or_else(|| non_blank(config.get("committer.email")))
-        .or_else(|| non_blank(config.get("user.email")))
+        .or_else(|| non_blank(config.value("committer.email")))
+        .or_else(|| non_blank(config.value("user.email")))
         .or_else(|| non_blank(env.var("EMAIL")))
         .unwrap_or_else(|| synthetic_email_with(env));
     assemble_identity(&name, &email, None, now)

@@ -208,9 +208,9 @@ pub(crate) fn builtin_warnings_for_rules(rules: &[AttrRule], display_path: &str)
 pub(crate) fn global_attributes_path(
     repo: &Repository,
 ) -> std::result::Result<Option<PathBuf>, crate::error::Error> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let env = repo.environment();
-    if let Some(path) = config.get("core.attributesfile") {
+    if let Some(path) = config.value("core.attributesfile") {
         return Ok(Some(PathBuf::from(parse_path(env, &path))));
     }
     Ok(env.default_xdg_config_git_file("attributes"))
@@ -1279,8 +1279,12 @@ pub(crate) fn resolve_attr_treeish(
         .environment()
         .var("GIT_ATTR_SOURCE")
         .filter(|s| !s.is_empty());
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)?;
-    let cfg_tree = config.get("attr.tree");
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )?;
+    let cfg_tree = config.value("attr.tree");
     if let Some(s) = source_arg.map(|s| s.to_string()) {
         return Ok((Some(s), false));
     }
@@ -1406,7 +1410,10 @@ fn merge_info_attributes(repo: &Repository, merged: &mut ParsedGitAttributes) {
 /// Whether attribute pattern matching should fold ASCII case (`core.ignorecase`).
 #[must_use]
 pub fn attribute_matching_ignore_case(repo: &Repository) -> bool {
-    repo.config().ok().is_some_and(|c| c.ignore_case())
+    repo.config()
+        .snapshot()
+        .ok()
+        .is_some_and(|c| c.ignore_case())
 }
 
 /// Merged attribute rules for `git check-attr --cached` (global, index `.gitattributes`, `info/attributes`).

@@ -555,7 +555,7 @@ fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode)
         ..FollowUp::default()
     };
     let wanted = suggest_work_branch(
-        co.config.get("user.email").as_deref(),
+        crate::context::config_string(&co.config, "user.email").as_deref(),
         crate::commands::checkout::random_pair(),
     );
     let moved = crate::context::discover()
@@ -674,7 +674,14 @@ fn integrate_hosted(name: &str, without: &[String], mode: OutputMode) -> Result<
     use grit_lib::remote::HttpClientFactory as _;
 
     let repo = crate::context::discover()?;
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)?;
+    let config = ConfigSet::load(
+        &crate::context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &crate::context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )?;
     let Some(setup) = ensure_space(&repo, &config, "origin")? else {
         bail!(
             "grit integrate works in a snapshot checkout (`grit checkout`), or in a clone of a project on a grit hosting server such as grithub"

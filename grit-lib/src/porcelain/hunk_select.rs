@@ -203,7 +203,7 @@ pub fn unstaged_file_diffs(
     repo: &Repository,
     pathspecs: &[String],
 ) -> std::result::Result<Vec<(FileDiff, Vec<StructuredHunk>)>, Error> {
-    let opts = DiffOptions::from_config(repo.config()?.as_ref());
+    let opts = DiffOptions::from_config(repo.config().snapshot()?.as_ref());
     let (files, peers) = unstaged_file_diffs_with_peer_hunks(repo, pathspecs, opts)?;
     Ok(files
         .into_iter()
@@ -1262,7 +1262,7 @@ fn plan_worktree_reverse(
     whole_files: &BTreeSet<String>,
 ) -> std::result::Result<Vec<WorktreeReversePlan>, HunkSelectError> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let config = repo.config().map_err(HunkSelectError::from)?;
+    let config = repo.config().snapshot().map_err(HunkSelectError::from)?;
     let mut out = Vec::with_capacity(patches.len());
     for patch in patches {
         let path = patch
@@ -1319,7 +1319,7 @@ fn commit_worktree_reverse(
     outcome: &mut RestoreHunksOutcome,
 ) -> std::result::Result<(), HunkSelectError> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let config = repo.config().map_err(HunkSelectError::from)?;
+    let config = repo.config().snapshot().map_err(HunkSelectError::from)?;
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
     let has_symlinks = dir_cache.has_symlinks();
     for plan in planned {
@@ -1407,7 +1407,7 @@ pub fn reverse_apply_patches_to_worktree(
         path: String::new(),
         message: e.to_string(),
     })?;
-    let config = repo.config().map_err(|e| ApplyError::Failed {
+    let config = repo.config().snapshot().map_err(|e| ApplyError::Failed {
         path: String::new(),
         message: e.to_string(),
     })?;
@@ -1521,7 +1521,7 @@ pub fn reverse_apply_patches_to_worktree(
 ///
 /// Returns repository config errors.
 pub fn diff_options_for_hunk_select(repo: &Repository) -> std::result::Result<DiffOptions, Error> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     Ok(DiffOptions::from_config(config.as_ref()))
 }
 
@@ -1857,7 +1857,7 @@ mod tests {
         git(root, &["commit", "-qm", "init"]);
         std::fs::write(root.join("f.txt"), edited_two).unwrap();
 
-        let opts = DiffOptions::from_config(repo.config().unwrap().as_ref());
+        let opts = DiffOptions::from_config(repo.config().snapshot().unwrap().as_ref());
         let (files, peers) = unstaged_file_diffs_with_peer_hunks(&repo, &[], opts.clone()).unwrap();
         let ids = hunk_ids_with_duplicate_peers(
             DiffSide::Unstaged,

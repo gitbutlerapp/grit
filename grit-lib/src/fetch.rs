@@ -1628,7 +1628,11 @@ pub fn fetch_remote_into(
     progress.milestone(FetchMilestone::Connected);
     validate_fetch_depth_local(local_git_dir, opts)?;
     conn.mirror_http_cancel(cancel);
-    let local_cfg = crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
+    let local_cfg = crate::config::ConfigSet::load(
+        &opts.environment,
+        Some(local_git_dir),
+        &crate::config::LoadConfigOptions::standard(&opts.environment, Some(local_git_dir)),
+    )?;
     if opts.filter.is_none() {
         if let Some(remote) = opts.remote_name.as_deref() {
             opts.filter = crate::partial_clone::stored_remote_filter(&local_cfg, remote);
@@ -1926,8 +1930,11 @@ pub fn fetch_remote_into(
                     promisor: promisor_handshake,
                 });
             }
-            let pack_config =
-                crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
+            let pack_config = crate::config::ConfigSet::load(
+                &opts.environment,
+                Some(local_git_dir),
+                &crate::config::LoadConfigOptions::standard(&opts.environment, Some(local_git_dir)),
+            )?;
             let index_threads = crate::parallel::index_pack_threads_for_ingest(
                 opts.thread_policy,
                 &pack_config,
@@ -2290,8 +2297,11 @@ fn fetch_remote_object_wants(
         )?
     };
     if let Some(path) = pack_path {
-        let pack_config =
-            crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
+        let pack_config = crate::config::ConfigSet::load(
+            &opts.environment,
+            Some(local_git_dir),
+            &crate::config::LoadConfigOptions::standard(&opts.environment, Some(local_git_dir)),
+        )?;
         let index_threads = crate::parallel::index_pack_threads_for_ingest(
             opts.thread_policy,
             &pack_config,
@@ -2379,10 +2389,14 @@ pub(crate) fn fetch_operation_identity(
     git_dir: &Path,
 ) -> Result<crate::ident::Signature> {
     use crate::ident_config::ident_default_name;
-    let cfg = crate::config::ConfigSet::load(env, Some(git_dir), true)?;
+    let cfg = crate::config::ConfigSet::load(
+        env,
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(env, Some(git_dir)),
+    )?;
     let name = ident_default_name(&cfg, env);
     let email = cfg
-        .get("user.email")
+        .value("user.email")
         .filter(|e| !e.trim().is_empty())
         .unwrap_or_else(|| "unknown".to_owned());
     let now = time::OffsetDateTime::now_utc();
@@ -2452,7 +2466,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
         &log.identity.reflog_name_email(),
         log.identity.time,
     );
-    let config = local.config()?;
+    let config = local.config().snapshot()?;
     crate::refs::append_reflog_on_store(
         local.refs(),
         &head_ref,

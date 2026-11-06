@@ -136,9 +136,9 @@ fn t2404_worktree_config_matches_git() {
     );
 
     let repo = open_grit(&linked);
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     assert_eq!(
-        cfg.get("wtsection.from-common").as_deref(),
+        cfg.get("wtsection.from-common").unwrap().as_deref(),
         Some("yes"),
         "linked worktree must load config.worktree"
     );

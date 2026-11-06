@@ -218,9 +218,9 @@ pub enum DefaultHost {
 /// Fails when `GRIT_DEFAULT_HOST` is not an `http`/`https` URL.
 pub fn default_host() -> Result<DefaultHost> {
     let config = load_config();
-    if config
-        .get("remote.origin.url")
-        .is_some_and(|url| is_github_url(&url))
+    if crate::context::config_string(&config, "remote.origin.url")
+        .as_deref()
+        .is_some_and(is_github_url)
     {
         return Ok(DefaultHost::GitHub);
     }
@@ -574,11 +574,23 @@ fn load_config() -> ConfigSet {
         None,
         &grit_lib::config::environment::RepositoryOptions::with_environment(env.clone()),
     ) {
-        if let Ok(config) = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true) {
+        if let Ok(config) = ConfigSet::load(
+            repo.environment(),
+            Some(repo.git_dir()),
+            &grit_lib::config::LoadConfigOptions::standard(
+                repo.environment(),
+                Some(repo.git_dir()),
+            ),
+        ) {
             return config;
         }
     }
-    ConfigSet::load(&env, None, true).unwrap_or_default()
+    ConfigSet::load(
+        &env,
+        None,
+        &grit_lib::config::LoadConfigOptions::standard(&env, None),
+    )
+    .unwrap_or_default()
 }
 
 /// Resolve the OAuth App client id (env, then config, then the baked-in value).
@@ -587,8 +599,7 @@ fn client_id(config: &ConfigSet) -> Result<String> {
         .ok()
         .map(|v| v.trim().to_owned())
         .filter(|v| !v.is_empty());
-    let from_config = config
-        .get("grit.githubClientId")
+    let from_config = crate::context::config_string(config, "grit.githubClientId")
         .map(|v| v.trim().to_owned())
         .filter(|v| !v.is_empty());
     let baked = (!DEFAULT_GITHUB_CLIENT_ID.is_empty()).then(|| DEFAULT_GITHUB_CLIENT_ID.to_owned());

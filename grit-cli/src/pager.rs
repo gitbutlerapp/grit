@@ -184,8 +184,8 @@ fn is_env_var_name(name: &str) -> bool {
 fn pager_command(repo: Option<&Repository>) -> Option<String> {
     let from_env = |name: &str| std::env::var(name).ok();
     let from_config = || {
-        repo.and_then(|repo| repo.config().ok())
-            .and_then(|config| config.get("core.pager"))
+        repo.and_then(|repo| repo.config().snapshot().ok())
+            .and_then(|config| crate::context::config_string(&config, "core.pager"))
     };
     let command = from_env("GRIT_PAGER")
         .or_else(from_config)

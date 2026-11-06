@@ -307,7 +307,10 @@ fn is_literal_worktree_pathspec(resolved: &str) -> bool {
 }
 
 fn repo_pathspec_ignorecase(repo: &Repository) -> bool {
-    repo.config().ok().is_some_and(|cfg| cfg.ignore_case())
+    repo.config()
+        .snapshot()
+        .ok()
+        .is_some_and(|cfg| cfg.ignore_case())
 }
 
 fn known_paths(repo: &Repository) -> Result<Vec<String>> {

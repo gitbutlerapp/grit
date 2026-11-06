@@ -495,11 +495,15 @@ impl std::fmt::Debug for Odb {
 /// key names. Defaults to [`HashAlgo::Sha1`] when the extension is absent or unreadable.
 #[must_use]
 pub fn hash_algo_for_git_dir(env: &crate::environment::Environment, git_dir: &Path) -> HashAlgo {
-    ConfigSet::load(env, Some(git_dir), true)
-        .ok()
-        .and_then(|cfg| cfg.get("extensions.objectformat"))
-        .and_then(|v| HashAlgo::from_name(&v))
-        .unwrap_or(HashAlgo::Sha1)
+    ConfigSet::load(
+        env,
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(env, Some(git_dir)),
+    )
+    .ok()
+    .and_then(|cfg| cfg.value("extensions.objectformat"))
+    .and_then(|v| HashAlgo::from_name(&v))
+    .unwrap_or(HashAlgo::Sha1)
 }
 
 /// Like [`hash_algo_for_git_dir`] but takes an `objects/` directory path.
@@ -789,9 +793,15 @@ impl Odb {
             return caches.load_config_with_options(env.as_ref(), git_dir, &opts);
         }
         match git_dir {
-            Some(git_dir) => {
-                ConfigSet::load(self.config_environment(), Some(git_dir), true).map(Arc::new)
-            }
+            Some(git_dir) => ConfigSet::load(
+                self.config_environment(),
+                Some(git_dir),
+                &crate::config::LoadConfigOptions::standard(
+                    self.config_environment(),
+                    Some(git_dir),
+                ),
+            )
+            .map(Arc::new),
             None => Ok(Arc::new(ConfigSet::new())),
         }
     }
@@ -1433,7 +1443,7 @@ impl Odb {
                 return HashAlgo::Sha1;
             }
             let cfg = self.load_config_cascade().unwrap_or_default();
-            cfg.get("extensions.objectformat")
+            cfg.value("extensions.objectformat")
                 .and_then(|v| HashAlgo::from_name(&v))
                 .unwrap_or(HashAlgo::Sha1)
         })
@@ -1716,7 +1726,7 @@ impl Odb {
                 return false;
             }
             let cfg = self.load_config_cascade().unwrap_or_default();
-            cfg.bool_or("core.multiPackIndex", true)
+            cfg.bool_with_default("core.multiPackIndex", true)
         })
     }
 

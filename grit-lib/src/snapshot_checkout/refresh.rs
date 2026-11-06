@@ -399,7 +399,7 @@ fn snapshot_changes(
     let old_tree = odb.commit_tree(&previous)?;
     let new_tree = odb.commit_tree(&current)?;
     let entries = diff_trees(odb, Some(&old_tree), Some(&new_tree), "")?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let files = build_file_diffs(
         odb,
         entries,

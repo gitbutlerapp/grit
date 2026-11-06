@@ -821,8 +821,8 @@ fn find_header_value<'a>(header: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
 ///
 /// Propagates config load failures from [`Repository::config`](crate::repo::Repository::config).
 pub fn ref_query_options_for_repo(repo: &Repository) -> crate::error::Result<RefQueryOptions> {
-    let config = repo.config()?;
-    let versionsort_suffixes = config.get_all("versionsort.suffix");
+    let config = repo.config().snapshot()?;
+    let versionsort_suffixes = config.values_all("versionsort.suffix");
     let ignore_case = config.ignore_case();
     Ok(RefQueryOptions {
         versionsort_suffixes,

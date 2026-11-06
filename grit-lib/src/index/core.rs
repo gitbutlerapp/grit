@@ -122,17 +122,19 @@ impl StatMatchPolicy {
         let Some(cfg) = config else {
             return policy;
         };
-        if let Some(trust) = cfg.get_bool("core.trustctime").and_then(|r| r.ok()) {
+        if let Ok(Some(trust)) = cfg.get_bool("core.trustctime") {
             policy.trust_ctime = trust;
         }
-        if let Some(raw) = cfg.get("core.checkstat") {
+        if let Some(raw) = cfg.value("core.checkstat") {
             policy.check_stat = match raw.to_ascii_lowercase().as_str() {
                 "minimal" => false,
                 "default" => true,
-                other => cfg.bool_or("core.checkstat", !other.eq_ignore_ascii_case("minimal")),
+                other => {
+                    cfg.bool_with_default("core.checkstat", !other.eq_ignore_ascii_case("minimal"))
+                }
             };
         }
-        if let Some(use_ns) = cfg.get_bool("core.usenanosec").and_then(|r| r.ok()) {
+        if let Ok(Some(use_ns)) = cfg.get_bool("core.usenanosec") {
             policy.use_nanosec = use_ns;
         }
         policy
@@ -922,9 +924,9 @@ impl Index {
     /// `index.version` from `config`.
     #[must_use]
     pub fn new_from_config(config: &ConfigSet) -> Self {
-        let many_files = config.bool_or("feature.manyFiles", false);
+        let many_files = config.bool_with_default("feature.manyFiles", false);
         Self::empty(version_from_config(
-            config.get("index.version").as_deref(),
+            config.value("index.version").as_deref(),
             many_files,
         ))
     }
@@ -1424,7 +1426,15 @@ impl Index {
     pub fn write(&mut self, path: &Path) -> Result<()> {
         let git_dir = path.parent();
         let config = git_dir.and_then(|d| {
-            ConfigSet::load(&crate::environment::Environment::empty(), Some(d), true).ok()
+            ConfigSet::load(
+                &crate::environment::Environment::empty(),
+                Some(d),
+                &crate::config::LoadConfigOptions::standard(
+                    &crate::environment::Environment::empty(),
+                    Some(d),
+                ),
+            )
+            .ok()
         });
         let skip_hash = index_skip_hash_for_write(config.as_ref());
         self.write_to_path(path, skip_hash)
@@ -3173,7 +3183,8 @@ impl Index {
         self.sort();
         let has_stage1 = self.entries.iter().any(|e| e.stage() == 1);
         let mut appended: Vec<IndexEntry> = Vec::new();
-        let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+        let protect =
+            crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
         read_tree_into_overlay(
             repo,
             &tree_oid,
@@ -3498,8 +3509,8 @@ pub(crate) fn index_skip_hash_for_write(config: Option<&ConfigSet>) -> bool {
     let Some(config) = config else {
         return false;
     };
-    let default = config.bool_or("feature.manyFiles", false);
-    config.bool_or("index.skipHash", default)
+    let default = config.bool_with_default("feature.manyFiles", false);
+    config.bool_with_default("index.skipHash", default)
 }
 
 fn trim_trailing_slash_bytes(path: &[u8]) -> &[u8] {
@@ -6006,7 +6017,10 @@ mod tests {
         let cfg = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(&git_dir),
+            ),
         )
         .unwrap();
         let policy = StatMatchPolicy::from_config(Some(&cfg));
@@ -6023,7 +6037,10 @@ mod tests {
         let cfg = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(&git_dir),
+            ),
         )
         .unwrap();
         StatMatchPolicy::from_config(Some(&cfg))
@@ -6281,7 +6298,10 @@ mod tests {
         let cfg = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(&git_dir),
+            ),
         )
         .unwrap();
         let idx = Index::new_from_config(&cfg);

@@ -13,7 +13,7 @@ use crate::context::CommitSummary;
 
 /// Collision-aware abbrev batch using this repository's `core.abbrev` minimum length.
 pub fn display_abbrev_batch(repo: &Repository) -> anyhow::Result<OidAbbrevBatch> {
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let min_len = resolve_core_abbrev_len(&config, repo.odb())?;
     Ok(OidAbbrevBatch::new(min_len))
 }

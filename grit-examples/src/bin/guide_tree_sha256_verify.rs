@@ -15,8 +15,8 @@ fn main() -> Result<()> {
         .nth(1)
         .context("usage: guide_tree_sha256_verify <tag>")?;
     let oid = grit_lib::revwalk::rev_parse::resolve_revision(&repo, &tag)?;
-    let gpg =
-        GpgConfig::from_config(repo.config()?.as_ref())?.with_command_runner(repo.command_runner());
+    let gpg = GpgConfig::from_config(repo.config().snapshot()?.as_ref())?
+        .with_command_runner(repo.command_runner());
     let report = repo.verify_tag(
         oid,
         &TagVerifyOptions {

@@ -64,7 +64,7 @@ impl<'repo> Diff<'repo> {
         new_tree: Option<&ObjectId>,
         options: &DiffOptions,
     ) -> Result<Vec<DiffEntry>> {
-        let config = self.repo.config()?;
+        let config = self.repo.config().snapshot()?;
         diff_trees_with_renames_and_policy(
             self.repo.odb(),
             old_tree,

@@ -526,7 +526,7 @@ pub(crate) fn bloom_settings_for_commit_graph_write(
         return bloom;
     }
     if let Some(v) = config
-        .get("commitgraph.changedpathsversion")
+        .value("commitgraph.changedpathsversion")
         .and_then(|s| s.trim().parse::<i32>().ok())
     {
         if v == 2 {
@@ -552,7 +552,7 @@ fn existing_commit_graph_has_changed_paths(repo: &Repository) -> bool {
 
 pub(crate) fn commit_graph_writes_generation_data(config: &ConfigSet) -> bool {
     config
-        .get("commitgraph.generationversion")
+        .value("commitgraph.generationversion")
         .and_then(|s| s.trim().parse::<i32>().ok())
         .map(|v| v >= 2)
         .unwrap_or(true)
@@ -626,7 +626,7 @@ pub fn build_commit_graph(
     build_commit_graph_for_commits(
         odb,
         &commits,
-        &*repo.config()?,
+        &*repo.config().snapshot()?,
         opts.changed_paths,
         existing.as_deref(),
     )
@@ -758,7 +758,7 @@ pub fn write_commit_graph(
     let built = build_commit_graph_for_commits(
         odb,
         &commits,
-        &*repo.config()?,
+        &*repo.config().snapshot()?,
         opts.changed_paths,
         existing.as_ref(),
     )?;
@@ -790,7 +790,7 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
     odb.require_files_primary("midx write")?;
     let requested = match opts.version {
         Some(v) => Some(v),
-        None => midx_version_from_config(&*repo.config()?)?,
+        None => midx_version_from_config(&*repo.config().snapshot()?)?,
     };
     let version = Some(midx_write_version(requested)?);
     let objects_dir = odb
@@ -941,7 +941,7 @@ fn repack_detail(
     let cfg = opts
         .merged_config
         .clone()
-        .or_else(|| repo.config().ok().map(|c| (*c).clone()));
+        .or_else(|| repo.config().snapshot().ok().map(|c| (*c).clone()));
     let mut pack_opts = opts
         .pack_build
         .unwrap_or_else(|| PackBuildOptions::for_local_copy(cfg.as_ref()));
@@ -1288,7 +1288,7 @@ fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> Result<bool
 }
 
 fn gc_should_pack_refs(repo: &Repository, config: &ConfigSet) -> Result<bool> {
-    let Some(spec) = config.get("gc.packRefs") else {
+    let Some(spec) = config.value("gc.packRefs") else {
         return Ok(true);
     };
     if spec.eq_ignore_ascii_case("notbare") {
@@ -1298,10 +1298,10 @@ fn gc_should_pack_refs(repo: &Repository, config: &ConfigSet) -> Result<bool> {
 }
 
 fn gc_should_write_commit_graph(config: &ConfigSet) -> Result<bool> {
-    if config.get_bool("gc.writeCommitGraph").transpose()? == Some(false) {
+    if config.get_bool("gc.writeCommitGraph")? == Some(false) {
         return Ok(false);
     }
-    Ok(config.get_bool("core.commitGraph").transpose()? != Some(false))
+    Ok(config.get_bool("core.commitGraph")? != Some(false))
 }
 
 /// Loose objects reachable from the maintenance roots: what Git's incremental `repack -d`
@@ -1491,7 +1491,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
 pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
     let odb = repo.odb();
     odb.require_files_primary("prune")?;
-    let cfg = repo.config()?;
+    let cfg = repo.config().snapshot()?;
     let now = gc_now_unix(0);
     let keep_newer_than = match opts.older_than {
         Some(t) => Some(t),
@@ -1700,7 +1700,7 @@ const AUTO_GC_SAMPLE_FANOUT: &str = "17";
 ///
 /// Config load failures and I/O errors other than a missing directory.
 pub fn auto_gc_needed(repo: &Repository) -> Result<Option<AutoGcReason>> {
-    let cfg = repo.config()?;
+    let cfg = repo.config().snapshot()?;
     let Some(threshold) = cfg.gc_auto_threshold() else {
         return Ok(None);
     };
@@ -1979,7 +1979,7 @@ fn gc_locked(
     let mut stats = GcStats::default();
     let dry_run = opts.repack.dry_run;
     let _ = crate::porcelain::commit::reap_stale_next_index_files(repo, dry_run)?;
-    let cfg = repo.config()?;
+    let cfg = repo.config().snapshot()?;
     let prune_policy = gc_loose_prune_policy(&cfg, now)?;
     // Settled before any phase, so a bad config value changes nothing.
     let drop_plan = if opts.drop_large_blobs {
@@ -2079,7 +2079,7 @@ enum GcLoosePrunePolicy {
 
 fn gc_loose_prune_policy(config: &ConfigSet, now_unix: i64) -> Result<GcLoosePrunePolicy> {
     let spec = config
-        .get("gc.pruneExpire")
+        .value("gc.pruneExpire")
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "2.weeks.ago".to_owned());
@@ -2113,7 +2113,7 @@ fn gc_now_unix(now_unix: i64) -> i64 {
 }
 
 fn expire_reflogs_for_gc(repo: &Repository, dry_run: bool, now: i64) -> Result<usize> {
-    let cfg = repo.config()?;
+    let cfg = repo.config().snapshot()?;
     let gc_cfg = load_gc_reflog_expire_config(&cfg, now);
     let params = ReflogExpireParams {
         stale_fix: false,
@@ -2566,7 +2566,7 @@ pub(crate) fn rewrite_local_objects_without(
     let cfg = opts
         .merged_config
         .clone()
-        .or_else(|| repo.config().ok().map(|c| (*c).clone()));
+        .or_else(|| repo.config().snapshot().ok().map(|c| (*c).clone()));
     let pack_opts = opts
         .pack_build
         .unwrap_or_else(|| PackBuildOptions::for_local_copy(cfg.as_ref()));
@@ -3227,7 +3227,7 @@ mod tests {
         let opts = repo_fsck::FsckOptions::full_repository(true).with_check_dangling(false);
         let report = repo_fsck::fsck(repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
         assert!(
-            report.ok(&repo.config().expect("config"), &opts),
+            report.ok(&repo.config().snapshot().expect("config"), &opts),
             "{:?}",
             report.issues
         );

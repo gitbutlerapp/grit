@@ -59,7 +59,8 @@ pub(crate) fn load_worktree_index(repo: &Repository) -> Result<Index> {
     let index_path = repo.index_path_for_env()?;
     let mut index = repo.load_index_at(&index_path)?;
     if index.has_sparse_directory_placeholders() {
-        let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+        let protect =
+            crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
         index.expand_sparse_directory_placeholders(repo.odb(), protect)?;
     }
     Ok(index)
@@ -74,16 +75,20 @@ pub(crate) fn local_change_diffs(
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
     index.expand_sparse_directory_placeholders(
         repo.odb(),
-        crate::path_validate::ProtectOptions::from_config(&*repo.config()?),
+        crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?),
     )?;
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_file_mtime(&index_path);
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
-        .ok()
-        .map(Arc::new);
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .ok()
+    .map(Arc::new);
     let worktree_rules = match config.as_ref() {
-        Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts(
+        Some(cfg) => Some(Arc::new(Mutex::new(WorktreeRules::from_parts_with_config(
             repo,
             index,
             cfg.clone(),
@@ -137,7 +142,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
-    let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
+    let stat_policy = StatMatchPolicy::from_config(repo.config().snapshot().ok().as_deref());
     let added_tree_paths: HashSet<String> = tree_changes
         .iter()
         .filter(|change| change.status == DiffStatus::Added)
@@ -202,11 +207,11 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         }
     }
 
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let worktree_rules = match config.as_ref() {
         Some(cfg) => {
             let rules = if tree_changes_touch_gitattributes(tree_changes) {
-                WorktreeRules::from_parts(repo, index, Arc::clone(cfg))?
+                WorktreeRules::from_parts_with_config(repo, index, Arc::clone(cfg))?
             } else {
                 WorktreeRules::from_parts_index_attributes_only(repo, index, Arc::clone(cfg))?
             };
@@ -288,7 +293,7 @@ fn switch_worktree_clean_for_paths(
     };
 
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let precompose_unicode = config.as_ref().is_some_and(|c| c.precompose_unicode());
     let ignorecase = config.as_ref().is_some_and(|c| c.ignore_case());
     let small = paths.len() < SWITCH_TREE_DIFF_STAT_SKIP_MIN;
@@ -771,10 +776,14 @@ fn collect_untracked_for_added_tree_changes_lstat(
     tree_changes: &[DiffEntry],
     ignorecase: bool,
 ) -> Result<Vec<String>> {
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
-        .ok()
-        .map(Arc::new)
-        .unwrap_or_else(|| Arc::new(ConfigSet::new()));
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .ok()
+    .map(Arc::new)
+    .unwrap_or_else(|| Arc::new(ConfigSet::new()));
     let rules = WorktreeRules::from_parts_index_attributes_only(repo, index, config)?;
     let mut matcher = rules.ignore_mut();
     let removed_paths = removed_or_replaced_old_paths(tree_changes);
@@ -1331,7 +1340,7 @@ fn collect_untracked_for_wholesale_delete_roots(
     let delete_paths_shared = Arc::new(delete_paths.clone());
     const PARALLEL_WHOLESALE_ROOT_SCAN_MIN: usize = 16;
     let scans: Vec<WholesaleDeleteRootScan> = if roots.len() >= PARALLEL_WHOLESALE_ROOT_SCAN_MIN {
-        let config = repo.config().ok();
+        let config = repo.config().snapshot().ok();
         let default_cfg = ConfigSet::new();
         let cfg = config.as_deref().unwrap_or(&default_cfg);
         let options = repo.thread_policy().resolve(ParallelOp::Checkout, cfg);
@@ -1392,10 +1401,14 @@ fn collect_untracked_for_wholesale_delete_roots(
         return Ok((untracked, Vec::new()));
     }
 
-    let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
-        .ok()
-        .map(Arc::new)
-        .unwrap_or_else(|| Arc::new(ConfigSet::new()));
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .ok()
+    .map(Arc::new)
+    .unwrap_or_else(|| Arc::new(ConfigSet::new()));
     let rules = WorktreeRules::from_parts_index_attributes_only(repo, index, config)?;
     let mut matcher = rules.ignore_mut();
     let mut ignored = Vec::new();
@@ -1443,7 +1456,11 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
         return Ok((Vec::new(), Vec::new(), true, false));
     }
     let all_specs: Vec<String> = pathspecs.into_iter().collect();
-    let ignorecase = repo.config().ok().is_some_and(|c| c.ignore_case());
+    let ignorecase = repo
+        .config()
+        .snapshot()
+        .ok()
+        .is_some_and(|c| c.ignore_case());
     let under_delete_root = |path: &str| {
         let root = path.split('/').next().unwrap_or(path);
         if ignorecase {

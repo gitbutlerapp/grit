@@ -241,24 +241,24 @@ impl DiffOptions {
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
         let mut opts = Self::default();
-        if let Some(name) = config.get("diff.algorithm") {
+        if let Some(name) = config.value("diff.algorithm") {
             if let Ok(parsed) = name.parse::<DiffAlgorithm>() {
                 opts.algorithm = parsed;
             }
         }
-        if let Some(v) = config.get("diff.context") {
+        if let Some(v) = config.value("diff.context") {
             if let Ok(n) = v.parse::<usize>() {
                 opts.context_lines = n;
             }
         }
-        if let Some(v) = config.get("diff.interHunkContext") {
+        if let Some(v) = config.value("diff.interHunkContext") {
             if let Ok(n) = v.parse::<usize>() {
                 opts.inter_hunk_context = n;
             }
         }
         opts.indent_heuristic = indent_heuristic_from_config(config);
         opts.renames = renames_from_config(config);
-        if config.bool_or("diff.ignoreSpaceChange", false) {
+        if config.bool_with_default("diff.ignoreSpaceChange", false) {
             opts.whitespace.ignore_space_change = true;
         }
         opts
@@ -278,7 +278,7 @@ impl DiffOptions {
 /// `diff.renames`: `false` disables; `true` or copy modes use default similarity.
 #[must_use]
 pub fn renames_from_config(config: &ConfigSet) -> RenameDetection {
-    match config.get("diff.renames") {
+    match config.value("diff.renames") {
         Some(v) => {
             let v = v.trim();
             if v.eq_ignore_ascii_case("false")

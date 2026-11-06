@@ -107,7 +107,7 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
         &grit_lib::progress::NeverCancel,
     )
     .expect("stage");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let now = repo.identity_now();
     assert_eq!(
         now,

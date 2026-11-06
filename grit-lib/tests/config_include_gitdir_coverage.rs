@@ -47,7 +47,7 @@ fn relative_gitdir_include_from_disk_file() {
     let mut set = ConfigSet::new();
     set.merge_file_with_includes(&file, true, &ctx)
         .expect("merge includes");
-    assert_eq!(set.get("hit.k").as_deref(), Some("yes"));
+    assert_eq!(set.get("hit.k").unwrap().as_deref(), Some("yes"));
 }
 
 #[test]

@@ -9,7 +9,7 @@ These pages walk through every stable domain in `grit-lib`: repository discovery
 | --- | --- |
 | [Repository](repository/) | Discover, open, init, typed handles overview |
 | [Embedding](embedding/) | Environment, sinks, subprocess injection, concurrency |
-| [Config](config/) | `ConfigHandle` get/set |
+| [Config](config/) | `Repository::config()` / `Config` get/set |
 | [Objects](objects/) | `Objects` read/write |
 | [Refs](refs/) | `References`, reflog, backends |
 | [Index](staging/) | `IndexHandle`, stage, write tree |

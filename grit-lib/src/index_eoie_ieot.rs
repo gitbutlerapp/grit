@@ -80,7 +80,7 @@ pub(crate) fn record_end_of_index_entries(config: Option<&ConfigSet>) -> bool {
         return false;
     };
     match cfg.get_bool("index.recordEndOfIndexEntries") {
-        Some(Ok(v)) => v,
+        Ok(Some(v)) => v,
         _ => index_threads_explicitly_non_serial(cfg),
     }
 }
@@ -91,7 +91,7 @@ pub(crate) fn record_offset_table(config: Option<&ConfigSet>) -> bool {
         return false;
     };
     match cfg.get_bool("index.recordOffsetTable") {
-        Some(Ok(v)) => v,
+        Ok(Some(v)) => v,
         _ => index_threads_explicitly_non_serial(cfg),
     }
 }
@@ -102,11 +102,11 @@ fn index_threads_explicitly_non_serial(config: &ConfigSet) -> bool {
 }
 
 fn configured_index_threads_value(config: &ConfigSet) -> Option<i64> {
-    if let Some(Ok(n)) = config.get_i64("index.threads") {
+    if let Ok(Some(n)) = config.get_i64("index.threads") {
         return Some(n);
     }
-    if let Some(result) = config.get_bool("index.threads") {
-        return result.ok().map(|b| if b { 0 } else { 1 });
+    if let Ok(Some(b)) = config.get_bool("index.threads") {
+        return Some(if b { 0 } else { 1 });
     }
     None
 }
@@ -601,8 +601,15 @@ mod tests {
             .expect("git add")
             .success());
         let bytes = std::fs::read(root.join(".git/index")).expect("read index");
-        let cfg =
-            ConfigSet::load(&Environment::empty(), Some(&root.join(".git")), true).expect("config");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(&root.join(".git")),
+            &crate::config::LoadConfigOptions::standard(
+                &Environment::empty(),
+                Some(&root.join(".git")),
+            ),
+        )
+        .expect("config");
         (tmp, bytes, cfg)
     }
 

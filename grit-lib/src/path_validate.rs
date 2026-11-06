@@ -77,9 +77,9 @@ impl ProtectOptions {
     /// Defaults match Git: `core.protectNTFS` true; `core.protectHFS` true on macOS, false elsewhere.
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
-        let protect_ntfs = config.bool_or("core.protectNTFS", true);
+        let protect_ntfs = config.bool_with_default("core.protectNTFS", true);
         let default_hfs = cfg!(target_os = "macos");
-        let protect_hfs = config.bool_or("core.protectHFS", default_hfs);
+        let protect_hfs = config.bool_with_default("core.protectHFS", default_hfs);
         Self {
             protect_ntfs,
             protect_hfs,

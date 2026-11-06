@@ -414,7 +414,7 @@ fn hook_environment_exports_repository_snapshot_not_process() {
     )
     .expect("open");
 
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     run_hook_opts(
         Some(&repo),
         "pre-commit",

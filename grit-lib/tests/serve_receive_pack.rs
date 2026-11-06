@@ -920,7 +920,7 @@ fn shallow_update_records_the_new_boundary_on_both_storage_paths() {
         .expect("hook");
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).expect("chmod");
         let repo = open(&bare);
-        let policy = ReceivePolicy::from_config(&repo.config().expect("config"));
+        let policy = ReceivePolicy::from_config(&repo.config().snapshot().expect("config"));
         assert!(policy.shallow_update);
 
         let body = shallow_push_body(&[boundary], &[(None, Some(tip), "refs/heads/t")], &pack);

@@ -23,10 +23,11 @@ fn main() -> Result<()> {
     let repo = Repository::discover(Some(consumer), &RepositoryOptions::from_process())?;
     let git_dir = repo.git_dir().to_path_buf();
     let work_tree = repo.work_tree().map(|p| p.to_path_buf());
+    let env = grit_lib::config::environment::Environment::capture_process();
     let config = ConfigSet::load(
-        &grit_lib::config::environment::Environment::capture_process(),
+        &env,
         Some(&git_dir),
-        true,
+        &grit_lib::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
     )?;
 
     let remote_info = remote::resolve_remote(&config, &git_dir, Some("origin"), false)?;

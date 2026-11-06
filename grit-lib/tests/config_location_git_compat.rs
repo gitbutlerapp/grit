@@ -104,7 +104,12 @@ fn config_get_with_origin_matches_git_show_origin_show_scope() {
     let repo = Repository::discover(Some(&repo_path), &RepositoryOptions::empty()).expect("open");
     let git_dir = repo.git_dir();
 
-    let merged = ConfigSet::load(&env, Some(git_dir), true).expect("load merged");
+    let merged = ConfigSet::load(
+        &env,
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(git_dir)),
+    )
+    .expect("load merged");
     let origin = merged
         .get_with_origin("user.name")
         .expect("valid key")

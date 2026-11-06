@@ -299,9 +299,19 @@ pub(crate) fn comparison(
     ours: ObjectId,
     theirs: ObjectId,
 ) -> Option<(Vec<ObjectId>, Option<ObjectId>)> {
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true).ok()?;
+    let config = ConfigSet::load(
+        &context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .ok()?;
     let mut floor = Vec::new();
-    if let Some(base) = config.get(&format!("branch.{branch}.sharedBase")) {
+    if let Some(base) =
+        crate::context::config_string(&config, &format!("branch.{branch}.sharedBase"))
+    {
         for name in [
             format!("refs/remotes/origin/{base}"),
             format!("refs/remotes/{remote}/{base}"),
@@ -666,13 +676,27 @@ fn here() -> Result<Here> {
     if crate::commands::checkout::open_checkout_here()?.is_some() {
         bail!("this is a snapshot checkout: share branches from a clone of the project");
     }
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     let Some(setup) = ensure_space(&repo, &config, "origin")? else {
         bail!("origin is not a project on a grit hosting server; sharing needs a clone of one, such as `grit clone https://grithub.dev/<owner>/<project>`");
     };
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
+    let config = ConfigSet::load(
+        &context::environment(),
+        Some(repo.git_dir()),
+        &grit_lib::config::LoadConfigOptions::standard(
+            &context::environment(),
+            Some(repo.git_dir()),
+        ),
+    )
+    .context("could not load config")?;
     Ok(Here {
         repo,
         config,
@@ -1537,10 +1561,14 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
         bail!("{link} isn't a share link: they look like https://grithub.dev/share/<token>");
     };
     let repo = context::discover().ok();
+    let env = context::environment();
     let config = ConfigSet::load(
-        &context::environment(),
+        &env,
         repo.as_ref().map(Repository::git_dir),
-        true,
+        &grit_lib::config::LoadConfigOptions::standard(
+            &env,
+            repo.as_ref().map(Repository::git_dir),
+        ),
     )
     .context("could not load config")?;
     let http = context::http_client_factory()
@@ -1572,7 +1600,7 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
     // In a clone of the project (or of the organization's project it
     // copies), fetch into it; anywhere else, clone your copy.
     let in_clone = repo.as_ref().and_then(|repo| {
-        let url = config.get("remote.origin.url")?;
+        let url = crate::context::config_string(&config, "remote.origin.url")?;
         let (origin_server, origin_project) =
             grit_lib::remote::grit_server_space::hosted_project(&url)?;
         let name = |p: &str| p.split_once('/').map(|(_, n)| n.to_owned());
@@ -1581,8 +1609,15 @@ pub fn accept(link: &str, mode: OutputMode) -> Result<ShareAcceptOutcome> {
     });
     let (path, cloned) = match in_clone {
         Some(repo) => {
-            let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-                .context("could not load config")?;
+            let config = ConfigSet::load(
+                &context::environment(),
+                Some(repo.git_dir()),
+                &grit_lib::config::LoadConfigOptions::standard(
+                    &context::environment(),
+                    Some(repo.git_dir()),
+                ),
+            )
+            .context("could not load config")?;
             let Some(setup) = ensure_space(repo, &config, "origin")? else {
                 bail!("origin is not a project on {}", server.host());
             };

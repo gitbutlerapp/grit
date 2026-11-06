@@ -465,13 +465,13 @@ fn resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs() {
     git(wt, &["branch", "cached-a"]);
     git(wt, &["pack-refs", "--all"]);
     let mut snapshot = PackedRefs::load(&git_dir).unwrap();
-    assert!(snapshot.get("refs/heads/cached-a").is_some());
+    assert!(snapshot.value("refs/heads/cached-a").is_some());
 
     git(wt, &["branch", "cached-b"]);
     git(wt, &["pack-refs", "--all"]);
 
     assert!(
-        snapshot.get("refs/heads/cached-b").is_none(),
+        snapshot.value("refs/heads/cached-b").is_none(),
         "stale snapshot omits newly packed ref"
     );
     assert!(
@@ -488,7 +488,7 @@ fn resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs() {
     );
 
     snapshot = PackedRefs::load(&git_dir).unwrap();
-    assert!(snapshot.get("refs/heads/cached-b").is_some());
+    assert!(snapshot.value("refs/heads/cached-b").is_some());
     assert_eq!(
         resolve_ref_cached(&git_dir, "refs/heads/cached-b", &snapshot)
             .unwrap()

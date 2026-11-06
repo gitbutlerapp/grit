@@ -109,7 +109,7 @@ impl ConfigSet {
     /// Returns [`ConfigError::BadNumericValue`] (as [`Error::Config`]) when the value is
     /// not an integer or does not fit in an `i64`.
     pub(crate) fn get_i64_strict(&self, key: &str) -> Result<Option<i64>> {
-        let Some(raw) = self.get(key) else {
+        let Some(raw) = self.value(key) else {
             return Ok(None);
         };
         parse_git_config_int_strict(&raw)

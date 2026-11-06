@@ -164,9 +164,17 @@ impl FilesRefStore {
         *self.ignorecase.get_or_init(|| {
             use crate::config::ConfigSet;
             use crate::environment::Environment;
-            let config = ConfigSet::load(&Environment::empty(), Some(&self.common_dir), true).ok();
+            let config = ConfigSet::load(
+                &Environment::empty(),
+                Some(&self.common_dir),
+                &crate::config::LoadConfigOptions::standard(
+                    &Environment::empty(),
+                    Some(&self.common_dir),
+                ),
+            )
+            .ok();
             if let Some(cfg) = config.as_ref() {
-                if cfg.get("core.ignorecase").is_some() {
+                if cfg.value("core.ignorecase").is_some() {
                     return cfg.ignore_case();
                 }
             }

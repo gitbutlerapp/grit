@@ -251,7 +251,7 @@ mod unix {
     fn patch_read_of_unreadable_path_still_errors() {
         let Some(fx) = setup(0) else { return };
         let repo = fx.open();
-        let config = repo.config().expect("config");
+        let config = repo.config().snapshot().expect("config");
         let err = grit_lib::diff::read_worktree_side_bytes_for_diff(
             repo.odb(),
             fx.root(),

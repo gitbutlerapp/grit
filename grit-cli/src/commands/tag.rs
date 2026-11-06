@@ -516,7 +516,7 @@ fn validate_delete_options(opts: &TagRunOptions) -> Result<()> {
 
 fn verify(repo: &Repository, opts: &TagRunOptions) -> Result<TagOutcome> {
     validate_verify_options(opts)?;
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let gpg = GpgConfig::from_config(config.as_ref())
         .context("could not load signing config")?
         .with_command_runner(repo.command_runner());
@@ -697,7 +697,7 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
     let message = read_message(opts.message.clone(), opts.message_file.clone())?;
 
     let env = context::environment();
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let will_sign =
         should_sign_tag(&config, opts.sign).context("could not read tag signing config")?;
     let tree_sha256_opts = if opts.tree_sha256 || !opts.exclude_submodule.is_empty() {

@@ -136,7 +136,7 @@ fn bool_or_agrees_with_git_type_bool() {
                 None => default,
             };
             assert_eq!(
-                set.bool_or(&key, default),
+                support::config_bool_with_default(&set, &key, default),
                 expected,
                 "{key} default {default}"
             );
@@ -301,7 +301,7 @@ fn config_worktree_read_ignored_without_extension_git_parity() {
     let set = ConfigLocation::Worktree
         .load_single(&env, Some(&git_dir))
         .expect("load worktree scope");
-    assert_eq!(set.get("x.k"), None);
+    assert_eq!(set.get("x.k").unwrap(), None);
 }
 
 #[test]
@@ -351,7 +351,7 @@ fn config_worktree_read_enabled_matches_git() {
     let set = ConfigLocation::Worktree
         .load_single(&env, Some(&git_dir))
         .expect("load");
-    assert_eq!(set.get("wt.key").as_deref(), Some("from-grit"));
+    assert_eq!(set.get("wt.key").unwrap().as_deref(), Some("from-grit"));
 }
 
 #[test]
@@ -411,7 +411,7 @@ fn config_system_location_honors_env() {
     let set = ConfigLocation::System
         .load_single(&env, None)
         .expect("load system");
-    assert_eq!(set.get("core.a").as_deref(), Some("1"));
+    assert_eq!(set.get("core.a").unwrap().as_deref(), Some("1"));
 }
 
 #[test]

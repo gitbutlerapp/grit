@@ -1121,7 +1121,9 @@ mod git_path_component_tests {
             assert_eq!(repo.git_dir(), expected.join(".git"));
             assert_eq!(repo.common_git_dir(), repo.git_dir());
             assert!(repo.git_dir().join("config").is_file());
-            repo.config().expect("config through stored git dir");
+            repo.config()
+                .snapshot()
+                .expect("config through stored git dir");
         }
 
         let opened = Repository::open(

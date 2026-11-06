@@ -373,7 +373,7 @@ pub(crate) fn fetch_from_bundle_into(
 
     let header = bundle.header();
     let remote_refs = header.refs.clone();
-    let init_default_branch = repo.config().ok().and_then(|cfg| {
+    let init_default_branch = repo.config().snapshot().ok().and_then(|cfg| {
         cfg.get_last_entry("init.defaultBranch")
             .and_then(|e| e.value.clone())
             .filter(|s| !s.is_empty())

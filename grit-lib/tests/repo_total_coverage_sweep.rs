@@ -22,13 +22,13 @@ fn repository_handles_and_discovery_sweep() -> grit_lib::error::Result<()> {
     let _ = repo.environment();
     let _ = repo.reference_unix_time();
     let _ = repo.wall_clock_epoch();
-    let _ = repo.config()?;
+    let _ = repo.config().snapshot()?;
     repo.reload_config()?;
     let _ = repo.refs();
     let _ = repo.objects();
     let _ = repo.references();
     let _ = repo.index_handle().load()?;
-    let _ = repo.config_handle();
+    let _ = repo.config();
     let _ = repo.rev_walk();
     let _ = repo.diff();
     let _ = repo.remotes();

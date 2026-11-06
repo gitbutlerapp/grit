@@ -86,7 +86,14 @@ impl RepositoryLocation {
         }
         let repo = Repository::discover(None, options)?;
         let location = Self::from(&repo);
-        let config = ConfigSet::load(&options.environment, Some(location.git_dir()), true)?;
+        let config = ConfigSet::load(
+            &options.environment,
+            Some(location.git_dir()),
+            &crate::config::LoadConfigOptions::standard(
+                &options.environment,
+                Some(location.git_dir()),
+            ),
+        )?;
         Ok((location, config))
     }
 
@@ -173,7 +180,11 @@ fn accept_dot_git_dir(
         return Ok(None);
     };
     let env = &options.environment;
-    let config = match ConfigSet::load(env, Some(&git_dir), true) {
+    let config = match ConfigSet::load(
+        env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(env, Some(&git_dir)),
+    ) {
         Ok(c) => c,
         Err(Error::Config(e)) => return Err(Error::Config(e)),
         Err(_) => return Ok(None),
@@ -368,8 +379,15 @@ mod tests {
         );
         let (location, config) = RepositoryLocation::discover_with_config(&options).unwrap();
         assert_eq!(location, full(&options));
-        let expected =
-            ConfigSet::load(&options.environment, Some(location.git_dir()), true).unwrap();
+        let expected = ConfigSet::load(
+            &options.environment,
+            Some(location.git_dir()),
+            &crate::config::LoadConfigOptions::standard(
+                &options.environment,
+                Some(location.git_dir()),
+            ),
+        )
+        .unwrap();
         let keyed = |set: &ConfigSet| -> Vec<(String, Option<String>)> {
             set.entries()
                 .iter()
@@ -377,8 +395,8 @@ mod tests {
                 .collect()
         };
         assert_eq!(keyed(&config), keyed(&expected));
-        assert_eq!(config.get("user.name").as_deref(), Some("Global"));
-        assert_eq!(config.get("review.cmdline").as_deref(), Some("yes"));
+        assert_eq!(config.value("user.name").as_deref(), Some("Global"));
+        assert_eq!(config.value("review.cmdline").as_deref(), Some("yes"));
     }
 
     #[test]

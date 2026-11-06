@@ -432,7 +432,7 @@ pub(crate) fn collect_files_for_target(
     pathspecs: &[String],
     opts: DiffOptions,
 ) -> Result<Vec<FileDiff>> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let thread_policy = repo.thread_policy();
     // Git uses similarity 50 by default; when renames are off, skip detection (101 = never).
     let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
@@ -528,7 +528,7 @@ pub(crate) fn stored_target_entries(
     let rename_threshold = options.rename_threshold_u32();
     let entries = match target {
         DiffTarget::Commit(oid) => {
-            let config = repo.config()?;
+            let config = repo.config().snapshot()?;
             commit_diff_entries(
                 repo,
                 oid,
@@ -539,7 +539,7 @@ pub(crate) fn stored_target_entries(
             )?
         }
         DiffTarget::Trees { old, new } => {
-            let config = repo.config()?;
+            let config = repo.config().snapshot()?;
             let thread_policy = repo.thread_policy();
             match old {
                 Some(base) => tree_commit_diff_entries(
@@ -1333,7 +1333,7 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
     pathspecs: &[String],
     opts: DiffOptions,
 ) -> Result<UnstagedDiffWithPeers> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let thread_policy = repo.thread_policy();
     let rename_threshold = opts.renames.threshold_percent().unwrap_or(101);
     let staged = filter_file_changes(
@@ -1378,7 +1378,7 @@ pub fn hunk_diff_bundle(
     pathspecs: &[String],
     opts: DiffOptions,
 ) -> Result<HunkDiffBundle> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let thread_policy = repo.thread_policy();
     let (unstaged_fc, peer_hunks) =
         unstaged_raw_changes_with_peer_hunks(repo, pathspecs, opts.clone())?;

@@ -1717,7 +1717,11 @@ pub struct BlameTextconvContext {
 impl BlameTextconvContext {
     /// Build textconv context from the open repository (config, attributes, filters).
     pub fn new(repo: &Repository) -> Self {
-        let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+        let config = repo
+            .config()
+            .snapshot()
+            .map(|c| (*c).clone())
+            .unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
         let parsed = load_attr_parsed(repo);
         let attrs = parsed.rules.clone();
@@ -1872,7 +1876,7 @@ fn resolve_textconv_command(ctx: &BlameTextconvContext, path: &str) -> Option<St
     }
 
     match selected {
-        Some(DiffAttrValue::Driver(driver)) => ctx.config.get(&format!("diff.{driver}.textconv")),
+        Some(DiffAttrValue::Driver(driver)) => ctx.config.value(&format!("diff.{driver}.textconv")),
         _ => None,
     }
 }
@@ -4644,7 +4648,11 @@ pub fn resolve_blame_line_range_with_options(
             String::from_utf8_lossy(&content_bytes).into_owned().into()
         }
     };
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let parsed = load_gitattributes_for_check_attr_source(repo, &commit.tree)
         .map_err(|e| invalid(e.to_string()))?;
     let matcher =
@@ -5095,14 +5103,18 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
 pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Result<BlameResult> {
     let start_oid = resolve_blame_start(repo, options.start)?;
     let file_path = normalize_blame_path(repo, path);
-    let config = repo.config().map(|cfg| (*cfg).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|cfg| (*cfg).clone())
+        .unwrap_or_default();
     let mut grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
     for oid in crate::shallow::load_shallow_boundaries(repo.git_dir()) {
         grafts.entry(oid).or_default();
     }
     let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
     let diff_algorithm = config
-        .get("diff.algorithm")
+        .value("diff.algorithm")
         .as_ref()
         .and_then(|name| parse_diff_algorithm_name(name))
         .unwrap_or(BlameDiffAlgorithm::Myers);
@@ -5258,7 +5270,11 @@ fn load_blame_overlay(
         BlameFinalSource::Contents(bytes) => Some(bytes.as_slice()),
     };
     let odb = repo.odb();
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let path_bytes = storage_bytes(file_path);
     let rel_match = crate::repo_relpath::as_utf8_for_matching(file_path);
     let conv = crate::crlf::ConversionConfig::from_config(&config);

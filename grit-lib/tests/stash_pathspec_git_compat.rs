@@ -59,8 +59,9 @@ fn stash_w_tree(repo: &Repository, stash_oid: &ObjectId) -> ObjectId {
 
 fn flat_tree_map(repo: &Repository, tree: &ObjectId) -> std::collections::BTreeMap<String, String> {
     use grit_lib::stash::flatten_tree_full;
-    let protect =
-        grit_lib::path_validate::ProtectOptions::from_config(&*repo.config().expect("config"));
+    let protect = grit_lib::path_validate::ProtectOptions::from_config(
+        &*repo.config().snapshot().expect("config"),
+    );
     let entries = flatten_tree_full(repo.odb(), tree, "", protect).expect("flatten");
     entries
         .into_iter()

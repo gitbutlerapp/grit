@@ -99,7 +99,7 @@ pub fn pin_workspace_snapshot(
         flags: Default::default(),
     };
     let store = repo.refs();
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let txn = RefTransaction::new().update(update).map_err(Error::from)?;
     let prepared = prepare_with_lock_wait(store, txn, wait).map_err(Error::from)?;
@@ -121,7 +121,7 @@ pub fn unpin_workspace_snapshot(repo: &Repository, caller_id: &str) -> Result<()
         flags: Default::default(),
     };
     let store = repo.refs();
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let txn = RefTransaction::new().update(update).map_err(Error::from)?;
     let prepared = prepare_with_lock_wait(store, txn, wait).map_err(Error::from)?;
@@ -522,7 +522,7 @@ fn commit_ref_restore(
     _options: &WorkspaceRestoreOptions,
 ) -> Result<()> {
     let store = repo.refs();
-    let config = repo.config().ok();
+    let config = repo.config().snapshot().ok();
     let wait = LockWait::files_ref_lock(config.as_ref().map(|c| c.as_ref()));
     let mut txn = RefTransaction::new();
     for (name, new_value) in &snapshot.refs {

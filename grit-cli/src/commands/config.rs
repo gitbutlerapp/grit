@@ -502,7 +502,7 @@ fn hot_get_in_repo(
     key: &str,
 ) -> Result<ConfigOutcome> {
     let config = read_merged_config(env)?;
-    match config.get(key) {
+    match crate::context::config_string(&config, key) {
         Some(value) => Ok(ConfigOutcome::Get {
             key: key.to_owned(),
             value: Some(value),
@@ -566,7 +566,12 @@ fn read_merged_config(env: &grit_lib::config::environment::Environment) -> Resul
     if let Ok((_, config)) = context::locate_repository_with_config() {
         Ok(config)
     } else {
-        ConfigSet::load(env, None, true).context("could not load config")
+        ConfigSet::load(
+            env,
+            None,
+            &grit_lib::config::LoadConfigOptions::standard(env, None),
+        )
+        .context("could not load config")
     }
 }
 
@@ -646,7 +651,7 @@ fn get_value(
     }
 
     if matches!(mode, OutputMode::Human) {
-        match config.get(key) {
+        match crate::context::config_string(&config, key) {
             Some(value) => {
                 return Ok(ConfigOutcome::Get {
                     key: key.to_owned(),
@@ -703,7 +708,7 @@ fn resolve_get_raw(
     key: &str,
     default_value: Option<&str>,
 ) -> Result<Option<String>> {
-    if let Some(v) = config.get(key) {
+    if let Some(v) = crate::context::config_string(config, key) {
         return Ok(Some(v));
     }
     Ok(default_value.map(str::to_owned))

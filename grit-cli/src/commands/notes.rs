@@ -262,7 +262,7 @@ fn resolve_notes_ref(repo: &Repository, override_ref: Option<&str>) -> Result<No
     if let Some(name) = override_ref {
         return Ok(NotesRef::parse(name));
     }
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     resolve_configured_notes_ref(repo.environment(), config.as_ref()).map_err(map_notes_error)
 }
 

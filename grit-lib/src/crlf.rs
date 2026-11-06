@@ -272,7 +272,7 @@ pub struct ConversionConfig {
 impl ConversionConfig {
     /// Load conversion settings from a ConfigSet.
     pub fn from_config(config: &ConfigSet) -> Self {
-        let autocrlf = match config.get("core.autocrlf") {
+        let autocrlf = match config.value("core.autocrlf") {
             Some(v) => match v.to_lowercase().as_str() {
                 "true" | "yes" | "on" | "1" => AutoCrlf::True,
                 "input" => AutoCrlf::Input,
@@ -281,7 +281,7 @@ impl ConversionConfig {
             None => AutoCrlf::False,
         };
 
-        let eol = match config.get("core.eol") {
+        let eol = match config.value("core.eol") {
             Some(v) => match v.to_lowercase().as_str() {
                 "crlf" => CoreEol::Crlf,
                 "lf" => CoreEol::Lf,
@@ -291,7 +291,7 @@ impl ConversionConfig {
             None => CoreEol::Native,
         };
 
-        let safecrlf = match config.get("core.safecrlf") {
+        let safecrlf = match config.value("core.safecrlf") {
             Some(v) => match v.to_lowercase().as_str() {
                 "true" | "yes" | "on" | "1" => SafeCrlf::True,
                 "warn" => SafeCrlf::Warn,
@@ -528,16 +528,16 @@ pub(crate) fn file_attrs_from_attr_map(
                 let process_key = format!("filter.{driver}.process");
                 let req_key = format!("filter.{driver}.required");
                 fa.filter_driver_name = Some(driver.to_owned());
-                fa.filter_process = config.get(&process_key).filter(|s| !s.is_empty());
+                fa.filter_process = config.value(&process_key).filter(|s| !s.is_empty());
                 if fa.filter_process.is_some() {
                     fa.filter_clean = None;
                     fa.filter_smudge = None;
                 } else {
-                    fa.filter_clean = config.get(&clean_key);
-                    fa.filter_smudge = config.get(&smudge_key);
+                    fa.filter_clean = config.value(&clean_key);
+                    fa.filter_smudge = config.value(&smudge_key);
                 }
                 let required = config
-                    .get(&req_key)
+                    .value(&req_key)
                     .is_some_and(|v| config_bool_truthy(v.as_str()));
                 fa.filter_smudge_required = required;
                 fa.filter_clean_required = required;

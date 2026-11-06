@@ -89,7 +89,7 @@ fn normal_refresh_check_only_subtree_records_nested_files() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let idx = repo.index_handle().load().expect("load");
     let wt = repo.work_tree().expect("wt");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let mut uc = UntrackedCache::new_shell(
         DIR_SHOW_OTHER_DIRECTORIES | DIR_HIDE_EMPTY_DIRECTORIES,
         untracked_cache_ident(wt),
@@ -185,7 +185,7 @@ fn try_untracked_from_valid_cache_rejects_invalid_root() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(
         DIR_SHOW_OTHER_DIRECTORIES | DIR_HIDE_EMPTY_DIRECTORIES,
@@ -326,7 +326,7 @@ fn t7063_untracked_cache_reused_by_git_status() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let mut idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("work tree");
     let mut uc = UntrackedCache::new_shell(
         DIR_SHOW_OTHER_DIRECTORIES | DIR_HIDE_EMPTY_DIRECTORIES,
@@ -464,7 +464,10 @@ fn t7063_dir_flags_from_config_modes() {
     let cfg_all = ConfigSet::load(
         &grit_lib::config::environment::Environment::empty(),
         Some(cfg_dir.path()),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(cfg_dir.path()),
+        ),
     )
     .expect("load cfg");
     assert_eq!(dir_flags_from_config(&cfg_all), 0);
@@ -480,7 +483,7 @@ fn t7063_dir_flags_from_config_modes() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let mut idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(0, untracked_cache_ident(wt));
     refresh_untracked_cache_for_status(
@@ -567,7 +570,7 @@ fn t7063_collect_untracked_matches_git_deep_tree() {
     assert_eq!(git_set, grit_set);
 
     let mut idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = idx.untracked_cache.take().expect("untr");
     refresh_untracked_cache_for_status(

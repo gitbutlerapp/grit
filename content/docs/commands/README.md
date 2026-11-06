@@ -18,7 +18,7 @@ Each core library area from the [project direction](../../ROADMAP.md) has at lea
 | Revwalking | [`log`](log.md), [`revs`](revs.md), [`shortlog`](shortlog.md) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) |
 | History rewrite | [`history`](history.md) | [`grit_lib::revwalk::history`](rustdoc:grit_lib::revwalk::history) |
 | Revparsing | [`resolve`](resolve.md), [`merge-base`](merge-base.md), [`show`](show.md) | [`RevWalk`](rustdoc:grit_lib::revwalk::RevWalk) |
-| Config | [`config`](config.md) | [`ConfigHandle`](rustdoc:grit_lib::config::ConfigHandle) |
+| Config | [`config`](config.md) | [`Config`](rustdoc:grit_lib::config::Config) |
 | Ignore rules | [`ignore check`](ignore.md) | [`WorktreeRules`](rustdoc:grit_lib::worktree::worktree_rules::WorktreeRules) |
 | Hooks | [`hooks`](hooks.md) | [`Repository::hooks`](rustdoc:grit_lib::repo::Repository) (via hook runner) |
 | Patch IDs | [`patch-id`](patch-id.md) | [`compute_patch_id`](rustdoc:grit_lib::diff::patch_ids::compute_patch_id) |

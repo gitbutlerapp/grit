@@ -161,7 +161,10 @@ fn cargo_mirror_for_repack_rewrite_build_time_when_fixture_present() {
         grit_lib::config::ConfigSet::load(
             &grit_lib::config::environment::Environment::empty(),
             Some(mirror),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &grit_lib::config::environment::Environment::empty(),
+                Some(mirror),
+            ),
         )
         .ok()
         .as_ref(),
@@ -253,7 +256,10 @@ fn cargo_mirror_for_local_copy_build_time_when_fixture_present() {
         grit_lib::config::ConfigSet::load(
             &grit_lib::config::environment::Environment::empty(),
             Some(mirror),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &grit_lib::config::environment::Environment::empty(),
+                Some(mirror),
+            ),
         )
         .ok()
         .as_ref(),

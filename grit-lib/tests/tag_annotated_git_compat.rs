@@ -105,7 +105,7 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
         Repository::discover(Some(host.as_path()), &RepositoryOptions::empty()).expect("discover");
     let fsck_opts = FsckOptions::full_repository(false).with_check_dangling(false);
     let report = fsck(&host_repo, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
-    let config = host_repo.config().expect("config");
+    let config = host_repo.config().snapshot().expect("config");
     assert!(
         report.ok(&config, &fsck_opts),
         "grit fsck failed: {:?}",
@@ -135,7 +135,7 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
         .expect("discover clone");
     let clone_report =
         fsck(&cloned, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck clone");
-    let clone_config = cloned.config().expect("config");
+    let clone_config = cloned.config().snapshot().expect("config");
     assert!(
         clone_report.ok(&clone_config, &fsck_opts),
         "clone fsck: {:?}",

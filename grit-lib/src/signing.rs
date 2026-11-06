@@ -236,7 +236,7 @@ impl GpgConfig {
     /// Returns [`Error::Config`] when `gpg.format` holds an unrecognized
     /// value (Git rejects this case-sensitively).
     pub fn from_config(config: &ConfigSet) -> Result<GpgConfig> {
-        let format = match config.get("gpg.format") {
+        let format = match config.value("gpg.format") {
             Some(raw) => GpgFormat::from_name(&raw).ok_or_else(|| {
                 Error::Config(ConfigError::UnknownValue {
                     key: "gpg.format".to_owned(),
@@ -246,7 +246,7 @@ impl GpgConfig {
             None => GpgFormat::OpenPgp,
         };
 
-        let nonempty = |k: &str| config.get(k).filter(|p| !p.is_empty());
+        let nonempty = |k: &str| config.value(k).filter(|p| !p.is_empty());
         let generic_program = nonempty("gpg.program");
         let fmt_program = |f: GpgFormat| nonempty(&format!("gpg.{}.program", f.name()));
         let openpgp_program = fmt_program(GpgFormat::OpenPgp);
@@ -264,20 +264,20 @@ impl GpgConfig {
             },
         );
 
-        let signing_key = config.get("user.signingkey").filter(|k| !k.is_empty());
+        let signing_key = config.value("user.signingkey").filter(|k| !k.is_empty());
 
         let min_trust_level = config
-            .get("gpg.mintrustlevel")
+            .value("gpg.mintrustlevel")
             .and_then(|v| TrustLevel::from_config(&v));
 
         // Path values: Git uses `git_config_pathname`, which expands a leading
         // `~/` relative to $HOME. `ConfigSet` lowercases section/variable names.
         let ssh_allowed_signers = config
-            .get("gpg.ssh.allowedsignersfile")
+            .value("gpg.ssh.allowedsignersfile")
             .filter(|p| !p.is_empty())
             .map(|p| expand_tilde(&p));
         let ssh_revocation_file = config
-            .get("gpg.ssh.revocationfile")
+            .value("gpg.ssh.revocationfile")
             .filter(|p| !p.is_empty())
             .map(|p| expand_tilde(&p));
 
@@ -452,10 +452,7 @@ pub fn should_sign_commit(config: &ConfigSet, sign_override: Option<bool>) -> Re
     if let Some(force) = sign_override {
         return Ok(force);
     }
-    Ok(config
-        .get_bool("commit.gpgSign")
-        .transpose()?
-        .unwrap_or(false))
+    Ok(config.get_bool("commit.gpgSign")?.unwrap_or(false))
 }
 
 /// Whether a new annotated tag object should be signed.
@@ -470,7 +467,7 @@ pub fn should_sign_tag(config: &ConfigSet, sign_override: Option<bool>) -> Resul
     if let Some(force) = sign_override {
         return Ok(force);
     }
-    Ok(config.get_bool("tag.gpgSign").transpose()?.unwrap_or(false))
+    Ok(config.get_bool("tag.gpgSign")?.unwrap_or(false))
 }
 
 /// Header name for an embedded commit signature for `hash_algo`.

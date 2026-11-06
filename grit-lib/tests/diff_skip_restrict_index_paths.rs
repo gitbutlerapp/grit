@@ -20,7 +20,7 @@ fn diff_paths_with_options(
     .expect("open");
     let mut index = repo.index_handle().load().expect("index");
     let index_mtime = grit_lib::diff::index_mtime_for_diff(&index, None);
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let (entries, _) = diff_index_to_worktree_with_options(
         repo.odb(),
         &mut index,

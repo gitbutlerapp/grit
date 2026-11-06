@@ -47,7 +47,7 @@ fn refresh_normal(
     uc: &mut UntrackedCache,
     ignored: UntrackedIgnoredMode,
 ) {
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     refresh_untracked_cache_for_status(repo, idx, wt, cfg.as_ref(), uc, false, ignored, None)
         .expect("refresh");
@@ -143,7 +143,7 @@ fn untracked_cache_all_mode_and_mode_switch() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(0, untracked_cache_ident(wt));
     refresh_untracked_cache_for_status(
@@ -620,7 +620,7 @@ fn untracked_cache_many_loose_files_normal_and_all() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(0, untracked_cache_ident(wt));
     refresh_untracked_cache_for_status(
@@ -711,7 +711,7 @@ fn untracked_matching_all_mode_skips_excluded_directories() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(0, untracked_cache_ident(wt));
     refresh_untracked_cache_for_status(
@@ -789,7 +789,7 @@ fn untracked_cache_deep_status_integration() {
     }
 
     let idx = repo.index_handle().load().expect("load");
-    let cfg = repo.config().expect("config");
+    let cfg = repo.config().snapshot().expect("config");
     let wt = repo.work_tree().expect("wt");
     let mut uc = UntrackedCache::new_shell(0, untracked_cache_ident(wt));
     for (show_all, mode) in [

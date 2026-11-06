@@ -50,7 +50,12 @@ fn git_add_all(repo: &Path, version: u32) {
 }
 
 fn load_config(repo: &Repository) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true).expect("config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(repo.git_dir())),
+    )
+    .expect("config")
 }
 
 fn grit_parse_parallel(bytes: &[u8], algo: HashAlgo, cfg: &ConfigSet, threads: usize) -> Index {

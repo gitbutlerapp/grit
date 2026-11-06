@@ -231,15 +231,15 @@ impl ReceivePolicy {
     /// The policy, with defaults for unset or unparseable keys.
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
-        let flag = |key: &str| config.get_bool(key).and_then(|r| r.ok()).unwrap_or(false);
+        let flag = |key: &str| config.get_bool(key).ok().flatten().unwrap_or(false);
         // Whether a `receive.deny*` key is set to a value that lets the update through.
         let allows_delete = |key: &str| {
-            config.get(key).is_some_and(|v| {
+            config.value(key).is_some_and(|v| {
                 let v = v.to_ascii_lowercase();
                 matches!(v.as_str(), "ignore" | "warn" | "false" | "no" | "off" | "0")
             })
         };
-        let deny_current_branch = match config.get("receive.denyCurrentBranch") {
+        let deny_current_branch = match config.value("receive.denyCurrentBranch") {
             None => DenyCurrentBranch::Refuse,
             Some(v) => {
                 let v = v.to_ascii_lowercase();
@@ -256,9 +256,9 @@ impl ReceivePolicy {
                 }
             }
         };
-        let explicit = |key: &str| config.get_bool(key).map(|r| r.unwrap_or(true));
+        let explicit = |key: &str| config.get_bool(key).ok().flatten();
         let fsck = explicit("receive.fsckObjects")
-            .or_else(|| explicit("transfer.fsckObjects"))
+            .or(explicit("transfer.fsckObjects"))
             .unwrap_or(false);
         Self {
             deny_non_fast_forwards: flag("receive.denyNonFastForwards"),
@@ -805,6 +805,7 @@ pub fn receive_pack_with_hook_cancellable(
 
     let cfg = repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     let max_input = max_input_size_from_config(cfg.as_ref());
     let sideband = request.caps.contains("side-band-64k");
@@ -990,10 +991,12 @@ fn write_advertisement(
     let mut caps: Vec<String> = CAPABILITIES.iter().map(|c| (*c).to_owned()).collect();
     let config = repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     if config
         .get_bool("receive.advertisepushoptions")
-        .and_then(|r| r.ok())
+        .ok()
+        .flatten()
         .unwrap_or(false)
     {
         caps.push("push-options".to_owned());

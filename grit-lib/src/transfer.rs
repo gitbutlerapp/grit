@@ -529,10 +529,10 @@ pub fn resolve_fetch_prune(
         return Ok(enabled);
     }
     let remote_key = format!("remote.{remote}.prune");
-    if let Some(value) = config.get_bool(&remote_key).transpose()? {
+    if let Some(value) = config.get_bool(&remote_key)? {
         return Ok(value);
     }
-    if let Some(value) = config.get_bool("fetch.prune").transpose()? {
+    if let Some(value) = config.get_bool("fetch.prune")? {
         return Ok(value);
     }
     Ok(false)
@@ -554,7 +554,7 @@ pub fn resolve_fetch_tags(
         return if all { TagMode::All } else { TagMode::None };
     }
     let key = format!("remote.{remote}.tagOpt");
-    match config.get(&key).as_deref().map(str::trim) {
+    match config.value(&key).as_deref().map(str::trim) {
         Some("--tags") | Some("tags") | Some("all") => TagMode::All,
         Some("--no-tags") | Some("no-tags") | Some("no") | Some("never") => TagMode::None,
         _ => TagMode::Following,
@@ -1066,8 +1066,11 @@ fn ingest_pack_options_for_fetch(
     local_git_dir: &Path,
     fetch_opts: &FetchOptions,
 ) -> Result<crate::index_pack::IngestPackOptions> {
-    let pack_config =
-        crate::config::ConfigSet::load(&fetch_opts.environment, Some(local_git_dir), true)?;
+    let pack_config = crate::config::ConfigSet::load(
+        &fetch_opts.environment,
+        Some(local_git_dir),
+        &crate::config::LoadConfigOptions::standard(&fetch_opts.environment, Some(local_git_dir)),
+    )?;
     let index_threads = crate::parallel::index_pack_threads_for_ingest(
         fetch_opts.thread_policy,
         &pack_config,
@@ -2565,8 +2568,11 @@ pub(crate) fn push_local_from(
         crate::repo::Repository::open(remote_git_dir, &local.peer_repository_options())?;
     let remote_cfg = remote_repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
-    if !opts.push_options.is_empty() && !remote_cfg.bool_or("receive.advertisepushoptions", false) {
+    if !opts.push_options.is_empty()
+        && !remote_cfg.bool_with_default("receive.advertisepushoptions", false)
+    {
         return Err(Error::PushOptionsUnsupported);
     }
 
@@ -2773,6 +2779,7 @@ pub(crate) fn push_local_from(
         }
         let cfg = remote_repo
             .config()
+            .snapshot()
             .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
         let receive_policy = crate::serve::ReceivePolicy::from_config(cfg.as_ref());
         for d in decisions.iter_mut().filter(|d| d.apply) {
@@ -2997,6 +3004,7 @@ fn apply_remote_receive_policy(
     }
     let cfg = remote_repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let policy = crate::serve::ReceivePolicy::from_config(cfg.as_ref());
     let hidden_refs = crate::hide_refs::hide_ref_patterns_receive(cfg.as_ref());
@@ -3582,7 +3590,10 @@ fn config_for_git_dir(git_dir: &Path) -> Option<crate::config::ConfigSet> {
     crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .ok()
 }
@@ -3607,7 +3618,7 @@ pub(crate) fn finish_anonymous_url_fetch(
         let name = opts.remote_name.as_deref()?;
         let config = config_for_git_dir(git_dir)?;
         config
-            .get(&format!("remote.{name}.url"))
+            .value(&format!("remote.{name}.url"))
             .filter(|url| !url.trim().is_empty())
     });
     let Some(source) = source.as_deref() else {
@@ -4227,7 +4238,7 @@ pub(crate) fn apply_fetch_ref_updates(
     use std::collections::HashMap;
 
     let store = local.refs();
-    let config = local.config()?;
+    let config = local.config().snapshot()?;
     let null_oid = store.reference_transaction_null_oid();
     let mode_by_local: HashMap<String, (UpdateMode, Option<ObjectId>, Option<ObjectId>)> = updates
         .iter()

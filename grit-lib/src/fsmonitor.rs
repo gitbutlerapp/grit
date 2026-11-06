@@ -65,7 +65,7 @@ pub fn fsmonitor_enabled(config: &ConfigSet) -> bool {
 }
 
 fn fsmonitor_mode(config: &ConfigSet) -> FsmonitorMode {
-    let Some(raw) = config.get("core.fsmonitor") else {
+    let Some(raw) = config.value("core.fsmonitor") else {
         return FsmonitorMode::Disabled;
     };
     let trimmed = raw.trim();
@@ -83,7 +83,7 @@ fn fsmonitor_mode(config: &ConfigSet) -> FsmonitorMode {
 
 fn hook_version(config: &ConfigSet) -> u32 {
     config
-        .get("core.fsmonitorhookversion")
+        .value("core.fsmonitorhookversion")
         .and_then(|v| v.trim().parse().ok())
         .filter(|&v| v == 1 || v == 2)
         .unwrap_or(2)

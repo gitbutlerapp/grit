@@ -107,9 +107,9 @@ pub fn commit_diff_files(
     detail: DiffDetail,
     options: &DiffOptions,
     pathspecs: &[String],
-    config: &ConfigSet,
     thread_policy: &ThreadPolicy,
 ) -> Result<DiffFilesOutput> {
+    let config = repo.config().snapshot()?;
     let commit = repo.read_commit_with_replace(commit_oid)?;
     let parent_ctx = crate::shallow::EffectiveCommitParents::load(repo);
     let effective_parents = parent_ctx.for_commit(*commit_oid, &commit.parents);
@@ -124,7 +124,7 @@ pub fn commit_diff_files(
             Some(&commit.tree),
             "",
             pathspecs,
-            config,
+            config.as_ref(),
             thread_policy,
         )?;
         let filtered = filter_entries(repo, entries, pathspecs)?;
@@ -135,7 +135,7 @@ pub fn commit_diff_files(
             options
                 .clone()
                 .with_renames(crate::diff::RenameDetection::Off),
-            config,
+            config.as_ref(),
             thread_policy,
         )?;
         out.files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -149,7 +149,7 @@ pub fn commit_diff_files(
         detail,
         options,
         pathspecs,
-        config,
+        config.as_ref(),
         thread_policy,
     )
 }

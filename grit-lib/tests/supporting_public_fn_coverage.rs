@@ -76,7 +76,12 @@ fn commit_encoding_and_trailers_helpers() {
     let dir = tempdir().expect("tempdir");
     init_repo(dir.path());
     let git_dir = dir.path().join(".git");
-    let config = ConfigSet::load(&env, Some(&git_dir), true).expect("config");
+    let config = ConfigSet::load(
+        &env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
+    )
+    .expect("config");
     let _ = finalize_cherry_pick_message(
         "subject\n",
         true,
@@ -103,7 +108,12 @@ fn crlf_and_pathspec_helpers() {
     let dir = tempdir().expect("tempdir");
     let repo = init_repo(dir.path());
     let git_dir = dir.path().join(".git");
-    let config = ConfigSet::load(&env, Some(&git_dir), true).expect("config");
+    let config = ConfigSet::load(
+        &env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
+    )
+    .expect("config");
     let _ = ConversionConfig::from_config(&config);
 
     let _ = parse_gitattributes_content("*.bin binary\n");
@@ -172,7 +182,12 @@ fn hide_refs_namespace_refspec_parallel() {
     let dir = tempdir().expect("tempdir");
     init_repo(dir.path());
     let git_dir = dir.path().join(".git");
-    let config = ConfigSet::load(&env, Some(&git_dir), true).expect("config");
+    let config = ConfigSet::load(
+        &env,
+        Some(&git_dir),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&git_dir)),
+    )
+    .expect("config");
     let _ = hide_ref_patterns_receive(&config);
     let _ = hide_ref_patterns_uploadpack(&config);
 
@@ -191,7 +206,12 @@ fn protocol_transport_terminal_progress_ws_userdiff() {
     let env = Environment::empty();
     let dir = tempdir().expect("tempdir");
     init_repo(dir.path());
-    let config = ConfigSet::load(&env, Some(&dir.path().join(".git")), true).expect("config");
+    let config = ConfigSet::load(
+        &env,
+        Some(&dir.path().join(".git")),
+        &crate::config::LoadConfigOptions::standard(&env, Some(&dir.path().join(".git"))),
+    )
+    .expect("config");
     let macros = MacroTable::default();
 
     let inputs = ProtocolPolicyInputs::default();

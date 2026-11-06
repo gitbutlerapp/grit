@@ -44,7 +44,7 @@ fn system_hook_receives_stdin_on_pre_push() {
     perms.set_mode(0o755);
     fs::set_permissions(&hook, perms).expect("chmod");
 
-    let config = _repo.config().expect("config");
+    let config = _repo.config().snapshot().expect("config");
     let stdin_data = b"expected hook stdin\n";
     let result = run_hook_opts(
         Some(&_repo),

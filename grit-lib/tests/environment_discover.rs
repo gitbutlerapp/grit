@@ -36,7 +36,11 @@ fn cloned_environment_config_overrides_match_git() {
         let options = RepositoryOptions::with_environment(env);
         let repo = Repository::discover(None, &options.clone()).expect("discover");
         assert_eq!(
-            repo.config().expect("config").get("user.name").as_deref(),
+            repo.config()
+                .snapshot()
+                .expect("config")
+                .get("user.name")
+                .as_deref(),
             Some(expected)
         );
         assert_eq!(
@@ -81,8 +85,11 @@ fn discover_with_global_config_from_environment_not_process() {
 
     let repo = Repository::discover(Some(&repo_root), &RepositoryOptions::with_environment(env))
         .expect("discover");
-    let cfg = repo.config().expect("config");
-    assert_eq!(cfg.get("user.name").as_deref(), Some("FromEnvGlobal"));
+    let cfg = repo.config().snapshot().expect("config");
+    assert_eq!(
+        cfg.get("user.name").unwrap().as_deref(),
+        Some("FromEnvGlobal")
+    );
 
     assert!(
         std::env::var("GIT_CONFIG_GLOBAL").is_err(),
@@ -237,8 +244,11 @@ fn relative_global_config_resolved_from_environment_cwd() {
         &RepositoryOptions::with_environment(env.clone()),
     )
     .expect("discover");
-    let cfg = repo.config().expect("config");
-    assert_eq!(cfg.get("user.name").as_deref(), Some("RelativeGlobal"));
+    let cfg = repo.config().snapshot().expect("config");
+    assert_eq!(
+        cfg.get("user.name").unwrap().as_deref(),
+        Some("RelativeGlobal")
+    );
 
     let git_out = Command::new("git")
         .args(["config", "user.name"])

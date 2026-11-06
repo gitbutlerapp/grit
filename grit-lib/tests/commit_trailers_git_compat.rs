@@ -44,7 +44,15 @@ fn init_repo(config: &[(&str, &str)]) -> TempDir {
 }
 
 fn repo_config(repo: &Path) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(&repo.join(".git")), false).expect("load config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(&repo.join(".git")),
+        &crate::config::LoadConfigOptions::standard(
+            &Environment::empty(),
+            Some(&repo.join(".git")),
+        ),
+    )
+    .expect("load config")
 }
 
 /// Commits `message` verbatim on top of `base` and returns the new commit id.

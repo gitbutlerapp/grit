@@ -98,7 +98,7 @@ impl PatchTextOptions {
     ///
     /// Propagates config and ODB errors from abbrev resolution.
     pub fn from_repo(repo: &Repository, diff: DiffOptions) -> Result<Self> {
-        let config = repo.config()?.clone();
+        let config = repo.config().snapshot()?.clone();
         Ok(Self {
             diff,
             abbrev_len: resolve_core_abbrev_len(&config, repo.odb())?,
@@ -124,7 +124,7 @@ pub fn write_patch<W: Write>(
     }
     let odb = repo.odb();
     super::tree_content::prefetch_tree_diff_blobs(odb, entries)?;
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let thread_policy = repo.thread_policy();
     let log_opts = LogPatchOptions {
         diff: opts.diff.clone(),
@@ -214,7 +214,7 @@ pub fn write_patch_structured<W: Write>(
         return Ok(());
     }
     let odb = repo.odb();
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let thread_policy = repo.thread_policy();
     let log_opts = LogPatchOptions {
         diff: opts.diff.clone(),
@@ -434,7 +434,7 @@ fn effective_log_patch_options(
     repo: &Repository,
     opts: &LogPatchOptions,
 ) -> Result<LogPatchOptions> {
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let mut out = opts.clone();
     out.abbrev_len = resolve_core_abbrev_len(&config, repo.odb())?;
     Ok(out)
@@ -631,7 +631,7 @@ fn write_parsed_commit_log_patch<W: Write>(
             writeln!(out)?;
         }
     }
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let thread_policy = repo.thread_policy();
     let entries = commit_first_parent_diff_entries(
         repo,
@@ -748,7 +748,7 @@ pub fn write_diff_entry_log_patch<W: Write>(
     entry: &DiffEntry,
     opts: &LogPatchOptions,
 ) -> Result<()> {
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     write_diff_entry_patch(
         out,
@@ -1088,7 +1088,7 @@ pub fn write_patch_resolved<W: Write>(
     if files.is_empty() {
         return Ok(());
     }
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let thread_policy = repo.thread_policy();
     let log_opts = LogPatchOptions {
         diff: opts.diff.clone(),

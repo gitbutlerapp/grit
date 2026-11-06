@@ -132,7 +132,7 @@ pub(crate) fn flatten_tree_full_for_repo(
     tree_oid: &ObjectId,
     prefix: &str,
 ) -> Result<Vec<FlatTreeEntry>> {
-    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
     flatten_tree_full(repo.odb(), tree_oid, prefix, protect)
 }
 
@@ -185,7 +185,7 @@ fn flatten_tree_full_raw_for_repo(
     repo: &Repository,
     tree_oid: &ObjectId,
 ) -> Result<Vec<RawFlatTreeEntry>> {
-    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
     flatten_tree_full_raw(repo.odb(), tree_oid, b"", protect)
 }
 
@@ -224,7 +224,8 @@ struct StashTreeDelta {
 
 impl StashTreeDelta {
     fn read(repo: &Repository, base: &ObjectId, other: &ObjectId) -> Result<Self> {
-        let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+        let protect =
+            crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
         let mut before = Vec::new();
         let mut changes = Vec::new();
         for change in diff_trees(repo.odb(), Some(base), Some(other), "")? {
@@ -645,7 +646,7 @@ fn stash_worktree_diff_opts(
         ignore_submodule_untracked: true,
         simplify_gitlinks: true,
         repository_git_dir: Some(repo.git_dir().to_path_buf()),
-        config: repo.config().ok(),
+        config: repo.config().snapshot().ok(),
         worktree_rules: Some(rules_arc),
         skip_inaccessible_paths: true,
         diagnostics: Some(repo.diagnostics()),
@@ -1439,7 +1440,7 @@ fn pathspecs_for_push_reset(
     head_tree: &ObjectId,
     pathspecs: &[String],
 ) -> Result<Vec<String>> {
-    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
     let head_entries = flatten_tree_full(repo.odb(), head_tree, "", protect)?;
     let head_match_entries: Vec<PathspecMatchEntry<'_>> = head_entries
         .iter()
@@ -1741,7 +1742,7 @@ pub(crate) fn store_stash(
         identity,
         message,
         true,
-        repo.config()?.as_ref(),
+        repo.config().snapshot()?.as_ref(),
     )
 }
 
@@ -2011,7 +2012,7 @@ pub(crate) fn stash_diff_stat(
     diff_options: DiffOptions,
 ) -> Result<DiffStat> {
     let entries = stash_diff(repo, n, options)?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let whitespace = diff_options.whitespace;
     let output = build_file_diffs(
         repo.odb(),
@@ -2412,7 +2413,7 @@ fn check_stash_local_changes<'a>(
     current_index: &Index,
     paths: impl IntoIterator<Item = &'a [u8]>,
 ) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config.file_mode();
     let index_mtime = crate::diff::index_mtime_for_diff(current_index, None);
@@ -3328,7 +3329,7 @@ fn refresh_index_stats_content_verified(
         index,
         work_tree,
         None,
-        repo.config().ok().as_deref(),
+        repo.config().snapshot().ok().as_deref(),
         None,
         rules_arc.as_ref(),
     )?;

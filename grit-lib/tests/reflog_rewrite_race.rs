@@ -20,7 +20,7 @@ use grit_lib::repo::Repository;
 use grit_lib::repo_handles::ExpireOptions;
 
 fn long_ref_lock_wait(repo: &Repository) -> LockWait {
-    LockWait::files_ref_lock(repo.config().ok().as_deref())
+    LockWait::files_ref_lock(repo.config().snapshot().ok().as_deref())
 }
 
 fn append(

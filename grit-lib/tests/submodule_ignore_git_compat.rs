@@ -277,7 +277,7 @@ fn ignore_untracked_only_inside_submodule() {
         &main,
         DiffIndexToWorktreeOptions {
             repository_git_dir: Some(repo.git_dir().to_path_buf()),
-            config: repo.config().ok(),
+            config: repo.config().snapshot().ok(),
             ..DiffIndexToWorktreeOptions::default()
         },
     )

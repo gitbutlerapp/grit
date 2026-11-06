@@ -219,7 +219,7 @@ pub fn give_change_ids(
     if operation_in_progress(repo)? {
         return Ok(0);
     }
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     if !ChangeIdPolicy::from_config(config.as_ref()).enabled() {
         return Ok(0);
     }

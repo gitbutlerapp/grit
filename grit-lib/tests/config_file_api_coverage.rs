@@ -57,7 +57,7 @@ fn config_file_unset_matching_and_replace_all() {
         s.merge(&file);
         s
     };
-    assert_eq!(set.get_all("m.k"), vec!["x", "y"]);
+    assert_eq!(set.get_all("m.k").unwrap(), vec!["x", "y"]);
 }
 
 #[test]

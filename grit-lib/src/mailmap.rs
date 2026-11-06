@@ -468,8 +468,8 @@ pub fn load_mailmap_table(repo: &Repository) -> Result<MailmapTable> {
 
 /// Merge Git's configured mailmap sources into `table`.
 pub(crate) fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> Result<()> {
-    let config = repo.config()?;
-    let mut mailmap_blob = config.get("mailmap.blob");
+    let config = repo.config().snapshot()?;
+    let mut mailmap_blob = config.value("mailmap.blob");
     let is_bare = repo.work_tree().is_none();
     if mailmap_blob.is_none() && is_bare {
         mailmap_blob = Some("HEAD:.mailmap".to_string());
@@ -489,7 +489,7 @@ pub(crate) fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> 
         }
     }
 
-    if let Some(file) = config.get("mailmap.file") {
+    if let Some(file) = config.value("mailmap.file") {
         read_mailmap_string(
             table,
             &read_optional_mailmap_file(&resolve_mailmap_path(&base_dir, &file), false)?,

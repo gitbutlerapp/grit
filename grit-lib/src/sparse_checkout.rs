@@ -525,7 +525,10 @@ pub fn apply_sparse_checkout_skip_worktree(
     let config = crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     )
     .unwrap_or_else(|_| crate::config::ConfigSet::new());
     let mut warnings = Vec::new();
@@ -574,7 +577,7 @@ impl SparseCheckout {
     /// [`crate::error::Error::Config`] when either key holds an invalid boolean, and
     /// [`crate::error::Error::Io`] when the pattern file exists but cannot be read.
     pub fn load(repo: &crate::repo::Repository) -> crate::error::Result<Option<Self>> {
-        let config = repo.config()?;
+        let config = repo.config().snapshot()?;
         Self::from_config(repo.git_dir(), &config)
     }
 
@@ -601,7 +604,7 @@ impl SparseCheckout {
         warnings: &mut Vec<String>,
     ) -> crate::error::Result<Option<Self>> {
         let get_bool = |key: &str| -> crate::error::Result<bool> {
-            Ok(config.get_bool(key).transpose()?.unwrap_or(false))
+            Ok(config.get_bool(key)?.unwrap_or(false))
         };
         if !get_bool("core.sparsecheckout")? {
             return Ok(None);
@@ -812,15 +815,18 @@ pub(crate) fn clear_skip_worktree_from_present_files(
         crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(git_dir),
+            ),
         )
         .unwrap_or_default()
     });
-    let sparse_enabled = config.bool_or("core.sparsecheckout", false);
+    let sparse_enabled = config.bool_with_default("core.sparsecheckout", false);
     if !sparse_enabled {
         return;
     }
-    if config.bool_or("sparse.expectfilesoutsideofpatterns", false) {
+    if config.bool_with_default("sparse.expectfilesoutsideofpatterns", false) {
         return;
     }
 
@@ -1639,7 +1645,10 @@ mod sparse_public_api_coverage {
         config = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(&git_dir),
+            ),
         )
         .expect("config");
         let sparse = SparseCheckout::from_config(&git_dir, &config)
@@ -1656,7 +1665,10 @@ mod sparse_public_api_coverage {
         let bad = crate::config::ConfigSet::load(
             &crate::environment::Environment::empty(),
             Some(&git_dir),
-            true,
+            &crate::config::LoadConfigOptions::standard(
+                &crate::environment::Environment::empty(),
+                Some(&git_dir),
+            ),
         )
         .expect("config");
         assert!(matches!(

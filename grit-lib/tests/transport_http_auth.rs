@@ -1099,9 +1099,9 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
         &RepositoryOptions::with_environment(env).with_work_tree(&work),
     )
     .expect("open repo");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
 
-    let ctx = load_push_plan_context(&repo, &config, Some("origin"), None).expect("context");
+    let ctx = load_push_plan_context(&repo, Some("origin"), None).expect("context");
     assert!(ctx.remote_tips.is_none(), "the advertisement was refused");
     assert_eq!(
         std::fs::read_to_string(&store_file).unwrap(),
@@ -1148,7 +1148,7 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
         format!("http://{USER}:{PASS}@127.0.0.1%3a{port}\n"),
     )
     .unwrap();
-    let ctx = load_push_plan_context(&repo, &config, Some("origin"), None).expect("context");
+    let ctx = load_push_plan_context(&repo, Some("origin"), None).expect("context");
     assert_eq!(
         ctx.remote_tips,
         Some(Vec::new()),
@@ -1249,7 +1249,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
             .with_work_tree(&work),
     )
     .expect("open repo");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
 
     let counters = Arc::new(StaticCredentialProvider::new(USER, "WRONG"));
     let factory = CountingFactory {
@@ -1257,8 +1257,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
         creates: AtomicUsize::new(0),
         probes: AtomicUsize::new(0),
     };
-    let ctx =
-        load_push_plan_context(&repo, &config, Some("origin"), Some(&factory)).expect("context");
+    let ctx = load_push_plan_context(&repo, Some("origin"), Some(&factory)).expect("context");
     assert!(ctx.remote_tips.is_none());
     assert_eq!(factory.probes.load(Ordering::SeqCst), 1);
     assert_eq!(factory.creates.load(Ordering::SeqCst), 0);

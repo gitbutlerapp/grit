@@ -48,7 +48,7 @@ fn commit_range_structured_diff_parallel_matches_serial() {
     let entries = diff_trees(repo.odb(), Some(&old_tree), Some(&new_tree), "").expect("diff");
     assert_eq!(entries.len(), FILE_COUNT);
 
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let opts = DiffOptions::default()
         .with_context_lines(3)
         .with_word_level_inline(false);

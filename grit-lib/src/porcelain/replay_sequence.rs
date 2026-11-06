@@ -441,7 +441,7 @@ pub fn continue_replay_sequence(
         )?;
         clear_step_heads(repo.git_dir(), active.direction)?;
     } else {
-        let config = repo.config()?;
+        let config = repo.config().snapshot()?;
         let change_id_policy = ChangeIdPolicy::from_config(&config);
         let new_oid = write_replay_commit(
             repo,
@@ -808,7 +808,7 @@ fn run_sequence(
 ) -> Result<SequenceOutcome> {
     let mut head = head_oid;
     let _ = abort_safety;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let change_id_policy = ChangeIdPolicy::from_config(&config);
     let mut replay_session = ReplayMergeSession::default();
     let mut cached_head_tree = repo.odb().commit_tree(&head)?;
@@ -1573,7 +1573,7 @@ fn record_replay_stop(
     let git_dir = repo.git_dir();
     let source_obj = repo.odb().read(&source_oid)?;
     let source = parse_commit(&source_obj.data)?;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let message = replay_message(&config, opts, direction, &source, source_oid, committer)?;
     write_orig_head_if_absent(repo, orig_head)?;
     fs::write(git_dir.join("MERGE_MSG"), &message).map_err(Error::Io)?;

@@ -901,10 +901,11 @@ fn space_for_clone(dir: &str, url: &str, remote: &str) -> Option<String> {
     let (options, _sink) = crate::diagnostics::repository_options(false);
     let repo =
         grit_lib::repo::Repository::discover(Some(std::path::Path::new(dir)), &options).ok()?;
+    let env = crate::context::environment();
     let config = grit_lib::config::ConfigSet::load(
-        &crate::context::environment(),
+        &env,
         Some(repo.git_dir()),
-        true,
+        &grit_lib::config::LoadConfigOptions::standard(&env, Some(repo.git_dir())),
     )
     .ok()?;
     let setup = crate::commands::sync::ensure_space(&repo, &config, remote).ok()??;

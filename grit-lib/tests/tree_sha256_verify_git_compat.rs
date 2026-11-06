@@ -86,7 +86,7 @@ fn setup_ssh_signing(root: &Path) -> std::path::PathBuf {
 }
 
 fn gpg_config(repo: &Repository) -> GpgConfig {
-    GpgConfig::from_config(repo.config().expect("config").as_ref())
+    GpgConfig::from_config(repo.config().snapshot().expect("config").as_ref())
         .expect("gpg config")
         .with_command_runner(repo.command_runner())
 }
@@ -611,7 +611,7 @@ fn signature_and_hash_run_concurrently() {
         gate: sign_gate.clone(),
         hash_done: hash_done.clone(),
     });
-    let gpg = GpgConfig::from_config(repo.config().expect("config").as_ref())
+    let gpg = GpgConfig::from_config(repo.config().snapshot().expect("config").as_ref())
         .expect("gpg")
         .with_command_runner(gate_runner);
 

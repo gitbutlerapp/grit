@@ -365,8 +365,9 @@ fn collect_decorations_impl(
     let head = resolve_head_for_repository(repo)?;
     let hide_remote_update_noise = repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()))
-        .get("grit.submoduleUpdateRemoteDecorations")
+        .value("grit.submoduleUpdateRemoteDecorations")
         .as_deref()
         .and_then(|value| parse_bool(value).ok())
         .unwrap_or(false);

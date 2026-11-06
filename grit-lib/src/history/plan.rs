@@ -114,7 +114,7 @@ struct ChangeIdWriteContext {
 
 impl ChangeIdWriteContext {
     fn from_repo(repo: &Repository) -> Result<Self, HistoryError> {
-        let config = repo.config().map_err(library_err)?;
+        let config = repo.config().snapshot().map_err(library_err)?;
         Ok(Self {
             policy: ChangeIdPolicy::from_config(config.as_ref()),
             generator: repo.change_id_generator(),
@@ -1804,7 +1804,7 @@ fn preserve_logical_change_id(
     template_oid: ObjectId,
     data: &mut CommitData,
 ) -> Result<(), HistoryError> {
-    let config = repo.config().map_err(library_err)?;
+    let config = repo.config().snapshot().map_err(library_err)?;
     if !ChangeIdPolicy::from_config(config.as_ref()).enabled() {
         return Ok(());
     }
@@ -1819,8 +1819,7 @@ fn write_commit_data(
     data: &CommitData,
 ) -> Result<ObjectId, HistoryError> {
     let bytes = if opts.sign {
-        let config = repo.config().map_err(library_err)?;
-        prepare_commit_bytes(repo, config.as_ref(), data, None).map_err(signing_err)?
+        prepare_commit_bytes(repo, data, None).map_err(signing_err)?
     } else {
         serialize_commit(data)
     };

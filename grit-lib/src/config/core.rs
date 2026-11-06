@@ -92,7 +92,7 @@ pub mod cascade_load_counters {
         CACHE_VALIDATED.with(Cell::get)
     }
 
-    /// Total [`ConfigSet::load`] / [`ConfigSet::load_with_options`] invocations.
+    /// Total [`ConfigSet::load`] invocations.
     #[must_use]
     pub fn total_loads() -> usize {
         uncached_loads().saturating_add(cache_validated_loads())
@@ -206,8 +206,8 @@ pub struct ConfigFile {
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let repo = Repository::init(dir.path(), &InitOptions::default())?;
-/// let cfg = repo.config()?;
-/// assert!(cfg.get("core.repositoryformatversion").is_some());
+/// let cfg = repo.config().snapshot()?;
+/// assert!(cfg.get("core.repositoryformatversion")?.is_some());
 /// # Ok(())
 /// # }
 /// ```
@@ -244,11 +244,15 @@ impl Default for IncludeContext {
     }
 }
 
-/// Options controlling how [`ConfigSet::load_with_options`] merges files and includes.
+/// Options controlling how [`ConfigSet::load`] merges files and includes.
 #[derive(Clone)]
 pub struct LoadConfigOptions {
     /// Load `/etc/gitconfig` (unless `GIT_CONFIG_NOSYSTEM` is enabled).
     pub include_system: bool,
+    /// Load only the repository `config` file (no system/global/env overrides).
+    pub repo_local_only: bool,
+    /// Git **protected** config: system (optional), global, and command-line only.
+    pub protected_only: bool,
     /// Expand `[include]` / `[includeIf]` while reading file-backed layers.
     pub process_includes: bool,
     /// Expand includes for synthetic command-line config built from `GIT_CONFIG_PARAMETERS`.
@@ -276,6 +280,8 @@ impl Default for LoadConfigOptions {
     fn default() -> Self {
         Self {
             include_system: true,
+            repo_local_only: false,
+            protected_only: false,
             process_includes: true,
             command_includes: true,
             include_ctx: IncludeContext::default(),
@@ -286,6 +292,55 @@ impl Default for LoadConfigOptions {
 }
 
 impl LoadConfigOptions {
+    /// Standard repository cascade (system, global, local, worktree, environment overrides).
+    #[must_use]
+    pub fn standard(env: &Environment, git_dir: Option<&Path>) -> Self {
+        Self {
+            include_ctx: IncludeContext {
+                git_dir: git_dir.map(Path::to_path_buf),
+                cwd: env.cwd.clone(),
+                pwd: env.pwd.clone(),
+                env: std::sync::Arc::new(env.clone()),
+                ..Default::default()
+            },
+            ..Self::default()
+        }
+    }
+
+    /// Only `.git/config` (plus `[include]` targets), ignoring system/global/env overrides.
+    #[must_use]
+    pub fn repo_local_only(git_dir: &Path) -> Self {
+        Self {
+            include_system: false,
+            repo_local_only: true,
+            include_ctx: IncludeContext {
+                git_dir: Some(git_dir.to_path_buf()),
+                command_line_relative_include_is_error: false,
+                cwd: PathBuf::from("."),
+                pwd: None,
+                env: std::sync::Arc::new(Environment::empty()),
+            },
+            ..Self::default()
+        }
+    }
+
+    /// Git protected config (hooks): system (optional), global, and `-c` / env parameters only.
+    #[must_use]
+    pub fn protected(env: &Environment, include_system: bool) -> Self {
+        Self {
+            include_system,
+            protected_only: true,
+            include_ctx: IncludeContext {
+                git_dir: None,
+                command_line_relative_include_is_error: false,
+                cwd: env.cwd.clone(),
+                pwd: env.pwd.clone(),
+                env: std::sync::Arc::new(env.clone()),
+            },
+            ..Self::default()
+        }
+    }
+
     /// Options for the full cascade of the repository at `git_dir`, as its
     /// [`crate::repo::Repository`] handle loads it: system config included, `gitdir:`
     /// conditions matched against `git_dir`, and the local `config` read through `repo_caches`.
@@ -1894,14 +1949,37 @@ impl ConfigSet {
     ///
     /// `Some(value)` for the last matching entry, or `None` if not found.
     /// Bare boolean keys return `Some("true")`.
+    ///
+    /// Invalid keys are treated as unset (legacy lenient lookup for internal call sites).
     #[must_use]
-    pub fn get(&self, key: &str) -> Option<String> {
+    pub(crate) fn value(&self, key: &str) -> Option<String> {
         let canon = canonical_key(key).ok()?;
         self.entries
             .iter()
             .rev()
             .find(|e| e.key == canon)
             .map(|e| e.value.clone().unwrap_or_else(|| "true".to_owned()))
+    }
+
+    /// Winning string value for `key`, or `None` when unset.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::InvalidKey`] when `key` is not a valid Git config key.
+    pub fn get(&self, key: &str) -> std::result::Result<Option<String>, ConfigError> {
+        let canon = canonical_key(key).map_err(|e| match e {
+            Error::Config(c) => c,
+            _ => ConfigError::InvalidKey {
+                key: key.to_owned(),
+                reason: InvalidKeyReason::InvalidVariable,
+            },
+        })?;
+        Ok(self
+            .entries
+            .iter()
+            .rev()
+            .find(|e| e.key == canon)
+            .map(|e| e.value.clone().unwrap_or_else(|| "true".to_owned())))
     }
 
     /// Last (highest-priority) [`ConfigEntry`] for a key, including origin metadata.
@@ -1949,9 +2027,9 @@ impl ConfigSet {
             .collect())
     }
 
-    /// Get all values for a key (multi-valued; in load order).
+    /// All values for `key` in load order (lenient; invalid keys yield an empty list).
     #[must_use]
-    pub fn get_all(&self, key: &str) -> Vec<String> {
+    pub(crate) fn values_all(&self, key: &str) -> Vec<String> {
         let canon = match canonical_key(key) {
             Ok(c) => c,
             Err(_) => return Vec::new(),
@@ -1961,6 +2039,27 @@ impl ConfigSet {
             .filter(|e| e.key == canon)
             .map(|e| e.value.clone().unwrap_or_default())
             .collect()
+    }
+
+    /// All values for `key` in load order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::InvalidKey`] when `key` is not valid.
+    pub fn get_all(&self, key: &str) -> std::result::Result<Vec<String>, ConfigError> {
+        let canon = canonical_key(key).map_err(|e| match e {
+            Error::Config(c) => c,
+            _ => ConfigError::InvalidKey {
+                key: key.to_owned(),
+                reason: InvalidKeyReason::InvalidVariable,
+            },
+        })?;
+        Ok(self
+            .entries
+            .iter()
+            .filter(|e| e.key == canon)
+            .map(|e| e.value.clone().unwrap_or_default())
+            .collect())
     }
 
     /// All raw values for a key in load order, preserving `None` for bare boolean keys.
@@ -2004,38 +2103,31 @@ impl ConfigSet {
     /// # Errors
     ///
     /// [`ConfigError::InvalidValue`] naming `key` when the value is not a Git boolean.
-    pub fn get_bool(&self, key: &str) -> Option<std::result::Result<bool, ConfigError>> {
-        let v = self.get(key)?;
+    pub fn get_bool(&self, key: &str) -> std::result::Result<Option<bool>, ConfigError> {
+        let Some(v) = self.get(key)? else {
+            return Ok(None);
+        };
         if canonical_key(key).ok().as_deref() == Some("pack.allowpackreuse") {
             let lower = v.trim().to_ascii_lowercase();
             if lower == "single" || lower == "multi" {
-                return None;
+                return Ok(None);
             }
         }
-        Some(parse_bool(&v).map_err(|e| e.for_key(key)))
+        parse_bool(&v).map(Some).map_err(|e| e.for_key(key))
     }
 
-    /// Get a boolean value, falling back to `default` when `key` is unset or its value is not a
-    /// Git boolean.
-    ///
-    /// Use this for settings where Git also ignores a malformed value; use [`Self::get_bool`]
-    /// with `transpose()?` when a bad value must be reported.
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: dotted config key, matched case-insensitively in its section and variable name.
-    /// - `default`: the value Git uses when the key is unset.
-    #[must_use]
-    pub fn bool_or(&self, key: &str, default: bool) -> bool {
-        self.get_bool(key)
-            .and_then(std::result::Result::ok)
-            .unwrap_or(default)
+    /// Lenient boolean read: unset or invalid values fall back to `default`.
+    pub(crate) fn bool_with_default(&self, key: &str, default: bool) -> bool {
+        match self.get_bool(key) {
+            Ok(Some(b)) => b,
+            Ok(None) | Err(_) => default,
+        }
     }
 
     /// Whether path comparisons fold ASCII case (`core.ignoreCase`, default `false`).
     #[must_use]
     pub fn ignore_case(&self) -> bool {
-        self.bool_or("core.ignoreCase", false)
+        self.bool_with_default("core.ignoreCase", false)
     }
 
     /// Whether paths are stored NFC-precomposed (`core.precomposeUnicode`, default `false`).
@@ -2044,19 +2136,19 @@ impl ConfigSet {
     /// `effective_core_precomposeunicode_with_config`.
     #[must_use]
     pub fn precompose_unicode(&self) -> bool {
-        self.bool_or("core.precomposeUnicode", false)
+        self.bool_with_default("core.precomposeUnicode", false)
     }
 
     /// Whether index refresh may stat entries in parallel (`core.preloadIndex`, default `true`).
     #[must_use]
     pub fn preload_index(&self) -> bool {
-        self.bool_or("core.preloadIndex", true)
+        self.bool_with_default("core.preloadIndex", true)
     }
 
     /// Whether the executable bit in the work tree is trusted (`core.fileMode`, default `true`).
     #[must_use]
     pub fn file_mode(&self) -> bool {
-        self.bool_or("core.fileMode", true)
+        self.bool_with_default("core.fileMode", true)
     }
 
     /// Whether pathnames in human-readable output should fully C-quote non-ASCII bytes as octal.
@@ -2065,27 +2157,27 @@ impl ConfigSet {
     /// other high bytes are emitted literally; only ASCII specials are escaped.
     #[must_use]
     pub fn quote_path_fully(&self) -> bool {
-        self.bool_or("core.quotePath", true)
+        self.bool_with_default("core.quotePath", true)
     }
 
     /// Default for `pack.writeBitmapHashCache` (Git default: true).
     #[must_use]
     pub fn pack_write_bitmap_hash_cache(&self) -> bool {
-        self.bool_or("pack.writeBitmapHashCache", true)
+        self.bool_with_default("pack.writeBitmapHashCache", true)
     }
 
     /// Default for `pack.writeBitmapLookupTable` (Git default: false).
     #[must_use]
     pub fn pack_write_bitmap_lookup_table(&self) -> bool {
-        self.bool_or("pack.writeBitmapLookupTable", false)
+        self.bool_with_default("pack.writeBitmapLookupTable", false)
     }
 
     /// Values of `pack.preferBitmapTips` (may appear multiple times).
     #[must_use]
     pub fn pack_prefer_bitmap_tips(&self) -> Vec<String> {
-        let mut out = self.get_all("pack.preferbitmaptips");
+        let mut out = self.values_all("pack.preferbitmaptips");
         if out.is_empty() {
-            out = self.get_all("pack.preferBitmapTips");
+            out = self.values_all("pack.preferBitmapTips");
         }
         out
     }
@@ -2107,19 +2199,20 @@ impl ConfigSet {
     #[must_use]
     pub fn pack_write_reverse_index_default(&self) -> bool {
         if self
-            .get("pack.writeReverseIndex")
+            .value("pack.writeReverseIndex")
             .is_some_and(|v| v.trim().is_empty())
         {
             return false;
         }
-        self.bool_or("pack.writeReverseIndex", true)
+        self.bool_with_default("pack.writeReverseIndex", true)
     }
 
     /// Resolved worker count for pack indexing (`pack.threads`, Git default: unset → all CPUs).
     #[must_use]
     pub fn pack_index_threads(&self) -> Option<usize> {
         self.get_i64("pack.threads")
-            .and_then(|r| r.ok())
+            .ok()
+            .flatten()
             .and_then(|n| usize::try_from(n).ok())
     }
 
@@ -2128,10 +2221,10 @@ impl ConfigSet {
     /// An explicit `0` disables newly computed deltas (on-disk reuse may still apply).
     #[must_use]
     pub fn pack_object_window(&self) -> usize {
-        match self.get_i64("pack.window") {
+        match self.get_i64("pack.window").ok().flatten() {
             None => 10,
-            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(10),
-            Some(Ok(_)) | Some(Err(_)) => 10,
+            Some(n) if n >= 0 => usize::try_from(n).unwrap_or(10),
+            Some(_) => 10,
         }
     }
 
@@ -2141,19 +2234,19 @@ impl ConfigSet {
     #[must_use]
     /// Sliding-window memory cap for delta search (`pack.windowMemory`, Git default: unlimited).
     pub fn pack_window_memory_bytes(&self) -> u64 {
-        match self.get_i64("pack.windowmemory") {
+        match self.get_i64("pack.windowmemory").ok().flatten() {
             None => 0,
-            Some(Ok(n)) if n >= 0 => u64::try_from(n).unwrap_or(0),
-            Some(Ok(_)) | Some(Err(_)) => 0,
+            Some(n) if n >= 0 => u64::try_from(n).unwrap_or(0),
+            Some(_) => 0,
         }
     }
 
     /// Maximum delta depth for `git pack-objects` (`pack.depth`, Git default 50).
     pub fn pack_object_depth(&self) -> usize {
-        match self.get_i64("pack.depth") {
+        match self.get_i64("pack.depth").ok().flatten() {
             None => crate::pack::DEFAULT_PACK_DEPTH,
-            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(crate::pack::DEFAULT_PACK_DEPTH),
-            Some(Ok(_)) | Some(Err(_)) => crate::pack::DEFAULT_PACK_DEPTH,
+            Some(n) if n >= 0 => usize::try_from(n).unwrap_or(crate::pack::DEFAULT_PACK_DEPTH),
+            Some(_) => crate::pack::DEFAULT_PACK_DEPTH,
         }
     }
 
@@ -2165,10 +2258,10 @@ impl ConfigSet {
     /// back to the default.
     #[must_use]
     pub fn gc_auto_threshold(&self) -> Option<usize> {
-        match self.get_i64("gc.auto") {
-            Some(Ok(n)) if n <= 0 => None,
-            Some(Ok(n)) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
-            None | Some(Err(_)) => Some(DEFAULT_GC_AUTO_THRESHOLD),
+        match self.get_i64("gc.auto").ok().flatten() {
+            Some(n) if n <= 0 => None,
+            Some(n) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
+            None => Some(DEFAULT_GC_AUTO_THRESHOLD),
         }
     }
 
@@ -2179,10 +2272,10 @@ impl ConfigSet {
     /// Unparsable values fall back to the default.
     #[must_use]
     pub fn gc_auto_pack_limit(&self) -> Option<usize> {
-        match self.get_i64("gc.autoPackLimit") {
-            Some(Ok(n)) if n <= 0 => None,
-            Some(Ok(n)) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
-            None | Some(Err(_)) => Some(DEFAULT_GC_AUTO_PACK_LIMIT),
+        match self.get_i64("gc.autoPackLimit").ok().flatten() {
+            Some(n) if n <= 0 => None,
+            Some(n) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
+            None => Some(DEFAULT_GC_AUTO_PACK_LIMIT),
         }
     }
 
@@ -2190,14 +2283,14 @@ impl ConfigSet {
     /// (`gc.autoDetach`, default `true`).
     #[must_use]
     pub fn gc_auto_detach(&self) -> bool {
-        self.bool_or("gc.autoDetach", true)
+        self.bool_with_default("gc.autoDetach", true)
     }
 
     /// Whether commands may start automatic maintenance at all (`maintenance.auto`, default
     /// `true`).
     #[must_use]
     pub fn maintenance_auto(&self) -> bool {
-        self.bool_or("maintenance.auto", true)
+        self.bool_with_default("maintenance.auto", true)
     }
 
     /// [`crate::hash::Parallelism`] for pack indexing from merged config.
@@ -2232,7 +2325,7 @@ impl ConfigSet {
     ) -> Result<crate::parallel::Parallelism> {
         match git_dir {
             Some(d) => {
-                let cfg = Self::load(env, Some(d), true)?;
+                let cfg = Self::load(env, Some(d), &LoadConfigOptions::standard(env, Some(d)))?;
                 Ok(cfg.try_pack_index_parallelism()?)
             }
             None => Ok(crate::parallel::Parallelism::resolve(None)),
@@ -2252,14 +2345,14 @@ impl ConfigSet {
     /// Default for `pack.readReverseIndex` / `pack.readreverseindex` (Git default: true).
     #[must_use]
     pub fn pack_read_reverse_index_default(&self) -> bool {
-        self.bool_or("pack.readReverseIndex", true)
+        self.bool_with_default("pack.readReverseIndex", true)
     }
 
     /// `core.logAllRefUpdates` as configured in this set, or [`refs::LogRefsConfig::Unset`] when
     /// the key is absent or holds an unrecognised value.
     #[must_use]
     pub(crate) fn log_refs_config(&self) -> refs::LogRefsConfig {
-        self.get("core.logAllRefUpdates")
+        self.value("core.logAllRefUpdates")
             .and_then(|v| refs::LogRefsConfig::parse(&v))
             .unwrap_or(refs::LogRefsConfig::Unset)
     }
@@ -2273,7 +2366,7 @@ impl ConfigSet {
     #[must_use]
     pub fn effective_log_refs_config(&self) -> refs::LogRefsConfig {
         match self.log_refs_config() {
-            refs::LogRefsConfig::Unset if self.bool_or("core.bare", false) => {
+            refs::LogRefsConfig::Unset if self.bool_with_default("core.bare", false) => {
                 refs::LogRefsConfig::None
             }
             refs::LogRefsConfig::Unset => refs::LogRefsConfig::Normal,
@@ -2296,9 +2389,26 @@ impl ConfigSet {
     ///
     /// [`ConfigError::InvalidValue`] naming `key` when the value is not an integer or
     /// overflows `i64`.
-    pub fn get_i64(&self, key: &str) -> Option<std::result::Result<i64, ConfigError>> {
-        self.get(key)
+    pub fn get_i64(&self, key: &str) -> std::result::Result<Option<i64>, ConfigError> {
+        self.get(key)?
             .map(|v| parse_i64(&v).map_err(|e| e.for_key(key)))
+            .transpose()
+    }
+
+    /// Expand a path value using `env` (tilde and environment variables).
+    pub fn get_path(
+        &self,
+        env: &Environment,
+        key: &str,
+    ) -> std::result::Result<Option<PathBuf>, ConfigError> {
+        Ok(self.get(key)?.map(|v| PathBuf::from(parse_path(env, &v))))
+    }
+
+    /// Parse a Git color value for `key`.
+    pub fn get_color(&self, key: &str) -> std::result::Result<Option<String>, ConfigError> {
+        self.get(key)?
+            .map(|v| parse_color(&v).map_err(|e| e.for_key(key)))
+            .transpose()
     }
 
     /// Parse `core.compression` / `core.looseCompression` style zlib level integers.
@@ -2453,38 +2563,17 @@ impl ConfigSet {
             .collect())
     }
 
-    /// Load the standard Git configuration file cascade for a repository.
+    /// Load the Git configuration cascade.
     ///
-    /// # Parameters
+    /// See [`LoadConfigOptions`] for system/global/local scope, includes, and command-line overrides.
     ///
-    /// - `git_dir` — path to the `.git` directory (for local/worktree config).
-    /// - `include_system` — whether to load system config.
+    /// Uncached load: parses the cascade from disk every call. Repository-scoped memoization
+    /// lives on [`crate::repo_caches::RepoCaches::load_config_with_options`].
     ///
     /// # Errors
     ///
     /// Returns errors from file I/O or parsing.
-    pub fn load(env: &Environment, git_dir: Option<&Path>, include_system: bool) -> Result<Self> {
-        let opts = LoadConfigOptions {
-            include_system,
-            include_ctx: IncludeContext {
-                git_dir: git_dir.map(PathBuf::from),
-                cwd: env.cwd.clone(),
-                pwd: env.pwd.clone(),
-                env: std::sync::Arc::new(env.clone()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        Self::load_with_options(env, git_dir, &opts)
-    }
-
-    /// Load the standard configuration cascade with explicit include and scope control.
-    ///
-    /// See [`LoadConfigOptions`] for `GIT_CONFIG_PARAMETERS` / `-c` include behaviour.
-    ///
-    /// Uncached load: parses the cascade from disk every call. Repository-scoped memoization
-    /// lives on [`crate::repo_caches::RepoCaches::load_config_with_options`].
-    pub fn load_with_options(
+    pub fn load(
         env: &Environment,
         git_dir: Option<&Path>,
         opts: &LoadConfigOptions,
@@ -2528,6 +2617,18 @@ impl ConfigSet {
         ctx.env = std::sync::Arc::new(env.clone());
         let mut layers = Vec::new();
 
+        if opts.repo_local_only {
+            let gd = git_dir
+                .or(opts.include_ctx.git_dir.as_deref())
+                .ok_or_else(|| Error::Config(ConfigError::RepositoryRequired))?;
+            let local_path = gd.join("config");
+            let mut set = Self::new();
+            if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
+                set.merge_layers(&[ConfigLayer::file(f)], proc, &ctx, included_files)?;
+            }
+            return Ok(set);
+        }
+
         if opts.include_system && !git_config_nosystem_enabled(env) {
             let system_path = system_config_path(env);
             if let Some(f) = ConfigFile::from_path(&system_path, ConfigScope::System)? {
@@ -2543,39 +2644,43 @@ impl ConfigSet {
         }
 
         // Local config — linked worktrees read `commondir/config`, not the admin `config`.
-        if let Some(gd) = git_dir {
-            let common_dir = crate::repo::common_git_dir_for_config(gd);
-            let local_path = common_dir.join("config");
-            let local_text =
-                Self::read_local_config_text_optional(&local_path, opts.repo_caches.as_ref())?;
-            if let Some(msg) =
-                crate::repo::early_config_ignore_repo_reason_for_text(local_text.as_deref())
-            {
-                if let Some(sink) = opts.diagnostics.as_ref() {
-                    sink.warn(crate::diagnostics::Warning::IgnoredGitDir {
-                        path: gd.to_path_buf(),
-                        reason: msg,
-                    });
-                }
-            } else if let Some(text) = local_text.as_deref() {
-                let f = ConfigFile::parse(&local_path, text, ConfigScope::Local)?;
-                layers.push(ConfigLayer::file(f));
-            }
-
-            // Worktree config — Git only reads `config.worktree` when
-            // `extensions.worktreeConfig` is enabled in the common repository `config`.
-            let wt_path = gd.join("config.worktree");
-            if crate::repo::worktree_config_enabled_for_text(local_text.as_deref()) {
-                if let Some(f) = ConfigFile::from_path(&wt_path, ConfigScope::Worktree)? {
+        if !opts.protected_only {
+            if let Some(gd) = git_dir {
+                let common_dir = crate::repo::common_git_dir_for_config(gd);
+                let local_path = common_dir.join("config");
+                let local_text =
+                    Self::read_local_config_text_optional(&local_path, opts.repo_caches.as_ref())?;
+                if let Some(msg) =
+                    crate::repo::early_config_ignore_repo_reason_for_text(local_text.as_deref())
+                {
+                    if let Some(sink) = opts.diagnostics.as_ref() {
+                        sink.warn(crate::diagnostics::Warning::IgnoredGitDir {
+                            path: gd.to_path_buf(),
+                            reason: msg,
+                        });
+                    }
+                } else if let Some(text) = local_text.as_deref() {
+                    let f = ConfigFile::parse(&local_path, text, ConfigScope::Local)?;
                     layers.push(ConfigLayer::file(f));
+                }
+
+                // Worktree config — Git only reads `config.worktree` when
+                // `extensions.worktreeConfig` is enabled in the common repository `config`.
+                let wt_path = gd.join("config.worktree");
+                if crate::repo::worktree_config_enabled_for_text(local_text.as_deref()) {
+                    if let Some(f) = ConfigFile::from_path(&wt_path, ConfigScope::Worktree)? {
+                        layers.push(ConfigLayer::file(f));
+                    }
                 }
             }
         }
 
-        if let Some(path) = env.git_config.as_deref() {
-            let path = resolve_config_override_path(env, path);
-            if let Some(f) = ConfigFile::from_path(&path, ConfigScope::Command)? {
-                layers.push(ConfigLayer::file(f));
+        if !opts.protected_only {
+            if let Some(path) = env.git_config.as_deref() {
+                let path = resolve_config_override_path(env, path);
+                if let Some(f) = ConfigFile::from_path(&path, ConfigScope::Command)? {
+                    layers.push(ConfigLayer::file(f));
+                }
             }
         }
 
@@ -2672,12 +2777,12 @@ impl ConfigSet {
 
         let mut set = Self::new();
         set.merge_layers(&layers, true, &ctx, &mut Vec::new())?;
-        Ok(set.get_all(key))
+        Ok(set.values_all(key))
     }
 
     /// Merge a single config file, optionally expanding `[include]` / `[includeIf]`.
     ///
-    /// Used by `grit config -f` and scoped reads; [`ConfigSet::load_with_options`] uses the same
+    /// Used by `grit config -f` and scoped reads; [`ConfigSet::load`] uses the same
     /// internal routine for the standard cascade.
     ///
     /// `hasconfig:remote.*.url:` conditions match only remote URLs reachable from `file`
@@ -2699,70 +2804,6 @@ impl ConfigSet {
             ctx,
             &mut Vec::new(),
         )
-    }
-
-    /// Load only the repository's own `config` file (plus any `[include]` targets).
-    ///
-    /// Unlike [`Self::load`], this ignores system/global config and environment
-    /// overrides. Used for receive-side options (e.g. `transfer.fsckObjects`) so a
-    /// pusher's global configuration cannot weaken the remote repository's policy.
-    pub fn load_repo_local_only(git_dir: &Path) -> Result<Self> {
-        let local_path = git_dir.join("config");
-        let ctx = IncludeContext {
-            git_dir: Some(git_dir.to_path_buf()),
-            command_line_relative_include_is_error: false,
-            cwd: PathBuf::from("."),
-            pwd: None,
-            env: std::sync::Arc::new(Environment::empty()),
-        };
-        let mut set = Self::new();
-        if let Ok(Some(f)) = ConfigFile::from_path(&local_path, ConfigScope::Local) {
-            set.merge_layers(&[ConfigLayer::file(f)], true, &ctx, &mut Vec::new())?;
-        }
-        Ok(set)
-    }
-
-    /// Load configuration the way Git loads **protected** config (e.g. `uploadpack.packObjectsHook`).
-    ///
-    /// This matches Git's `read_protected_config`: system (optional), global files only (no
-    /// repository or worktree `config`), then command-line overrides from `GIT_CONFIG_COUNT` /
-    /// `GIT_CONFIG_PARAMETERS`. It does **not** read `$GIT_CONFIG` (Git omits that for protected
-    /// config).
-    ///
-    /// Global file order matches Git: XDG `git/config` first (when present), then `~/.gitconfig`,
-    /// unless `GIT_CONFIG_GLOBAL` is set (single file). When both global files exist, both are
-    /// merged so later entries win for duplicate keys.
-    pub fn load_protected(env: &Environment, include_system: bool) -> Result<Self> {
-        let ctx = IncludeContext {
-            git_dir: None,
-            command_line_relative_include_is_error: false,
-            cwd: env.cwd.clone(),
-            pwd: env.pwd.clone(),
-            env: std::sync::Arc::new(env.clone()),
-        };
-        let mut layers = Vec::new();
-
-        if include_system && !git_config_nosystem_enabled(env) {
-            let system_path = system_config_path(env);
-            if let Ok(Some(f)) = ConfigFile::from_path(&system_path, ConfigScope::System) {
-                layers.push(ConfigLayer::file(f));
-            }
-        }
-
-        for path in global_config_paths(env) {
-            if let Ok(Some(f)) = ConfigFile::from_path(&path, ConfigScope::Global) {
-                layers.push(ConfigLayer::file(f));
-            }
-        }
-
-        layers.push(ConfigLayer::Entries(environment_config_pair_entries(env)?));
-        if let Some(params) = env.git_config_parameters.as_deref() {
-            layers.push(ConfigLayer::Entries(command_override_entries(params)));
-        }
-
-        let mut set = Self::new();
-        set.merge_layers(&layers, true, &ctx, &mut Vec::new())?;
-        Ok(set)
     }
 
     /// Merge `layers` in order, expanding includes in file layers when `process_includes`.
@@ -4818,10 +4859,7 @@ mod value_error_tests {
     #[test]
     fn get_bool_and_get_i64_name_the_key() {
         let set = set_from_snippet("[core]\n\tbare = sometimes\n[pack]\n\tthreads = many\n");
-        let bool_err = set
-            .get_bool("core.bare")
-            .and_then(Result::err)
-            .expect("invalid bool");
+        let bool_err = set.get_bool("core.bare").unwrap_err();
         assert_eq!(
             bool_err,
             ConfigError::InvalidValue {
@@ -4835,17 +4873,14 @@ mod value_error_tests {
             bool_err.to_string(),
             "bad boolean config value 'sometimes' for 'core.bare'"
         );
-        let int_err = set
-            .get_i64("pack.threads")
-            .and_then(Result::err)
-            .expect("invalid int");
+        let int_err = set.get_i64("pack.threads").unwrap_err();
         assert!(matches!(
             &int_err,
             ConfigError::InvalidValue { key, source: ConfigValueError::InvalidInteger { value } }
                 if key == "pack.threads" && value == "many"
         ));
         assert!(matches!(Error::from(int_err), Error::Config(_)));
-        assert!(set.get_bool("core.missing").is_none());
+        assert_eq!(set.get_bool("core.missing").unwrap(), None);
     }
 
     #[test]
@@ -4856,7 +4891,7 @@ mod value_error_tests {
         assert!(!set.quote_path_fully());
         assert!(!set.pack_write_bitmap_hash_cache());
         assert!(!set.pack_read_reverse_index_default());
-        assert_eq!(set.get_bool("Core.QuotePath"), Some(Ok(false)));
+        assert_eq!(set.get_bool("Core.QuotePath").unwrap(), Some(false));
     }
 
     #[test]
@@ -4865,10 +4900,10 @@ mod value_error_tests {
             "[core]\n\tbare = sometimes\n\tlogAllRefUpdates\n[feature]\n\tmanyFiles = off\n",
         );
         for default in [false, true] {
-            assert_eq!(set.bool_or("core.missing", default), default);
-            assert_eq!(set.bool_or("core.bare", default), default);
-            assert!(set.bool_or("core.logallrefupdates", default));
-            assert!(!set.bool_or("FEATURE.MANYFILES", default));
+            assert_eq!(set.bool_with_default("core.missing", default), default);
+            assert_eq!(set.bool_with_default("core.bare", default), default);
+            assert!(set.bool_with_default("core.logallrefupdates", default));
+            assert!(!set.bool_with_default("FEATURE.MANYFILES", default));
         }
     }
 
@@ -5237,7 +5272,7 @@ mod config_cache_tests {
         let set = caches
             .load_config_with_options(&Environment::empty(), Some(git_dir), &opts)
             .expect("load cascade");
-        set.get("gritcachetest.value")
+        set.value("gritcachetest.value")
     }
 
     fn mtime_of(path: &Path) -> FileTime {
@@ -5368,7 +5403,12 @@ mod config_cache_tests {
         let git_dir = td.path();
         let config = git_dir.join("config");
         symlink("config", &config).expect("self-referential symlink");
-        let err = ConfigSet::load(&Environment::empty(), Some(git_dir), false).unwrap_err();
+        let err = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, Error::Io(_)),
             "expected I/O error for symlink loop, got {err:?}"

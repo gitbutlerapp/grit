@@ -58,7 +58,12 @@ fn wall_clock_now() -> i64 {
 }
 
 fn load_repo_config(git_dir: &Path) -> ConfigSet {
-    ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("load config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(git_dir),
+        &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+    )
+    .expect("load config")
 }
 
 fn open_repo(worktree: &Path) -> Repository {

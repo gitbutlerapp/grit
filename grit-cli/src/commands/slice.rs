@@ -181,8 +181,15 @@ impl Target {
                 bail!("not in a snapshot checkout; pass --url <repository> to name the server")
             }
         };
-        let config = ConfigSet::load(&env, repo.as_ref().map(|r| r.git_dir()), true)
-            .context("could not load config")?;
+        let config = ConfigSet::load(
+            &env,
+            repo.as_ref().map(|r| r.git_dir()),
+            &grit_lib::config::LoadConfigOptions::standard(
+                &env,
+                repo.as_ref().map(|r| r.git_dir()),
+            ),
+        )
+        .context("could not load config")?;
         let http = crate::context::http_client_factory()
             .create(&config)
             .map_err(|e| anyhow::anyhow!("{e}"))?;

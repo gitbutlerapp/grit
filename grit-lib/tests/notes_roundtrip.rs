@@ -250,9 +250,11 @@ fn padded_core_notes_ref_is_invalid() {
         &["config", "core.notesRef", " refs/notes/spaced "],
     );
     let repo = open_grit(dir.path());
-    let err =
-        resolve_configured_notes_ref(repo.environment(), repo.config().expect("config").as_ref())
-            .expect_err("padded core.notesRef");
+    let err = resolve_configured_notes_ref(
+        repo.environment(),
+        repo.config().snapshot().expect("config").as_ref(),
+    )
+    .expect_err("padded core.notesRef");
     assert!(
         matches!(err, Error::InvalidNotesRef(_)),
         "expected InvalidNotesRef, got {err:?}"
@@ -265,9 +267,11 @@ fn empty_core_notes_ref_is_invalid() {
     init_repo(dir.path());
     git_cmd(dir.path(), &["config", "core.notesRef", ""]);
     let repo = open_grit(dir.path());
-    let err =
-        resolve_configured_notes_ref(repo.environment(), repo.config().expect("config").as_ref())
-            .expect_err("empty config ref");
+    let err = resolve_configured_notes_ref(
+        repo.environment(),
+        repo.config().snapshot().expect("config").as_ref(),
+    )
+    .expect_err("empty config ref");
     assert!(
         matches!(err, Error::InvalidNotesRef(_)),
         "expected InvalidNotesRef, got {err:?}"
@@ -285,9 +289,11 @@ fn custom_notes_ref() {
     let commit = seed_commit(dir.path(), "f", "x\n", "init");
 
     let repo = open_grit(dir.path());
-    let notes_ref =
-        resolve_configured_notes_ref(repo.environment(), repo.config().expect("config").as_ref())
-            .expect("resolve");
+    let notes_ref = resolve_configured_notes_ref(
+        repo.environment(),
+        repo.config().snapshot().expect("config").as_ref(),
+    )
+    .expect("resolve");
     assert_eq!(notes_ref.as_str(), "refs/notes/custom");
 
     repo.notes()

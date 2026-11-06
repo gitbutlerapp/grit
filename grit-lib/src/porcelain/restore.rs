@@ -158,7 +158,7 @@ pub(crate) fn restore_paths_with_lock(
         }
     }
 
-    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config().snapshot()?);
     let restore_worktree = opts.worktree || !opts.staged;
     let worktree_from_tree = matches!(opts.source, RestoreSource::Tree(_)) && !restore_staged;
 
@@ -332,10 +332,10 @@ fn restore_conflict_paths(
 /// Default conflict-marker style from `merge.conflictStyle` (Git default: `merge`).
 #[must_use]
 pub fn conflict_style_from_config(repo: &Repository) -> ConflictStyle {
-    let Ok(config) = repo.config() else {
+    let Ok(config) = repo.config().snapshot() else {
         return ConflictStyle::Merge;
     };
-    let Some(value) = config.get("merge.conflictStyle") else {
+    let Some(value) = config.value("merge.conflictStyle") else {
         return ConflictStyle::Merge;
     };
     match value.as_str() {
@@ -956,13 +956,13 @@ fn apply_worktree_restore_inner(
         progress,
         cancel,
     } = ctx;
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let ignorecase = config.ignore_case();
     let mut dir_cache = LeadingDirCache::for_config(config.as_ref());
 
     if !worktree_from_tree {
         let attr_index = index_out.gitattributes_snapshot();
-        let rules = WorktreeRules::from_parts(repo, &attr_index, Arc::clone(&config))?;
+        let rules = WorktreeRules::from_parts_with_config(repo, &attr_index, Arc::clone(&config))?;
         let index_mtime = index_mtime_for_diff(index_out, None);
         let mut to_write: Vec<usize> = Vec::new();
         for (pos, entry) in index_out.entries.iter().enumerate() {
@@ -1157,7 +1157,7 @@ fn worktree_index_entry_up_to_date(
     if !meta.is_file() || !stat_matches(entry, &meta) {
         return Ok(false);
     }
-    if !crate::index::WorktreeModePolicy::from_config(&*repo.config()?)
+    if !crate::index::WorktreeModePolicy::from_config(&*repo.config().snapshot()?)
         .worktree_mode_matches(crate::diff::mode_from_metadata(&meta), entry.mode)
     {
         return Ok(false);

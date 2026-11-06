@@ -1028,6 +1028,7 @@ pub fn rev_list(
     }
     let repo_config = repo
         .config()
+        .snapshot()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
     let mut walk_options = options.clone();
     walk_options.normalize_for_walk(repo_config.as_ref());
@@ -1326,11 +1327,11 @@ pub fn rev_list(
         let cfg = repo_config.as_ref();
         let core_cg = repo_commit_graph_enabled(cfg);
         let read_paths = cfg
-            .get("commitgraph.readchangedpaths")
+            .value("commitgraph.readchangedpaths")
             .and_then(|v| crate::config::parse_bool(&v).ok())
             .unwrap_or(true);
         let version = cfg
-            .get("commitgraph.changedpathsversion")
+            .value("commitgraph.changedpathsversion")
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(-1);
         let use_bloom = core_cg
@@ -4429,7 +4430,7 @@ fn dense_path_limited_count_from_included(
 const LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT: u32 = 50;
 
 fn log_follow_rename_threshold(cfg: &ConfigSet) -> u32 {
-    let Some(raw) = cfg.get("diff.renames") else {
+    let Some(raw) = cfg.value("diff.renames") else {
         return LOG_FOLLOW_RENAME_THRESHOLD_DEFAULT;
     };
     let v = raw.trim();
@@ -7178,7 +7179,7 @@ fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
 }
 
 fn repo_commit_graph_enabled(cfg: &ConfigSet) -> bool {
-    cfg.bool_or("core.commitGraph", true)
+    cfg.bool_with_default("core.commitGraph", true)
 }
 
 fn dense_bloom_context_for_paths(
@@ -7188,11 +7189,11 @@ fn dense_bloom_context_for_paths(
 ) -> (Option<Arc<CommitGraphChain>>, bool, i32, Option<String>) {
     let core_cg = repo_commit_graph_enabled(repo_config);
     let read_paths = repo_config
-        .get("commitgraph.readchangedpaths")
+        .value("commitgraph.readchangedpaths")
         .and_then(|v| crate::config::parse_bool(&v).ok())
         .unwrap_or(true);
     let version = repo_config
-        .get("commitgraph.changedpathsversion")
+        .value("commitgraph.changedpathsversion")
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(-1);
     let use_bloom = core_cg

@@ -207,7 +207,7 @@ impl UreqHttpClient {
 
         // Cookies: parse the cookie file (if any) and decide whether to persist.
         client.cookie_file_path = config
-            .get("http.cookieFile")
+            .value("http.cookieFile")
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
@@ -215,7 +215,8 @@ impl UreqHttpClient {
         client.save_cookies = client.cookie_file_path.is_some()
             && config
                 .get_bool("http.saveCookies")
-                .and_then(std::result::Result::ok)
+                .ok()
+                .flatten()
                 .unwrap_or(false);
 
         // Extra headers (`http.extraHeader`, optionally URL-scoped).
@@ -477,7 +478,7 @@ impl Default for HttpTransportTimeouts {
 impl HttpTransportTimeouts {
     fn from_config(config: &ConfigSet, environment: &Environment) -> Self {
         let global = config
-            .get("http.timeout")
+            .value("http.timeout")
             .as_deref()
             .and_then(|v| parse_i64(v).ok())
             .map(|secs| {
@@ -504,7 +505,7 @@ fn parse_low_speed(config: &ConfigSet, environment: &Environment) -> Option<LowS
         .and_then(|v| parse_i64(v.trim()).ok())
         .or_else(|| {
             config
-                .get("http.lowSpeedLimit")
+                .value("http.lowSpeedLimit")
                 .and_then(|v| parse_i64(v.trim()).ok())
         });
     let time_secs = environment
@@ -512,7 +513,7 @@ fn parse_low_speed(config: &ConfigSet, environment: &Environment) -> Option<LowS
         .and_then(|v| parse_i64(v.trim()).ok())
         .or_else(|| {
             config
-                .get("http.lowSpeedTime")
+                .value("http.lowSpeedTime")
                 .and_then(|v| parse_i64(v.trim()).ok())
         });
 
@@ -699,7 +700,7 @@ fn agent_from_timeouts(
 /// silently fail at request time — fail loudly instead. Lifts the relevant parts
 /// of the CLI's `build_transport` / `build_transport_from_proxy`.
 fn build_proxy(config: &ConfigSet) -> Result<Option<ureq::Proxy>> {
-    let Some(raw) = config.get("http.proxy") else {
+    let Some(raw) = config.value("http.proxy") else {
         return Ok(None);
     };
     let raw = raw.trim();

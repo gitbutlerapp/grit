@@ -172,7 +172,7 @@ impl HotPathsFixture {
                 refresh_index_stat_in_pass: true,
                 for_status: true,
                 repository_git_dir: Some(self.repo.git_dir().to_path_buf()),
-                config: self.repo.config().ok(),
+                config: self.repo.config().snapshot().ok(),
                 thread_policy: Some(self.repo.thread_policy()),
                 ..DiffIndexToWorktreeOptions::default()
             },
@@ -204,7 +204,7 @@ impl HotPathsFixture {
                 refresh_index_stat_in_pass: false,
                 for_status: true,
                 repository_git_dir: Some(self.repo.git_dir().to_path_buf()),
-                config: self.repo.config().ok(),
+                config: self.repo.config().snapshot().ok(),
                 thread_policy: Some(self.repo.thread_policy()),
                 ..DiffIndexToWorktreeOptions::default()
             },

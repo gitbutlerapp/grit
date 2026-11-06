@@ -61,7 +61,7 @@ impl<'repo> RepositoryHooks<'repo> {
     /// Returns [`crate::error::Error::Config`] when config cannot be read, or I/O errors from
     /// reading the hooks directory.
     pub fn list(&self, limit: Option<usize>) -> Result<Limited<HookInfo>> {
-        let config = self.repo.config()?;
+        let config = self.repo.config().snapshot()?;
         let hooks = list_hooks_in_dir(self.repo, config.as_ref())?;
         Ok(Limited::from_vec(hooks, limit))
     }
@@ -69,7 +69,7 @@ impl<'repo> RepositoryHooks<'repo> {
 
 fn list_hooks_in_dir(repo: &Repository, config: &ConfigSet) -> Result<Vec<HookInfo>> {
     let hooks_dir = resolve_hooks_dir(repo);
-    let source = if config.get("core.hooksPath").is_some() {
+    let source = if config.value("core.hooksPath").is_some() {
         HookSource::CoreHooksPath
     } else {
         HookSource::HooksDir

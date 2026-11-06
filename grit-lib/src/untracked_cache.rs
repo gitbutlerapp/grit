@@ -37,7 +37,7 @@ pub(crate) fn untracked_cache_enabled_for_status(config: &ConfigSet, index: &Ind
     if index.untracked_cache.is_none() {
         return false;
     }
-    match config.get_bool("core.untrackedCache").and_then(|r| r.ok()) {
+    match config.get_bool("core.untrackedCache").ok().flatten() {
         Some(false) => false,
         Some(true) => true,
         None => index.entries.len() >= AUTO_UNTRACKED_CACHE_MIN_ENTRIES,
@@ -53,7 +53,7 @@ pub(crate) fn ensure_untracked_cache_shell(
     if index.untracked_cache.is_some() {
         return;
     }
-    if !config.bool_or("core.untrackedCache", true) {
+    if !config.bool_with_default("core.untrackedCache", true) {
         return;
     }
     if index.entries.len() < AUTO_UNTRACKED_CACHE_MIN_ENTRIES {
@@ -609,7 +609,7 @@ pub(crate) fn untracked_cache_ident(work_tree: &Path) -> Vec<u8> {
 /// `dir_flags_from_config` function.
 pub(crate) fn dir_flags_from_config(config: &ConfigSet) -> u32 {
     if config
-        .get("status.showUntrackedFiles")
+        .value("status.showUntrackedFiles")
         .is_some_and(|v| v.eq_ignore_ascii_case("all"))
     {
         0
@@ -620,7 +620,7 @@ pub(crate) fn dir_flags_from_config(config: &ConfigSet) -> u32 {
 
 fn global_excludes_path(repo: &Repository, config: &ConfigSet) -> Option<PathBuf> {
     let env = repo.environment();
-    if let Some(raw) = config.get("core.excludesFile") {
+    if let Some(raw) = config.value("core.excludesFile") {
         let expanded = parse_path(env, &raw);
         let p = Path::new(&expanded);
         if p.is_absolute() {
@@ -2192,7 +2192,12 @@ mod tests {
             "[status]\n\tshowUntrackedFiles = all\n",
         )
         .expect("write");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(dir.path()), true).expect("load");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(dir.path()),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(dir.path())),
+        )
+        .expect("load");
         assert_eq!(dir_flags_from_config(&cfg), 0);
     }
 

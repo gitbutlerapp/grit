@@ -271,20 +271,21 @@ pub struct StatusSharedJson {
 
 /// The other members' heads of `branch`, when it is shared here.
 fn shared_status(repo: &grit_lib::repo::Repository, branch: &str) -> Option<StatusSharedJson> {
+    let env = crate::context::environment();
     let config = grit_lib::config::ConfigSet::load(
-        &crate::context::environment(),
+        &env,
         Some(repo.git_dir()),
-        true,
+        &grit_lib::config::LoadConfigOptions::standard(&env, Some(repo.git_dir())),
     )
     .ok()?;
     if !crate::commands::sync::is_shared(&config, branch) {
         return None;
     }
     let ours = grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{branch}")).ok();
-    let mut remotes: Vec<String> = config
-        .get(&format!("branch.{branch}.remote"))
-        .into_iter()
-        .collect();
+    let mut remotes: Vec<String> =
+        crate::context::config_string(&config, &format!("branch.{branch}.remote"))
+            .into_iter()
+            .collect();
     remotes.push(crate::commands::sync::SPACE_REMOTE.to_owned());
     remotes.push("origin".to_owned());
     for remote in remotes {
@@ -1087,7 +1088,7 @@ pub struct StatusCliArgs {
 
 pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
-    let config = repo.config().context("could not load config")?;
+    let config = repo.config().snapshot().context("could not load config")?;
     let mut status_opts = status_options_from_config(&config)?;
     if let Some(mode) = args.untracked {
         status_opts.untracked = mode.into_lib();

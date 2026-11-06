@@ -77,7 +77,10 @@ fn load_config(dir: &Path) -> ConfigSet {
     ConfigSet::load(
         &grit_lib::config::environment::Environment::capture_process(),
         Some(&git_dir),
-        false,
+        &crate::config::LoadConfigOptions::standard(
+            &grit_lib::config::environment::Environment::capture_process(),
+            Some(&git_dir),
+        ),
     )
     .expect("load config")
 }

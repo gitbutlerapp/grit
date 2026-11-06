@@ -17,7 +17,12 @@ use crate::state::{resolve_head_for_repository, HeadState};
 /// Committer identity line for reflog updates (`Name <email> epoch tz`).
 pub fn checkout_reflog_identity(repo: &Repository) -> String {
     let env = repo.environment();
-    let config = ConfigSet::load(env, Some(repo.git_dir()), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        env,
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(env, Some(repo.git_dir())),
+    )
+    .unwrap_or_default();
     resolve_loose_committer_identity_with(env, &config, repo.identity_now())
 }
 
@@ -65,8 +70,12 @@ pub fn append_head_checkout_reflog(
     from_label: &str,
     to_label: &str,
 ) -> Result<()> {
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .unwrap_or_default();
     let identity = checkout_reflog_identity(repo);
     let message = format!("checkout: moving from {from_label} to {to_label}");
     append_reflog_on_store(
@@ -88,7 +97,7 @@ pub fn create_branch_ref_with_reflog(
     start_oid: ObjectId,
     source_label: &str,
 ) -> Result<()> {
-    let config = repo.config()?;
+    let config = repo.config().snapshot()?;
     let identity =
         resolve_loose_committer_identity_with(repo.environment(), &config, repo.identity_now());
     let message = format!("branch: Created from {source_label}");
@@ -113,8 +122,12 @@ pub(crate) fn reset_branch_ref_with_reflog(
 ) -> Result<()> {
     let identity = checkout_reflog_identity(repo);
     let message = format!("branch: Reset to {source_label}");
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let config = ConfigSet::load(
+        repo.environment(),
+        Some(repo.git_dir()),
+        &crate::config::LoadConfigOptions::standard(repo.environment(), Some(repo.git_dir())),
+    )
+    .unwrap_or_default();
     let reflog =
         if crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), branch_ref)
             || repo.refs().reflog_exists(branch_ref)?

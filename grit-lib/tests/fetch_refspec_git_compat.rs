@@ -223,7 +223,7 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
         &RepositoryOptions::empty().with_work_tree(&grit_c),
     )
     .expect("open repo");
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let origin = Remote::from_config(&config, "origin").expect("origin remote");
     let mut fetch_opts = FetchOptions::new();
     fetch_opts.refspecs = vec!["main".into()];

@@ -113,7 +113,11 @@ fn index_line_abbrev_for_colliding_blobs_matches_git_show() {
     let head_hex = String::from_utf8_lossy(&head);
     let head_oid = grit_lib::objects::ObjectId::from_hex(head_hex.trim()).expect("parse HEAD oid");
 
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let patch_opts = LogPatchOptions {
         diff: DiffOptions::default(),
         abbrev_len: 7,

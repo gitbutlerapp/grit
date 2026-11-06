@@ -276,8 +276,15 @@ fn grit_expire_within_limit(
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let repo = open_repo(&worktree);
-        let cfg = ConfigSet::load(&Environment::empty(), Some(repo.git_dir()), true)
-            .expect("load config");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(repo.git_dir()),
+            &crate::config::LoadConfigOptions::standard(
+                &Environment::empty(),
+                Some(repo.git_dir()),
+            ),
+        )
+        .expect("load config");
         let gc = load_gc_reflog_expire_config(&cfg, NOW);
         let pruned = refnames
             .iter()

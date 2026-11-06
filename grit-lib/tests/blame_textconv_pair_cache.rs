@@ -162,7 +162,11 @@ fn blame_pair_map_cache_respects_textconv_path() {
         &["blame", "--textconv", "-CCC", "--porcelain", "target.txt"],
     ));
 
-    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let config = repo
+        .config()
+        .snapshot()
+        .map(|c| (*c).clone())
+        .unwrap_or_default();
     let diff_algorithm = config
         .get("diff.algorithm")
         .as_ref()

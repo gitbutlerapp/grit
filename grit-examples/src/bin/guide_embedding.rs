@@ -53,8 +53,16 @@ fn main() -> Result<(), Error> {
     let (repo_a, sink_a) = open_named("alpha", "a@example.com")?;
     let (repo_b, sink_b) = open_named("beta", "b@example.com")?;
 
-    let name_a = repo_a.config()?.get("user.name").unwrap_or_default();
-    let name_b = repo_b.config()?.get("user.name").unwrap_or_default();
+    let name_a = repo_a
+        .config()
+        .snapshot()?
+        .get("user.name")?
+        .unwrap_or_default();
+    let name_b = repo_b
+        .config()
+        .snapshot()?
+        .get("user.name")?
+        .unwrap_or_default();
     println!("alpha user.name={name_a}");
     println!("beta user.name={name_b}");
     println!("alpha warnings={}", sink_a.warnings().len());

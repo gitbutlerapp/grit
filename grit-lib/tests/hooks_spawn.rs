@@ -66,7 +66,7 @@ fn process_environment(cwd: &Path) -> Environment {
 }
 
 fn run_captured(repo: &Repository, hook: &str) -> (Result<HookResult, HookError>, String) {
-    let config = repo.config().expect("config");
+    let config = repo.config().snapshot().expect("config");
     let result = run_hook_opts(
         Some(repo),
         hook,

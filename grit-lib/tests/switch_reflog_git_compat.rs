@@ -573,10 +573,13 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
         "branch: Created from refs/remotes/origin/topic"
     );
 
-    let config = repo.config().expect("config");
-    assert_eq!(config.get("branch.topic.remote").as_deref(), Some("origin"));
+    let config = repo.config().snapshot().expect("config");
     assert_eq!(
-        config.get("branch.topic.merge").as_deref(),
+        config.get("branch.topic.remote").unwrap().as_deref(),
+        Some("origin")
+    );
+    assert_eq!(
+        config.get("branch.topic.merge").unwrap().as_deref(),
         Some("refs/heads/topic")
     );
 

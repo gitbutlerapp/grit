@@ -69,7 +69,12 @@ fn ieot_write_config(base: &Path) -> ConfigSet {
         "[index]\n\tthreads = 4\n\trecordOffsetTable = true\n\trecordEndOfIndexEntries = true\n",
     )
     .expect("ieot config");
-    ConfigSet::load(&Environment::empty(), Some(&git_dir), true).expect("load ieot config")
+    ConfigSet::load(
+        &Environment::empty(),
+        Some(&git_dir),
+        &LoadConfigOptions::standard(&Environment::empty(), Some(&git_dir)),
+    )
+    .expect("load ieot config")
 }
 
 fn write_index_file_ieot(index: &Index, path: &Path, cfg: &ConfigSet) {
@@ -437,7 +442,7 @@ impl WorktreeBenchFixtures {
 
     /// Load the layered config fixture (global + includes + local).
     pub fn load_config_cascade(&self) -> ConfigSet {
-        ConfigSet::load_with_options(
+        ConfigSet::load(
             &Environment::capture_process(),
             Some(&self.config_git_dir),
             &self.config_load_opts,

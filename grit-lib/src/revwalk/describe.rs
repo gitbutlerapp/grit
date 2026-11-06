@@ -155,7 +155,7 @@ fn build_described(
     distance: usize,
     opts: &DescribeOptions,
 ) -> Result<DescribedCommit> {
-    let config = repo.config()?.clone();
+    let config = repo.config().snapshot()?.clone();
     let abbrev_len = match opts.abbrev {
         Some(n) => n,
         None => resolve_core_abbrev_len(&config, repo.odb())?,

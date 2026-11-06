@@ -141,11 +141,14 @@ fn adjust_reflog_shared_perm(git_dir: &Path, path: &Path) {
     let Ok(config) = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(git_dir),
+        ),
     ) else {
         return;
     };
-    let raw = config.get("core.sharedRepository");
+    let raw = config.value("core.sharedRepository");
     let Ok(perm) = crate::shared_repo::shared_repository_from_config_value(raw.as_deref()) else {
         return;
     };
@@ -925,10 +928,10 @@ fn collect_gc_reflog_patterns(config: &ConfigSet, now: i64) -> Vec<GcReflogPatte
 
 fn global_gc_reflog_expiry(config: &ConfigSet, now: i64) -> (Option<i64>, Option<i64>) {
     let total = config
-        .get("gc.reflogExpire")
+        .value("gc.reflogExpire")
         .and_then(|v| parse_reflog_expire_spec(&v, now).ok());
     let unreach = config
-        .get("gc.reflogExpireUnreachable")
+        .value("gc.reflogExpireUnreachable")
         .and_then(|v| parse_reflog_expire_spec(&v, now).ok());
     (total, unreach)
 }
@@ -1807,7 +1810,12 @@ mod default_expire_tests {
             "[core]\nrepositoryformatversion = 0\n[gc \"refs/heads/main*suffix\"]\n\treflogExpire = now\n",
         )
         .expect("write config");
-        let cfg = ConfigSet::load(&Environment::empty(), Some(&git_dir), true).expect("cfg");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(&git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(&git_dir)),
+        )
+        .expect("cfg");
         let gc = load_gc_reflog_expire_config(&cfg, now);
         assert_eq!(gc.patterns.len(), 1);
         assert_eq!(gc.patterns[0].pattern, "refs/heads/main*suffix");
@@ -1967,7 +1975,12 @@ mod default_expire_tests {
         )
         .expect("stash log");
 
-        let cfg = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("cfg");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("cfg");
         let gc = load_gc_reflog_expire_config(&cfg, now);
         let dry = expire_reflog_git(
             &repo,
@@ -2145,7 +2158,12 @@ mod default_expire_tests {
         )
         .expect("log");
         let now = 2_000_000_i64;
-        let cfg = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("cfg");
+        let cfg = ConfigSet::load(
+            &Environment::empty(),
+            Some(git_dir),
+            &crate::config::LoadConfigOptions::standard(&Environment::empty(), Some(git_dir)),
+        )
+        .expect("cfg");
         let gc = load_gc_reflog_expire_config(&cfg, now);
         let result = expire_reflog_git(
             &repo,

@@ -120,11 +120,13 @@ pub fn is_bare_repository(common: &Path) -> bool {
     ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(common),
-        true,
+        &crate::config::LoadConfigOptions::standard(
+            &crate::environment::Environment::empty(),
+            Some(common),
+        ),
     )
     .ok()
-    .and_then(|cfg| cfg.get_bool("core.bare"))
-    .and_then(|r| r.ok())
+    .and_then(|cfg| cfg.get_bool("core.bare").ok().flatten())
     .unwrap_or_else(|| {
         // Heuristic when config is missing: bare repos usually are not named `.git`.
         !common.ends_with(".git") && common.join("config").is_file()
@@ -277,8 +279,9 @@ fn branch_checked_out_error(branch: &str, worktree_path: &Path) -> Error {
 fn main_worktree_list_is_bare(repo: &Repository) -> bool {
     let core_bare = repo
         .config()
+        .snapshot()
         .ok()
-        .is_some_and(|cfg| cfg.bool_or("core.bare", false));
+        .is_some_and(|cfg| cfg.bool_with_default("core.bare", false));
     core_bare || repo.is_bare()
 }
 

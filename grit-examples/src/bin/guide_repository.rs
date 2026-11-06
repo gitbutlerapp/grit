@@ -27,7 +27,7 @@ fn main() -> Result<(), Error> {
         println!("work_tree=<bare>");
     }
 
-    let name = repo.config_handle().get("user.name")?.unwrap_or_default();
+    let name = repo.config().get("user.name")?.unwrap_or_default();
     if !name.is_empty() {
         println!("user.name={name}");
     }

@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(referenced.to_hex()[..7], dangling.to_hex()[..7]);
         repo.odb().write(ObjectKind::Blob, &data_ref)?;
         repo.odb().write(ObjectKind::Blob, &data_dang)?;
-        let config = repo.config()?.clone();
+        let config = repo.config().snapshot()?.clone();
         let thread_policy = repo.thread_policy();
         let mut cache = OidAbbrevCache::new(7);
         cache.warm_for_patch_batch(&repo, [referenced, dangling], &thread_policy, &config)?;
