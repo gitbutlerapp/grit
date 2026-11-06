@@ -558,15 +558,9 @@ impl From<crate::error::Error> for IndexError {
                 path: None,
                 source,
             }),
-            crate::error::Error::GitDirPathIo {
-                operation,
-                path,
-                source,
-            } => Self::PathIo(PathIoError {
-                operation: PathIoOperation::GitDir(operation),
-                path: Some(PathBuf::from(path)),
-                source,
-            }),
+            crate::error::Error::Repository(crate::repo::RepositoryError::GitDirPathIo(source)) => {
+                Self::PathIo(source)
+            }
             crate::error::Error::WorktreePathIo {
                 operation,
                 path,

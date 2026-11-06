@@ -6413,6 +6413,8 @@ impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::error::Erro
 pub fn grit_lib::error::Error::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::repo::error::RepositoryError
+pub fn grit_lib::repo::error::RepositoryError::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::worktree::WorktreeError
 pub fn grit_lib::worktree::WorktreeError::from(grit_lib::error::PathIoError) -> Self
 impl core::error::Error for grit_lib::error::PathIoError

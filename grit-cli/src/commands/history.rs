@@ -1324,7 +1324,7 @@ fn run_rebase_with_exec(
         &spec,
         runner.as_ref(),
         &mut grit_lib::progress::NullProgress,
-        &CancelToken::never(),
+        &grit_lib::progress::CancelToken::never(),
     ) {
         Ok(RebaseOutcome::Done { .. }) => {
             RebaseCliOutcome::from_rewrite(HistoryRewriteOutcome::up_to_date("rebase", false))

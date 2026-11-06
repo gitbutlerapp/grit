@@ -81,7 +81,7 @@ fn poll_stash(scope: &mut ProgressScope<'_>) -> StashResult<()> {
 }
 use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store};
 use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
-use crate::repo::{Repository, RepositoryError};
+use crate::repo::Repository;
 use crate::repo_relpath::{
     as_utf8_for_matching, storage_bytes, storage_string, stored_directory_marker_parent,
     stored_path_is_directory_marker, worktree_abs,
