@@ -5472,6 +5472,7 @@ pub grit_lib::error::Error::NothingStagedToCommit
 pub grit_lib::error::Error::NothingStagedToCommit::unstaged: usize
 pub grit_lib::error::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::error::Error::NothingToCommit
+pub grit_lib::error::Error::Object(grit_lib::objects::error::ObjectError)
 #[non_exhaustive] pub grit_lib::error::Error::ObjectFormatMismatch
 pub grit_lib::error::Error::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
 pub grit_lib::error::Error::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
@@ -5622,6 +5623,7 @@ pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<a
 pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
 pub fn grit_lib::error::Error::is_damaged_object(&self) -> bool
 pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
+pub fn grit_lib::error::Error::is_object_not_found(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
@@ -5630,6 +5632,8 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -5650,6 +5654,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiff
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::commit::CommitPatchError
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::hunk_select::HunkSelectError
@@ -5702,6 +5708,8 @@ impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::erro
 pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch::BranchError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch::BranchError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
@@ -5897,6 +5905,8 @@ impl core::cmp::PartialEq for grit_lib::prelude::MidxError
 pub fn grit_lib::prelude::MidxError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::prelude::MidxError) -> Self
+impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::prelude::MidxError) -> Self
 impl core::error::Error for grit_lib::prelude::MidxError
 impl core::fmt::Debug for grit_lib::prelude::MidxError
 pub fn grit_lib::prelude::MidxError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -6278,6 +6288,8 @@ impl core::cmp::PartialEq for grit_lib::error::LockHeldError
 pub fn grit_lib::error::LockHeldError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::LockHeldError) -> Self
+impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::LockHeldError) -> Self
 impl core::error::Error for grit_lib::error::LockHeldError
 impl core::fmt::Debug for grit_lib::error::LockHeldError
 pub fn grit_lib::error::LockHeldError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -6301,6 +6313,8 @@ pub fn grit_lib::error::PathIoError::message(&self) -> alloc::string::String
 pub fn grit_lib::error::PathIoError::worktree(impl core::convert::Into<alloc::string::String>, grit_lib::error::WorktreePathOperation, core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::PathIoError) -> Self
 impl core::fmt::Debug for grit_lib::error::PathIoError
 pub fn grit_lib::error::PathIoError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for grit_lib::error::PathIoError
@@ -6443,6 +6457,8 @@ impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::config::
 pub fn grit_lib::config::ident_resolve::IdentityError::from(grit_lib::ident::SignatureError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
+impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::ident::SignatureError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::refs::store::RefStoreError
 pub fn grit_lib::refs::store::RefStoreError::from(grit_lib::ident::SignatureError) -> Self
 impl core::error::Error for grit_lib::ident::SignatureError
@@ -6591,7 +6607,7 @@ pub fn grit_lib::ident::committer_timestamp_for_until_filter(&str) -> i64
 pub fn grit_lib::ident::committer_timestamp_for_until_filter_bytes(&[u8]) -> i64
 pub fn grit_lib::ident::committer_unix_seconds_for_ordering(&str) -> i64
 pub fn grit_lib::ident::committer_unix_seconds_for_ordering_bytes(&[u8]) -> i64
-pub fn grit_lib::ident::fsck_commit_idents(&[u8], grit_lib::objects::HashAlgo) -> core::result::Result<(), alloc::string::String>
+pub fn grit_lib::ident::fsck_commit_idents(&[u8], grit_lib::objects::HashAlgo) -> core::result::Result<(), grit_lib::maintenance::fsck::FsckError>
 pub fn grit_lib::ident::parse_author_arg(&str) -> core::result::Result<grit_lib::ident::AuthorContact, grit_lib::ident::AuthorArgError>
 pub fn grit_lib::ident::parse_signature(&str) -> core::option::Option<grit_lib::ident::Signature>
 pub fn grit_lib::ident::parse_signature_tail(&str) -> core::option::Option<grit_lib::ident::SignatureTail>
@@ -7808,6 +7824,8 @@ pub grit_lib::maintenance::OffloadError::RemoteNotConfigured
 pub grit_lib::maintenance::OffloadError::RemoteNotConfigured::remote: alloc::string::String
 impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
+impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::error::Error for grit_lib::maintenance::OffloadError
 impl core::fmt::Debug for grit_lib::maintenance::OffloadError
 pub fn grit_lib::maintenance::OffloadError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -8634,6 +8652,8 @@ impl core::convert::From<grit_lib::objects::bitmap::BitmapError> for grit_lib::o
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::objects::bitmap::BitmapError) -> Self
 impl core::convert::From<grit_lib::objects::bitmap::BitmapWalkUnsupported> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::objects::bitmap::BitmapWalkUnsupported) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::objects::bitmap::BitmapWalkError
+pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::error::Error for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::objects::bitmap::BitmapWalkError
@@ -8853,6 +8873,173 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::delta_encode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::delta_encode::DeltaIndex
 pub fn grit_lib::objects::delta_encode::encode_delta(&[u8], &[u8], usize) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::delta_encode::encode_lcp_delta(&[u8], &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub mod grit_lib::objects::error
+#[non_exhaustive] pub enum grit_lib::objects::error::CorruptObjectReason
+pub grit_lib::objects::error::CorruptObjectReason::Detail
+pub grit_lib::objects::error::CorruptObjectReason::Detail::message: alloc::string::String
+impl grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::detail(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::error::CorruptObjectReason
+impl core::cmp::PartialEq for grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Freeze for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Send for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Sync for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Unpin for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::UnsafeUnpin for grit_lib::objects::error::CorruptObjectReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::error::CorruptObjectReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::error::CorruptObjectReason
+#[non_exhaustive] pub enum grit_lib::objects::error::ObjectError
+pub grit_lib::objects::error::ObjectError::Backend
+pub grit_lib::objects::error::ObjectError::Backend::source: alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>
+pub grit_lib::objects::error::ObjectError::CommitGraphParentMissing
+pub grit_lib::objects::error::ObjectError::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::CorruptLooseObject
+pub grit_lib::objects::error::ObjectError::CorruptLooseObject::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::CorruptLooseObject::path: std::path::PathBuf
+pub grit_lib::objects::error::ObjectError::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::objects::error::ObjectError>
+pub grit_lib::objects::error::ObjectError::CorruptObject
+pub grit_lib::objects::error::ObjectError::CorruptObject::oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::objects::error::ObjectError::CorruptObject::reason: grit_lib::objects::error::CorruptObjectReason
+pub grit_lib::objects::error::ObjectError::CorruptPackedObject
+pub grit_lib::objects::error::ObjectError::CorruptPackedObject::offset: u64
+pub grit_lib::objects::error::ObjectError::CorruptPackedObject::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::CorruptPackedObject::pack: std::path::PathBuf
+pub grit_lib::objects::error::ObjectError::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::objects::error::ObjectError>
+pub grit_lib::objects::error::ObjectError::DeltaChainTooDeep
+pub grit_lib::objects::error::ObjectError::DeltaChainTooDeep::limit: usize
+pub grit_lib::objects::error::ObjectError::HashCollision
+pub grit_lib::objects::error::ObjectError::HashCollision::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::InvalidObject
+pub grit_lib::objects::error::ObjectError::InvalidObject::check: grit_lib::maintenance::fsck::FsckError
+pub grit_lib::objects::error::ObjectError::InvalidObject::kind: grit_lib::objects::ObjectKind
+pub grit_lib::objects::error::ObjectError::InvalidObjectId
+pub grit_lib::objects::error::ObjectError::InvalidObjectId::input: alloc::string::String
+pub grit_lib::objects::error::ObjectError::InvalidSignature(grit_lib::ident::SignatureError)
+pub grit_lib::objects::error::ObjectError::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
+pub grit_lib::objects::error::ObjectError::LockHeld(grit_lib::error::LockHeldError)
+pub grit_lib::objects::error::ObjectError::LooseHashMismatch
+pub grit_lib::objects::error::ObjectError::LooseHashMismatch::path: alloc::string::String
+pub grit_lib::objects::error::ObjectError::LooseHashMismatch::real_oid: alloc::string::String
+pub grit_lib::objects::error::ObjectError::LooseObjectWrite
+pub grit_lib::objects::error::ObjectError::LooseObjectWrite::path: alloc::string::String
+pub grit_lib::objects::error::ObjectError::LooseObjectWrite::source: core::io::error::Error
+pub grit_lib::objects::error::ObjectError::MaintenanceRunning
+pub grit_lib::objects::error::ObjectError::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
+pub grit_lib::objects::error::ObjectError::Midx(grit_lib::prelude::MidxError)
+pub grit_lib::objects::error::ObjectError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
+pub grit_lib::objects::error::ObjectError::NoPromisorRemote
+pub grit_lib::objects::error::ObjectError::NoPromisorRemote::operation: &'static str
+pub grit_lib::objects::error::ObjectError::ObjectFormatMismatch
+pub grit_lib::objects::error::ObjectError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
+pub grit_lib::objects::error::ObjectError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
+pub grit_lib::objects::error::ObjectError::ObjectHeaderTooLong
+pub grit_lib::objects::error::ObjectError::ObjectHeaderTooLong::oid: alloc::string::String
+pub grit_lib::objects::error::ObjectError::ObjectNotFound
+pub grit_lib::objects::error::ObjectError::ObjectNotFound::oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::objects::error::ObjectError::ObjectNotFound::spec: alloc::string::String
+pub grit_lib::objects::error::ObjectError::ObjectStreamTruncated
+pub grit_lib::objects::error::ObjectError::ObjectStreamTruncated::actual: u64
+pub grit_lib::objects::error::ObjectError::ObjectStreamTruncated::expected: u64
+pub grit_lib::objects::error::ObjectError::OdbObjectsDirMismatch
+pub grit_lib::objects::error::ObjectError::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::objects::error::ObjectError::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::objects::error::ObjectError::Offload(grit_lib::maintenance::OffloadError)
+pub grit_lib::objects::error::ObjectError::PackDeltaBaseNotWritten
+pub grit_lib::objects::error::ObjectError::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::PackDeltaBaseNotWritten::target: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::PackIndexChecksumMismatch
+pub grit_lib::objects::error::ObjectError::PackIndexChecksumMismatch::mismatch: grit_lib::hash::TrailerMismatch
+pub grit_lib::objects::error::ObjectError::PackIndexChecksumMismatch::path: std::path::PathBuf
+pub grit_lib::objects::error::ObjectError::PathIo
+pub grit_lib::objects::error::ObjectError::PathIo::path_io: grit_lib::error::PathIoError
+pub grit_lib::objects::error::ObjectError::PreciousObjectsRepository
+pub grit_lib::objects::error::ObjectError::PreciousObjectsRepository::operation: &'static str
+pub grit_lib::objects::error::ObjectError::PromisedObjectMissing(grit_lib::objects::ObjectId)
+pub grit_lib::objects::error::ObjectError::PromisorFetchFailed
+pub grit_lib::objects::error::ObjectError::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::objects::error::ObjectError>)>
+pub grit_lib::objects::error::ObjectError::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::TagVerifyDuplicateTreeSha256Header
+pub grit_lib::objects::error::ObjectError::TagVerifyMissingObjectHeader
+pub grit_lib::objects::error::ObjectError::TagVerifyNotTag
+pub grit_lib::objects::error::ObjectError::TagVerifyNotTag::found: grit_lib::objects::ObjectKind
+pub grit_lib::objects::error::ObjectError::TagVerifyNotTag::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::TreeSha256Claim(grit_lib::tree_sha256::TreeSha256ClaimError)
+pub grit_lib::objects::error::ObjectError::TreeSha256InvalidHex
+pub grit_lib::objects::error::ObjectError::TreeSha256InvalidRevision
+pub grit_lib::objects::error::ObjectError::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
+pub grit_lib::objects::error::ObjectError::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
+pub grit_lib::objects::error::ObjectError::TreeSha256RequiresSigning
+pub grit_lib::objects::error::ObjectError::UnexpectedObjectKind
+pub grit_lib::objects::error::ObjectError::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
+pub grit_lib::objects::error::ObjectError::UnexpectedObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::objects::error::ObjectError::UnexpectedObjectKind::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::UnknownObjectType
+pub grit_lib::objects::error::ObjectError::UnknownObjectType::ty: alloc::string::String
+pub grit_lib::objects::error::ObjectError::UnresolvedDeltas
+pub grit_lib::objects::error::ObjectError::UnresolvedDeltas::count: u64
+pub grit_lib::objects::error::ObjectError::UnsupportedObjectStore
+pub grit_lib::objects::error::ObjectError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::objects::error::ObjectError::Zlib
+pub grit_lib::objects::error::ObjectError::Zlib::detail: alloc::string::String
+impl grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::corrupt_object(core::option::Option<grit_lib::objects::ObjectId>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::objects::error::ObjectError::from_umbrella(grit_lib::error::Error) -> Self
+pub fn grit_lib::objects::error::ObjectError::is_damaged_object(&self) -> bool
+pub fn grit_lib::objects::error::ObjectError::kind_name(&self) -> &'static str
+pub fn grit_lib::objects::error::ObjectError::object_not_found(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::objects::error::ObjectError::wrap_loose_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, grit_lib::objects::error::ObjectError) -> grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::wrap_packed_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, u64, grit_lib::objects::error::ObjectError) -> grit_lib::objects::error::ObjectError
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::LockHeldError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::ident::SignatureError) -> Self
+impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::maintenance::OffloadError) -> Self
+impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::objects::bitmap::BitmapWalkError
+pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::serve::ServeError
+pub fn grit_lib::remote::serve::ServeError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::serve::UnpackError
+pub fn grit_lib::remote::serve::UnpackError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::snapshot_checkout::CheckoutError
+pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::prelude::MidxError) -> Self
+impl core::convert::From<grit_lib::tree_sha256::TreeSha256ClaimError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::tree_sha256::TreeSha256ClaimError) -> Self
+impl core::error::Error for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::objects::error::ObjectError
+impl core::marker::Send for grit_lib::objects::error::ObjectError
+impl core::marker::Sync for grit_lib::objects::error::ObjectError
+impl core::marker::Unpin for grit_lib::objects::error::ObjectError
+impl core::marker::UnsafeUnpin for grit_lib::objects::error::ObjectError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::error::ObjectError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::error::ObjectError
+pub type grit_lib::objects::error::ObjectResult<T> = core::result::Result<T, grit_lib::objects::error::ObjectError>
 pub mod grit_lib::objects::hash
 pub enum grit_lib::objects::hash::Backend
 pub grit_lib::objects::hash::Backend::Aarch64Sha
@@ -9151,16 +9338,16 @@ pub fn grit_lib::objects::odb::store::CompositeStore::stores(&self) -> &[alloc::
 impl core::fmt::Debug for grit_lib::objects::odb::store::CompositeStore
 pub fn grit_lib::objects::odb::store::CompositeStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::CompositeStore
-pub fn grit_lib::objects::odb::store::CompositeStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::CompositeStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::CompositeStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::CompositeStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::CompositeStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::CompositeStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::CompositeStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::CompositeStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::CompositeStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::CompositeStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::CompositeStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::CompositeStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::CompositeStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl core::marker::Freeze for grit_lib::objects::odb::store::CompositeStore
 impl core::marker::Send for grit_lib::objects::odb::store::CompositeStore
 impl core::marker::Sync for grit_lib::objects::odb::store::CompositeStore
@@ -9171,33 +9358,33 @@ impl !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::store::Co
 pub struct grit_lib::objects::odb::store::FilesSource
 impl grit_lib::objects::odb::store::FilesSource
 pub fn grit_lib::objects::odb::store::FilesSource::exists_local_materialized(&self, &grit_lib::objects::ObjectId) -> bool
-pub fn grit_lib::objects::odb::store::FilesSource::local_loose_exists_but_unreadable(&self, &grit_lib::objects::ObjectId, &grit_lib::error::Error) -> bool
+pub fn grit_lib::objects::odb::store::FilesSource::local_loose_exists_but_unreadable(&self, &grit_lib::objects::ObjectId, &grit_lib::objects::error::ObjectError) -> bool
 pub fn grit_lib::objects::odb::store::FilesSource::loose_store(&self) -> &grit_lib::objects::odb::store::LooseStore
 pub fn grit_lib::objects::odb::store::FilesSource::objects_dir(&self) -> &std::path::Path
-pub fn grit_lib::objects::odb::store::FilesSource::open(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, grit_lib::objects::odb::store::LooseStore, bool, bool, grit_lib::diagnostics::DiagnosticsHandle) -> grit_lib::error::Result<Self>
+pub fn grit_lib::objects::odb::store::FilesSource::open(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, grit_lib::objects::odb::store::LooseStore, bool, bool, grit_lib::diagnostics::DiagnosticsHandle) -> grit_lib::objects::error::ObjectResult<Self>
 pub fn grit_lib::objects::odb::store::FilesSource::packed_objects(&self) -> &grit_lib::objects::odb::store::PackedObjects
-pub fn grit_lib::objects::odb::store::FilesSource::try_finish_duplicate_write(&self, &grit_lib::objects::ObjectId, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::objects::odb::store::FilesSource::write_zlib_prehashed(&self, &grit_lib::objects::ObjectId, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::try_finish_duplicate_write(&self, &grit_lib::objects::ObjectId, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::objects::odb::store::FilesSource::write_zlib_prehashed(&self, &grit_lib::objects::ObjectId, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl core::fmt::Debug for grit_lib::objects::odb::store::FilesSource
 pub fn grit_lib::objects::odb::store::FilesSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::FilesSource
-pub fn grit_lib::objects::odb::store::FilesSource::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::FilesSource::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::FilesSource::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::FilesSource::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::FilesSource::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::FilesSource::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::FilesSource::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::FilesSource::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::FilesSource::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::FilesSource::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::FilesSource::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::FilesSource::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::FilesSource::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::FilesSource::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::FilesSource::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::FilesSource
-pub fn grit_lib::objects::odb::store::FilesSource::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::FilesSource::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::FilesSource::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl !core::marker::Freeze for grit_lib::objects::odb::store::FilesSource
 impl core::marker::Send for grit_lib::objects::odb::store::FilesSource
 impl core::marker::Sync for grit_lib::objects::odb::store::FilesSource
@@ -9207,36 +9394,36 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::odb::store:
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::store::FilesSource
 pub struct grit_lib::objects::odb::store::LooseStore
 impl grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::ensure_all_loose_prefix_dirs(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::LooseStore::ensure_all_loose_prefix_dirs(&self) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::LooseStore::new(std::path::PathBuf, grit_lib::objects::HashAlgo, flate2::Compression) -> Self
 pub fn grit_lib::objects::odb::store::LooseStore::object_path(&self, &grit_lib::objects::ObjectId) -> std::path::PathBuf
 pub fn grit_lib::objects::odb::store::LooseStore::objects_dir(&self) -> &std::path::Path
-pub fn grit_lib::objects::odb::store::LooseStore::read_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
-pub fn grit_lib::objects::odb::store::LooseStore::write_store_prehashed(&self, &grit_lib::objects::ObjectId, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::LooseStore::write_zlib_prehashed(&self, &grit_lib::objects::ObjectId, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::LooseStore::zlib_compress_store_bytes(&self, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::Object>
+pub fn grit_lib::objects::odb::store::LooseStore::write_store_prehashed(&self, &grit_lib::objects::ObjectId, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::write_zlib_prehashed(&self, &grit_lib::objects::ObjectId, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::zlib_compress_store_bytes(&self, &[u8]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<u8>>
 impl core::clone::Clone for grit_lib::objects::odb::store::LooseStore
 pub fn grit_lib::objects::odb::store::LooseStore::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::objects::odb::store::LooseStore
 pub fn grit_lib::objects::odb::store::LooseStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::LooseStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::LooseStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::LooseStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::LooseStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::LooseStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::LooseStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::LooseStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::LooseStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::LooseStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::LooseStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::LooseStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::LooseStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::LooseStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::LooseStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl core::marker::Freeze for grit_lib::objects::odb::store::LooseStore
 impl core::marker::Send for grit_lib::objects::odb::store::LooseStore
 impl core::marker::Sync for grit_lib::objects::odb::store::LooseStore
@@ -9250,23 +9437,23 @@ pub fn grit_lib::objects::odb::store::MemoryStore::new(grit_lib::objects::HashAl
 impl core::fmt::Debug for grit_lib::objects::odb::store::MemoryStore
 pub fn grit_lib::objects::odb::store::MemoryStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::MemoryStore
-pub fn grit_lib::objects::odb::store::MemoryStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MemoryStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::MemoryStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::MemoryStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::MemoryStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::MemoryStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::MemoryStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::MemoryStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::MemoryStore
-pub fn grit_lib::objects::odb::store::MemoryStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MemoryStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::MemoryStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::MemoryStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::MemoryStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl !core::marker::Freeze for grit_lib::objects::odb::store::MemoryStore
 impl core::marker::Send for grit_lib::objects::odb::store::MemoryStore
 impl core::marker::Sync for grit_lib::objects::odb::store::MemoryStore
@@ -9276,23 +9463,23 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::odb::store::
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::store::MemoryStore
 pub struct grit_lib::objects::odb::store::MidxObjects
 impl grit_lib::objects::odb::store::MidxObjects
-pub fn grit_lib::objects::odb::store::MidxObjects::covered_pack_basenames(&self) -> grit_lib::error::Result<std::collections::hash::set::HashSet<alloc::string::String>>
-pub fn grit_lib::objects::odb::store::MidxObjects::new(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, bool) -> grit_lib::error::Result<Self>
+pub fn grit_lib::objects::odb::store::MidxObjects::covered_pack_basenames(&self) -> grit_lib::objects::error::ObjectResult<std::collections::hash::set::HashSet<alloc::string::String>>
+pub fn grit_lib::objects::odb::store::MidxObjects::new(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>, bool) -> grit_lib::objects::error::ObjectResult<Self>
 pub fn grit_lib::objects::odb::store::MidxObjects::packed_objects(&self) -> &grit_lib::objects::odb::store::PackedObjects
 pub fn grit_lib::objects::odb::store::MidxObjects::status(&self) -> grit_lib::objects::odb::store::MidxObjectsStatus
 impl core::fmt::Debug for grit_lib::objects::odb::store::MidxObjects
 pub fn grit_lib::objects::odb::store::MidxObjects::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::MidxObjects
-pub fn grit_lib::objects::odb::store::MidxObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MidxObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::MidxObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::MidxObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MidxObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::MidxObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::MidxObjects::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::MidxObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MidxObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::MidxObjects::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::MidxObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MidxObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::MidxObjects::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl !core::marker::Freeze for grit_lib::objects::odb::store::MidxObjects
 impl core::marker::Send for grit_lib::objects::odb::store::MidxObjects
 impl core::marker::Sync for grit_lib::objects::odb::store::MidxObjects
@@ -9334,27 +9521,27 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::odb::store::
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::store::PackFilter
 pub struct grit_lib::objects::odb::store::PackedObjects
 impl grit_lib::objects::odb::store::PackedObjects
-pub fn grit_lib::objects::odb::store::PackedObjects::contains_filtered(&self, &grit_lib::objects::ObjectId, grit_lib::objects::odb::store::PackFilter) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::PackedObjects::for_each_promisor_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::PackedObjects::for_each_removable_pack_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::PackedObjects::freshen_pack_containing(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::PackedObjects::kept_pack_object_ids(&self) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains_filtered(&self, &grit_lib::objects::ObjectId, grit_lib::objects::odb::store::PackFilter) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::for_each_promisor_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::for_each_removable_pack_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::freshen_pack_containing(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::kept_pack_object_ids(&self) -> grit_lib::objects::error::ObjectResult<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::objects::odb::store::PackedObjects::new(alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>) -> Self
-pub fn grit_lib::objects::odb::store::PackedObjects::object_ids_from_index_path(&std::path::Path) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub fn grit_lib::objects::odb::store::PackedObjects::object_ids_from_index_path(&std::path::Path) -> grit_lib::objects::error::ObjectResult<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::objects::odb::store::PackedObjects::pack_store(&self) -> &alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>
 impl core::fmt::Debug for grit_lib::objects::odb::store::PackedObjects
 pub fn grit_lib::objects::odb::store::PackedObjects::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::PackedObjects
-pub fn grit_lib::objects::odb::store::PackedObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::PackedObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::PackedObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::PackedObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::PackedObjects::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::PackedObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::PackedObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::PackedObjects::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::PackedObjects::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl core::marker::Freeze for grit_lib::objects::odb::store::PackedObjects
 impl core::marker::Send for grit_lib::objects::odb::store::PackedObjects
 impl core::marker::Sync for grit_lib::objects::odb::store::PackedObjects
@@ -9363,166 +9550,166 @@ impl core::marker::UnsafeUnpin for grit_lib::objects::odb::store::PackedObjects
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::odb::store::PackedObjects
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::store::PackedObjects
 pub trait grit_lib::objects::odb::store::ObjectStore: core::marker::Send + core::marker::Sync + core::fmt::Debug
-pub fn grit_lib::objects::odb::store::ObjectStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::ObjectStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::ObjectStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::ObjectStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::ObjectStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::ObjectStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::ObjectStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::ObjectStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::ObjectStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::ObjectStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::ObjectStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::ObjectStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::ObjectStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::ObjectStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::ObjectStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::ObjectStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::ObjectStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::ObjectStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::ObjectStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::CompositeStore
-pub fn grit_lib::objects::odb::store::CompositeStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::CompositeStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::CompositeStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::CompositeStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::CompositeStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::CompositeStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::CompositeStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::CompositeStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::CompositeStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::CompositeStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::CompositeStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::CompositeStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::CompositeStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::FilesSource
-pub fn grit_lib::objects::odb::store::FilesSource::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::FilesSource::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::FilesSource::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::FilesSource::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::FilesSource::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::FilesSource::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::FilesSource::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::FilesSource::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::FilesSource::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::FilesSource::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::FilesSource::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::FilesSource::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::FilesSource::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::FilesSource::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::FilesSource::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::LooseStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::LooseStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::LooseStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::LooseStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::LooseStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::LooseStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::LooseStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::LooseStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::LooseStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::LooseStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::LooseStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::LooseStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::MemoryStore
-pub fn grit_lib::objects::odb::store::MemoryStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MemoryStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::MemoryStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::MemoryStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::MemoryStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::MemoryStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::MemoryStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::MemoryStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::MidxObjects
-pub fn grit_lib::objects::odb::store::MidxObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MidxObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::MidxObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::MidxObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MidxObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::MidxObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::MidxObjects::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::MidxObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MidxObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::MidxObjects::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::MidxObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MidxObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::MidxObjects::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::PackedObjects
-pub fn grit_lib::objects::odb::store::PackedObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::PackedObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::PackedObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::PackedObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::PackedObjects::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::PackedObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::PackedObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::PackedObjects::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::PackedObjects::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl<T: grit_lib::objects::odb::ObjectStore + ?core::marker::Sized> grit_lib::objects::odb::ObjectStore for &T
-pub fn &T::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn &T::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn &T::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn &T::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn &T::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn &T::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn &T::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn &T::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn &T::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn &T::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn &T::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn &T::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn &T::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn &T::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn &T::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn &T::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn &T::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn &T::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl<T: grit_lib::objects::odb::ObjectStore + ?core::marker::Sized> grit_lib::objects::odb::ObjectStore for alloc::boxed::Box<T>
-pub fn alloc::boxed::Box<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::boxed::Box<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn alloc::boxed::Box<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn alloc::boxed::Box<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::boxed::Box<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn alloc::boxed::Box<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn alloc::boxed::Box<T>::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn alloc::boxed::Box<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn alloc::boxed::Box<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn alloc::boxed::Box<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn alloc::boxed::Box<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn alloc::boxed::Box<T>::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn alloc::boxed::Box<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn alloc::boxed::Box<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn alloc::boxed::Box<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn alloc::boxed::Box<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn alloc::boxed::Box<T>::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl<T: grit_lib::objects::odb::ObjectStore + ?core::marker::Sized> grit_lib::objects::odb::ObjectStore for alloc::rcs::arc::Arc<T>
-pub fn alloc::rcs::arc::Arc<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::rcs::arc::Arc<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn alloc::rcs::arc::Arc<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn alloc::rcs::arc::Arc<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::rcs::arc::Arc<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn alloc::rcs::arc::Arc<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn alloc::rcs::arc::Arc<T>::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn alloc::rcs::arc::Arc<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn alloc::rcs::arc::Arc<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn alloc::rcs::arc::Arc<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn alloc::rcs::arc::Arc<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn alloc::rcs::arc::Arc<T>::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn alloc::rcs::arc::Arc<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn alloc::rcs::arc::Arc<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn alloc::rcs::arc::Arc<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn alloc::rcs::arc::Arc<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn alloc::rcs::arc::Arc<T>::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 pub trait grit_lib::objects::odb::store::WritableObjectStore: grit_lib::objects::odb::ObjectStore
-pub fn grit_lib::objects::odb::store::WritableObjectStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::WritableObjectStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::WritableObjectStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::WritableObjectStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::WritableObjectStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::FilesSource
-pub fn grit_lib::objects::odb::store::FilesSource::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::FilesSource::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::FilesSource::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::LooseStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::LooseStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::MemoryStore
-pub fn grit_lib::objects::odb::store::MemoryStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MemoryStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::MemoryStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::MemoryStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::MemoryStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl<T: grit_lib::objects::odb::WritableObjectStore + ?core::marker::Sized> grit_lib::objects::odb::WritableObjectStore for &T
-pub fn &T::flush(&self) -> grit_lib::error::Result<()>
-pub fn &T::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn &T::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn &T::rollback(&self) -> grit_lib::error::Result<()>
-pub fn &T::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn &T::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn &T::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn &T::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn &T::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl<T: grit_lib::objects::odb::WritableObjectStore + ?core::marker::Sized> grit_lib::objects::odb::WritableObjectStore for alloc::boxed::Box<T>
-pub fn alloc::boxed::Box<T>::flush(&self) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::boxed::Box<T>::rollback(&self) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn alloc::boxed::Box<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn alloc::boxed::Box<T>::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::boxed::Box<T>::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn alloc::boxed::Box<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl<T: grit_lib::objects::odb::WritableObjectStore + ?core::marker::Sized> grit_lib::objects::odb::WritableObjectStore for alloc::rcs::arc::Arc<T>
-pub fn alloc::rcs::arc::Arc<T>::flush(&self) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::rcs::arc::Arc<T>::rollback(&self) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::enumerate_loose_objects(&std::path::Path, grit_lib::objects::HashAlgo) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, std::path::PathBuf)>>
-pub fn grit_lib::objects::odb::store::read_loose_object_info(&std::path::Path) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
+pub fn alloc::rcs::arc::Arc<T>::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::rcs::arc::Arc<T>::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::enumerate_loose_objects(&std::path::Path, grit_lib::objects::HashAlgo) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<(grit_lib::objects::ObjectId, std::path::PathBuf)>>
+pub fn grit_lib::objects::odb::store::read_loose_object_info(&std::path::Path) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectInfo>
 pub struct grit_lib::objects::odb::ObjectStream<'a>
 pub grit_lib::objects::odb::ObjectStream::kind: grit_lib::objects::ObjectKind
 pub grit_lib::objects::odb::ObjectStream::reader: alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send + 'a)>
@@ -9542,7 +9729,7 @@ pub fn grit_lib::prelude::Odb::approximate_object_count(&self) -> grit_lib::erro
 pub fn grit_lib::prelude::Odb::big_file_threshold(&self) -> grit_lib::error::Result<u64>
 pub fn grit_lib::prelude::Odb::bulk_stage_write_options(&self) -> grit_lib::objects::odb::WriteOptions
 pub fn grit_lib::prelude::Odb::config_git_dir(&self) -> core::option::Option<&std::path::Path>
-pub fn grit_lib::prelude::Odb::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::prelude::Odb::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
 pub fn grit_lib::prelude::Odb::count_loose_objects(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::prelude::Odb::disable_mem_overlay(&self)
 pub fn grit_lib::prelude::Odb::empty_tree_oid(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -9556,7 +9743,7 @@ pub fn grit_lib::prelude::Odb::exists_materialized_local(&self, &grit_lib::objec
 pub fn grit_lib::prelude::Odb::exists_stored(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::prelude::Odb::flush(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::prelude::Odb::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::prelude::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::prelude::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::prelude::Odb::freshen_object(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::prelude::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::prelude::Odb::hash_algo(&self) -> grit_lib::objects::HashAlgo
@@ -9564,17 +9751,17 @@ pub fn grit_lib::prelude::Odb::hash_stream(&self, grit_lib::objects::ObjectKind,
 pub fn grit_lib::prelude::Odb::invalidate_packs(&self)
 pub fn grit_lib::prelude::Odb::is_empty_tree(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::prelude::Odb::largest_pack_index_path(&self) -> grit_lib::error::Result<core::option::Option<std::path::PathBuf>>
-pub fn grit_lib::prelude::Odb::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
+pub fn grit_lib::prelude::Odb::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::prelude::Odb::new(&std::path::Path) -> Self
 pub fn grit_lib::prelude::Odb::object_path(&self, &grit_lib::objects::ObjectId) -> std::path::PathBuf
 pub fn grit_lib::prelude::Odb::objects_dir(&self) -> &std::path::Path
-pub fn grit_lib::prelude::Odb::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'static>>>
+pub fn grit_lib::prelude::Odb::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'static>>>
 pub fn grit_lib::prelude::Odb::pack_store(&self) -> grit_lib::error::Result<&alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>>
 pub fn grit_lib::prelude::Odb::primary(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::store::FilesSource>>
-pub fn grit_lib::prelude::Odb::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
-pub fn grit_lib::prelude::Odb::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
-pub fn grit_lib::prelude::Odb::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
-pub fn grit_lib::prelude::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::prelude::Odb::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::Object>
+pub fn grit_lib::prelude::Odb::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectInfo>
+pub fn grit_lib::prelude::Odb::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectKind>
+pub fn grit_lib::prelude::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::Object>
 pub fn grit_lib::prelude::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::prelude::Odb::register_submodule_object_directories_from_index(&self, &std::path::Path, &grit_lib::index::Index)
 pub fn grit_lib::prelude::Odb::rollback(&self) -> grit_lib::error::Result<()>
@@ -9669,164 +9856,164 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::odb::WriteOptio
 pub const grit_lib::objects::odb::BULK_NEW_LOOSE_WRITE: grit_lib::objects::odb::WriteOptions
 pub const grit_lib::objects::odb::BULK_TRACKED_RESTAGE_LOOSE_WRITE: grit_lib::objects::odb::WriteOptions
 pub trait grit_lib::objects::odb::ObjectStore: core::marker::Send + core::marker::Sync + core::fmt::Debug
-pub fn grit_lib::objects::odb::ObjectStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::ObjectStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::ObjectStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::ObjectStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::ObjectStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::ObjectStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::ObjectStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::ObjectStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::ObjectStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::ObjectStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::ObjectStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::ObjectStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::ObjectStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::ObjectStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::ObjectStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::ObjectStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::ObjectStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::ObjectStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::ObjectStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::CompositeStore
-pub fn grit_lib::objects::odb::store::CompositeStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::CompositeStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::CompositeStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::CompositeStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::CompositeStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::CompositeStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::CompositeStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::CompositeStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::CompositeStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::CompositeStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::CompositeStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::CompositeStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::CompositeStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::CompositeStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::CompositeStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::FilesSource
-pub fn grit_lib::objects::odb::store::FilesSource::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::FilesSource::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::FilesSource::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::FilesSource::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::FilesSource::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::FilesSource::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::FilesSource::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::FilesSource::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::FilesSource::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::FilesSource::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::FilesSource::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::FilesSource::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::FilesSource::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::FilesSource::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::FilesSource::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::LooseStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::LooseStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::LooseStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::LooseStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::LooseStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::LooseStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::LooseStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::LooseStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::LooseStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::LooseStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::LooseStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::LooseStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::LooseStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::MemoryStore
-pub fn grit_lib::objects::odb::store::MemoryStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MemoryStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::MemoryStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::MemoryStore::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::MemoryStore::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::MemoryStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::MemoryStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::MemoryStore::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::MemoryStore::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::MemoryStore::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::MidxObjects
-pub fn grit_lib::objects::odb::store::MidxObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MidxObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::MidxObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::MidxObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MidxObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::MidxObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::MidxObjects::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::MidxObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MidxObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::MidxObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::MidxObjects::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::MidxObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MidxObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::MidxObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::MidxObjects::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl grit_lib::objects::odb::ObjectStore for grit_lib::objects::odb::store::PackedObjects
-pub fn grit_lib::objects::odb::store::PackedObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::PackedObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn grit_lib::objects::odb::store::PackedObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn grit_lib::objects::odb::store::PackedObjects::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::objects::odb::store::PackedObjects::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn grit_lib::objects::odb::store::PackedObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::PackedObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn grit_lib::objects::odb::store::PackedObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn grit_lib::objects::odb::store::PackedObjects::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::odb::store::PackedObjects::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::PackedObjects::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn grit_lib::objects::odb::store::PackedObjects::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn grit_lib::objects::odb::store::PackedObjects::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl<T: grit_lib::objects::odb::ObjectStore + ?core::marker::Sized> grit_lib::objects::odb::ObjectStore for &T
-pub fn &T::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn &T::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn &T::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn &T::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn &T::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn &T::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn &T::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn &T::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn &T::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn &T::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn &T::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn &T::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn &T::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn &T::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn &T::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn &T::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn &T::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn &T::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl<T: grit_lib::objects::odb::ObjectStore + ?core::marker::Sized> grit_lib::objects::odb::ObjectStore for alloc::boxed::Box<T>
-pub fn alloc::boxed::Box<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::boxed::Box<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn alloc::boxed::Box<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn alloc::boxed::Box<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::boxed::Box<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn alloc::boxed::Box<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn alloc::boxed::Box<T>::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn alloc::boxed::Box<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn alloc::boxed::Box<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn alloc::boxed::Box<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn alloc::boxed::Box<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn alloc::boxed::Box<T>::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn alloc::boxed::Box<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn alloc::boxed::Box<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn alloc::boxed::Box<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn alloc::boxed::Box<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn alloc::boxed::Box<T>::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 impl<T: grit_lib::objects::odb::ObjectStore + ?core::marker::Sized> grit_lib::objects::odb::ObjectStore for alloc::rcs::arc::Arc<T>
-pub fn alloc::rcs::arc::Arc<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::rcs::arc::Arc<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<bool>>
-pub fn alloc::rcs::arc::Arc<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn alloc::rcs::arc::Arc<T>::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::rcs::arc::Arc<T>::contains_many(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::objects::error::ObjectResult<alloc::vec::Vec<bool>>
+pub fn alloc::rcs::arc::Arc<T>::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn alloc::rcs::arc::Arc<T>::hash_algo(&self) -> grit_lib::objects::HashAlgo
-pub fn alloc::rcs::arc::Arc<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
-pub fn alloc::rcs::arc::Arc<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
-pub fn alloc::rcs::arc::Arc<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectInfo>>
-pub fn alloc::rcs::arc::Arc<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectKind>>
-pub fn alloc::rcs::arc::Arc<T>::refresh(&self) -> grit_lib::error::Result<bool>
+pub fn alloc::rcs::arc::Arc<T>::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'_>>>
+pub fn alloc::rcs::arc::Arc<T>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::Object>>
+pub fn alloc::rcs::arc::Arc<T>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectInfo>>
+pub fn alloc::rcs::arc::Arc<T>::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::ObjectKind>>
+pub fn alloc::rcs::arc::Arc<T>::refresh(&self) -> grit_lib::objects::error::ObjectResult<bool>
 pub trait grit_lib::objects::odb::WritableObjectStore: grit_lib::objects::odb::ObjectStore
-pub fn grit_lib::objects::odb::WritableObjectStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::WritableObjectStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::WritableObjectStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::WritableObjectStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::WritableObjectStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::WritableObjectStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::WritableObjectStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::WritableObjectStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::WritableObjectStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::WritableObjectStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::FilesSource
-pub fn grit_lib::objects::odb::store::FilesSource::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::FilesSource::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::FilesSource::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::FilesSource::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::FilesSource::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::FilesSource::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::FilesSource::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::LooseStore
-pub fn grit_lib::objects::odb::store::LooseStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::LooseStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::LooseStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::LooseStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::LooseStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::LooseStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::LooseStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl grit_lib::objects::odb::WritableObjectStore for grit_lib::objects::odb::store::MemoryStore
-pub fn grit_lib::objects::odb::store::MemoryStore::flush(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn grit_lib::objects::odb::store::MemoryStore::rollback(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::odb::store::MemoryStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::objects::odb::store::MemoryStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::MemoryStore::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn grit_lib::objects::odb::store::MemoryStore::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn grit_lib::objects::odb::store::MemoryStore::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::store::MemoryStore::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl<T: grit_lib::objects::odb::WritableObjectStore + ?core::marker::Sized> grit_lib::objects::odb::WritableObjectStore for &T
-pub fn &T::flush(&self) -> grit_lib::error::Result<()>
-pub fn &T::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn &T::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn &T::rollback(&self) -> grit_lib::error::Result<()>
-pub fn &T::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn &T::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn &T::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn &T::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn &T::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn &T::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl<T: grit_lib::objects::odb::WritableObjectStore + ?core::marker::Sized> grit_lib::objects::odb::WritableObjectStore for alloc::boxed::Box<T>
-pub fn alloc::boxed::Box<T>::flush(&self) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::boxed::Box<T>::rollback(&self) -> grit_lib::error::Result<()>
-pub fn alloc::boxed::Box<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn alloc::boxed::Box<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn alloc::boxed::Box<T>::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::boxed::Box<T>::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::boxed::Box<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn alloc::boxed::Box<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 impl<T: grit_lib::objects::odb::WritableObjectStore + ?core::marker::Sized> grit_lib::objects::odb::WritableObjectStore for alloc::rcs::arc::Arc<T>
-pub fn alloc::rcs::arc::Arc<T>::flush(&self) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
-pub fn alloc::rcs::arc::Arc<T>::rollback(&self) -> grit_lib::error::Result<()>
-pub fn alloc::rcs::arc::Arc<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn alloc::rcs::arc::Arc<T>::flush(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::flush_for_publish(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::freshen(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
+pub fn alloc::rcs::arc::Arc<T>::rollback(&self) -> grit_lib::objects::error::ObjectResult<()>
+pub fn alloc::rcs::arc::Arc<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
+pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 pub mod grit_lib::objects::pack
 pub struct grit_lib::objects::pack::PackIndex
 pub grit_lib::objects::pack::PackIndex::fanout: [u32; 256]
@@ -10369,6 +10556,27 @@ pub fn grit_lib::objects::unpack_objects::apply_delta(&[u8], &[u8]) -> grit_lib:
 pub fn grit_lib::objects::unpack_objects::apply_delta_into(&mut alloc::vec::Vec<u8>, &[u8], &[u8]) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::unpack_objects::ingest_pack_into(&mut dyn alloc::io::read::Read, &dyn grit_lib::objects::odb::WritableObjectStore, &dyn grit_lib::objects::odb::ObjectStore, &grit_lib::objects::unpack_objects::UnpackOptions) -> grit_lib::error::Result<grit_lib::unpack_objects::IngestedObjects>
 pub fn grit_lib::objects::unpack_objects::pack_index_records_with_threads(&[u8], &grit_lib::prelude::Odb, grit_lib::parallel::Parallelism) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::unpack_objects::PackIndexRecord>>
+pub fn grit_lib::objects::unpack_objects::pack_is_thin(&[u8], grit_lib::objects::HashAlgo) -> bool
+#[non_exhaustive] pub enum grit_lib::objects::CorruptObjectReason
+pub grit_lib::objects::CorruptObjectReason::Detail
+pub grit_lib::objects::CorruptObjectReason::Detail::message: alloc::string::String
+impl grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::detail(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::error::CorruptObjectReason
+impl core::cmp::PartialEq for grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::error::CorruptObjectReason
+pub fn grit_lib::objects::error::CorruptObjectReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Freeze for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Send for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Sync for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::Unpin for grit_lib::objects::error::CorruptObjectReason
+impl core::marker::UnsafeUnpin for grit_lib::objects::error::CorruptObjectReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::error::CorruptObjectReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::error::CorruptObjectReason
 pub enum grit_lib::objects::HashAlgo
 pub grit_lib::objects::HashAlgo::Sha1
 pub grit_lib::objects::HashAlgo::Sha256
@@ -10415,6 +10623,151 @@ impl core::marker::Unpin for grit_lib::objects::HashAlgo
 impl core::marker::UnsafeUnpin for grit_lib::objects::HashAlgo
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::HashAlgo
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::HashAlgo
+#[non_exhaustive] pub enum grit_lib::objects::ObjectError
+pub grit_lib::objects::ObjectError::Backend
+pub grit_lib::objects::ObjectError::Backend::source: alloc::boxed::Box<(dyn core::error::Error + core::marker::Send + core::marker::Sync)>
+pub grit_lib::objects::ObjectError::CommitGraphParentMissing
+pub grit_lib::objects::ObjectError::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::CorruptLooseObject
+pub grit_lib::objects::ObjectError::CorruptLooseObject::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::CorruptLooseObject::path: std::path::PathBuf
+pub grit_lib::objects::ObjectError::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::objects::error::ObjectError>
+pub grit_lib::objects::ObjectError::CorruptObject
+pub grit_lib::objects::ObjectError::CorruptObject::oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::objects::ObjectError::CorruptObject::reason: grit_lib::objects::error::CorruptObjectReason
+pub grit_lib::objects::ObjectError::CorruptPackedObject
+pub grit_lib::objects::ObjectError::CorruptPackedObject::offset: u64
+pub grit_lib::objects::ObjectError::CorruptPackedObject::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::CorruptPackedObject::pack: std::path::PathBuf
+pub grit_lib::objects::ObjectError::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::objects::error::ObjectError>
+pub grit_lib::objects::ObjectError::DeltaChainTooDeep
+pub grit_lib::objects::ObjectError::DeltaChainTooDeep::limit: usize
+pub grit_lib::objects::ObjectError::HashCollision
+pub grit_lib::objects::ObjectError::HashCollision::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::InvalidObject
+pub grit_lib::objects::ObjectError::InvalidObject::check: grit_lib::maintenance::fsck::FsckError
+pub grit_lib::objects::ObjectError::InvalidObject::kind: grit_lib::objects::ObjectKind
+pub grit_lib::objects::ObjectError::InvalidObjectId
+pub grit_lib::objects::ObjectError::InvalidObjectId::input: alloc::string::String
+pub grit_lib::objects::ObjectError::InvalidSignature(grit_lib::ident::SignatureError)
+pub grit_lib::objects::ObjectError::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
+pub grit_lib::objects::ObjectError::LockHeld(grit_lib::error::LockHeldError)
+pub grit_lib::objects::ObjectError::LooseHashMismatch
+pub grit_lib::objects::ObjectError::LooseHashMismatch::path: alloc::string::String
+pub grit_lib::objects::ObjectError::LooseHashMismatch::real_oid: alloc::string::String
+pub grit_lib::objects::ObjectError::LooseObjectWrite
+pub grit_lib::objects::ObjectError::LooseObjectWrite::path: alloc::string::String
+pub grit_lib::objects::ObjectError::LooseObjectWrite::source: core::io::error::Error
+pub grit_lib::objects::ObjectError::MaintenanceRunning
+pub grit_lib::objects::ObjectError::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
+pub grit_lib::objects::ObjectError::Midx(grit_lib::prelude::MidxError)
+pub grit_lib::objects::ObjectError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
+pub grit_lib::objects::ObjectError::NoPromisorRemote
+pub grit_lib::objects::ObjectError::NoPromisorRemote::operation: &'static str
+pub grit_lib::objects::ObjectError::ObjectFormatMismatch
+pub grit_lib::objects::ObjectError::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
+pub grit_lib::objects::ObjectError::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
+pub grit_lib::objects::ObjectError::ObjectHeaderTooLong
+pub grit_lib::objects::ObjectError::ObjectHeaderTooLong::oid: alloc::string::String
+pub grit_lib::objects::ObjectError::ObjectNotFound
+pub grit_lib::objects::ObjectError::ObjectNotFound::oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::objects::ObjectError::ObjectNotFound::spec: alloc::string::String
+pub grit_lib::objects::ObjectError::ObjectStreamTruncated
+pub grit_lib::objects::ObjectError::ObjectStreamTruncated::actual: u64
+pub grit_lib::objects::ObjectError::ObjectStreamTruncated::expected: u64
+pub grit_lib::objects::ObjectError::OdbObjectsDirMismatch
+pub grit_lib::objects::ObjectError::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::objects::ObjectError::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::objects::ObjectError::Offload(grit_lib::maintenance::OffloadError)
+pub grit_lib::objects::ObjectError::PackDeltaBaseNotWritten
+pub grit_lib::objects::ObjectError::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::PackDeltaBaseNotWritten::target: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::PackIndexChecksumMismatch
+pub grit_lib::objects::ObjectError::PackIndexChecksumMismatch::mismatch: grit_lib::hash::TrailerMismatch
+pub grit_lib::objects::ObjectError::PackIndexChecksumMismatch::path: std::path::PathBuf
+pub grit_lib::objects::ObjectError::PathIo
+pub grit_lib::objects::ObjectError::PathIo::path_io: grit_lib::error::PathIoError
+pub grit_lib::objects::ObjectError::PreciousObjectsRepository
+pub grit_lib::objects::ObjectError::PreciousObjectsRepository::operation: &'static str
+pub grit_lib::objects::ObjectError::PromisedObjectMissing(grit_lib::objects::ObjectId)
+pub grit_lib::objects::ObjectError::PromisorFetchFailed
+pub grit_lib::objects::ObjectError::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::objects::error::ObjectError>)>
+pub grit_lib::objects::ObjectError::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::TagVerifyDuplicateTreeSha256Header
+pub grit_lib::objects::ObjectError::TagVerifyMissingObjectHeader
+pub grit_lib::objects::ObjectError::TagVerifyNotTag
+pub grit_lib::objects::ObjectError::TagVerifyNotTag::found: grit_lib::objects::ObjectKind
+pub grit_lib::objects::ObjectError::TagVerifyNotTag::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::TreeSha256Claim(grit_lib::tree_sha256::TreeSha256ClaimError)
+pub grit_lib::objects::ObjectError::TreeSha256InvalidHex
+pub grit_lib::objects::ObjectError::TreeSha256InvalidRevision
+pub grit_lib::objects::ObjectError::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
+pub grit_lib::objects::ObjectError::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
+pub grit_lib::objects::ObjectError::TreeSha256RequiresSigning
+pub grit_lib::objects::ObjectError::UnexpectedObjectKind
+pub grit_lib::objects::ObjectError::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
+pub grit_lib::objects::ObjectError::UnexpectedObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::objects::ObjectError::UnexpectedObjectKind::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::UnknownObjectType
+pub grit_lib::objects::ObjectError::UnknownObjectType::ty: alloc::string::String
+pub grit_lib::objects::ObjectError::UnresolvedDeltas
+pub grit_lib::objects::ObjectError::UnresolvedDeltas::count: u64
+pub grit_lib::objects::ObjectError::UnsupportedObjectStore
+pub grit_lib::objects::ObjectError::UnsupportedObjectStore::operation: &'static str
+pub grit_lib::objects::ObjectError::Zlib
+pub grit_lib::objects::ObjectError::Zlib::detail: alloc::string::String
+impl grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::corrupt_object(core::option::Option<grit_lib::objects::ObjectId>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::objects::error::ObjectError::from_umbrella(grit_lib::error::Error) -> Self
+pub fn grit_lib::objects::error::ObjectError::is_damaged_object(&self) -> bool
+pub fn grit_lib::objects::error::ObjectError::kind_name(&self) -> &'static str
+pub fn grit_lib::objects::error::ObjectError::object_not_found(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::objects::error::ObjectError::wrap_loose_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, grit_lib::objects::error::ObjectError) -> grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::wrap_packed_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, u64, grit_lib::objects::error::ObjectError) -> grit_lib::objects::error::ObjectError
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::LockHeldError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::LockHeldError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::ident::SignatureError) -> Self
+impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::maintenance::OffloadError) -> Self
+impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::objects::bitmap::BitmapWalkError
+pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::serve::ServeError
+pub fn grit_lib::remote::serve::ServeError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::serve::UnpackError
+pub fn grit_lib::remote::serve::UnpackError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::snapshot_checkout::CheckoutError
+pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::objects::error::ObjectError) -> Self
+impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::prelude::MidxError) -> Self
+impl core::convert::From<grit_lib::tree_sha256::TreeSha256ClaimError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::tree_sha256::TreeSha256ClaimError) -> Self
+impl core::error::Error for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::objects::error::ObjectError
+impl core::marker::Send for grit_lib::objects::error::ObjectError
+impl core::marker::Sync for grit_lib::objects::error::ObjectError
+impl core::marker::Unpin for grit_lib::objects::error::ObjectError
+impl core::marker::UnsafeUnpin for grit_lib::objects::error::ObjectError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::error::ObjectError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::error::ObjectError
 pub enum grit_lib::objects::ObjectKind
 pub grit_lib::objects::ObjectKind::Blob
 pub grit_lib::objects::ObjectKind::Commit
@@ -10477,6 +10830,8 @@ impl core::cmp::PartialEq for grit_lib::objects::TreeEntryError
 pub fn grit_lib::objects::TreeEntryError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::objects::TreeEntryError) -> Self
 impl core::error::Error for grit_lib::objects::TreeEntryError
 impl core::fmt::Debug for grit_lib::objects::TreeEntryError
 pub fn grit_lib::objects::TreeEntryError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -10982,6 +11337,7 @@ pub fn grit_lib::objects::short_hex(&str) -> &str
 pub fn grit_lib::objects::tag_header_field(&[u8], &[u8]) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::objects::tag_object_line_oid(&[u8]) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::tree_entry_cmp(&[u8], bool, &[u8], bool) -> core::cmp::Ordering
+pub type grit_lib::objects::ObjectResult<T> = core::result::Result<T, grit_lib::objects::error::ObjectError>
 pub type grit_lib::objects::OidHashMap<V> = hashbrown::map::HashMap<grit_lib::objects::ObjectId, V, grit_lib::objects::OidBuildHasher>
 pub type grit_lib::objects::OidHashSet = hashbrown::set::HashSet<grit_lib::objects::ObjectId, grit_lib::objects::OidBuildHasher>
 pub mod grit_lib::operation
@@ -14440,6 +14796,7 @@ pub grit_lib::prelude::Error::NothingStagedToCommit
 pub grit_lib::prelude::Error::NothingStagedToCommit::unstaged: usize
 pub grit_lib::prelude::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::prelude::Error::NothingToCommit
+pub grit_lib::prelude::Error::Object(grit_lib::objects::error::ObjectError)
 #[non_exhaustive] pub grit_lib::prelude::Error::ObjectFormatMismatch
 pub grit_lib::prelude::Error::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
 pub grit_lib::prelude::Error::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
@@ -14590,6 +14947,7 @@ pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<a
 pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
 pub fn grit_lib::error::Error::is_damaged_object(&self) -> bool
 pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
+pub fn grit_lib::error::Error::is_object_not_found(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
@@ -14598,6 +14956,8 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -14618,6 +14978,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiff
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::commit::CommitPatchError
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::hunk_select::HunkSelectError
@@ -14670,6 +15032,8 @@ impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::erro
 pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch::BranchError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch::BranchError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
@@ -14757,6 +15121,8 @@ impl core::cmp::PartialEq for grit_lib::prelude::MidxError
 pub fn grit_lib::prelude::MidxError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::prelude::MidxError) -> Self
+impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::prelude::MidxError) -> Self
 impl core::error::Error for grit_lib::prelude::MidxError
 impl core::fmt::Debug for grit_lib::prelude::MidxError
 pub fn grit_lib::prelude::MidxError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -15336,7 +15702,7 @@ pub fn grit_lib::prelude::Odb::approximate_object_count(&self) -> grit_lib::erro
 pub fn grit_lib::prelude::Odb::big_file_threshold(&self) -> grit_lib::error::Result<u64>
 pub fn grit_lib::prelude::Odb::bulk_stage_write_options(&self) -> grit_lib::objects::odb::WriteOptions
 pub fn grit_lib::prelude::Odb::config_git_dir(&self) -> core::option::Option<&std::path::Path>
-pub fn grit_lib::prelude::Odb::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::prelude::Odb::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
 pub fn grit_lib::prelude::Odb::count_loose_objects(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::prelude::Odb::disable_mem_overlay(&self)
 pub fn grit_lib::prelude::Odb::empty_tree_oid(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -15350,7 +15716,7 @@ pub fn grit_lib::prelude::Odb::exists_materialized_local(&self, &grit_lib::objec
 pub fn grit_lib::prelude::Odb::exists_stored(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::prelude::Odb::flush(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::prelude::Odb::flush_for_publish(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::prelude::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::prelude::Odb::for_each_object(&self, &mut dyn core::ops::function::FnMut(&grit_lib::objects::ObjectId) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::prelude::Odb::freshen_object(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::prelude::Odb::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::prelude::Odb::hash_algo(&self) -> grit_lib::objects::HashAlgo
@@ -15358,17 +15724,17 @@ pub fn grit_lib::prelude::Odb::hash_stream(&self, grit_lib::objects::ObjectKind,
 pub fn grit_lib::prelude::Odb::invalidate_packs(&self)
 pub fn grit_lib::prelude::Odb::is_empty_tree(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::prelude::Odb::largest_pack_index_path(&self) -> grit_lib::error::Result<core::option::Option<std::path::PathBuf>>
-pub fn grit_lib::prelude::Odb::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<()>
+pub fn grit_lib::prelude::Odb::lookup_prefix(&self, &str, usize, &mut alloc::vec::Vec<grit_lib::objects::ObjectId>) -> grit_lib::objects::error::ObjectResult<()>
 pub fn grit_lib::prelude::Odb::new(&std::path::Path) -> Self
 pub fn grit_lib::prelude::Odb::object_path(&self, &grit_lib::objects::ObjectId) -> std::path::PathBuf
 pub fn grit_lib::prelude::Odb::objects_dir(&self) -> &std::path::Path
-pub fn grit_lib::prelude::Odb::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::odb::ObjectStream<'static>>>
+pub fn grit_lib::prelude::Odb::open_stream(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<grit_lib::objects::odb::ObjectStream<'static>>>
 pub fn grit_lib::prelude::Odb::pack_store(&self) -> grit_lib::error::Result<&alloc::rcs::arc::Arc<grit_lib::objects::pack_store::PackStore>>
 pub fn grit_lib::prelude::Odb::primary(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::odb::store::FilesSource>>
-pub fn grit_lib::prelude::Odb::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
-pub fn grit_lib::prelude::Odb::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
-pub fn grit_lib::prelude::Odb::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
-pub fn grit_lib::prelude::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::prelude::Odb::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::Object>
+pub fn grit_lib::prelude::Odb::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectInfo>
+pub fn grit_lib::prelude::Odb::read_into(&self, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectKind>
+pub fn grit_lib::prelude::Odb::read_loose_verify_oid(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::Object>
 pub fn grit_lib::prelude::Odb::refresh_file_alternates_from_disk(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::prelude::Odb::register_submodule_object_directories_from_index(&self, &std::path::Path, &grit_lib::index::Index)
 pub fn grit_lib::prelude::Odb::rollback(&self) -> grit_lib::error::Result<()>
@@ -20026,6 +20392,8 @@ impl core::convert::From<core::io::error::Error> for grit_lib::remote::serve::Se
 pub fn grit_lib::remote::serve::ServeError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::ServeError
 pub fn grit_lib::remote::serve::ServeError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::serve::ServeError
+pub fn grit_lib::remote::serve::ServeError::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::error::Error for grit_lib::remote::serve::ServeError
 pub fn grit_lib::remote::serve::ServeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::remote::serve::ServeError
@@ -20055,6 +20423,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::Un
 pub fn grit_lib::remote::serve::UnpackError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::maintenance::fsck::SkipListError> for grit_lib::remote::serve::UnpackError
 pub fn grit_lib::remote::serve::UnpackError::from(grit_lib::maintenance::fsck::SkipListError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::serve::UnpackError
+pub fn grit_lib::remote::serve::UnpackError::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::error::Error for grit_lib::remote::serve::UnpackError
 pub fn grit_lib::remote::serve::UnpackError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::remote::serve::UnpackError
@@ -20491,6 +20861,8 @@ impl core::convert::From<core::io::error::Error> for grit_lib::remote::snapshot_
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::snapshot_checkout::CheckoutError
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::remote::snapshot_checkout::CheckoutError
+pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::convert::From<grit_lib::porcelain::pull::PullError> for grit_lib::remote::snapshot_checkout::CheckoutError
 pub fn grit_lib::remote::snapshot_checkout::CheckoutError::from(grit_lib::porcelain::pull::PullError) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::remote::snapshot_checkout::CheckoutError
@@ -23868,6 +24240,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history:
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::ident::AuthorArgError) -> Self
+impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::error::Error
@@ -26635,6 +27009,8 @@ impl core::cmp::PartialEq for grit_lib::tree_sha256::TreeSha256ClaimError
 pub fn grit_lib::tree_sha256::TreeSha256ClaimError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::tree_sha256::TreeSha256ClaimError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::tree_sha256::TreeSha256ClaimError) -> Self
+impl core::convert::From<grit_lib::tree_sha256::TreeSha256ClaimError> for grit_lib::objects::error::ObjectError
+pub fn grit_lib::objects::error::ObjectError::from(grit_lib::tree_sha256::TreeSha256ClaimError) -> Self
 impl core::error::Error for grit_lib::tree_sha256::TreeSha256ClaimError
 impl core::fmt::Debug for grit_lib::tree_sha256::TreeSha256ClaimError
 pub fn grit_lib::tree_sha256::TreeSha256ClaimError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
