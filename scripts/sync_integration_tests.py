@@ -136,6 +136,12 @@ def render(crate: str, modules: list[tuple[str, bool]], helpers: list[str]) -> s
         lines.append("// Helpers the test modules share, compiled once.")
         lines += [f"mod {h};" for h in helpers]
         lines.append("")
+    if crate == "grit-lib":
+        lines.append(
+            "// Integration modules refer to `crate::config` for load options and types."
+        )
+        lines.append("pub use grit_lib::config;")
+        lines.append("")
     for stem, full in modules:
         if (crate, stem) in DEFAULT_SUITE_OVERRIDE:
             pass

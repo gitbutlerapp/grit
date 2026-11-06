@@ -7,7 +7,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! let _cfg = _repo.config()?;
+//! let _cfg = _repo.config().snapshot()?;
 //!
 //! # Ok(())
 //! # }

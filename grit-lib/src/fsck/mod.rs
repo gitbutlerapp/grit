@@ -11,7 +11,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! let config = repo.config()?;
+//! let config = repo.config().snapshot()?;
 //! let report = fsck(
 //!     &repo,
 //!     &FsckOptions::connectivity_and_refs(false),

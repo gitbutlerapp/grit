@@ -2,7 +2,7 @@
 
 use grit_lib::ident::Signature;
 use grit_lib::objects::{parse_commit, NewCommit};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::StashApplyOptions;
 use grit_lib::stash::{CorruptStashReason, StashError};
@@ -67,7 +67,7 @@ fn stash_apply_refuses_local_overwrite() {
             0,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("overwrite blocked");
     assert!(matches!(err, StashError::WouldOverwriteLocalChanges { .. }));
@@ -106,7 +106,7 @@ fn corrupt_stash_wrong_parent_count() {
             &bad,
             &StashApplyOptions::default(),
             &mut NullProgress,
-            &NeverCancel,
+            &CancelToken::never(),
         )
         .expect_err("single-parent commit");
     match err {

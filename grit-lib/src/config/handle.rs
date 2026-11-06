@@ -41,7 +41,7 @@ impl<'repo> Config<'repo> {
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = std::env::temp_dir().join("grit-config-get-doc");
     /// let (repo, _) = Repository::init(&dir, &InitOptions::default())?;
-    /// let _ = repo.config_handle().get("core.repositoryformatversion");
+    /// let _ = repo.config().get("core.repositoryformatversion")?;
     /// # Ok(())
     /// # }
     /// ```

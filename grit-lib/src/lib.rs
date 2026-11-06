@@ -151,7 +151,7 @@ pub mod progress;
 /// # fn main() -> Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let _cfg = repo.config()?;
+/// let _cfg = repo.config().snapshot()?;
 /// assert!(repo.refs().read_raw("HEAD")?.is_some());
 /// # Ok(())
 /// # }

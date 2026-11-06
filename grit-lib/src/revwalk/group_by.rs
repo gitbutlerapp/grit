@@ -247,7 +247,8 @@ fn try_count_authors_via_bitmap(
     all_refs: bool,
     mailmap: Option<&MailmapTable>,
 ) -> Result<Option<Vec<AuthorGroup>>> {
-    let mut opts = rev_list_options_from_walk(repo, walk_options, parsed, all_refs, false)?;
+    let (mut opts, _context) =
+        rev_list_options_from_walk(repo, walk_options, parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
     let objects_dir = repo.odb().objects_dir();
     repo.odb().with_pack_read_context(|| {
