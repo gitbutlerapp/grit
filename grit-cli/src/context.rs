@@ -278,7 +278,9 @@ pub fn identity(
 /// ([`Repository::identity`]), with setup advice when no identity is configured.
 pub fn signature(repo: &Repository, role: IdentRole, now: OffsetDateTime) -> Result<Signature> {
     repo.identity(role, now).map_err(|err| match err {
-        grit_lib::error::Error::Identity(err) => crate::error_map::identity_error(err),
+        grit_lib::error::Error::Commit(grit_lib::porcelain::CommitError::Identity(err)) => {
+            crate::error_map::identity_error(err)
+        }
         other => other.into(),
     })
 }
@@ -292,7 +294,7 @@ pub fn committer_reflog_signature(
 ) -> Result<Signature> {
     match repo.identity(IdentRole::Committer, now) {
         Ok(sig) => Ok(sig),
-        Err(grit_lib::error::Error::Identity(_)) => {
+        Err(grit_lib::error::Error::Commit(grit_lib::porcelain::CommitError::Identity(_))) => {
             let line = resolve_loose_committer_identity_with(repo.environment(), config, now);
             line.parse()
                 .map_err(|err| grit_lib::error::Error::InvalidSignature(err).into())

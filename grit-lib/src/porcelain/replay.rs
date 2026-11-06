@@ -23,6 +23,7 @@ use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_objec
 use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
+use crate::porcelain::MergeError;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::refs::{
     should_autocreate_reflog_with_config, update_branch_for_commit_on_store,
@@ -90,8 +91,8 @@ pub enum ReplayOutcome {
 /// # Errors
 ///
 /// - [`Error::UnbornHead`] when `HEAD` has no commits yet.
-/// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
-/// - [`Error::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
+/// - [`MergeError::MergeCommit`] when the source commit has more than one parent (pick or revert).
+/// - [`MergeError::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
 /// - [`Error::Cancelled`] when `cancel` (or [`ProgressSink::should_cancel`]) fires before the
 ///   branch moved; a checkout already under way is rolled back to `HEAD` first.
@@ -124,13 +125,13 @@ pub fn replay_commit(
     };
 
     if req.direction == ReplayDirection::Pick && req.commit == head_oid {
-        return Err(Error::ReplaySourceAtHead);
+        return Err(MergeError::ReplaySourceAtHead.into());
     }
 
     let source_obj = repo.odb().read(&req.commit)?;
     let source = parse_commit(&source_obj.data)?;
     if source.parents.len() > 1 {
-        return Err(Error::MergeCommit { oid: req.commit });
+        return Err(MergeError::MergeCommit { oid: req.commit }.into());
     }
 
     let head_tree = repo.odb().commit_tree(&head_oid)?;

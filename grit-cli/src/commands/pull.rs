@@ -16,6 +16,7 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
+use grit_lib::porcelain::MergeError;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
 use grit_lib::remote::snapshot_checkout::{
@@ -80,7 +81,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     let mut options =
         PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args)).map_err(
             |err| match err {
-                PullError::Repository(LibError::OperationInProgress(kind)) => {
+                PullError::Repository(LibError::Merge(MergeError::OperationInProgress(kind))) => {
                     crate::json_error::operation_in_progress_for_repo(&repo, "pull", kind)
                 }
                 other => anyhow::Error::new(other),
@@ -154,7 +155,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
                         anyhow::Error::new(hook)
                     }
                 }
-                PullError::Repository(LibError::OperationInProgress(kind)) => {
+                PullError::Repository(LibError::Merge(MergeError::OperationInProgress(kind))) => {
                     return Err(crate::json_error::operation_in_progress_for_repo(
                         &repo, "pull", kind,
                     ));

@@ -64,6 +64,7 @@ use crate::porcelain::tree_merge_checkout::{
     write_index_after_merge_checkout,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
+use crate::porcelain::MergeError;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::refs;
 use crate::refs::store::RawRef;
@@ -78,7 +79,6 @@ use crate::state::{
     write_orig_head,
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
-use thiserror::Error;
 
 use crate::hooks::{CommitHookEnv, HookName};
 use crate::porcelain::add::stage_for_commit_on_index;
@@ -303,7 +303,7 @@ pub struct MergePredictionOptions {
     pub allow_fast_forward: bool,
     /// When `true`, [`write_merge_tree`] merges commits with no merge base over the empty
     /// tree, like Git's `--allow-unrelated-histories`; when `false` it fails with
-    /// [`Error::UnrelatedHistories`]. [`predict_merge`] always reports
+    /// [`MergeError::UnrelatedHistories`]. [`predict_merge`] always reports
     /// [`MergePrediction::Unrelated`] for such commits.
     pub allow_unrelated_histories: bool,
     /// Merge-favor policy for the simulated three-way merge (ours/theirs/normal).
@@ -461,7 +461,7 @@ impl WrittenMergeTree {
 ///
 /// # Errors
 ///
-/// - [`Error::UnrelatedHistories`] when the commits share no merge base and
+/// - [`MergeError::UnrelatedHistories`] when the commits share no merge base and
 ///   [`MergePredictionOptions::allow_unrelated_histories`] is `false`.
 /// - Object read, merge and object write failures are propagated.
 pub fn write_merge_tree(
@@ -474,10 +474,11 @@ pub fn write_merge_tree(
         Some(base) => base,
         None if options.allow_unrelated_histories => MergeBase::empty(repo)?,
         None => {
-            return Err(Error::UnrelatedHistories {
+            return Err(MergeError::UnrelatedHistories {
                 ours: into_oid,
                 theirs: other_oid,
-            })
+            }
+            .into())
         }
     };
 
@@ -966,7 +967,7 @@ pub fn integrate_branch(
 ///
 /// # Errors
 ///
-/// Same as [`integrate_branch`], plus [`Error::NotFastForward`] when
+/// Same as [`integrate_branch`], plus [`MergeError::NotFastForward`] when
 /// [`FastForwardPolicy::Only`] cannot fast-forward, and [`Error::Hook`] when
 /// `pre-merge-commit`, `prepare-commit-msg` or `commit-msg` refuses. A refused merge leaves the
 /// merged index and work tree with `MERGE_HEAD`, `ORIG_HEAD` and `MERGE_MSG` recorded and the
@@ -1149,7 +1150,7 @@ fn integrate_at_tip_without_hooks(
     let ff_possible = is_ancestor(repo, into_oid, other_oid)?;
 
     if matches!(options.fast_forward, FastForwardPolicy::Only) && !ff_possible {
-        return Err(Error::NotFastForward);
+        return Err(MergeError::NotFastForward.into());
     }
 
     if should_take_fast_forward(options, ff_possible) {
@@ -1523,31 +1524,8 @@ pub fn squash_conflict_merge_in_progress(git_dir: &Path) -> bool {
         && git_dir.join("MERGE_MSG").is_file()
 }
 
-/// Failure modes for [`continue_merge`].
-#[derive(Debug, Error)]
-pub enum ContinueMergeError {
-    /// No `MERGE_HEAD` (or other merge sentinel) is recorded.
-    #[error("there is no merge in progress")]
-    NoMergeInProgress,
-    /// Stage-1/2/3 entries remain in the index.
-    #[error("you still have unmerged paths: {}", paths.join(", "))]
-    UnmergedPaths {
-        /// Repository-relative paths still in conflict stages.
-        paths: Vec<String>,
-    },
-    /// Work tree content is resolved but the index still has conflict stages (`commit.autoStage=false`).
-    #[error("resolved in the work tree but not staged: {}", paths.join(", "))]
-    ResolvedNotStaged {
-        /// Repository-relative paths cleared of conflict markers but not staged.
-        paths: Vec<String>,
-    },
-    /// The resolved message would be empty after cleanup.
-    #[error("empty commit message")]
-    EmptyMessage,
-    /// Underlying repository or commit failure.
-    #[error(transparent)]
-    Repository(#[from] Error),
-}
+/// Deprecated alias — use [`MergeError`] for [`continue_merge`] failures.
+pub type ContinueMergeError = MergeError;
 
 /// Finish an in-progress merge after conflicts are resolved or after `--no-commit`.
 ///
@@ -1558,37 +1536,37 @@ pub enum ContinueMergeError {
 ///
 /// # Errors
 ///
-/// Returns [`ContinueMergeError::NoMergeInProgress`] when no merge is active,
-/// [`ContinueMergeError::UnmergedPaths`] when conflict stages remain, or propagates
-/// commit and I/O failures (including [`Error::Cancelled`]) as [`ContinueMergeError::Repository`].
+/// Returns [`MergeError::NoMergeInProgress`] when no merge is active,
+/// [`MergeError::ContinueUnmergedPaths`] when conflict stages remain, or propagates
+/// commit and I/O failures (including [`Error::Cancelled`]) as [`MergeError::Library`].
 pub fn continue_merge(
     repo: &Repository,
     options: &ContinueOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> std::result::Result<ContinueOutcome, ContinueMergeError> {
+) -> std::result::Result<ContinueOutcome, MergeError> {
     let merge_heads = read_merge_heads(repo.git_dir())?;
     if merge_heads.is_empty() {
-        return Err(ContinueMergeError::NoMergeInProgress);
+        return Err(MergeError::NoMergeInProgress);
     }
 
-    let config = repo.config().map_err(ContinueMergeError::Repository)?;
+    let config = repo.config().map_err(MergeError::from)?;
     let auto_stage = default_commit_scope_from_config(config.as_ref()) == CommitScope::AutoStage;
 
-    let mut index = repo.load_index().map_err(ContinueMergeError::Repository)?;
+    let mut index = repo.load_index().map_err(MergeError::from)?;
     if auto_stage {
         stage_for_commit_on_index(repo, &mut index, progress, cancel, false)
-            .map_err(ContinueMergeError::Repository)?;
+            .map_err(MergeError::from)?;
     }
     if index.has_unmerged_entries() {
         let paths = unmerged_index_paths(&index);
         if !auto_stage {
             let resolved = resolved_not_staged_paths(repo, &index, &paths);
             if !resolved.is_empty() {
-                return Err(ContinueMergeError::ResolvedNotStaged { paths: resolved });
+                return Err(MergeError::ContinueResolvedNotStaged { paths: resolved });
             }
         }
-        return Err(ContinueMergeError::UnmergedPaths { paths });
+        return Err(MergeError::ContinueUnmergedPaths { paths });
     }
 
     let message = resolve_continue_merge_message(repo.git_dir(), options.message.as_deref())?;
@@ -1601,7 +1579,7 @@ pub fn continue_merge(
         ..Default::default()
     };
     let outcome = create_commit_with_loaded_index(repo, &mut index, &req, progress, cancel)
-        .map_err(ContinueMergeError::Repository)?;
+        .map_err(MergeError::from)?;
     Ok(ContinueOutcome {
         oid: outcome.oid,
         change_id: outcome.change_id,
@@ -1612,21 +1590,21 @@ pub fn continue_merge(
 fn resolve_continue_merge_message(
     git_dir: &Path,
     override_message: Option<&str>,
-) -> std::result::Result<String, ContinueMergeError> {
+) -> std::result::Result<String, MergeError> {
     if let Some(raw) = override_message {
-        return normalize_commit_message(raw).map_err(|_| ContinueMergeError::EmptyMessage);
+        return normalize_commit_message(raw).map_err(|_| MergeError::ContinueEmptyMessage);
     }
 
-    let Some(raw) = read_merge_msg(git_dir).map_err(ContinueMergeError::Repository)? else {
-        return Err(ContinueMergeError::EmptyMessage);
+    let Some(raw) = read_merge_msg(git_dir).map_err(MergeError::from)? else {
+        return Err(MergeError::ContinueEmptyMessage);
     };
     let processed = stripspace_process(
         raw.as_bytes(),
         &StripspaceMode::StripComments("#".to_owned()),
     );
-    let message = String::from_utf8(processed).map_err(|_| ContinueMergeError::EmptyMessage)?;
+    let message = String::from_utf8(processed).map_err(|_| MergeError::ContinueEmptyMessage)?;
     if message.trim().is_empty() {
-        return Err(ContinueMergeError::EmptyMessage);
+        return Err(MergeError::ContinueEmptyMessage);
     }
     let mut message = message;
     if !message.ends_with('\n') {
@@ -1693,7 +1671,7 @@ fn resolved_not_staged_paths(repo: &Repository, index: &Index, unmerged: &[Strin
 ///
 /// # Errors
 ///
-/// Returns [`Error::NoMergeInProgress`] when no merge is in progress, or propagates checkout and
+/// Returns [`MergeError::NoMergeInProgress`] when no merge is in progress, or propagates checkout and
 /// I/O errors.
 pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     let git_dir = repo.git_dir();
@@ -1701,7 +1679,7 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
     let squash_conflict =
         git_dir.join("SQUASH_MSG").is_file() && git_dir.join("MERGE_MSG").is_file();
     if !in_merge && !squash_conflict {
-        return Err(Error::NoMergeInProgress);
+        return Err(MergeError::NoMergeInProgress.into());
     }
     crate::rerere::rerere_clear(git_dir)?;
     restore_pre_merge_state(repo)
@@ -2720,7 +2698,7 @@ mod integrate_tests {
     #[test]
     fn continue_merge_errors_list_paths_plainly() {
         let paths = vec!["f.txt".to_owned(), "dir/g h.txt".to_owned()];
-        let unmerged = ContinueMergeError::UnmergedPaths {
+        let unmerged = MergeError::ContinueUnmergedPaths {
             paths: paths.clone(),
         }
         .to_string();
@@ -2728,7 +2706,7 @@ mod integrate_tests {
             unmerged,
             "you still have unmerged paths: f.txt, dir/g h.txt"
         );
-        let unstaged = ContinueMergeError::ResolvedNotStaged { paths }.to_string();
+        let unstaged = MergeError::ContinueResolvedNotStaged { paths }.to_string();
         assert_eq!(
             unstaged,
             "resolved in the work tree but not staged: f.txt, dir/g h.txt"

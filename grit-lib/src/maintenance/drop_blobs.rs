@@ -67,6 +67,7 @@ use crate::offload::LOP_GIT_DIR_KEY;
 use crate::pack::PackedType;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
+use crate::porcelain::MergeError;
 use crate::repo::Repository;
 use crate::state::InProgressOperation;
 
@@ -430,7 +431,7 @@ impl DropPromisedBlobsReport {
 /// - [`Error::PreciousObjectsRepository`] when `extensions.preciousObjects` is set;
 /// - [`Error::NoPromisorRemote`] when no remote is a promisor and
 ///   `extensions.partialClone` is unset;
-/// - [`Error::OperationInProgress`] when a worktree is in the middle of a merge,
+/// - [`MergeError::OperationInProgress`] when a worktree is in the middle of a merge,
 ///   rebase, cherry-pick, revert, am or bisect;
 /// - [`Error::MaintenanceRunning`] when another process holds `gc.pid`;
 /// - pack read, write and removal failures.
@@ -549,7 +550,7 @@ impl From<Refusal> for Error {
             Refusal::NoPromisorRemote => Error::NoPromisorRemote {
                 operation: OPERATION,
             },
-            Refusal::InProgress(op) => Error::OperationInProgress(op),
+            Refusal::InProgress(op) => MergeError::OperationInProgress(op).into(),
         }
     }
 }

@@ -9,6 +9,7 @@ use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
 };
+use grit_lib::porcelain::MergeError;
 use grit_lib::state::{status_operation, wt_status_get_state, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -227,7 +228,7 @@ pub fn run(
         &interrupt,
     )
     .map_err(|err| match err {
-        LibError::OperationInProgress(kind) => {
+        LibError::Merge(MergeError::OperationInProgress(kind)) => {
             let operation = wt_status_get_state(repo.git_dir(), &HeadState::Invalid, false)
                 .ok()
                 .and_then(|state| status_operation(&state, false));

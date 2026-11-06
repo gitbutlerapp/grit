@@ -243,7 +243,7 @@ fn replay_pick_rejects_merge_commit() {
     let repo = open_repo(root.path());
     let err = replay_pick(&repo, merge).unwrap_err();
     assert!(
-        matches!(err, Error::MergeCommit { .. }),
+        matches!(err, grit_lib::error::Error::Merge(MergeError::MergeCommit { .. })),
         "unexpected error: {err:?}"
     );
 }
@@ -264,7 +264,7 @@ fn replay_revert_rejects_merge_commit() {
     let repo = open_repo(root.path());
     let err = replay_revert(&repo, merge).unwrap_err();
     assert!(
-        matches!(err, Error::MergeCommit { .. }),
+        matches!(err, grit_lib::error::Error::Merge(MergeError::MergeCommit { .. })),
         "unexpected error: {err:?}"
     );
     assert_eq!(

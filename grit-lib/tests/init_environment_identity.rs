@@ -97,7 +97,7 @@ fn init_default_hermetic_commit_reports_missing_identity() {
     .unwrap_err();
     assert!(matches!(
         err,
-        Error::Identity(IdentityError::MissingConfiguredEmail {
+        CommitError::Identity(IdentityError::MissingConfiguredEmail {
             role: IdentRole::Committer
         })
     ));

@@ -156,7 +156,7 @@ fn stray_files_in_uninitialized_gitlink_match_git_status_and_commit() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::NothingToCommit),
+        matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit),
         "expected nothing to commit, got {err:?}"
     );
 }

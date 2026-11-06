@@ -27,6 +27,7 @@ use grit_lib::porcelain::merge::{
     IntegrateBranchOutcome, MergeCommitMode, MergeDryRunPlan, MergeOptions, MergePrediction,
     MergePredictionOptions,
 };
+use grit_lib::porcelain::MergeError;
 use grit_lib::progress::{Cancel, ProgressSink};
 use grit_lib::repo::Repository;
 use grit_lib::state::{read_merge_msg, resolve_head, HeadState};
@@ -852,7 +853,7 @@ fn integrate_with_options(
         cancel,
     ) {
         Ok(outcome) => Ok(map_integrate_outcome(outcome, label, head_short)),
-        Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label)),
+        Err(Error::Merge(MergeError::NotFastForward)) => Ok(MergeOutcome::refused_not_ff(label)),
         Err(err @ Error::Hook(_)) => Err(json_error::hook_failed_with_hint(
             err,
             "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel",
@@ -880,7 +881,9 @@ fn integrate_detached_with_options(
         cancel,
     ) {
         Ok(outcome) => Ok(map_integrate_outcome(outcome, label, "HEAD").for_detached_head()),
-        Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label).for_detached_head()),
+        Err(Error::Merge(MergeError::NotFastForward)) => {
+            Ok(MergeOutcome::refused_not_ff(label).for_detached_head())
+        }
         Err(err @ Error::Hook(_)) => Err(json_error::hook_failed_with_hint(
             err,
             "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel",

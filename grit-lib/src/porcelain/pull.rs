@@ -31,6 +31,7 @@ use crate::porcelain::stash::{
 };
 use crate::porcelain::switch::checkout_tree_transition_allow_local_reset;
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
+use crate::porcelain::MergeError;
 use crate::progress::{Cancel, ProgressSink};
 use crate::remote::fetch::Progress;
 use crate::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode, TransferStats};
@@ -377,7 +378,9 @@ impl PullOptions {
         if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())
             .map_err(PullError::Repository)?
         {
-            return Err(PullError::Repository(Error::OperationInProgress(op)));
+            return Err(PullError::Repository(
+                MergeError::OperationInProgress(op).into(),
+            ));
         }
         let short_name = match resolve_head_for_repository(repo).map_err(PullError::Repository)? {
             HeadState::Branch { short_name, .. } => short_name,
@@ -475,7 +478,9 @@ where
     P: Progress,
 {
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
-        return Err(PullError::Repository(Error::OperationInProgress(op)));
+        return Err(PullError::Repository(
+            MergeError::OperationInProgress(op).into(),
+        ));
     }
     let (refname, short_name, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {

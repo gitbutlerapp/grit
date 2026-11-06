@@ -9,7 +9,9 @@ use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
+use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::porcelain::pull::PullError;
+use grit_lib::porcelain::{CommitError, MergeError};
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
@@ -315,9 +317,10 @@ fn hook_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<Structure
 
 fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<ClassifiedError> {
     match cause.downcast_ref::<LibError>()? {
-        LibError::LockHeld(lock) => {
-            Some(classified_from_structured_error(&lock_held(&lock.path, lock.holder)))
-        }
+        LibError::LockHeld(lock) => Some(classified_from_structured_error(&lock_held(
+            &lock.path,
+            lock.holder,
+        ))),
         _ => None,
     }
 }
@@ -461,7 +464,6 @@ pub fn map_branch_error(err: LibError) -> Error {
 }
 
 use grit_lib::error::{AuthFailure, OverwriteReason, RemoteUnreadableReason};
-use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::remote::github_auth::is_github_https_url;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::DEFAULT_REMOTE;
@@ -576,29 +578,7 @@ fn guide_pull(err: &PullError) -> Option<Error> {
 }
 
 fn guide_continue_merge(err: &ContinueMergeError) -> Option<Error> {
-    match err {
-        ContinueMergeError::NoMergeInProgress => Some(no_operation_in_progress(err.to_string())),
-        ContinueMergeError::UnmergedPaths { paths } => Some(guided(
-            ErrorKind::UnmergedPaths,
-            err.to_string(),
-            Some(format!(
-                "resolve the conflict markers in {}, then run `grit merge --continue` (or `grit merge --abort` to start over)",
-                listed_paths(paths)
-            )),
-            Some(paths.clone()),
-        )),
-        ContinueMergeError::ResolvedNotStaged { paths } => Some(guided(
-            ErrorKind::UnmergedPaths,
-            err.to_string(),
-            Some(format!(
-                "stage them with `grit add {}`, then run `grit merge --continue`",
-                shell_words(paths)
-            )),
-            Some(paths.clone()),
-        )),
-        ContinueMergeError::Repository(lib) => guide_lib(lib),
-        _ => None,
-    }
+    guide_merge(err)
 }
 
 fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
@@ -632,13 +612,8 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             None,
             None,
         )),
-        LibError::EmptyCommitMessage => Some(guided(
-            ErrorKind::EmptyCommitMessage,
-            err.to_string(),
-            None,
-            None,
-        )),
-        LibError::Identity(identity_err) => Some(identity_error(identity_err.clone())),
+        LibError::Commit(commit_err) => guide_commit(commit_err),
+        LibError::Merge(merge_err) => guide_merge(merge_err),
         LibError::Tag(tag_err) => match tag_err {
             grit_lib::porcelain::tag::TagError::AlreadyExists { name } => {
                 let human = format!("tag '{name}' already exists (use --force to replace)");
@@ -664,9 +639,6 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             ),
             None,
         )),
-        LibError::NoMergeInProgress | LibError::NoReplayInProgress => {
-            Some(no_operation_in_progress(err.to_string()))
-        }
         LibError::StashNotFound { .. } => Some(stash_not_found(err)),
         LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
@@ -818,6 +790,53 @@ fn clone_checkout_failed(err: &CloneError) -> Error {
         },
         human,
     })
+}
+
+fn guide_commit(err: &CommitError) -> Option<Error> {
+    match err {
+        CommitError::EmptyCommitMessage => Some(guided(
+            ErrorKind::EmptyCommitMessage,
+            err.to_string(),
+            None,
+            None,
+        )),
+        CommitError::Identity(identity_err) => Some(identity_error(identity_err.clone())),
+        CommitError::Library(lib) => guide_lib(lib),
+        _ => None,
+    }
+}
+
+fn guide_merge(err: &MergeError) -> Option<Error> {
+    match err {
+        MergeError::NoMergeInProgress | MergeError::NoReplayInProgress => {
+            Some(no_operation_in_progress(err.to_string()))
+        }
+        MergeError::ContinueUnmergedPaths { paths } => Some(guided(
+            ErrorKind::UnmergedPaths,
+            err.to_string(),
+            Some(format!(
+                "resolve the conflict markers in {}, then run `grit merge --continue` (or `grit merge --abort` to start over)",
+                listed_paths(paths)
+            )),
+            Some(paths.clone()),
+        )),
+        MergeError::ContinueResolvedNotStaged { paths } => Some(guided(
+            ErrorKind::UnmergedPaths,
+            err.to_string(),
+            Some(format!(
+                "stage them with `grit add {}`, then run `grit merge --continue`",
+                shell_words(paths)
+            )),
+            Some(paths.clone()),
+        )),
+        MergeError::OperationInProgress(op) => Some(crate::json_error::operation_in_progress(
+            "complete this command",
+            *op,
+            None,
+        )),
+        MergeError::Library(lib) => guide_lib(lib),
+        _ => None,
+    }
 }
 
 fn guide_branch(err: &BranchError) -> Option<Error> {
@@ -1207,7 +1226,7 @@ mod tests {
 
     #[test]
     fn unmerged_paths_carry_paths_and_next_commands() {
-        let p = payload(Error::new(ContinueMergeError::UnmergedPaths {
+        let p = payload(Error::new(MergeError::ContinueUnmergedPaths {
             paths: strings(&["f.txt"]),
         }));
         assert_eq!(p.kind, ErrorKind::UnmergedPaths);
@@ -1215,7 +1234,7 @@ mod tests {
         assert_eq!(p.error, "you still have unmerged paths: f.txt");
         let hint = p.hint.expect("hint");
         assert!(hint.contains("f.txt") && hint.contains("grit merge --continue"));
-        let p = payload(Error::new(ContinueMergeError::ResolvedNotStaged {
+        let p = payload(Error::new(MergeError::ContinueResolvedNotStaged {
             paths: strings(&["a b"]),
         }));
         assert!(p.hint.expect("hint").contains("grit add 'a b'"));
@@ -1301,7 +1320,7 @@ mod tests {
 
     #[test]
     fn no_operation_in_progress_for_merge_abort() {
-        let p = payload(Error::new(LibError::NoMergeInProgress));
+        let p = payload(Error::new(LibError::Merge(MergeError::NoMergeInProgress)));
         assert_eq!(p.kind, ErrorKind::NoOperationInProgress);
     }
 

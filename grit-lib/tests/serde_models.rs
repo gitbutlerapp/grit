@@ -209,7 +209,7 @@ fn diff_entry_modes_serialize_as_octal_strings() {
 
 #[test]
 fn errors_serialize_with_kind_and_message() {
-    let err = grit_lib::error::Error::NothingToCommit;
+    let err = grit_lib::error::Error::Commit(grit_lib::porcelain::CommitError::NothingToCommit);
     let json = serde_json::to_value(&err).expect("Error");
     assert_eq!(json["kind"], "nothing_to_commit");
     assert_eq!(json["message"], err.to_string());

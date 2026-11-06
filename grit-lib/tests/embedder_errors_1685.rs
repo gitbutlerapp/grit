@@ -5,6 +5,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::CommitError;
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::{NeverCancel, NullProgress};
@@ -141,5 +142,11 @@ fn empty_commit_message_is_typed() {
     let mut empty = CommitRequest::new("");
     empty.allow_empty = true;
     let err = create_commit(&repo, &empty, &mut NullProgress, &NeverCancel).unwrap_err();
-    assert!(matches!(err, Error::EmptyCommitMessage), "got {err:?}");
+    assert!(
+        matches!(
+            err,
+            grit_lib::error::Error::Commit(CommitError::EmptyCommitMessage)
+        ),
+        "got {err:?}"
+    );
 }

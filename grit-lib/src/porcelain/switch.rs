@@ -29,6 +29,7 @@ use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes, TreeSwitchPlan,
     WorktreeSnapshot,
 };
+use crate::porcelain::MergeError;
 use crate::refs;
 use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
@@ -441,7 +442,7 @@ fn map_revision_spec_error(spec: &str, err: Error) -> Error {
 ///
 /// # Errors
 ///
-/// Returns [`Error::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
+/// Returns [`MergeError::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
 /// rebase, am, cherry-pick or revert is paused, whichever tool started it;
 /// [`Error::LockHeld`] when another process holds `index.lock`, with the work tree, index,
 /// `HEAD` and branch refs unchanged; overwrite refusals and ref/object failures otherwise;
@@ -456,7 +457,7 @@ pub fn switch_repository(
 ) -> Result<SwitchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
-        return Err(Error::OperationInProgress(op));
+        return Err(MergeError::OperationInProgress(op).into());
     }
     let run_hooks = opts.hooks.enabled() && !opts.dry_run;
     let old_head = if run_hooks {

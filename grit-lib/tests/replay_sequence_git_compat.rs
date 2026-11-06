@@ -581,7 +581,7 @@ fn continue_refuses_unmerged() {
         .unwrap_err();
     assert!(matches!(
         err,
-        grit_lib::error::Error::ReplayContinueUnmerged
+        grit_lib::error::MergeError::ReplayContinueUnmerged
     ));
 }
 
@@ -662,7 +662,10 @@ fn merge_source_without_mainline_errors() {
         &NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(err, grit_lib::error::Error::MergeCommit { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::error::MergeError::MergeCommit { .. }
+    ));
     assert_no_replay_state(root.path());
 }
 
@@ -866,7 +869,10 @@ fn abort_after_clean_step_then_merge_error_restores_start() {
         &NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(err, grit_lib::error::Error::MergeCommit { .. }));
+    assert!(matches!(
+        err,
+        grit_lib::error::MergeError::MergeCommit { .. }
+    ));
     assert!(root.path().join(".git/sequencer/todo").is_file());
     abort_replay_sequence(&repo).expect("abort after partial sequence");
     assert_eq!(oid_from_rev(root.path(), "HEAD"), start);

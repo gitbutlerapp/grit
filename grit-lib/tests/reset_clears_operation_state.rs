@@ -188,7 +188,7 @@ fn hard_reset_to_head_after_conflicted_merge_clears_state() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::NothingToCommit),
+        matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit),
         "commit after reset must not create a merge: {err}"
     );
 }
@@ -220,7 +220,7 @@ fn hard_reset_to_head_after_conflicted_pick_clears_state() {
         &grit_lib::progress::NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(err, Error::NothingToCommit), "{err}");
+    assert!(matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit)), "{err}"));
 }
 
 #[test]

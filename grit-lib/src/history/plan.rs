@@ -931,9 +931,7 @@ fn library_err(err: Error) -> HistoryError {
     if matches!(err, Error::ObjectNotFound(_)) {
         return HistoryError::Library(Box::new(err));
     }
-    HistoryError::Planning {
-        message: err.to_string(),
-    }
+    HistoryError::Library(Box::new(err))
 }
 
 fn oldest_from_resume_seed(

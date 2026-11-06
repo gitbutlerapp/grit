@@ -760,7 +760,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// [`Error::Identity`] when no usable name, email, or date is configured, and config load
+    /// [`Error::Commit`](crate::error::Error::Commit)([`CommitError::Identity`](crate::porcelain::CommitError::Identity)) when no usable name, email, or date is configured, and config load
     /// failures.
     ///
     /// # Examples
@@ -773,7 +773,7 @@ impl Repository {
     /// let repo = Repository::init(dir.path(), &InitOptions::default())?;
     /// match repo.identity(IdentRole::Author, repo.identity_now()) {
     ///     Ok(author) => assert!(!author.email.is_empty()),
-    ///     Err(grit_lib::error::Error::Identity(_)) => {} // nothing configured
+    ///     Err(grit_lib::error::CommitError::Identity(_)) => {} // nothing configured
     ///     Err(other) => return Err(other),
     /// }
     /// # Ok(())

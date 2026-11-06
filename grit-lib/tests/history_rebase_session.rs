@@ -911,7 +911,7 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     assert!(
         matches!(
             pull_err,
-            grit_lib::porcelain::pull::PullError::Repository(Error::OperationInProgress(
+            grit_lib::porcelain::pull::PullError::Repository(MergeError::OperationInProgress(
                 InProgressOperation::Rebase
             ))
         ),
@@ -929,7 +929,7 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     assert!(
         matches!(
             pick_err,
-            Error::OperationInProgress(InProgressOperation::Rebase)
+            MergeError::OperationInProgress(InProgressOperation::Rebase)
         ),
         "pick: {pick_err:?}"
     );
@@ -2047,7 +2047,7 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
         assert!(
             matches!(
                 err,
-                Error::OperationInProgress(InProgressOperation::RebaseInteractive)
+                MergeError::OperationInProgress(InProgressOperation::RebaseInteractive)
             ),
             "dry_run={dry_run}: {err:?}"
         );
@@ -2102,7 +2102,10 @@ fn switch_refuses_during_merge_conflict() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::OperationInProgress(InProgressOperation::Merge)),
+        matches!(
+            err,
+            MergeError::OperationInProgress(InProgressOperation::Merge)
+        ),
         "{err:?}"
     );
     assert_eq!(git(wt, &["symbolic-ref", "HEAD"]).trim(), "refs/heads/main");

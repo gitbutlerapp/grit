@@ -29,6 +29,11 @@ use crate::command_runner::{
 };
 use crate::config::ConfigSet;
 use crate::error::{ConfigError, Error, Result};
+use crate::porcelain::commit_error::CommitError;
+
+fn commit_signing_message(message: impl Into<String>) -> Error {
+    CommitError::signing_from_message(message.into()).into()
+}
 use crate::objects::HashAlgo;
 
 /// The hash header label for a sha1 repository.
@@ -209,17 +214,19 @@ fn signing_spawn(
     let running = cfg
         .command_runner
         .spawn(&spec)
-        .map_err(|e| Error::Signing(format!("could not run signing program: {e}")))?;
+        .map_err(|e| commit_signing_message(format!("could not run signing program: {e}")))?;
     let output = if let Some(data) = payload {
         running
             .feed_stdin_and_wait_with_output(Some(
                 crate::command_runner::ConcurrentStdinFeed::Bytes(data),
             ))
-            .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))?
+            .map_err(|e| {
+                commit_signing_message(format!("failed waiting for signing program: {e}"))
+            })?
     } else {
-        running
-            .wait_with_output()
-            .map_err(|e| Error::Signing(format!("failed waiting for signing program: {e}")))?
+        running.wait_with_output().map_err(|e| {
+            commit_signing_message(format!("failed waiting for signing program: {e}"))
+        })?
     };
     Ok(output)
 }
@@ -491,7 +498,7 @@ pub fn commit_gpg_sig_header(hash_algo: HashAlgo) -> &'static str {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Signing`] when the signing program fails, and [`Error::Config`]
+/// Returns [`[`CommitError::Signing`](crate::porcelain::commit_error::CommitError::Signing)`] when the signing program fails, and [`Error::Config`]
 /// when `GpgConfig` cannot be built from the repository config (callers typically
 /// construct [`GpgConfig`] first).
 pub fn sign_serialized_commit(
@@ -528,7 +535,7 @@ pub fn append_tag_signature(unsigned_bytes: &[u8], sig: &[u8]) -> Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Signing`] when the signing program fails.
+/// Returns [`[`CommitError::Signing`](crate::porcelain::commit_error::CommitError::Signing)`] when the signing program fails.
 pub fn sign_serialized_tag(
     cfg: &GpgConfig,
     unsigned_bytes: &[u8],
@@ -551,7 +558,7 @@ pub fn sign_serialized_tag(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Signing`] when the program cannot be spawned, exits
+/// Returns [`[`CommitError::Signing`](crate::porcelain::commit_error::CommitError::Signing)`] when the program cannot be spawned, exits
 /// non-zero, or fails to produce a signature.
 pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result<Vec<u8>> {
     if cfg.format == GpgFormat::Ssh {
@@ -584,7 +591,7 @@ pub fn sign_buffer(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         } else {
             status_text.into_owned()
         };
-        return Err(Error::Signing(format!(
+        return Err(commit_signing_message(format!(
             "gpg failed to sign the data:\n{detail}"
         )));
     }
@@ -622,12 +629,12 @@ fn is_literal_ssh_key(s: &str) -> Option<&str> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Signing`] when `signing_key` is empty, a temp file cannot be
+/// Returns [`[`CommitError::Signing`](crate::porcelain::commit_error::CommitError::Signing)`] when `signing_key` is empty, a temp file cannot be
 /// written, `ssh-keygen` cannot be run or exits non-zero, or the `.sig` output
 /// cannot be read.
 fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result<Vec<u8>> {
     if signing_key.is_empty() {
-        return Err(Error::Signing(
+        return Err(commit_signing_message(
             "user.signingKey needs to be set for ssh signing".to_owned(),
         ));
     }
@@ -702,17 +709,17 @@ fn sign_buffer_ssh(cfg: &GpgConfig, payload: &[u8], signing_key: &str) -> Result
         let stderr = String::from_utf8_lossy(&output.stderr);
         cleanup(&literal_key_tmp, &buffer_path);
         if stderr.contains("usage:") {
-            return Err(Error::Signing(
+            return Err(commit_signing_message(
                 "ssh-keygen -Y sign is needed for ssh signing (available in openssh version 8.2p1+)"
                     .to_owned(),
             ));
         }
-        return Err(Error::Signing(stderr.into_owned()));
+        return Err(commit_signing_message(stderr.into_owned()));
     }
 
     let sig_path = sig_sibling(&buffer_path);
     let result = std::fs::read(&sig_path).map_err(|e| {
-        Error::Signing(format!(
+        commit_signing_message(format!(
             "failed reading ssh signing data buffer from '{}': {e}",
             sig_path.display()
         ))
@@ -1229,7 +1236,7 @@ fn verify_ssh_signed_buffer(
 
     if !find_out.status.success && find_stderr.contains("usage:") {
         let _ = std::fs::remove_file(&sig_path);
-        return Err(Error::Signing(
+        return Err(commit_signing_message(
             "ssh-keygen -Y find-principals/verify is needed for ssh signature verification (available in openssh version 8.2p1+)"
                 .to_owned(),
         ));
@@ -1586,9 +1593,9 @@ fn temp_file_path(stem: &str) -> PathBuf {
 fn write_temp_file_named(data: &[u8], stem: &str) -> Result<PathBuf> {
     let path = temp_file_path(stem);
     let mut f = std::fs::File::create(&path)
-        .map_err(|e| Error::Signing(format!("could not create temporary file: {e}")))?;
+        .map_err(|e| commit_signing_message(format!("could not create temporary file: {e}")))?;
     f.write_all(data)
-        .map_err(|e| Error::Signing(format!("failed writing to temporary file: {e}")))?;
+        .map_err(|e| commit_signing_message(format!("failed writing to temporary file: {e}")))?;
     Ok(path)
 }
 

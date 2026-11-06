@@ -12,6 +12,7 @@ use grit_lib::porcelain::commit::{
     CommitPatchError, CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
 };
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
+use grit_lib::porcelain::CommitError;
 use grit_lib::progress::{NullProgress, ProgressSink};
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::state::{resolve_head, HeadState};
@@ -165,7 +166,7 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     if err.downcast_ref::<HunkSelectError>().is_some()
         || err
             .downcast_ref::<CommitPatchError>()
-            .is_some_and(|e| matches!(e, CommitPatchError::Select(_)))
+            .is_some_and(|e| matches!(e, CommitPatchError::HunkSelect(_)))
     {
         2
     } else {
@@ -174,12 +175,13 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
 }
 
 fn map_patch_error(err: CommitPatchError) -> anyhow::Error {
-    match err {
-        CommitPatchError::Commit(locked @ Error::LockHeld(..)) => {
-            crate::json_error::map_lib_error(locked)
+    if let CommitPatchError::Library(locked) = err {
+        if matches!(*locked, Error::LockHeld(..)) {
+            return crate::json_error::map_lib_error(*locked);
         }
-        other => anyhow::Error::new(other),
+        return anyhow::Error::new(locked);
     }
+    anyhow::Error::new(err)
 }
 
 fn map_hunk_parse(err: grit_lib::porcelain::hunk_select::HunkSelectError) -> anyhow::Error {
@@ -642,11 +644,11 @@ fn nothing_staged_commit_error(unstaged: usize, untracked: usize) -> anyhow::Err
 
 fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
-        Error::NothingStagedToCommit {
+        Error::Commit(CommitError::NothingStagedToCommit {
             unstaged,
             untracked,
-        } => nothing_staged_commit_error(unstaged, untracked),
-        Error::NothingToCommit => anyhow::Error::new(StructuredCliError {
+        }) => nothing_staged_commit_error(unstaged, untracked),
+        Error::Commit(CommitError::NothingToCommit) => anyhow::Error::new(StructuredCliError {
             payload: StructuredJsonError::new(
                 "nothing to commit — working tree clean",
                 ErrorKind::NothingToCommit,
@@ -654,11 +656,13 @@ fn map_commit_error(err: Error) -> anyhow::Error {
             human: "nothing to commit — working tree clean".to_owned(),
         }),
         unmerged @ Error::IndexUnmerged => anyhow::Error::new(unmerged),
-        Error::AmendUnborn => anyhow::anyhow!("cannot amend: no commits on this branch yet"),
-        Error::PartialCommitDuringMerge => {
+        Error::Commit(CommitError::AmendUnborn) => {
+            anyhow::anyhow!("cannot amend: no commits on this branch yet")
+        }
+        Error::Commit(CommitError::PartialCommitDuringMerge) => {
             anyhow::anyhow!("cannot do a partial commit during a merge")
         }
-        Error::PartialCommitDuringReplay => {
+        Error::Commit(CommitError::PartialCommitDuringReplay) => {
             anyhow::anyhow!("cannot do a partial commit during a cherry-pick or revert")
         }
         pathspec @ Error::PathspecNoMatch { .. } => anyhow::Error::new(pathspec),

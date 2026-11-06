@@ -412,32 +412,44 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
 
 fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {
     match err {
-        Error::OperationInProgress(kind) => {
-            crate::json_error::operation_in_progress_for_repo(repo, "pick", kind)
-        }
+        Error::Merge(merge_err) => map_merge_replay_error(repo, "pick", merge_err),
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to pick onto"),
-        Error::MergeCommit { oid } => {
+        Error::Message(msg) => anyhow::anyhow!(msg),
+        other => anyhow::Error::new(other),
+    }
+}
+
+fn map_merge_replay_error(
+    repo: &grit_lib::repo::Repository,
+    verb: &str,
+    err: grit_lib::porcelain::MergeError,
+) -> anyhow::Error {
+    use grit_lib::porcelain::MergeError;
+    match err {
+        MergeError::OperationInProgress(kind) => {
+            crate::json_error::operation_in_progress_for_repo(repo, verb, kind)
+        }
+        MergeError::MergeCommit { oid } => {
             let s = oid.to_short_hex();
             anyhow::anyhow!(
                 "{s} is a merge commit — pass `--mainline <n>` to pick a merge commit (not yet supported on the CLI)"
             )
         }
-        Error::ReplaySourceAtHead => {
+        MergeError::ReplaySourceAtHead => {
             anyhow::anyhow!("nothing to pick — that commit is already the current HEAD")
         }
-        Error::NoReplayInProgress => {
+        MergeError::NoReplayInProgress => {
             crate::json_error::no_operation_in_progress("no cherry-pick in progress")
         }
-        Error::ReplayContinueUnmerged => anyhow::anyhow!(
+        MergeError::ReplayContinueUnmerged => anyhow::anyhow!(
             "cannot continue: resolve conflicts and stage the result (`grit add`), then run `grit pick --continue`"
         ),
-        Error::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
+        MergeError::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
             "nothing to skip: current step already committed; run `grit pick --continue` instead"
         ),
-        Error::ReplayContinueDirtyIndex => anyhow::anyhow!(
+        MergeError::ReplayContinueDirtyIndex => anyhow::anyhow!(
             "cannot continue: index differs from HEAD after the step was committed"
         ),
-        Error::Message(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),
     }
 }
