@@ -74,8 +74,7 @@ fn resolve_typed_pathspec(
         }
     };
     let options = pathspec_options_from_repo(repo, from_file);
-    repo.pathspec(paths, &options)
-        .map_err(map_pathspec_resolve)
+    repo.pathspec(paths, &options).map_err(map_pathspec_resolve)
 }
 
 impl PathspecArgs {
