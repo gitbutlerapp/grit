@@ -13,7 +13,7 @@ use grit_lib::tree_sha256::TreeSha256Options;
 
 # fn main() -> grit_lib::error::Result<()> {
 let dir = tempfile::tempdir()?;
-let repo = Repository::init(dir.path(), &InitOptions::default())?;
+let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 # let head = repo.odb().write_loose_materialize(
 #     grit_lib::objects::ObjectKind::Commit,
 #     b"tree 0000000000000000000000000000000000000000\n\n",

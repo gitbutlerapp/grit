@@ -206,8 +206,8 @@ pub struct ConfigFile {
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let cfg = repo.config()?;
-/// assert!(cfg.get("core.repositoryformatversion").is_some());
+/// let cfg = repo.config().snapshot()?;
+/// assert!(cfg.get("core.repositoryformatversion")?.is_some());
 /// # Ok(())
 /// # }
 /// ```
