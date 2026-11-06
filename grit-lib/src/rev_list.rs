@@ -4,6 +4,7 @@
 //! ordering (`--topo-order`, `--date-order`, `--reverse`), path simplification,
 //! object walks with `--filter`, and counting (`--count`).
 
+use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -71,6 +72,37 @@ use crate::repo::Repository;
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
 use crate::revwalk::filter::CommitFilter;
+
+thread_local! {
+    /// [`RevWalkListOptions::retained_commit_extent`] for the innermost `rev_list` call started from
+    /// [`crate::revwalk::queries::RevWalk`], without widening public [`RevListOptions`].
+    static REV_WALK_RETAINED_COMMIT_EXTENT_STACK: RefCell<Vec<CommitExtent>> = RefCell::new(Vec::new());
+}
+
+/// Guard: [`RevWalkListOptions::retained_commit_extent`] for the duration of a [`rev_list`] call from
+/// [`crate::revwalk::queries::RevWalk`] helpers.
+pub(crate) struct RevWalkRetainedCommitExtentGuard;
+
+impl RevWalkRetainedCommitExtentGuard {
+    pub fn push(extent: CommitExtent) -> Self {
+        REV_WALK_RETAINED_COMMIT_EXTENT_STACK.with(|s| s.borrow_mut().push(extent));
+        Self
+    }
+}
+
+impl Drop for RevWalkRetainedCommitExtentGuard {
+    fn drop(&mut self) {
+        REV_WALK_RETAINED_COMMIT_EXTENT_STACK.with(|s| {
+            s.borrow_mut().pop();
+        });
+    }
+}
+
+fn effective_rev_walk_retained_commit_extent() -> CommitExtent {
+    REV_WALK_RETAINED_COMMIT_EXTENT_STACK
+        .with(|s| s.borrow().last().copied())
+        .unwrap_or(CommitExtent::Whole)
+}
 
 /// Behavior when reachable objects are missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -594,11 +626,6 @@ pub struct RevListOptions {
     /// Keep the commits a walk parses anyway in [`RevListResult::commit_data`], so callers that
     /// render the listed commits do not read and inflate them a second time.
     pub retain_commit_data: bool,
-    /// How much of each retained commit object to keep when [`Self::retain_commit_data`] is set.
-    ///
-    /// [`CommitExtent::ThroughSubject`] matches [`Odb::read_commit_through_subject`](crate::odb::Odb::read_commit_through_subject)
-    /// and is enough for one-line listings and commit filters without re-reading full bodies.
-    pub retained_commit_extent: CommitExtent,
     /// Follow renames when history is limited to a single literal file path (Git `log --follow`).
     /// Requires exactly one plain file pathspec in [`Self::paths`].
     pub follow: bool,
@@ -692,7 +719,6 @@ impl Default for RevListOptions {
             commit_filter: None,
             pickaxe: None,
             retain_commit_data: false,
-            retained_commit_extent: CommitExtent::default(),
             follow: false,
             cancel: None,
         }
@@ -6555,10 +6581,13 @@ fn try_bounded_commit_filter_limit_list(
                 )?;
                 // Reuse traversal bytes for filters and output, without keeping every
                 // nonmatching commit when a selective filter scans a long history.
+                let walk_extent = effective_rev_walk_retained_commit_extent();
                 let traverse_extent = if pickaxe.is_some() {
                     CommitExtent::Whole
+                } else if filter.is_some_and(|f| f.needs_full_commit_bytes()) {
+                    CommitExtent::Whole
                 } else {
-                    options.retained_commit_extent
+                    walk_extent
                 };
                 graph.keep_unreleased_commit_bytes(traverse_extent);
 
@@ -6611,8 +6640,9 @@ fn try_bounded_commit_filter_limit_list(
                                     } else if max_count.is_none_or(|m| ordered.len() < m) {
                                         ordered.push(oid);
                                         if options.retain_commit_data {
+                                            let retain_extent = walk_extent;
                                             let bytes = graph.commit_bytes(oid)?;
-                                            let data = if traverse_extent
+                                            let data = if retain_extent
                                                 == CommitExtent::ThroughSubject
                                                 && commit_through_subject_len(bytes).is_none()
                                             {
@@ -6717,6 +6747,8 @@ fn try_bounded_parent_filter_limit_list(
             options.use_commit_graph,
             options.first_parent,
         )?;
+        let walk_extent = effective_rev_walk_retained_commit_extent();
+        graph.keep_unreleased_commit_bytes(walk_extent);
         let mut matched_seen = 0usize;
         streaming_date_walk(&mut graph, include, &excluded, false, None, |graph, oid| {
             let parent_count = graph.parent_count_for_filter(oid)?;
@@ -6724,34 +6756,26 @@ fn try_bounded_parent_filter_limit_list(
                 matched_seen += 1;
                 if matched_seen > options.skip && max_count.is_none_or(|m| ordered.len() < m) {
                     ordered.push(oid);
+                    if options.retain_commit_data {
+                        let bytes = graph.commit_bytes(oid)?;
+                        let data = if walk_extent == CommitExtent::ThroughSubject
+                            && commit_through_subject_len(bytes).is_none()
+                        {
+                            load_commit(repo, oid)?
+                        } else {
+                            parse_commit(bytes)?
+                        };
+                        commit_data.insert(oid, data);
+                    }
                 }
             }
+            graph.release_commit_bytes(oid);
             Ok(if max_count.is_some_and(|m| ordered.len() >= m) {
                 WalkControl::Stop
             } else {
                 WalkControl::Continue
             })
         })?;
-        if options.retain_commit_data {
-            for &oid in &ordered {
-                let data = match options.retained_commit_extent {
-                    CommitExtent::Whole => load_commit(repo, oid)?,
-                    CommitExtent::ThroughSubject => {
-                        let effective = repo.object_id_after_replace(&oid);
-                        let mut bytes = repo.odb().read_commit_through_subject(&effective)?;
-                        if commit_through_subject_len(&bytes).is_none() {
-                            bytes = read_commit_bytes(repo, oid)?;
-                        }
-                        if commit_through_subject_len(&bytes).is_some() {
-                            parse_commit(&bytes)?
-                        } else {
-                            load_commit(repo, oid)?
-                        }
-                    }
-                };
-                commit_data.insert(oid, data);
-            }
-        }
         Ok(())
     })?;
 

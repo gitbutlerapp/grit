@@ -13,8 +13,9 @@ use std::sync::Arc;
 
 use crate::pathspec::{Pathspec, PathspecGlobalFlags};
 use crate::rev_list::{
-    empty_rev_list_result, open_commit_stream, rev_list, split_revision_token, CommitExtent,
-    CommitStream, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    empty_rev_list_result, open_commit_stream, rev_list_with_context, split_revision_token,
+    CommitExtent, CommitStream, CommitStreamParams, OrderingMode, RevListOptions, RevListResult,
+    RevListWalkContext,
 };
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{
@@ -340,7 +341,6 @@ pub(crate) fn rev_list_options_from_walk(
         commit_filter: walk.commit_filter.clone(),
         pickaxe: walk.pickaxe.clone(),
         retain_commit_data: walk.retain_commit_data,
-        retained_commit_extent: walk.retained_commit_extent,
         left_right: walk.left_right || walk.cherry_mark,
         cherry_mark: walk.cherry_mark,
         follow: walk.follow,
@@ -402,6 +402,7 @@ pub fn rev_list_commits_for_author_group(
     let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, walk)?;
     let mut opts = rev_list_options_from_walk(repo, walk, &parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
+    let _extent = RevWalkRetainedCommitExtentGuard::push(walk.retained_commit_extent);
     let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
     Ok(result.commits)
 }
@@ -640,6 +641,7 @@ impl<'repo> RevWalk<'repo> {
             single_symmetric_range(tokens, &parsed)?;
         }
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
+        let _extent = RevWalkRetainedCommitExtentGuard::push(options.retained_commit_extent);
         rev_list(repo, &positive, &parsed.negative, &opts)
     }
 
@@ -715,6 +717,7 @@ impl<'repo> RevWalk<'repo> {
             );
         }
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
+        let _extent = RevWalkRetainedCommitExtentGuard::push(options.retained_commit_extent);
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
         commit_count_from_result(result)
     }
@@ -788,6 +791,7 @@ impl<'repo> RevWalk<'repo> {
         // left and right sets even when a list limit is also set.
         opts.max_count = None;
         opts.left_right = true;
+        let _extent = RevWalkRetainedCommitExtentGuard::push(options.retained_commit_extent);
         let left_count = {
             let mut left_opts = opts.clone();
             left_opts.left_only = true;

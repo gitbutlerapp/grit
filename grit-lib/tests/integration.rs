@@ -9,9 +9,6 @@
 //! Modules marked `full-tests` start the system `git` or build heavy fixtures;
 //! they build only with `--features full-tests` (`make test-full`).
 
-// Integration modules refer to `crate::config` for load options and types.
-pub use grit_lib::config;
-
 // Helpers the test modules share, compiled once.
 mod midx_support;
 mod pack_delta_scenarios;
@@ -492,6 +489,7 @@ mod config_parameters_coverage;
 mod config_parse;
 #[path = "config_repo_load_coverage.rs"]
 mod config_repo_load_coverage;
+#[cfg(feature = "full-tests")]
 #[path = "config_roundtrip.rs"]
 mod config_roundtrip;
 #[path = "config_set_getters_coverage.rs"]
@@ -1337,6 +1335,7 @@ mod pathspec_from_file_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "pathspec_git_compat.rs"]
 mod pathspec_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "pathspec_type.rs"]
 mod pathspec_type;
 #[cfg(feature = "full-tests")]
@@ -1815,6 +1814,9 @@ mod revision_label_git_compat;
 #[path = "revwalk_coverage_floor.rs"]
 mod revwalk_coverage_floor;
 #[cfg(feature = "full-tests")]
+#[path = "revwalk_grep_body_subject_retention.rs"]
+mod revwalk_grep_body_subject_retention;
+#[cfg(feature = "full-tests")]
 #[path = "revwalk_injected_ref_store.rs"]
 mod revwalk_injected_ref_store;
 #[cfg(feature = "full-tests")]
@@ -1950,6 +1952,7 @@ mod stash_apply_outcome_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "stash_diff_stat_git_compat.rs"]
 mod stash_diff_stat_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "stash_error_variants.rs"]
 mod stash_error_variants;
 #[cfg(feature = "full-tests")]
