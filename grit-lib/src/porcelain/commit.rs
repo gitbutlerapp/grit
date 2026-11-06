@@ -496,7 +496,7 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 /// - [`Error::PartialCommitDuringMerge`] for [`CommitScope::Paths`] or [`CommitScope::Patch`]
 ///   during an in-progress merge, and pathspec validation errors.
 /// - [`Error::HunkSelection`] when a [`CommitScope::Patch`] hunk id is unknown, stale, binary, or
-///   for the wrong side, and [`ApplyError`](crate::error::ApplyError) (via [`Error::Diff`]) when the selected patch does not apply to the
+///   for the wrong side, and [`ApplyError`] (via [`Error::Diff`]) when the selected patch does not apply to the
 ///   index. These carry the same values as [`CommitPatchError::Select`] and
 ///   [`CommitPatchError::Apply`] from [`commit_with_patch`].
 pub fn commit_with_scope(

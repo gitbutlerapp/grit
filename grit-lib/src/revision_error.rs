@@ -1,4 +1,13 @@
 //! Typed failures from revision parsing, walking, merge-base, and object filters.
+//!
+//! ```rust
+//! use grit_lib::revision_error::RevisionError;
+//!
+//! let err = RevisionError::NotFound {
+//!     spec: "missing".into(),
+//! };
+//! assert_eq!(err.kind_name(), "revision_not_found");
+//! ```
 
 use crate::error::Error;
 use crate::objects::ObjectId;

@@ -2,7 +2,7 @@
 use grit_lib::revwalk::rev_list::ObjectFilter;
 
 fn main() -> Result<(), String> {
-    let filter = ObjectFilter::parse("blob:limit=1m")?;
+    let filter = ObjectFilter::parse("blob:limit=1m").map_err(|e| e.to_string())?;
     match filter {
         ObjectFilter::BlobLimit(bytes) => {
             println!("blob size limit: {bytes} bytes");

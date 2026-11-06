@@ -1,4 +1,12 @@
 //! Typed failures from diffs, patch apply, and blame.
+//!
+//! ```rust
+//! use grit_lib::diff::error::DiffError;
+//! use grit_lib::error::ApplyError;
+//!
+//! let err = DiffError::Apply(ApplyError::Cancelled);
+//! assert_eq!(err.kind_name(), "apply");
+//! ```
 
 use crate::diff::hunk_id::HunkIdError;
 use crate::diff::pickaxe::PickaxeError;
