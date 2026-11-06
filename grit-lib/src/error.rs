@@ -65,6 +65,15 @@ pub struct PathIoError {
     pub source: std::io::Error,
 }
 
+/// Copy an [`std::io::Error`] without dropping [`raw_os_error`](std::io::Error::raw_os_error).
+fn preserve_io_error(source: &std::io::Error) -> std::io::Error {
+    if let Some(raw) = source.raw_os_error() {
+        std::io::Error::from_raw_os_error(raw)
+    } else {
+        std::io::Error::new(source.kind(), source.to_string())
+    }
+}
+
 impl PathIoError {
     /// Build a worktree-path failure (path is the index- or worktree-relative display path).
     #[must_use]
@@ -2677,7 +2686,7 @@ impl Error {
             } => Some(PathIoError::worktree(
                 path.clone(),
                 *operation,
-                std::io::Error::new(source.kind(), source.to_string()),
+                preserve_io_error(source),
             )),
             Self::GitDirPathIo {
                 path,
@@ -2686,7 +2695,7 @@ impl Error {
             } => Some(PathIoError::git_dir(
                 path.clone(),
                 *operation,
-                std::io::Error::new(source.kind(), source.to_string()),
+                preserve_io_error(source),
             )),
             _ => None,
         }

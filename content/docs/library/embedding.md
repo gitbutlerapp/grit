@@ -75,6 +75,8 @@ For tests, [`RecordingRunner`](rustdoc:grit_lib::command_runner::RecordingRunner
 
 Library APIs return `grit_lib::error::Result`. Match on `Error` variants (`RevParse`, `RevList`, `HookError`, `FilterError`, …) instead of parsing `"fatal:"` strings. The CLI maps variants to exit codes and human messages in its own words.
 
+Area enums, shared leaf types, JSON `kind` slugs, and migration rules are documented in [Typed errors](/docs/library/errors). The umbrella [`Error`](rustdoc:grit_lib::error::Error) remains during the migration; prefer matching on typed area errors as they appear.
+
 Common conditions use dedicated variants rather than `Error::Message`: bare or missing work tree → [`Error::RequiresWorkTree`](rustdoc:grit_lib::error::Error::RequiresWorkTree); empty commit body → [`Error::EmptyCommitMessage`](rustdoc:grit_lib::error::Error::EmptyCommitMessage); path missing from a revision tree → [`RevParseError::PathNotInRevision`](rustdoc:grit_lib::revwalk::rev_parse_error::RevParseError::PathNotInRevision); parent navigation past root → [`RevParseError::RevisionOutOfRange`](rustdoc:grit_lib::revwalk::rev_parse_error::RevParseError::RevisionOutOfRange); pack deltas whose bases are in neither the pack nor the object database (a thin pack received without its bases) → [`Error::UnresolvedDeltas`](rustdoc:grit_lib::error::Error::UnresolvedDeltas); a `.idx` whose trailing checksum is wrong, on reads that verify it → [`Error::PackIndexChecksumMismatch`](rustdoc:grit_lib::error::Error::PackIndexChecksumMismatch).
 
 ## Code layout
@@ -87,10 +89,6 @@ grit-lib = { version = "0.5", features = ["hot-text-layout"] }
 ```
 
 A short operation then faults in a few contiguous code pages instead of windows scattered over the whole binary. `grit status` on 10,000 files drops from 14.2 to 11.5 MB of peak RSS with it, and nothing changes at run time. The feature acts only on `x86_64-unknown-linux-gnu`, where rustc links with LLD; elsewhere it does nothing. Set `GRIT_HOT_TEXT_LAYOUT=0` at build time if you link with another linker. See [Hot text layout](../benchmarking.md#hot-text-layout).
-
-## Typed errors
-
-Area enums, shared leaf types, JSON `kind` slugs, and migration rules are documented in [Typed errors](/docs/library/errors). The umbrella [`Error`](rustdoc:grit_lib::error::Error) remains during the migration; prefer matching on typed area errors as they appear.
 
 ## Serializable results
 
