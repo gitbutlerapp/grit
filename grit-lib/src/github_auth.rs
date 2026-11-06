@@ -443,6 +443,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::remote::RemoteError;
 
     /// One recorded `POST`: URL and decoded form body.
     type Request = (String, Vec<(String, String)>);
