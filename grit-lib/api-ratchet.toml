@@ -2,49 +2,19 @@
 # Regenerate with: make api-ratchet
 
 [meta]
-# grit-lib public API quality counts — ratchet baseline
-# Regenerate with: make api-ratchet
-
-[meta]
 updated = "2026-11-06"
 semver_baseline = "20719b39f09310afad3e6a7db3177b57b384d9fa"
 
 [counts]
-pub_repo_constructors = 3
-public_api_lines = 28228
+pub_repo_constructors = 4
+public_api_lines = 28202
 pub_fn_impl_suffix = 0
-pub_fn_with_in_name = 116
+pub_fn_with_in_name = 114
 pub_fn_too_many_arguments_allow = 22
 pub_fn_two_plus_bare_bool = 26
 pub_fn_result_string_err = 12
 pub_free_fn_repository_first = 387
-pub_free_fn_git_dir_path_first = 109
-pub_items_multiple_paths = 19
-pub_libc_types = 0
-pub_unsafe_fn = 0
-pub_cancel_types = 86
-pub_progress_interfaces = 4
-pub_refname_validators = 0
-pub_fn_refname_str = 40
-pub_fn_pathspec_strings = 5
-pub_fn_configset_with_repo = 8
-umbrella_error_variants = 181
-pub_error_catch_all_variants = 5
-pub_error_string_tuple_variants = 56
-pub_error_enum_not_non_exhaustive = 38
-pub_area_error_wraps_umbrella = 31
-error_message_construction_sites = 328
-
-[counts]
-pub_repo_constructors = 3
-public_api_lines = 28228
-pub_fn_impl_suffix = 0
-pub_fn_with_in_name = 116
-pub_fn_too_many_arguments_allow = 22
-pub_fn_two_plus_bare_bool = 26
-pub_fn_result_string_err = 12
-pub_free_fn_repository_first = 387
-pub_free_fn_git_dir_path_first = 109
+pub_free_fn_git_dir_path_first = 108
 pub_items_multiple_paths = 19
 pub_libc_types = 0
 pub_unsafe_fn = 0
@@ -54,56 +24,6 @@ pub_refname_validators = 0
 pub_fn_refname_str = 40
 pub_fn_pathspec_strings = 5
 pub_fn_configset_with_repo = 8
-umbrella_error_variants = 181
-pub_error_catch_all_variants = 5
-pub_error_string_tuple_variants = 56
-pub_error_enum_not_non_exhaustive = 38
-pub_area_error_wraps_umbrella = 31
-error_message_construction_sites = 328
-pub_fn_too_many_arguments_allow = 22
-pub_fn_two_plus_bare_bool = 26
-# grit-lib public API quality counts — ratchet baseline
-# Regenerate with: make api-ratchet
-
-[meta]
-updated = "2026-11-06"
-semver_baseline = "da73c0551cd4a1efff00662345d7528b7d04da8b"
-
-[counts]
-pub_repo_constructors = 3
-public_api_lines = 28228
-pub_fn_impl_suffix = 0
-pub_fn_with_in_name = 116
-pub_fn_too_many_arguments_allow = 22
-pub_fn_two_plus_bare_bool = 26
-pub_fn_result_string_err = 12
-pub_free_fn_repository_first = 387
-pub_free_fn_git_dir_path_first = 109
-pub_items_multiple_paths = 19
-pub_libc_types = 0
-pub_unsafe_fn = 0
-pub_cancel_types = 86
-pub_progress_interfaces = 6
-pub_refname_validators = 0
-pub_fn_refname_str = 40
-pub_fn_pathspec_strings = 5
-pub_fn_configset_with_repo = 8
-umbrella_error_variants = 181
-pub_error_catch_all_variants = 5
-pub_error_string_tuple_variants = 56
-pub_error_enum_not_non_exhaustive = 38
-pub_area_error_wraps_umbrella = 31
-error_message_construction_sites = 328
-pub_items_multiple_paths = 19
-pub_libc_types = 0
-pub_unsafe_fn = 0
-pub_cancel_types = 86
-pub_progress_interfaces = 6
-pub_refname_validators = 0
-pub_fn_refname_str = 40
-pub_fn_pathspec_strings = 5
-pub_fn_configset_with_repo = 8
-pub_repo_constructors = 10
 umbrella_error_variants = 181
 pub_error_catch_all_variants = 5
 pub_error_string_tuple_variants = 56
