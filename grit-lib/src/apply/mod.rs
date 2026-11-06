@@ -19,7 +19,7 @@ mod apply_blob;
 
 pub use apply_blob::{apply_hunks_to_blob, ApplyOptions};
 
-use crate::error::{ApplyError, Error, Result};
+use crate::error::{ApplyError, Result};
 use crate::quote_path_root::unquote_c_style_prefix;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -311,8 +311,9 @@ fn squash_slash_path(s: &str) -> String {
 }
 
 fn bytes_to_path_string(bytes: &[u8]) -> Result<String> {
-    let s = String::from_utf8(bytes.to_vec())
-        .map_err(|e| Error::Message(format!("diff path is not valid UTF-8: {e}")))?;
+    let s = String::from_utf8(bytes.to_vec()).map_err(|e| ApplyError::DiffPathNotUtf8 {
+        detail: e.to_string(),
+    })?;
     Ok(squash_slash_path(&s))
 }
 
@@ -704,23 +705,19 @@ fn parse_traditional_patch_pair(
 
     if is_dev_null_nameline(old_p) {
         fp.is_new = true;
-        let name = find_name_traditional(new_p, None, p_val).ok_or_else(|| {
-            Error::Message("unable to find filename in traditional patch".to_string())
-        })?;
+        let name = find_name_traditional(new_p, None, p_val)
+            .ok_or(ApplyError::TraditionalPatchFilenameMissing)?;
         fp.new_path = Some(bytes_to_path_string(&name)?);
     } else if is_dev_null_nameline(new_p) {
         fp.is_deleted = true;
-        let name = find_name_traditional(old_p, None, p_val).ok_or_else(|| {
-            Error::Message("unable to find filename in traditional patch".to_string())
-        })?;
+        let name = find_name_traditional(old_p, None, p_val)
+            .ok_or(ApplyError::TraditionalPatchFilenameMissing)?;
         fp.old_path = Some(bytes_to_path_string(&name)?);
     } else {
-        let first_name = find_name_traditional(old_p, None, p_val).ok_or_else(|| {
-            Error::Message("unable to find filename in traditional patch".to_string())
-        })?;
-        let name = find_name_traditional(new_p, Some(&first_name), p_val).ok_or_else(|| {
-            Error::Message("unable to find filename in traditional patch".to_string())
-        })?;
+        let first_name = find_name_traditional(old_p, None, p_val)
+            .ok_or(ApplyError::TraditionalPatchFilenameMissing)?;
+        let name = find_name_traditional(new_p, Some(&first_name), p_val)
+            .ok_or(ApplyError::TraditionalPatchFilenameMissing)?;
         let name_str = bytes_to_path_string(&name)?;
         if has_epoch_timestamp(old_p) {
             fp.is_new = true;
@@ -921,10 +918,16 @@ fn parse_git_patch_header(
         fp.diff_old_path = Some(a.clone());
         fp.diff_new_path = Some(b.clone());
         fp.old_path = Some(skip_tree_prefix_str(&a, p_strip).ok_or_else(|| {
-            Error::Message(format!("malformed old path in diff --git header: {a}"))
+            ApplyError::MalformedDiffGitPath {
+                side: "old",
+                raw: a.clone(),
+            }
         })?);
         fp.new_path = Some(skip_tree_prefix_str(&b, p_strip).ok_or_else(|| {
-            Error::Message(format!("malformed new path in diff --git header: {b}"))
+            ApplyError::MalformedDiffGitPath {
+                side: "new",
+                raw: b.clone(),
+            }
         })?);
     }
     i += 1;
@@ -940,27 +943,33 @@ fn parse_git_patch_header(
         if let Some(val) = line.strip_prefix("old mode ") {
             let v = val.trim_end_matches('\r').trim_end();
             if v.is_empty() {
-                return Err(Error::Message(format!(
-                    "invalid mode on line {line_no}: {line}"
-                )));
+                return Err(ApplyError::InvalidPatchModeLine {
+                    line: line_no,
+                    raw: line.to_string(),
+                }
+                .into());
             }
             fp.old_mode = Some(v.to_string());
             fp.old_mode_line = Some(line_no);
         } else if let Some(val) = line.strip_prefix("new mode ") {
             let v = val.trim_end_matches('\r').trim_end();
             if v.is_empty() {
-                return Err(Error::Message(format!(
-                    "invalid mode on line {line_no}: {line}"
-                )));
+                return Err(ApplyError::InvalidPatchModeLine {
+                    line: line_no,
+                    raw: line.to_string(),
+                }
+                .into());
             }
             fp.new_mode = Some(v.to_string());
             fp.new_mode_line = Some(line_no);
         } else if let Some(val) = line.strip_prefix("new file mode ") {
             let v = val.trim_end_matches('\r').trim_end();
             if v.is_empty() {
-                return Err(Error::Message(format!(
-                    "invalid mode on line {line_no}: {line}"
-                )));
+                return Err(ApplyError::InvalidPatchModeLine {
+                    line: line_no,
+                    raw: line.to_string(),
+                }
+                .into());
             }
             fp.is_new = true;
             fp.new_mode = Some(v.to_string());
@@ -968,9 +977,11 @@ fn parse_git_patch_header(
         } else if let Some(val) = line.strip_prefix("deleted file mode ") {
             let v = val.trim_end_matches('\r').trim_end();
             if v.is_empty() {
-                return Err(Error::Message(format!(
-                    "invalid mode on line {line_no}: {line}"
-                )));
+                return Err(ApplyError::InvalidPatchModeLine {
+                    line: line_no,
+                    raw: line.to_string(),
+                }
+                .into());
             }
             fp.is_deleted = true;
             fp.old_mode = Some(v.to_string());
@@ -1101,16 +1112,19 @@ fn parse_binary_section(lines: &[&str], i: &mut usize) -> Result<BinaryPatchSect
     } else if let Some(s) = header.strip_prefix("delta ") {
         (BinaryPatchSectionKind::Delta, s)
     } else {
-        return Err(Error::Message(format!(
-            "unsupported binary patch section: '{header}'"
-        )));
+        return Err(ApplyError::UnsupportedBinaryPatchSection {
+            header: header.to_string(),
+        }
+        .into());
     };
     let declared_size: usize = size_str
         .trim()
         .parse()
-        .map_err(|e: std::num::ParseIntError| {
-            Error::Message(format!("invalid binary patch section size: {e}"))
-        })?;
+        .map_err(
+            |e: std::num::ParseIntError| ApplyError::InvalidBinaryPatchSectionSize {
+                detail: e.to_string(),
+            },
+        )?;
     *i += 1;
 
     let mut compressed = Vec::new();
@@ -1135,14 +1149,15 @@ fn parse_binary_section(lines: &[&str], i: &mut usize) -> Result<BinaryPatchSect
 fn decode_binary_patch_line(line: &str, out: &mut Vec<u8>) -> Result<()> {
     let mut chars = line.chars();
     let Some(len_ch) = chars.next() else {
-        return Err(Error::Message(
-            "empty binary patch payload line".to_string(),
-        ));
+        return Err(ApplyError::EmptyBinaryPatchPayloadLine.into());
     };
     let expected_len = decode_binary_line_len(len_ch)?;
     let body = chars.as_str().as_bytes();
-    let decoded = crate::git_binary_base85::decode_body(body, expected_len)
-        .map_err(|e| Error::Message(format!("invalid binary patch base85: {e}")))?;
+    let decoded = crate::git_binary_base85::decode_body(body, expected_len).map_err(|e| {
+        ApplyError::InvalidBinaryPatchBase85 {
+            detail: e.to_string(),
+        }
+    })?;
     out.extend_from_slice(&decoded);
     Ok(())
 }
@@ -1154,16 +1169,12 @@ fn decode_binary_line_len(ch: char) -> Result<usize> {
     if ch.is_ascii_lowercase() {
         return Ok((ch as u8 - b'a' + 27) as usize);
     }
-    Err(Error::Message(format!(
-        "invalid binary patch line length marker: '{ch}'"
-    )))
+    Err(ApplyError::BinaryPatchUnexpectedChar { ch }.into())
 }
 
 fn encode_binary_line_len(raw_len: usize) -> Result<char> {
     if raw_len == 0 || raw_len > 52 {
-        return Err(Error::Message(format!(
-            "binary patch line length out of range: {raw_len}"
-        )));
+        return Err(ApplyError::BinaryPatchLineLengthOutOfRange { raw_len }.into());
     }
     let ch = if raw_len <= 26 {
         char::from(b'A' + (raw_len as u8) - 1)
@@ -1181,10 +1192,14 @@ fn zlib_compress_binary_payload(data: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
     encoder
         .write_all(data)
-        .map_err(|e| Error::Message(format!("zlib compress failed: {e}")))?;
-    encoder
+        .map_err(|e| ApplyError::ZlibCompressFailed {
+            detail: e.to_string(),
+        })?;
+    Ok(encoder
         .finish()
-        .map_err(|e| Error::Message(format!("zlib compress finish failed: {e}")))
+        .map_err(|e| ApplyError::ZlibCompressFinishFailed {
+            detail: e.to_string(),
+        })?)
 }
 
 fn append_binary_literal_section(out: &mut String, uncompressed: &[u8]) -> Result<()> {
@@ -1209,15 +1224,24 @@ pub(crate) fn write_git_binary_patch_sections<W: std::io::Write>(
     new: &[u8],
 ) -> Result<()> {
     out.write_all(b"GIT binary patch\n")
-        .map_err(|e| Error::Message(format!("write binary patch header: {e}")))?;
+        .map_err(|e| ApplyError::WriteBinaryPatchFailed {
+            phase: "header",
+            detail: e.to_string(),
+        })?;
     let mut buf = String::new();
     append_binary_literal_section(&mut buf, new)?;
     out.write_all(buf.as_bytes())
-        .map_err(|e| Error::Message(format!("write binary patch forward: {e}")))?;
+        .map_err(|e| ApplyError::WriteBinaryPatchFailed {
+            phase: "forward",
+            detail: e.to_string(),
+        })?;
     buf.clear();
     append_binary_literal_section(&mut buf, old)?;
     out.write_all(buf.as_bytes())
-        .map_err(|e| Error::Message(format!("write binary patch reverse: {e}")))?;
+        .map_err(|e| ApplyError::WriteBinaryPatchFailed {
+            phase: "reverse",
+            detail: e.to_string(),
+        })?;
     Ok(())
 }
 
@@ -1255,7 +1279,9 @@ pub fn inflate_binary_payload(compressed: &[u8]) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     decoder
         .read_to_end(&mut out)
-        .map_err(|e| Error::Message(format!("failed to inflate binary patch payload: {e}")))?;
+        .map_err(|e| ApplyError::BinaryPatchInflateFailed {
+            detail: e.to_string(),
+        })?;
     Ok(out)
 }
 
@@ -1270,18 +1296,16 @@ pub(crate) fn materialize_binary_patch_section(
     match section.kind {
         BinaryPatchSectionKind::Literal => {
             if inflated.len() != section.declared_size {
-                return Err(Error::Message(format!(
-                    "binary patch literal size {} != declared {}",
-                    inflated.len(),
-                    section.declared_size
-                )));
+                return Err(ApplyError::BinaryPatchLiteralSizeMismatch {
+                    actual: inflated.len(),
+                    declared: section.declared_size,
+                }
+                .into());
             }
             Ok(inflated)
         }
         BinaryPatchSectionKind::Delta => {
-            let base = base.ok_or_else(|| {
-                Error::Message("binary patch delta requires a base blob".to_string())
-            })?;
+            let base = base.ok_or(ApplyError::BinaryPatchDeltaRequiresBase)?;
             crate::unpack_objects::apply_delta(base, &inflated)
         }
     }
@@ -1303,7 +1327,7 @@ pub fn materialize_binary_patch_reverse(
     let reverse = payload
         .reverse
         .as_ref()
-        .ok_or_else(|| Error::Message("binary patch has no reverse section".to_string()))?;
+        .ok_or(ApplyError::BinaryPatchNoReverseSection)?;
     materialize_binary_patch_section(reverse, Some(new))
 }
 
@@ -1385,8 +1409,11 @@ fn parse_hunk(
     recount: bool,
 ) -> Result<(Hunk, usize)> {
     let header = lines[start];
-    let (old_start, old_count, new_start, new_count) = parse_hunk_header(header)
-        .map_err(|e| Error::Message(format!("invalid hunk header: {header}: {e}")))?;
+    let (old_start, old_count, new_start, new_count) =
+        parse_hunk_header(header).map_err(|e| ApplyError::InvalidHunkHeader {
+            header: header.to_string(),
+            detail: e.to_string(),
+        })?;
 
     let mut hunk = Hunk {
         old_start,
@@ -1464,9 +1491,10 @@ fn parse_hunk_header(line: &str) -> Result<(usize, usize, usize, usize)> {
 
     let parts: Vec<&str> = range_part.split_whitespace().collect();
     if parts.len() < 2 {
-        return Err(Error::Message(
-            "expected old and new range in hunk header".to_string(),
-        ));
+        return Err(ApplyError::InvalidHunkRange {
+            detail: "expected old and new range in hunk header".to_string(),
+        }
+        .into());
     }
 
     let (old_start, old_count) = parse_range(parts[0].trim_start_matches('-'))?;
@@ -1480,15 +1508,21 @@ fn parse_range(s: &str) -> Result<(usize, usize)> {
     if let Some((start_s, count_s)) = s.split_once(',') {
         let start = start_s
             .parse::<usize>()
-            .map_err(|e| Error::Message(e.to_string()))?;
+            .map_err(|e| ApplyError::InvalidHunkRange {
+                detail: e.to_string(),
+            })?;
         let count = count_s
             .parse::<usize>()
-            .map_err(|e| Error::Message(e.to_string()))?;
+            .map_err(|e| ApplyError::InvalidHunkRange {
+                detail: e.to_string(),
+            })?;
         Ok((start, count))
     } else {
-        let n: usize = s
-            .parse()
-            .map_err(|e: std::num::ParseIntError| Error::Message(e.to_string()))?;
+        let n: usize =
+            s.parse()
+                .map_err(|e: std::num::ParseIntError| ApplyError::InvalidHunkRange {
+                    detail: e.to_string(),
+                })?;
         Ok((n, 1))
     }
 }
@@ -1504,6 +1538,7 @@ pub use index_apply::{
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
 
     #[test]
     fn binary_bodies_resume_at_following_git_patch() {
@@ -1563,8 +1598,9 @@ mod tests {
             let err = parse_patch(&input, 1, "mixed", false, None).unwrap_err();
             assert!(matches!(
                 err,
-                Error::Apply(ApplyError::CorruptPatch { input, line })
-                    if input == "mixed" && line == header.lines().count() + 3
+                Error::Diff(crate::diff::error::DiffError::Apply(
+                    ApplyError::CorruptPatch { input, line }
+                )) if input == "mixed" && line == header.lines().count() + 3
             ));
         }
     }
@@ -1623,10 +1659,9 @@ mod tests {
         let err = parse_patch(input, 1, "patch", false, None).unwrap_err();
         assert!(matches!(
             err,
-            Error::Apply(ApplyError::CorruptPatch {
-                ref input,
-                line: 4
-            }) if input == "patch"
+            Error::Diff(crate::diff::error::DiffError::Apply(
+                ApplyError::CorruptPatch { ref input, line: 4 }
+            )) if input == "patch"
         ));
         assert_eq!(
             err.git_stderr_message(),
@@ -1643,8 +1678,13 @@ mod tests {
     #[test]
     fn invalid_hunk_header_chains_inner_message() {
         let err = parse_hunk_header("@@ -x +1 @@").unwrap_err();
-        // The numeric parse failure must surface its own message.
-        assert_eq!(err.to_string(), "invalid digit found in string");
+        assert!(matches!(
+            err,
+            Error::Diff(crate::diff::error::DiffError::Apply(
+                ApplyError::InvalidHunkRange { .. }
+            ))
+        ));
+        assert!(err.to_string().contains("invalid hunk range"));
     }
 
     #[cfg_attr(

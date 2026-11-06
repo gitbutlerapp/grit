@@ -389,7 +389,9 @@ fn single_symmetric_range(
 ) -> Result<(ObjectId, ObjectId)> {
     match (tokens, parsed.symmetric_left, parsed.symmetric_right) {
         ([_], Some(left), Some(right)) => Ok((left, right)),
-        _ => Err(Error::RevList(RevListError::SymmetricRangeRequired)),
+        _ => Err(Error::Revision(
+            crate::revision_error::RevisionError::RevList(RevListError::SymmetricRangeRequired),
+        )),
     }
 }
 
@@ -654,7 +656,9 @@ impl<'repo> RevWalk<'repo> {
     /// range, or rev-parse / merge-base errors from resolving the tips.
     pub fn symmetric_range_tips(&self, tokens: &[&str]) -> Result<(ObjectId, ObjectId)> {
         if tokens.len() != 1 {
-            return Err(Error::RevList(RevListError::SymmetricRangeRequired));
+            return Err(Error::Revision(
+                crate::revision_error::RevisionError::RevList(RevListError::SymmetricRangeRequired),
+            ));
         }
         let parsed = parse_rev_walk_tokens(self.repository(), tokens)?;
         single_symmetric_range(tokens, &parsed)

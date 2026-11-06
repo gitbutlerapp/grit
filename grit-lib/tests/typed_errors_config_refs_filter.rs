@@ -220,7 +220,10 @@ fn corrupt_patch_surfaces_apply_error() {
     let input = "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n one\n";
     let err = parse_patch(input, 1, "patch", false, None).unwrap_err();
     match &err {
-        Error::Apply(ApplyError::CorruptPatch { line, .. }) => assert!(*line >= 3),
+        Error::Diff(grit_lib::diff::error::DiffError::Apply(ApplyError::CorruptPatch {
+            line,
+            ..
+        })) => assert!(*line >= 3),
         other => panic!("expected corrupt patch, got {other:?}"),
     }
 }

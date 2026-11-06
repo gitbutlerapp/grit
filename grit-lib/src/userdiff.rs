@@ -11,6 +11,7 @@
 
 use crate::attributes::{collect_attrs_for_path, AttrValue, MacroTable};
 use crate::config::ConfigSet;
+use crate::diff::error::DiffError;
 use regex::{Regex, RegexBuilder};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
@@ -234,7 +235,7 @@ pub fn matcher_for_path_parsed(
     macros: &MacroTable,
     rel_path: &str,
     ignore_case: bool,
-) -> Result<Option<FuncnameMatcher>, String> {
+) -> std::result::Result<Option<FuncnameMatcher>, DiffError> {
     let map = collect_attrs_for_path(rules, macros, rel_path, ignore_case);
     let Some(AttrValue::Value(driver)) = map.get("diff") else {
         return Ok(None);
@@ -249,12 +250,12 @@ pub fn matcher_for_path_parsed(
 pub fn matcher_for_driver(
     config: &ConfigSet,
     driver: &str,
-) -> Result<Option<FuncnameMatcher>, String> {
+) -> std::result::Result<Option<FuncnameMatcher>, DiffError> {
     if let Some(pattern) = config.value(&format!("diff.{driver}.xfuncname")) {
-        return compile_matcher(&pattern, true, false).map(Some);
+        return compile_matcher(&pattern, true, false, driver).map(Some);
     }
     if let Some(pattern) = config.value(&format!("diff.{driver}.funcname")) {
-        return compile_matcher(&pattern, false, false).map(Some);
+        return compile_matcher(&pattern, false, false, driver).map(Some);
     }
     if let Some(matcher) = cached_builtin_matcher(driver) {
         return Ok(Some((*matcher).clone()));
@@ -268,7 +269,7 @@ fn cached_builtin_matcher(driver: &str) -> Option<Arc<FuncnameMatcher>> {
             .clone()
             .into_iter()
             .map(|(name, builtin)| {
-                let matcher = compile_matcher(&builtin.pattern, true, builtin.ignore_case)
+                let matcher = compile_matcher(&builtin.pattern, true, builtin.ignore_case, &name)
                     .unwrap_or_else(|e| panic!("built-in userdiff driver {name}: {e}"));
                 (name, Arc::new(matcher))
             })
@@ -281,7 +282,8 @@ fn compile_matcher(
     pattern: &str,
     extended: bool,
     ignore_case: bool,
-) -> Result<FuncnameMatcher, String> {
+    driver: &str,
+) -> std::result::Result<FuncnameMatcher, DiffError> {
     let lines: Vec<&str> = pattern.split('\n').collect();
     if lines.is_empty() {
         return Ok(FuncnameMatcher { rules: Vec::new() });
@@ -293,7 +295,10 @@ fn compile_matcher(
         let negate = line.starts_with('!');
         if negate {
             if idx == lines.len() - 1 {
-                return Err(format!("Last expression must not be negated: {line}"));
+                return Err(DiffError::UserdiffInvalidFuncname {
+                    driver: driver.to_owned(),
+                    detail: format!("Last expression must not be negated: {line}"),
+                });
             }
             line = &line[1..];
         }
@@ -304,7 +309,13 @@ fn compile_matcher(
             bre_to_ere(line)
         };
 
-        let matcher = compile_posix_ere_rule(&posix_pattern, ignore_case, line)?;
+        let matcher =
+            compile_posix_ere_rule(&posix_pattern, ignore_case, line).map_err(|detail| {
+                DiffError::UserdiffInvalidFuncname {
+                    driver: driver.to_owned(),
+                    detail,
+                }
+            })?;
         rules.push(FuncRule { matcher, negate });
     }
 
@@ -530,11 +541,17 @@ mod tests {
 
     #[test]
     fn unterminated_posix_bracket_class_is_rejected() {
-        let err = compile_matcher("[a", true, false).unwrap_err();
-        assert!(err.contains("Invalid regexp"), "unexpected error: {err}");
+        let err = compile_matcher("[a", true, false, "probe").unwrap_err();
+        assert!(
+            matches!(err, DiffError::UserdiffInvalidFuncname { .. }),
+            "unexpected error: {err}"
+        );
         let cfg = config_with_xfuncname("probe", "[a");
         let err = matcher_for_driver(&cfg, "probe").unwrap_err();
-        assert!(err.contains("Invalid regexp"), "unexpected error: {err}");
+        assert!(
+            matches!(err, DiffError::UserdiffInvalidFuncname { .. }),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

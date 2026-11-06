@@ -303,7 +303,7 @@ pub struct MergePredictionOptions {
     pub allow_fast_forward: bool,
     /// When `true`, [`write_merge_tree`] merges commits with no merge base over the empty
     /// tree, like Git's `--allow-unrelated-histories`; when `false` it fails with
-    /// [`Error::UnrelatedHistories`]. [`predict_merge`] always reports
+    /// [`crate::revision_error::RevisionError::UnrelatedHistories`]. [`predict_merge`] always reports
     /// [`MergePrediction::Unrelated`] for such commits.
     pub allow_unrelated_histories: bool,
     /// Merge-favor policy for the simulated three-way merge (ours/theirs/normal).
@@ -461,7 +461,7 @@ impl WrittenMergeTree {
 ///
 /// # Errors
 ///
-/// - [`Error::UnrelatedHistories`] when the commits share no merge base and
+/// - [`crate::revision_error::RevisionError::UnrelatedHistories`] when the commits share no merge base and
 ///   [`MergePredictionOptions::allow_unrelated_histories`] is `false`.
 /// - Object read, merge and object write failures are propagated.
 pub fn write_merge_tree(
@@ -474,10 +474,12 @@ pub fn write_merge_tree(
         Some(base) => base,
         None if options.allow_unrelated_histories => MergeBase::empty(repo)?,
         None => {
-            return Err(Error::UnrelatedHistories {
-                ours: into_oid,
-                theirs: other_oid,
-            })
+            return Err(Error::Revision(
+                crate::revision_error::RevisionError::UnrelatedHistories {
+                    ours: into_oid,
+                    theirs: other_oid,
+                },
+            ));
         }
     };
 
@@ -657,7 +659,7 @@ pub struct MergeSource {
 ///
 /// # Errors
 ///
-/// - [`Error::RevisionNotFound`] when `spec` names nothing.
+/// - [`crate::revision_error::RevisionError::NotFound`] when `spec` names nothing.
 /// - [`Error::UnexpectedObjectKind`] when `spec` names (or a tag peels to) a tree or blob.
 /// - Object database errors (missing or corrupt objects behind a ref) are propagated.
 pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
@@ -676,12 +678,14 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
     // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
     let not_found = |err: Error| match err {
         Error::ObjectNotFound(_)
-        | Error::RevParse(
+        | Error::Revision(crate::revision_error::RevisionError::RevParse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::NoSuchBranch { .. },
-        ) => Error::RevisionNotFound(spec.to_owned()),
+        )) => Error::Revision(crate::revision_error::RevisionError::NotFound {
+            spec: spec.to_owned(),
+        }),
         other => other,
     };
     let (peeled, actual, kind) = match named {
@@ -693,7 +697,11 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
             // The revision parser resolves `a...b` to a merge base; a range never names the
             // commit to merge.
             if crate::rev_parse::is_top_level_range(spec) {
-                return Err(Error::RevisionNotFound(spec.to_owned()));
+                return Err(Error::Revision(
+                    crate::revision_error::RevisionError::NotFound {
+                        spec: spec.to_owned(),
+                    },
+                ));
             }
             let oid = crate::rev_parse::resolve_revision_without_index_dwim(repo, spec)
                 .map_err(not_found)?;

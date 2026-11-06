@@ -64,8 +64,9 @@ fn assert_blame_path_not_in_revision(err: Error, expected_path: &str, expected_r
     assert!(
         matches!(
             err,
-            Error::RevParse(RevParseError::PathNotInRevision { ref path, ref revision, .. })
-                if path == expected_path && revision == expected_revision
+            Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+                RevParseError::PathNotInRevision { ref path, ref revision, .. },
+            )) if path == expected_path && revision == expected_revision
         ),
         "got {err:?}"
     );
@@ -119,7 +120,9 @@ fn deep_parent_navigation_is_revision_out_of_range() {
     assert!(
         matches!(
             err,
-            Error::RevParse(RevParseError::RevisionOutOfRange { ref spec, .. }) if spec == "main~99"
+            Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+                RevParseError::RevisionOutOfRange { ref spec, .. },
+            )) if spec == "main~99"
         ),
         "got {err:?}"
     );

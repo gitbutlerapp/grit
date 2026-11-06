@@ -263,7 +263,9 @@ impl Repository {
                     spec: spec.to_owned(),
                 });
             }
-            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
+                RevParseError::AmbiguousShortObject { spec: prefix },
+            ))) => {
                 let candidates =
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
@@ -271,13 +273,17 @@ impl Repository {
                     candidates,
                 });
             }
-            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
+                RevParseError::AmbiguousChangeId { prefix, candidates },
+            ))) => {
                 return Err(ResolveError::AmbiguousChangeId {
                     spec: prefix,
                     candidates,
                 });
             }
-            Err(Error::RevParse(e)) => return Err(e.into()),
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(e))) => {
+                return Err(e.into());
+            }
             Err(_) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
@@ -337,7 +343,9 @@ impl Repository {
                     spec: spec.to_owned(),
                 });
             }
-            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
+                RevParseError::AmbiguousShortObject { spec: prefix },
+            ))) => {
                 let candidates =
                     ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
                 return Err(ResolveError::AmbiguousShortObject {
@@ -345,13 +353,17 @@ impl Repository {
                     candidates,
                 });
             }
-            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
+                RevParseError::AmbiguousChangeId { prefix, candidates },
+            ))) => {
                 return Err(ResolveError::AmbiguousChangeId {
                     spec: prefix,
                     candidates,
                 });
             }
-            Err(Error::RevParse(e)) => return Err(e.into()),
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(e))) => {
+                return Err(e.into());
+            }
             Err(_) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
@@ -629,7 +641,7 @@ mod abbreviate_for_display_tests {
 
 fn map_resolve_ref_error(err: Error) -> RevParseError {
     match err {
-        Error::RevParse(e) => e,
+        Error::Revision(crate::revision_error::RevisionError::RevParse(e)) => e,
         other => RevParseError::InvalidObjectName {
             name: other.to_string(),
         },

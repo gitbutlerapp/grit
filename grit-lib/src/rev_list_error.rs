@@ -83,6 +83,10 @@ pub enum RevListError {
     /// [`crate::rev_list::RevListOptions::follow`] requires a plain file path (no globs or magic).
     #[error("--follow requires a single literal file path")]
     FollowRequiresLiteralPath,
+
+    /// Lazy revision-range hide requires a commit-graph cache on the walk.
+    #[error("lazy range hide requires a CommitGraphCache")]
+    LazyRangeHideRequiresCommitGraph,
 }
 
 #[cfg(test)]
@@ -97,7 +101,9 @@ mod tests {
         });
         assert!(matches!(
             err,
-            Error::RevList(RevListError::SparseFilterUnparsable { .. })
+            Error::Revision(crate::revision_error::RevisionError::RevList(
+                RevListError::SparseFilterUnparsable { .. },
+            ))
         ));
     }
 
@@ -108,7 +114,9 @@ mod tests {
         });
         assert!(matches!(
             err,
-            Error::RevList(RevListError::MissingOptionValue { .. })
+            Error::Revision(crate::revision_error::RevisionError::RevList(
+                RevListError::MissingOptionValue { .. },
+            ))
         ));
     }
 
@@ -131,7 +139,9 @@ mod tests {
         assert!(symmetric.to_string().contains("'a...b'"));
         assert!(matches!(
             Error::from(symmetric),
-            Error::RevList(RevListError::UnexpandedSymmetricRange { .. })
+            Error::Revision(crate::revision_error::RevisionError::RevList(
+                RevListError::UnexpandedSymmetricRange { .. },
+            ))
         ));
     }
 

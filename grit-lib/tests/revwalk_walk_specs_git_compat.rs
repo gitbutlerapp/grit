@@ -192,7 +192,9 @@ fn walk_rejects_specs_that_need_the_token_api() {
             .walk(spec, &RevListOptions::default())
             .expect_err(spec);
         match err {
-            Error::RevList(RevListError::UnsupportedWalkSpec { spec: got }) => {
+            Error::Revision(grit_lib::revision_error::RevisionError::RevList(
+                RevListError::UnsupportedWalkSpec { spec: got },
+            )) => {
                 assert_eq!(got, spec, "error keeps the full spec");
             }
             other => panic!("walk({spec:?}): expected UnsupportedWalkSpec, got {other:?}"),
@@ -285,7 +287,9 @@ fn rev_list_rejects_unexpanded_symmetric_range() {
     assert!(
         matches!(
             &err,
-            Error::RevList(RevListError::UnexpandedSymmetricRange { spec }) if spec == "main...topic"
+            Error::Revision(grit_lib::revision_error::RevisionError::RevList(
+                RevListError::UnexpandedSymmetricRange { spec },
+            )) if spec == "main...topic"
         ),
         "{err:?}"
     );

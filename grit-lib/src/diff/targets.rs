@@ -29,7 +29,8 @@ use crate::porcelain::pathspec_match::{
 };
 use crate::repo::Repository;
 use crate::rev_parse::peel_tags_to_commit;
-use crate::revwalk::merge_base::{merge_base_for_diff_two_commits, MergeBaseForDiffError};
+use crate::revision_error::RevisionError;
+use crate::revwalk::merge_base::merge_base_for_diff_two_commits;
 use crate::revwalk::rev_parse::{
     resolve_revision, resolve_revision_for_range_end, split_double_dot_range,
     split_triple_dot_range,
@@ -1169,9 +1170,9 @@ fn parse_commit_range(
         let left = resolve_diff_range_end(repo, left)?;
         let right = resolve_diff_range_end(repo, right)?;
         let base = merge_base_for_diff_two_commits(repo, left, right).map_err(|e| match e {
-            MergeBaseForDiffError::None => ResolveDiffArgumentsError::NoMergeBase,
-            MergeBaseForDiffError::Multiple => ResolveDiffArgumentsError::MultipleMergeBases,
-            MergeBaseForDiffError::Other(msg) => Error::Message(msg).into(),
+            RevisionError::NoMergeBase => ResolveDiffArgumentsError::NoMergeBase,
+            RevisionError::MultipleMergeBases => ResolveDiffArgumentsError::MultipleMergeBases,
+            other => ResolveDiffArgumentsError::Library(Box::new(other.into())),
         })?;
         return Ok(Some((base, right)));
     }

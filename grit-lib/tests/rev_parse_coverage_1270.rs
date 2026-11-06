@@ -30,7 +30,7 @@ fn open_grit_at(wt: &Path, cwd: &Path) -> Repository {
 
 fn expect_rev_parse_variant(repo: &Repository, spec: &str, pred: fn(&RevParseError) -> bool) {
     let err = resolve_revision_for_verify(repo, spec).expect_err(spec);
-    let Error::RevParse(inner) = err else {
+    let Error::Revision(grit_lib::revision_error::RevisionError::RevParse(inner)) = err else {
         panic!("{spec}: expected RevParse error, got {err}");
     };
     assert!(pred(&inner), "{spec}: unexpected variant {inner:?}");

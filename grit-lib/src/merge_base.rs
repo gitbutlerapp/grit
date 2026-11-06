@@ -125,13 +125,13 @@ pub fn merge_base_for_diff_index(
     repo: &Repository,
     head: ObjectId,
     other: ObjectId,
-) -> std::result::Result<ObjectId, MergeBaseForDiffError> {
+) -> std::result::Result<ObjectId, crate::revision_error::RevisionError> {
     let bases = merge_bases_first_vs_rest(repo, other, &[head])
-        .map_err(|e| MergeBaseForDiffError::Other(e.to_string()))?;
+        .map_err(|e| crate::revision_error::RevisionError::Nested(Box::new(e)))?;
     match bases.len() {
-        0 => Err(MergeBaseForDiffError::None),
+        0 => Err(crate::revision_error::RevisionError::NoMergeBase),
         1 => Ok(bases[0]),
-        _ => Err(MergeBaseForDiffError::Multiple),
+        _ => Err(crate::revision_error::RevisionError::MultipleMergeBases),
     }
 }
 
@@ -142,25 +142,14 @@ pub fn merge_base_for_diff_two_commits(
     repo: &Repository,
     a: ObjectId,
     b: ObjectId,
-) -> std::result::Result<ObjectId, MergeBaseForDiffError> {
+) -> std::result::Result<ObjectId, crate::revision_error::RevisionError> {
     let bases = merge_bases_first_vs_rest(repo, a, &[b])
-        .map_err(|e| MergeBaseForDiffError::Other(e.to_string()))?;
+        .map_err(|e| crate::revision_error::RevisionError::Nested(Box::new(e)))?;
     match bases.len() {
-        0 => Err(MergeBaseForDiffError::None),
+        0 => Err(crate::revision_error::RevisionError::NoMergeBase),
         1 => Ok(bases[0]),
-        _ => Err(MergeBaseForDiffError::Multiple),
+        _ => Err(crate::revision_error::RevisionError::MultipleMergeBases),
     }
-}
-
-/// Failure modes for [`merge_base_for_diff_index`] and [`merge_base_for_diff_two_commits`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MergeBaseForDiffError {
-    /// No common ancestor between the commits.
-    None,
-    /// More than one minimal merge base (criss-cross history).
-    Multiple,
-    /// Resolution or object read error; message is suitable for stderr.
-    Other(String),
 }
 
 /// Compute merge bases common to all supplied commits (`--octopus` mode).
@@ -611,8 +600,7 @@ fn reflog_commits_for_fork_point(
     reflog_ref: &str,
     upstream_tip: ObjectId,
 ) -> Result<Vec<ObjectId>> {
-    let entries = read_reflog(repo.git_dir(), reflog_ref)
-        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+    let entries = read_reflog(repo.git_dir(), reflog_ref)?;
     let mut commits = Vec::new();
     let mut seen = oid_hash_set();
     let mut initial = true;
@@ -761,8 +749,7 @@ pub fn fork_point(
         resolve_fork_point_reflog_ref(repo, upstream_spec)
     };
 
-    let entries = read_reflog(repo.git_dir(), &reflog_ref)
-        .map_err(|e| Error::Message(format!("failed to read reflog for '{reflog_ref}': {e}")))?;
+    let entries = read_reflog(repo.git_dir(), &reflog_ref)?;
 
     let mut candidates = Vec::new();
     let mut seen = oid_hash_set();
@@ -787,8 +774,8 @@ pub fn fork_point(
 
     let mut bases = merge_bases_first_vs_rest(repo, upstream_tip, &[head])?;
     if bases.is_empty() {
-        return Err(Error::Message(
-            "no merge base found between upstream and HEAD".to_owned(),
+        return Err(Error::Revision(
+            crate::revision_error::RevisionError::NoMergeBase,
         ));
     }
     bases.sort();
@@ -1935,9 +1922,11 @@ impl RangeWalkHide {
             return Ok(true);
         }
         if let Some(lazy) = &self.lazy {
-            let cache = cache.as_mut().ok_or_else(|| {
-                Error::Message("lazy range hide requires a CommitGraphCache".into())
-            })?;
+            let cache = cache.as_mut().ok_or(Error::Revision(
+                crate::revision_error::RevisionError::RevList(
+                    crate::rev_list_error::RevListError::LazyRangeHideRequiresCommitGraph,
+                ),
+            ))?;
             return lazy.borrow_mut().is_hidden(cache, &self.hide_tips, oid);
         }
         Ok(self.is_hidden_eager(oid))

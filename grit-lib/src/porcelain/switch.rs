@@ -400,11 +400,16 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
 ///
 /// # Errors
 ///
-/// Returns [`Error::RevisionNotFound`] when `spec` does not resolve; [`Error::InvalidRef`] when the
+/// Returns [`crate::revision_error::RevisionError::NotFound`] when `spec` does not resolve;
+/// [`Error::InvalidRef`] when the
 /// resolved object is not a commit; other object database errors propagate.
 pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> {
     if crate::rev_parse::is_top_level_range(spec) {
-        return Err(Error::RevisionNotFound(spec.to_owned()));
+        return Err(Error::Revision(
+            crate::revision_error::RevisionError::NotFound {
+                spec: spec.to_owned(),
+            },
+        ));
     }
     let oid = resolve_revision(repo, spec).map_err(|err| map_revision_spec_error(spec, err))?;
     peel_to_commit_for_merge_base(repo, oid)
@@ -413,12 +418,14 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 fn map_revision_spec_error(spec: &str, err: Error) -> Error {
     match err {
         Error::ObjectNotFound(_)
-        | Error::RevParse(
+        | Error::Revision(crate::revision_error::RevisionError::RevParse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::NoSuchBranch { .. },
-        ) => Error::RevisionNotFound(spec.to_owned()),
+        )) => Error::Revision(crate::revision_error::RevisionError::NotFound {
+            spec: spec.to_owned(),
+        }),
         other => other,
     }
 }
@@ -2211,7 +2218,7 @@ mod tests {
                 .expect_err("missing start");
         assert!(matches!(
             missing,
-            Error::RevisionNotFound(spec) if spec == "nosuchrev"
+            Error::Revision(crate::revision_error::RevisionError::NotFound { spec: spec }) if spec == "nosuchrev"
         ));
 
         let tree_oid = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
@@ -2233,7 +2240,7 @@ mod tests {
         let err = resolve_revision_spec(&repo, "nosuchrev").expect_err("missing");
         assert!(matches!(
             err,
-            Error::RevisionNotFound(spec) if spec == "nosuchrev"
+            Error::Revision(crate::revision_error::RevisionError::NotFound { spec: spec }) if spec == "nosuchrev"
         ));
     }
 

@@ -84,8 +84,9 @@ impl UploadPackPolicy {
             ));
         }
         validate_upload_filter_request(config, spec).map_err(ServeError::UploadFilter)?;
-        ObjectFilter::parse(spec)
-            .map_err(|e| ServeError::UploadFilter(UploadFilterError::InvalidFilterSpec(e)))
+        ObjectFilter::parse(spec).map_err(|e| {
+            ServeError::UploadFilter(UploadFilterError::InvalidFilterSpec(e.to_string()))
+        })
     }
 }
 

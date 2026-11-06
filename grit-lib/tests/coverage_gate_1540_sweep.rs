@@ -20,7 +20,6 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::merge_base::{
     ancestor_closure, commits_reachable_excluding_ancestors_of, count_symmetric_ahead_behind,
     fork_point, independent_commits, is_ancestor, merge_bases_all, merge_bases_octopus,
-    MergeBaseForDiffError,
 };
 use grit_lib::revwalk::rev_list::{
     merge_bases, resolve_revision_specs_to_commits, rev_list, ObjectFilter, OrderingMode,
@@ -293,7 +292,8 @@ fn index_symlink_and_merge_base_diff_errors() -> grit_lib::error::Result<()> {
         .expect_err("missing");
     assert!(matches!(
         err,
-        MergeBaseForDiffError::None | MergeBaseForDiffError::Other(_)
+        grit_lib::revision_error::RevisionError::NoMergeBase
+            | grit_lib::revision_error::RevisionError::Nested(_)
     ));
 
     Ok(())

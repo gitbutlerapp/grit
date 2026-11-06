@@ -37,7 +37,8 @@ pub fn validate_upload_filter_request(
     config: &ConfigSet,
     spec: &str,
 ) -> Result<(), UploadFilterError> {
-    let filter = ObjectFilter::parse(spec).map_err(UploadFilterError::InvalidFilterSpec)?;
+    let filter = ObjectFilter::parse(spec)
+        .map_err(|e| UploadFilterError::InvalidFilterSpec(e.to_string()))?;
     validate_filter(config, &filter)
 }
 

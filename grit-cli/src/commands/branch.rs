@@ -714,9 +714,9 @@ fn track_mode(opts: &BranchRunOptions) -> TrackMode {
 fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
     use grit_lib::porcelain::branch::BranchError;
     match err {
-        Error::RevParse(
+        Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
             RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
-        )
+        ))
         | Error::ObjectNotFound(_) => {
             map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
                 label: rev.to_owned(),

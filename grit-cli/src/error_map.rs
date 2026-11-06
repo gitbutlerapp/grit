@@ -18,6 +18,7 @@ use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::RefError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
+use grit_lib::revision_error::RevisionError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 use time::OffsetDateTime;
@@ -119,18 +120,19 @@ fn format_ambiguous_change_id(spec: &str, candidates: &[AmbiguousChangeIdHint]) 
 #[must_use]
 pub fn human_message_for_lib(err: &LibError) -> String {
     match err {
-        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
-            format_ambiguous_change_id(prefix, candidates)
-        }
-        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousChangeId {
+            prefix,
+            candidates,
+        })) => format_ambiguous_change_id(prefix, candidates),
+        LibError::Revision(RevisionError::RevParse(RevParseError::InvalidObjectName { name })) => {
             format!("revision '{name}' not found")
         }
-        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousArgument { spec })) => {
             format!("revision '{spec}' not found")
         }
-        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
-            format!("invalid reflog date '{date}'")
-        }
+        LibError::Revision(RevisionError::RevParse(RevParseError::ReflogDateUnparseable {
+            date,
+        })) => format!("invalid reflog date '{date}'"),
         LibError::ObjectNotFound(spec) => format!("revision '{spec}' not found"),
         LibError::HashCollision { oid } => format!(
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
@@ -204,7 +206,9 @@ pub fn resolve_rebase_upstream_revision(
 ) -> Result<ObjectId, Error> {
     match resolve {
         Ok(oid) => Ok(oid),
-        Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if use_default_upstream => {
+        Err(LibError::Revision(RevisionError::RevParse(RevParseError::NoUpstream { branch })))
+            if use_default_upstream =>
+        {
             Err(rebase_no_upstream_error(&branch))
         }
         Err(other) => {
@@ -218,6 +222,9 @@ pub fn resolve_rebase_upstream_revision(
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
         LibError::RevisionNotFound(spec) => crate::json_error::revision_not_found(&spec),
+        LibError::Revision(RevisionError::NotFound { spec }) => {
+            crate::json_error::revision_not_found(&spec)
+        }
         LibError::Ref(RefError::UnbornHead) => crate::unborn_errors::unborn_head_from_cwd()
             .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         other => {
@@ -295,7 +302,7 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
             | RevParseError::AmbiguousArgument { .. }
             | RevParseError::ReflogDateUnparseable { .. }
     ) {
-        Error::msg(human_message_for_lib(&LibError::RevParse(err)))
+        Error::msg(human_message_for_lib(&LibError::Revision(RevisionError::RevParse(err))))
     } else {
         Error::msg(format!("could not resolve ref '{spec}': {err}"))
     }
@@ -305,6 +312,12 @@ pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
 #[must_use]
 pub fn map_commit_spec_error(err: LibError) -> Error {
     match err {
+        LibError::Revision(RevisionError::RevParse(RevParseError::InvalidObjectName { name })) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
+        }
+        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousArgument { spec })) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
         LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
             crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
         }
@@ -317,10 +330,18 @@ pub fn map_commit_spec_error(err: LibError) -> Error {
         LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
             Error::msg(format_ambiguous_change_id(&prefix, &candidates))
         }
+        LibError::Revision(RevisionError::RevParse(RevParseError::AmbiguousChangeId {
+            prefix,
+            candidates,
+        })) => Error::msg(format_ambiguous_change_id(&prefix, &candidates)),
         LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
             Error::msg(format!("invalid reflog date '{date}'"))
         }
+        LibError::Revision(RevisionError::RevParse(RevParseError::ReflogDateUnparseable {
+            date,
+        })) => Error::msg(format!("invalid reflog date '{date}'")),
         LibError::Ref(RefError::InvalidName { reason, .. }) => Error::msg(reason),
+        LibError::InvalidRef(msg) => Error::msg(msg),
         other => map_lib_error(other),
     }
 }
@@ -655,22 +676,22 @@ fn would_overwrite_classified_from_cause(
 fn revision_payload_from_cause(cause: &(dyn StdError + 'static)) -> Option<StructuredJsonError> {
     let lib = cause.downcast_ref::<LibError>()?;
     match lib {
-        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
-            Some(StructuredJsonError::new(
-                format!("revision '{name}' not found"),
-                ErrorKind::RevisionNotFound,
-            ))
-        }
-        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
-            Some(StructuredJsonError::new(
-                format!("revision '{spec}' not found"),
-                ErrorKind::RevisionNotFound,
-            ))
-        }
-        LibError::RevParse(
+        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
+            RevParseError::InvalidObjectName { name },
+        )) => Some(StructuredJsonError::new(
+            format!("revision '{name}' not found"),
+            ErrorKind::RevisionNotFound,
+        )),
+        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
+            RevParseError::AmbiguousArgument { spec },
+        )) => Some(StructuredJsonError::new(
+            format!("revision '{spec}' not found"),
+            ErrorKind::RevisionNotFound,
+        )),
+        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-        ) => Some(StructuredJsonError::new(
+        )) => Some(StructuredJsonError::new(
             lib.to_string(),
             ErrorKind::PathNotFound,
         )),
@@ -958,10 +979,10 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some(Error::msg(remove_blocked_human(paths, false, None)))
         }
         LibError::StashNotFound { .. } => Some(stash_not_found(err)),
-        LibError::RevParse(
+        LibError::Revision(grit_lib::revision_error::RevisionError::RevParse(
             RevParseError::PathNotInRevision { .. }
             | RevParseError::PathMissingFromWorktreeAndIndex { .. },
-        ) => Some(guided(
+        )) => Some(guided(
             ErrorKind::PathNotFound,
             err.to_string(),
             None,

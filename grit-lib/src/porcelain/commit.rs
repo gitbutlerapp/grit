@@ -496,7 +496,7 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 /// - [`Error::PartialCommitDuringMerge`] for [`CommitScope::Paths`] or [`CommitScope::Patch`]
 ///   during an in-progress merge, and pathspec validation errors.
 /// - [`Error::HunkSelection`] when a [`CommitScope::Patch`] hunk id is unknown, stale, binary, or
-///   for the wrong side, and [`Error::Apply`] when the selected patch does not apply to the
+///   for the wrong side, and [`ApplyError`](crate::error::ApplyError) (via [`Error::Diff`]) when the selected patch does not apply to the
 ///   index. These carry the same values as [`CommitPatchError::Select`] and
 ///   [`CommitPatchError::Apply`] from [`commit_with_patch`].
 pub fn commit_with_scope(
@@ -520,7 +520,9 @@ pub fn commit_with_scope(
         CommitScope::Patch { input, pathspecs } => {
             commit_with_patch(repo, req, input, &pathspecs, progress, cancel).map_err(|e| match e {
                 CommitPatchError::Select(err) => Error::HunkSelection(err),
-                CommitPatchError::Apply(err) => Error::Apply(err),
+                CommitPatchError::Apply(err) => {
+                    Error::Diff(crate::diff::error::DiffError::Apply(err))
+                }
                 CommitPatchError::Commit(err) => err,
             })
         }
@@ -5515,7 +5517,10 @@ mod tests {
             &crate::progress::NeverCancel,
         )
         .unwrap_err();
-        assert!(matches!(err, Error::Apply(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Diff(crate::diff::error::DiffError::Apply(_))),
+            "got {err:?}"
+        );
         assert_eq!(err.kind_name(), "apply");
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),

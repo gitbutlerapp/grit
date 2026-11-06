@@ -657,7 +657,13 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "lib_revision_not_found",
-        build: || map_lib_error(LibError::RevisionNotFound("missing".into())),
+        build: || {
+            map_lib_error(LibError::Revision(
+                grit_lib::revision_error::RevisionError::NotFound {
+                    spec: "missing".into(),
+                },
+            ))
+        },
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
         human: || "no branch, tag or commit named 'missing'".to_owned(),
@@ -757,10 +763,14 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "path_not_found",
         build: || {
-            Error::new(LibError::RevParse(RevParseError::PathNotInRevision {
-                path: "missing.txt".into(),
-                revision: "HEAD".into(),
-            }))
+            Error::new(LibError::Revision(
+                grit_lib::revision_error::RevisionError::RevParse(
+                    RevParseError::PathNotInRevision {
+                        path: "missing.txt".into(),
+                        revision: "HEAD".into(),
+                    },
+                ),
+            ))
         },
         kind: Some(ErrorKind::PathNotFound),
         exit: ExitStatus::Failure,

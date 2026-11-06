@@ -492,7 +492,13 @@ fn write_merge_tree_unrelated_histories() {
     let err = write_merge_tree(&repo, main, orphan, &MergePredictionOptions::default())
         .expect_err("unrelated histories must be refused by default");
     assert!(
-        matches!(err, Error::UnrelatedHistories { ours, theirs } if ours == main && theirs == orphan),
+        matches!(
+            err,
+            Error::Revision(grit_lib::revision_error::RevisionError::UnrelatedHistories {
+                ours,
+                theirs
+            }) if ours == main && theirs == orphan
+        ),
         "{err:?}"
     );
 

@@ -9,7 +9,7 @@ use grit_lib::revwalk::merge_base::{
     ahead_of_target_commits, ancestor_closure, branch_base_for_tip, count_symmetric_ahead_behind,
     is_ancestor_odb_walk, merge_base_for_diff_index, merge_base_for_diff_two_commits,
     merge_bases_octopus, resolve_commit_specs, walk_commits_reachable_excluding_ancestors_of,
-    MergeBaseForDiffError, ReachableWalkLimit,
+    ReachableWalkLimit,
 };
 
 use support::{build_commit_dag, git_merge_base, HistoryRepo};
@@ -127,5 +127,8 @@ fn merge_base_for_diff_errors_on_unrelated() {
     let oids = build_commit_dag(wt, &[("x", "r1"), ("y", "r2")], &[]);
     let repo = open_grit(wt);
     let err = merge_base_for_diff_two_commits(&repo, oids["x"], oids["y"]).unwrap_err();
-    assert!(matches!(err, MergeBaseForDiffError::None));
+    assert!(matches!(
+        err,
+        grit_lib::revision_error::RevisionError::NoMergeBase
+    ));
 }

@@ -77,6 +77,22 @@ For history listings, [`Diff::commit_files_many`](rustdoc:grit_lib::diff::Diff::
 - **Add** — uses diff results to decide which paths to hash and stage.
 - **Diff command** — tree-to-tree for commit ranges, index-to-worktree for uncommitted changes, then blob-level rendering for text files.
 
+## Errors
+
+Diff, patch apply, pickaxe, and blame failures use [`DiffError`](rustdoc:grit_lib::diff::error::DiffError), wrapped as [`Error::Diff`](rustdoc:grit_lib::error::Error) on the umbrella type. [`DiffError::kind_name`](rustdoc:grit_lib::diff::error::DiffError::kind_name) preserves stable slugs (`apply`, `pickaxe`, `blame_ignore_rev_unknown`, `userdiff_invalid_funcname`, …).
+
+| Variant / wrap | When |
+| --- | --- |
+| [`Apply`](rustdoc:grit_lib::diff::error::DiffError::Apply) | [`ApplyError`](rustdoc:grit_lib::error::ApplyError) from unified/`GIT binary patch` parse and blob hunk apply (corrupt patch, context mismatch, invalid hunk header, binary patch sections, …). |
+| [`Pickaxe`](rustdoc:grit_lib::diff::error::DiffError::Pickaxe) | Invalid `-S` / `-G` pattern compilation. |
+| [`HunkId`](rustdoc:grit_lib::diff::error::DiffError::HunkId) | Malformed hunk id strings. |
+| Blame ignore-revs | [`BlameIgnoreRevUnknown`](rustdoc:grit_lib::diff::error::DiffError::BlameIgnoreRevUnknown), [`BlameIgnoreRevsFileOpen`](rustdoc:grit_lib::diff::error::DiffError::BlameIgnoreRevsFileOpen), [`BlameIgnoreRevsFileInvalidRev`](rustdoc:grit_lib::diff::error::DiffError::BlameIgnoreRevsFileInvalidRev), [`BlameWorktreeBareRepository`](rustdoc:grit_lib::diff::error::DiffError::BlameWorktreeBareRepository). |
+| [`DiffMergesParse`](rustdoc:grit_lib::diff::error::DiffError::DiffMergesParse) | Unknown `--diff-merges` mode. |
+| [`UserdiffInvalidFuncname`](rustdoc:grit_lib::diff::error::DiffError::UserdiffInvalidFuncname) | Invalid `diff.<driver>.funcname` / `xfuncname` pattern. |
+| [`Nested`](rustdoc:grit_lib::diff::error::DiffError::Nested) | Other [`Error`](rustdoc:grit_lib::error::Error) values during diff/blame (object read, worktree, …). |
+
+Argument resolution for `grit diff`-style operands stays on [`ResolveDiffArgumentsError`](rustdoc:grit_lib::diff::ResolveDiffArgumentsError) until that surface is folded into `DiffError`. See [Typed errors](errors.md).
+
 ## Example
 
 The program below diffs the latest commit against its parent (tree-to-tree), checks whether the work tree is dirty, and counts unified-diff lines for one modified blob:

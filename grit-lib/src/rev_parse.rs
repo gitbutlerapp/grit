@@ -1551,7 +1551,9 @@ fn resolve_revision_with_navigation(
                     }
                     .into());
                 }
-                Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+                Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
+                    RevParseError::AmbiguousArgument { .. },
+                ))) => {
                     return Err(RevParseError::InvalidObjectName {
                         name: before.to_owned(),
                     }
@@ -1884,7 +1886,9 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
                 }
                 .into());
             }
-            Err(Error::RevParse(RevParseError::AmbiguousArgument { .. })) => {
+            Err(Error::Revision(crate::revision_error::RevisionError::RevParse(
+                RevParseError::AmbiguousArgument { .. },
+            ))) => {
                 return Err(RevParseError::InvalidObjectName {
                     name: before.to_owned(),
                 }
@@ -5166,7 +5170,9 @@ mod line_coverage_tests {
             assert!(
                 matches!(
                     err,
-                    Error::RevParse(RevParseError::OutsideRepository { .. })
+                    Error::Revision(crate::revision_error::RevisionError::RevParse(
+                        RevParseError::OutsideRepository { .. },
+                    ))
                 ),
                 "{spec}: {err:?}"
             );

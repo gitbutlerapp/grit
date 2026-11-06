@@ -4,6 +4,7 @@ use grit_lib::blame::blame_file;
 use grit_lib::blame::BlameOptions;
 use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
 use grit_lib::error::Error;
+use grit_lib::revision_error::RevisionError;
 use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
 use grit_lib::refs::RefError;
@@ -182,9 +183,9 @@ fn head_caret_one_errors_without_reading_missing_parent() {
     let clone_dir = dir.path().join("shallow");
     let repo = grit_shallow_clone(&bare, &clone_dir, 1);
     match resolve_revision(&repo, "HEAD~1") {
-        Err(Error::RevisionNotFound { .. })
+        Err(Error::Revision(RevisionError::NotFound { .. }))
         | Err(Error::Ref(RefError::InvalidName { .. }))
-        | Err(Error::RevParse(_)) => {}
+        | Err(Error::Revision(RevisionError::RevParse(_))) => {}
         other => panic!("expected revision not found for HEAD~1, got {other:?}"),
     }
 }

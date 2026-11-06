@@ -817,7 +817,7 @@ fn change_id_from_commit_object_header(data: &[u8]) -> Option<ChangeId> {
 /// # Errors
 ///
 /// Returns [`Error::ObjectNotFound`] when nothing matches,
-/// [`Error::RevParse`] with [`RevParseError::AmbiguousChangeId`] when several commits match.
+/// [`RevParseError::AmbiguousChangeId`] when several commits match (wrapped in [`Error::Revision`]).
 pub fn resolve_commit_by_change_id_prefix(repo: &Repository, prefix: &str) -> Result<ObjectId> {
     let matches = find_commits_by_change_id_prefix(repo, prefix)?;
     match matches.len() {

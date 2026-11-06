@@ -243,7 +243,9 @@ fn ambiguous_change_id_lists_all_candidates() {
 
     let err = resolve_revision(&repo, shared.as_str()).expect_err("ambiguous full");
     match err {
-        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+        Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+            RevParseError::AmbiguousChangeId { candidates, .. },
+        )) => {
             assert_eq!(candidates.len(), 2);
             let oids: Vec<_> = candidates.iter().map(|c| c.oid_hex.as_str()).collect();
             assert!(oids.contains(&a.to_hex().as_str()));
@@ -279,7 +281,9 @@ fn ambiguous_change_id_prefix_lists_candidates() {
 
     let err = resolve_revision(&repo, "zzzzzzzzzzzzzzzz").expect_err("prefix ambiguous");
     match err {
-        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+        Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+            RevParseError::AmbiguousChangeId { candidates, .. },
+        )) => {
             assert_eq!(candidates.len(), 2);
         }
         other => panic!("expected AmbiguousChangeId, got {other:?}"),
@@ -342,7 +346,9 @@ fn ambiguous_when_derived_prefix_collides_with_stored_prefix() {
 
     let err = resolve_revision(&repo, &prefix).expect_err("ambiguous");
     match err {
-        Error::RevParse(RevParseError::AmbiguousChangeId { candidates, .. }) => {
+        Error::Revision(grit_lib::revision_error::RevisionError::RevParse(
+            RevParseError::AmbiguousChangeId { candidates, .. },
+        )) => {
             assert_eq!(candidates.len(), 2);
         }
         other => panic!("expected AmbiguousChangeId, got {other:?}"),

@@ -51,7 +51,7 @@ impl FilterSpec {
     pub fn parse(spec: &str) -> std::result::Result<Self, BundleError> {
         ObjectFilter::parse(spec)
             .map(Self)
-            .map_err(BundleError::MalformedLine)
+            .map_err(|e| BundleError::MalformedLine(e.to_string()))
     }
 
     /// Borrow the parsed filter.

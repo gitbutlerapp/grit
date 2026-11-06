@@ -1014,6 +1014,145 @@ pub enum ApplyError {
         hunk_index: usize,
     },
 
+    /// Patch path bytes are not valid UTF-8.
+    #[error("diff path is not valid UTF-8: {detail}")]
+    DiffPathNotUtf8 {
+        /// Underlying UTF-8 error detail.
+        detail: String,
+    },
+
+    /// Traditional unified diff without a recognizable `---` / `+++` filename.
+    #[error("unable to find filename in traditional patch")]
+    TraditionalPatchFilenameMissing,
+
+    /// Malformed `a/` or `b/` path in a `diff --git` header line.
+    #[error("malformed {side} path in diff --git header: {raw}")]
+    MalformedDiffGitPath {
+        /// Which side failed (`old` or `new`).
+        side: &'static str,
+        /// Raw header fragment.
+        raw: String,
+    },
+
+    /// Binary patch section size could not be parsed.
+    #[error("invalid binary patch section size: {detail}")]
+    InvalidBinaryPatchSectionSize {
+        /// Parse failure detail.
+        detail: String,
+    },
+
+    /// Binary patch payload ended before a complete section.
+    #[error("binary patch section missing or truncated")]
+    BinaryPatchSectionMissing,
+
+    /// Base85 decode failure in a binary patch line.
+    #[error("invalid binary patch base85: {detail}")]
+    InvalidBinaryPatchBase85 {
+        /// Decode error detail.
+        detail: String,
+    },
+
+    /// Unexpected character while decoding binary patch length prefix.
+    #[error("unexpected character in binary patch line: '{ch}'")]
+    BinaryPatchUnexpectedChar {
+        /// Offending character.
+        ch: char,
+    },
+
+    /// Binary patch line exceeds the encoded length limit.
+    #[error("binary patch line too long")]
+    BinaryPatchLineTooLong,
+
+    /// Zlib compression failed while building a binary patch.
+    #[error("zlib compress failed: {detail}")]
+    ZlibCompressFailed {
+        /// Underlying zlib message.
+        detail: String,
+    },
+
+    /// Zlib finish failed while building a binary patch.
+    #[error("zlib compress finish failed: {detail}")]
+    ZlibCompressFinishFailed {
+        /// Underlying zlib message.
+        detail: String,
+    },
+
+    /// Writing binary patch text failed.
+    #[error("write binary patch {phase} failed: {detail}")]
+    WriteBinaryPatchFailed {
+        /// Which section was being written (`header`, `forward`, `reverse`).
+        phase: &'static str,
+        /// Underlying error detail.
+        detail: String,
+    },
+
+    /// Inflating binary patch payload failed.
+    #[error("failed to inflate binary patch payload: {detail}")]
+    BinaryPatchInflateFailed {
+        /// Underlying zlib message.
+        detail: String,
+    },
+
+    /// Delta-style binary patch without a base blob.
+    #[error("binary patch delta requires a base blob")]
+    BinaryPatchDeltaRequiresBase,
+
+    /// Binary patch lacks a reverse section.
+    #[error("binary patch has no reverse section")]
+    BinaryPatchNoReverseSection,
+
+    /// Extended header line has an invalid or empty mode value.
+    #[error("invalid mode on line {line}: {raw}")]
+    InvalidPatchModeLine {
+        /// One-based line number in the patch input.
+        line: usize,
+        /// Full header line text.
+        raw: String,
+    },
+
+    /// Binary patch section header is not `literal` or `delta`.
+    #[error("unsupported binary patch section: '{header}'")]
+    UnsupportedBinaryPatchSection {
+        /// Raw section header line.
+        header: String,
+    },
+
+    /// A binary patch payload line was empty.
+    #[error("empty binary patch payload line")]
+    EmptyBinaryPatchPayloadLine,
+
+    /// Encoded binary patch line length is outside the supported range.
+    #[error("binary patch line length out of range: {raw_len}")]
+    BinaryPatchLineLengthOutOfRange {
+        /// Requested encoded length.
+        raw_len: usize,
+    },
+
+    /// Inflated literal size does not match the declared size.
+    #[error("binary patch literal size {actual} != declared {declared}")]
+    BinaryPatchLiteralSizeMismatch {
+        /// Size after inflation.
+        actual: usize,
+        /// Size from the section header.
+        declared: usize,
+    },
+
+    /// Hunk header line could not be parsed.
+    #[error("invalid hunk header: {header}: {detail}")]
+    InvalidHunkHeader {
+        /// Raw `@@` line.
+        header: String,
+        /// Parse failure detail.
+        detail: String,
+    },
+
+    /// Hunk range field could not be parsed.
+    #[error("invalid hunk range: {detail}")]
+    InvalidHunkRange {
+        /// Parse failure detail.
+        detail: String,
+    },
+
     /// Other apply parse failures.
     #[error("{0}")]
     Other(String),
@@ -1054,6 +1193,14 @@ pub enum ApplyError {
     /// Cancellation stopped the apply between files.
     #[error("operation cancelled")]
     Cancelled,
+}
+
+impl ApplyError {
+    /// Stable kind slug for all apply failures (`apply`).
+    #[must_use]
+    pub fn kind_name(&self) -> &'static str {
+        "apply"
+    }
 }
 
 /// `--pathspec-from-file` / `--pathspec-file-nul` parse failure.
@@ -1281,11 +1428,6 @@ pub enum Error {
     #[error("object not found: {0}")]
     ObjectNotFound(String),
 
-    /// A revision expression (branch, tag, object id, `x~n`, `ORIG_HEAD`, …) names nothing in
-    /// the repository. Holds the expression as the caller wrote it.
-    #[error("unknown revision '{0}'")]
-    RevisionNotFound(String),
-
     /// A partial-clone promisor object is not present locally and no fetcher ran.
     #[error("promised object not available locally: {0}")]
     PromisedObjectMissing(crate::objects::ObjectId),
@@ -1366,16 +1508,6 @@ pub enum Error {
         expected: crate::objects::ObjectKind,
         /// The kind the object actually has.
         actual: crate::objects::ObjectKind,
-    },
-
-    /// Two commits that were asked to be merged share no merge base, and the caller did not
-    /// allow merging unrelated histories.
-    #[error("commits {ours} and {theirs} have no common ancestor")]
-    UnrelatedHistories {
-        /// The commit being merged into.
-        ours: crate::objects::ObjectId,
-        /// The commit being merged in.
-        theirs: crate::objects::ObjectId,
     },
 
     /// A commit-graph write was given a commit whose parent is neither among the commits
@@ -1615,9 +1747,13 @@ pub enum Error {
     #[error(transparent)]
     Filter(#[from] FilterError),
 
-    /// Patch application failure.
+    /// Revision parsing, walking, merge-base, and object-filter failure.
     #[error(transparent)]
-    Apply(#[from] ApplyError),
+    Revision(#[from] crate::revision_error::RevisionError),
+
+    /// Diff, patch apply, and blame failure.
+    #[error(transparent)]
+    Diff(#[from] crate::diff::error::DiffError),
 
     /// Path resolves outside the repository.
     #[error(transparent)]
@@ -2095,10 +2231,6 @@ pub enum Error {
     #[error("cannot stash in a bare repository")]
     StashBareRepository,
 
-    /// [`crate::blame::BlameFinalSource::Worktree`] was requested in a bare repository.
-    #[error("cannot blame the working tree of a bare repository")]
-    BlameWorktreeBareRepository,
-
     /// [`crate::repo_handles::RepositoryStash::apply`] with `restore_index` could
     /// not merge the current index with the stashed index parent.
     #[error("conflicts in index while applying stash with --index")]
@@ -2152,14 +2284,6 @@ pub enum Error {
     /// ([`crate::maintenance::offload_blobs`]).
     #[error(transparent)]
     Offload(#[from] crate::offload::OffloadError),
-
-    /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
-    #[error(transparent)]
-    RevParse(#[from] crate::rev_parse_error::RevParseError),
-
-    /// Revision walking / `rev-list` option parsing failed ([`crate::rev_list_error::RevListError`]).
-    #[error(transparent)]
-    RevList(#[from] crate::rev_list_error::RevListError),
 
     /// A Git hook subprocess failed or could not be started.
     #[error(transparent)]
@@ -2268,32 +2392,6 @@ pub enum Error {
     /// Annotated tag tree-sha256 header parsing failed.
     #[error(transparent)]
     TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
-
-    /// `grit blame --ignore-rev` did not resolve to a commit.
-    #[error("cannot find revision {rev} to ignore")]
-    BlameIgnoreRevUnknown {
-        /// Revision expression from `--ignore-rev`.
-        rev: String,
-    },
-
-    /// `--ignore-revs-file` could not be read.
-    #[error("could not open object name list: {path}")]
-    BlameIgnoreRevsFileOpen {
-        /// Path argument (before expansion).
-        path: String,
-        /// Underlying open error.
-        #[source]
-        source: std::io::Error,
-    },
-
-    /// A line in an ignore-revs file is not a full-length object id.
-    #[error("invalid object name: {rev}")]
-    BlameIgnoreRevsFileInvalidRev {
-        /// Path argument for the file.
-        path: String,
-        /// Offending line text after comment/trim handling.
-        rev: String,
-    },
 }
 
 impl Error {
@@ -2324,7 +2422,6 @@ impl Error {
             Self::InvalidObjectId(..) => "invalid_object_id",
             Self::HashCollision { .. } => "hash_collision",
             Self::ObjectNotFound(..) => "object_not_found",
-            Self::RevisionNotFound(..) => "revision_not_found",
             Self::PromisedObjectMissing(..) => "promised_object_missing",
             Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
             Self::CorruptObject(..) => "corrupt_object",
@@ -2369,7 +2466,8 @@ impl Error {
             Self::Submodule(..) => "submodule",
             Self::Branch(..) => "branch",
             Self::Filter(..) => "filter",
-            Self::Apply(..) => "apply",
+            Self::Revision(re) => re.kind_name(),
+            Self::Diff(de) => de.kind_name(),
             Self::PathOutsideRepo(..) => "path_outside_repo",
             Self::Signing(..) => "signing",
             Self::Auth { .. } => "auth",
@@ -2426,7 +2524,6 @@ impl Error {
             Self::Message(..) => "message",
             Self::NotFastForward => "not_fast_forward",
             Self::NothingToCommit => "nothing_to_commit",
-            Self::UnrelatedHistories { .. } => "unrelated_histories",
             Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
             Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
@@ -2444,7 +2541,6 @@ impl Error {
             Self::StashCommitNotOnStack { .. } => "stash_commit_not_on_stack",
             Self::StashNoInitialCommit => "stash_no_initial_commit",
             Self::StashBareRepository => "stash_bare_repository",
-            Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
             Self::StashIndexConflict => "stash_index_conflict",
             Self::StashOptionConflict(..) => "stash_option_conflict",
             Self::HunkSelection(..) => "hunk_selection",
@@ -2456,8 +2552,6 @@ impl Error {
             Self::AmendUnborn => "amend_unborn",
             Self::Midx(..) => "midx",
             Self::Offload(..) => "offload",
-            Self::RevParse(..) => "rev_parse",
-            Self::RevList(..) => "rev_list",
             Self::Hook(..) => "hook",
             Self::History(..) => "history",
             Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
@@ -2472,9 +2566,6 @@ impl Error {
             Self::TagVerifyMissingObjectHeader => "tag_verify_missing_object_header",
             Self::TagVerifyDuplicateTreeSha256Header => "tag_verify_duplicate_tree_sha256_header",
             Self::TreeSha256Claim(..) => "tree_sha256_claim",
-            Self::BlameIgnoreRevUnknown { .. } => "blame_ignore_rev_unknown",
-            Self::BlameIgnoreRevsFileOpen { .. } => "blame_ignore_revs_file_open",
-            Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame_ignore_revs_file_invalid_rev",
         }
     }
 
@@ -2689,14 +2780,32 @@ impl Error {
     #[must_use]
     pub fn git_stderr_message(&self) -> String {
         match self {
-            Error::Apply(ApplyError::CorruptPatch { .. }) => {
-                crate::diagnostics::error_line(&self.to_string())
-            }
+            Error::Diff(crate::diff::error::DiffError::Apply(ApplyError::CorruptPatch {
+                ..
+            })) => crate::diagnostics::error_line(&self.to_string()),
             Error::Message(s) => s.clone(),
             Error::WouldOverwrite { message, .. } => message.clone(),
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
         }
+    }
+}
+
+impl From<crate::rev_parse_error::RevParseError> for Error {
+    fn from(err: crate::rev_parse_error::RevParseError) -> Self {
+        Self::Revision(crate::revision_error::RevisionError::RevParse(err))
+    }
+}
+
+impl From<crate::rev_list_error::RevListError> for Error {
+    fn from(err: crate::rev_list_error::RevListError) -> Self {
+        Self::Revision(crate::revision_error::RevisionError::RevList(err))
+    }
+}
+
+impl From<ApplyError> for Error {
+    fn from(err: ApplyError) -> Self {
+        Self::Diff(crate::diff::error::DiffError::Apply(err))
     }
 }
 

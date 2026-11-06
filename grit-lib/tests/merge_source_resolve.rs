@@ -176,7 +176,9 @@ fn missing_revision_is_typed_not_found() {
         "0123456789abcdef0123456789abcdef01234567",
     ] {
         match resolve_merge_source(&repo, spec) {
-            Err(Error::RevisionNotFound(s)) => assert_eq!(s, spec),
+            Err(Error::Revision(grit_lib::revision_error::RevisionError::NotFound { spec: s })) => {
+                assert_eq!(s, spec)
+            }
             other => panic!("{spec}: expected RevisionNotFound, got {other:?}"),
         }
     }
@@ -247,7 +249,9 @@ fn ranges_over_brace_containing_branch_are_not_found() {
         "foo{bar@{0}...main",
     ] {
         match resolve_merge_source(&repo, spec) {
-            Err(Error::RevisionNotFound(s)) => assert_eq!(s, spec),
+            Err(Error::Revision(grit_lib::revision_error::RevisionError::NotFound { spec: s })) => {
+                assert_eq!(s, spec)
+            }
             other => panic!("{spec}: expected RevisionNotFound, got {other:?}"),
         }
         // The general resolver supports merge-base shorthand, but merge sources must

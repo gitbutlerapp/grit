@@ -22,6 +22,7 @@ pub(crate) use core::{
     intern_merge_compare_three_way, merge_file_compacted_line_ops, merge_myops_from_preinterned_ids,
 };
 mod detail;
+pub mod error;
 mod files;
 mod filter;
 mod git_histogram;
@@ -117,6 +118,7 @@ pub fn line_diff_unified_hunk_body(
     core::unified_hunk_body_for_diff_options(old_content, new_content, options)
 }
 pub(crate) use core::{imara_unified_hunk_slices, unified_hunk_body_for_diff_options};
+pub use error::DiffError;
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
     write_diff_entry_log_patch, write_patch, write_patch_resolved, write_patch_structured,

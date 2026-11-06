@@ -357,6 +357,7 @@ pub(crate) mod rev_list;
 pub(crate) mod rev_list_error;
 pub(crate) mod rev_parse;
 pub(crate) mod rev_parse_error;
+pub mod revision_error;
 pub(crate) mod serve;
 pub(crate) mod shallow;
 pub(crate) mod shared_repo;

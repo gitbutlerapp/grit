@@ -1056,7 +1056,11 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
             assert!(
                 matches!(
                     err,
-                    grit_lib::error::Error::RevList(RevListError::SymmetricRangeRequired)
+                    grit_lib::error::Error::Revision(
+                        grit_lib::revision_error::RevisionError::RevList(
+                            RevListError::SymmetricRangeRequired,
+                        ),
+                    )
                 ),
                 "{tokens:?}: {err:?}"
             );
@@ -1064,7 +1068,11 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
             assert!(
                 matches!(
                     err,
-                    grit_lib::error::Error::RevList(RevListError::SymmetricRangeRequired)
+                    grit_lib::error::Error::Revision(
+                        grit_lib::revision_error::RevisionError::RevList(
+                            RevListError::SymmetricRangeRequired,
+                        ),
+                    )
                 ),
                 "symmetric_range_tips {tokens:?}: {err:?}"
             );

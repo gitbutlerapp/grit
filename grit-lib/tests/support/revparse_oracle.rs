@@ -136,7 +136,9 @@ pub fn oracle_expect_rev_parse_error(
         });
     }
     match grit_resolve(repo, spec, mode) {
-        Err(Error::RevParse(e)) if pred(&e) => Ok(()),
+        Err(Error::Revision(grit_lib::revision_error::RevisionError::RevParse(e))) if pred(&e) => {
+            Ok(())
+        }
         Ok(oid) => Err(OracleMismatch::GitErrGritOk {
             spec: spec.to_owned(),
             grit: oid,

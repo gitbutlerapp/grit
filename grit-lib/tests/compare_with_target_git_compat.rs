@@ -9,6 +9,7 @@ use grit_lib::refs::branch_tracking::{
     compare_with_target, compare_with_target_optional, BaseSource, TargetComparisonOptions,
     TargetSpec,
 };
+use grit_lib::revision_error::RevisionError;
 use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, unique_tmp, write_file};
@@ -138,7 +139,7 @@ fn compare_with_target_unknown_errors() {
     assert!(
         matches!(err, Error::ObjectNotFound(_))
             || matches!(err, Error::Ref(RefError::InvalidName { .. }))
-            || matches!(err, Error::RevParse(_))
+            || matches!(err, Error::Revision(RevisionError::RevParse(_)))
     );
 }
 
