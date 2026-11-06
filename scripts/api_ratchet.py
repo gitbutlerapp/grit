@@ -3959,6 +3959,10 @@ def variant_field_types(variant: dict[str, Any], index: dict[str, Any]) -> list[
         for field in vinner.get("fields") or []:
             if isinstance(field, dict) and "type" in field:
                 types.append(field["type"])
+    elif kind == "tuple":
+        for field in vinner.get("fields") or []:
+            if isinstance(field, dict) and "type" in field:
+                types.append(field["type"])
     elif isinstance(kind, dict) and "tuple" in kind:
         for fid in kind["tuple"]:
             field = index_entry(index, fid)
@@ -3976,6 +3980,26 @@ def variant_field_types(variant: dict[str, Any], index: dict[str, Any]) -> list[
     return types
 
 
+def variant_is_tuple_kind(variant: dict[str, Any]) -> bool:
+    """True when rustdoc describes a tuple variant (legacy inline or modern field-id encoding)."""
+    inner = variant.get("inner") or {}
+    if "variant" not in inner:
+        return False
+    kind = inner["variant"].get("kind")
+    return kind == "tuple" or (isinstance(kind, dict) and "tuple" in kind)
+
+
+def variant_is_string_tuple_payload(
+    variant: dict[str, Any],
+    index: dict[str, Any],
+) -> bool:
+    """True when a tuple variant's sole payload is ``String`` (not named struct fields)."""
+    if not variant_is_tuple_kind(variant):
+        return False
+    field_types = variant_field_types(variant, index)
+    return len(field_types) == 1 and type_display(field_types[0]) in STRING_RUST_TYPES
+
+
 def variant_carries_catch_all_string(
     variant: dict[str, Any],
     index: dict[str, Any],
@@ -3986,28 +4010,6 @@ def variant_carries_catch_all_string(
         return False
     field_types = variant_field_types(variant, index)
     return any(type_display(ty) in STRING_RUST_TYPES for ty in field_types)
-
-
-def variant_carries_string(variant: dict[str, Any], index: dict[str, Any]) -> bool:
-    """True when a variant's payload is a single `String` (tuple or struct field)."""
-    field_types = variant_field_types(variant, index)
-    if len(field_types) == 1 and type_display(field_types[0]) in STRING_RUST_TYPES:
-        return True
-    inner = variant.get("inner") or {}
-    if "variant" not in inner:
-        return False
-    kind = inner["variant"].get("kind")
-    fields = inner["variant"].get("fields") or []
-    if kind == "struct":
-        for field in fields:
-            if not isinstance(field, dict):
-                continue
-            fname = field.get("name", "")
-            if fname in ERROR_CATCH_ALL_VARIANTS or fname in {"detail", "message", "msg"}:
-                ty = field.get("type")
-                if type_display(ty) in STRING_RUST_TYPES:
-                    return True
-    return False
 
 
 def field_type_is_umbrella_error(type_node: Any) -> bool:
@@ -4058,7 +4060,7 @@ def collect_error_ratchet_metrics(
             vpath = f"{path} :: {vname}"
             if variant_carries_catch_all_string(variant, index):
                 catch_all.append(vpath)
-            if variant_carries_string(variant, index):
+            if variant_is_string_tuple_payload(variant, index):
                 string_tuple.append(vpath)
             for fty in variant_field_types(variant, index):
                 if field_type_is_umbrella_error(fty):

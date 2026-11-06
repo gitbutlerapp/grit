@@ -7,6 +7,7 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -86,7 +87,24 @@ class ErrorRatchetMetricTests(unittest.TestCase):
         types = ar.variant_field_types(variant, index)
         self.assertEqual([ar.type_display(t) for t in types], ["str"])
         self.assertTrue(ar.variant_carries_catch_all_string(variant, index))
-        self.assertTrue(ar.variant_carries_string(variant, index))
+        self.assertTrue(ar.variant_is_string_tuple_payload(variant, index))
+
+    def test_legacy_inline_tuple_string_payload(self) -> None:
+        index = {
+            "30": {
+                "id": 30,
+                "name": "Message",
+                "inner": {
+                    "variant": {
+                        "kind": "tuple",
+                        "fields": [{"type": {"primitive": "str"}}],
+                    }
+                },
+            },
+        }
+        variant = index["30"]
+        self.assertTrue(ar.variant_is_tuple_kind(variant))
+        self.assertTrue(ar.variant_is_string_tuple_payload(variant, index))
 
     def test_catch_all_struct_field_not_tuple(self) -> None:
         index = {
@@ -108,7 +126,7 @@ class ErrorRatchetMetricTests(unittest.TestCase):
         }
         variant = index["20"]
         self.assertTrue(ar.variant_carries_catch_all_string(variant, index))
-        self.assertTrue(ar.variant_carries_string(variant, index))
+        self.assertFalse(ar.variant_is_string_tuple_payload(variant, index))
 
     def test_error_ratchet_metrics_on_synthetic_message_enum(self) -> None:
         payload = _minimal_rustdoc(
@@ -140,7 +158,13 @@ class ErrorRatchetMetricTests(unittest.TestCase):
                 },
             },
         )
+        payload["paths"]["1"] = {
+            "crate_id": 0,
+            "path": ["grit_lib", "error", "Error"],
+            "kind": "enum",
+        }
         snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["umbrella_error_variants"].count, 1)
         self.assertEqual(snap.metrics["pub_error_catch_all_variants"].count, 1)
         self.assertEqual(snap.metrics["pub_error_string_tuple_variants"].count, 1)
 
@@ -181,7 +205,19 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             },
         )
         snap = ar.compute_metrics(public_api_text="", payload=payload)
-        self.assertGreaterEqual(snap.metrics["pub_area_error_wraps_umbrella"].count, 1)
+        self.assertEqual(snap.metrics["pub_area_error_wraps_umbrella"].count, 1)
+
+    def test_error_message_construction_sites_synthetic_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "src" / "sample.rs"
+            src.parent.mkdir(parents=True)
+            src.write_text(
+                'fn f() { let _ = Error::Message("a"); Error::Message(format!("b")); }',
+                encoding="utf-8",
+            )
+            with mock.patch.object(ar, "GRIT_LIB", root):
+                self.assertEqual(ar.count_error_message_construction_sites(), 2)
 
     def test_write_baseline_preserves_semver_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -209,7 +245,7 @@ class ErrorRatchetMetricTests(unittest.TestCase):
             self.assertIn('semver_baseline = "deadbeef"', text)
             self.assertIn("public_api_lines = 2", text)
 
-    def test_non_exhaustive_error_enum_counted(self) -> None:
+    def test_non_exhaustive_error_enum_excluded_when_attributed(self) -> None:
         payload = _minimal_rustdoc(
             {
                 "name": "SampleError",
@@ -224,6 +260,21 @@ class ErrorRatchetMetricTests(unittest.TestCase):
         payload["index"]["1"]["attrs"] = {"non_exhaustive": None}
         snap = ar.compute_metrics(public_api_text="", payload=payload)
         self.assertEqual(snap.metrics["pub_error_enum_not_non_exhaustive"].count, 0)
+
+    def test_non_exhaustive_error_enum_included_without_attribute(self) -> None:
+        payload = _minimal_rustdoc(
+            {
+                "name": "SampleError",
+                "inner": {
+                    "enum": {
+                        "variants": [],
+                        "has_stripped_fields": False,
+                    }
+                },
+            },
+        )
+        snap = ar.compute_metrics(public_api_text="", payload=payload)
+        self.assertEqual(snap.metrics["pub_error_enum_not_non_exhaustive"].count, 1)
 
 
 class ApiRatchetMetricTests(unittest.TestCase):
