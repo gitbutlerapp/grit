@@ -126,9 +126,7 @@ pub(crate) fn swap_ref_as(
         reflog,
     ) {
         Ok(()) => Ok(Swap::Done),
-        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))) => {
-            Ok(Swap::Moved)
-        }
+        Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch { .. }))) => Ok(Swap::Moved),
         Err(e) => Err(e.into()),
     }
 }

@@ -14,8 +14,8 @@ use grit_lib::refs::store::{
     BackendError, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat,
     RefStore, RefStoreError, RefTransaction,
 };
+use grit_lib::refs::RefError;
 use grit_test_support::refstore_conformance::run_suite;
-use crate::refs::RefError;
 
 #[derive(Debug, Default)]
 struct Inner {

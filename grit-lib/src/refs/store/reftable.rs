@@ -30,7 +30,9 @@ use super::transaction::RefTransaction;
 use super::types::RefReflogRename;
 use crate::refs::RefError;
 
-use super::{Expected, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
+use super::{
+    Expected, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate,
+};
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 

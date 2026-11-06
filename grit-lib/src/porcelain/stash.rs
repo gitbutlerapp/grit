@@ -73,6 +73,7 @@ use crate::progress::{
     poll_cancel, Cancel, NeverCancel, NullProgress, ProgressPhase, ProgressScope, ProgressSink,
 };
 use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store};
+use crate::refs::RefError;
 use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
 use crate::repo::Repository;
 use crate::repo_relpath::{
@@ -82,7 +83,6 @@ use crate::repo_relpath::{
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
-use crate::refs::RefError;
 
 /// A single blob entry from a recursively flattened tree.
 #[derive(Clone)]
@@ -574,14 +574,12 @@ pub fn parse_stash_reference(repo: &Repository, spec: Option<&str>) -> Result<St
         raw
     };
     if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
-        let n = digits
-            .parse::<usize>()
-            .map_err(|source| {
-                Error::Ref(RefError::ReflogInvalidIndex {
-                    spec: raw.to_owned(),
-                    source,
-                })
-            })?;
+        let n = digits.parse::<usize>().map_err(|source| {
+            Error::Ref(RefError::ReflogInvalidIndex {
+                spec: raw.to_owned(),
+                source,
+            })
+        })?;
         return Ok(StashReference::Index(n));
     }
     let oid = crate::rev_parse::resolve_revision_as_commit(repo, raw)?;

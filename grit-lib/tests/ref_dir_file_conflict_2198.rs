@@ -13,11 +13,11 @@ use grit_lib::error::Error;
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
 use grit_lib::porcelain::switch::{resolve_create_branch, switch_repository, SwitchOptions};
 use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::RefError;
 use grit_lib::refs::{resolve_ref, RefnameUnavailable};
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode, UpdateMode};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
-use crate::refs::RefError;
 
 /// How `refs/heads/rel/1.0` is stored when `rel` is created.
 #[derive(Clone, Copy, Debug)]

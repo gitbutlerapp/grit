@@ -803,10 +803,12 @@ fn checked_out_error(repo: &Repository, name: &str) -> Result<Error> {
 
 fn map_checked_out_err(err: Error, name: &str) -> Error {
     match err {
-        Error::Branch(BranchError::CheckedOut { worktree, .. }) => Error::Branch(BranchError::CheckedOut {
-            name: name.to_owned(),
-            worktree: path_for_error_message(Path::new(&worktree)),
-        }),
+        Error::Branch(BranchError::CheckedOut { worktree, .. }) => {
+            Error::Branch(BranchError::CheckedOut {
+                name: name.to_owned(),
+                worktree: path_for_error_message(Path::new(&worktree)),
+            })
+        }
         other => other,
     }
 }

@@ -14,7 +14,6 @@ use crate::notes::{
     apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesError, NotesRewriteCommand,
     NotesRewritePlan,
 };
-use crate::refs::RefError;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
@@ -35,6 +34,7 @@ use crate::refs::store::RefUpdateFlags;
 use crate::refs::store::{
     Expected, RawRef, RefStoreError, RefTransaction, RefUpdate, ReflogUpdate,
 };
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
@@ -1620,7 +1620,9 @@ fn head_commit_after(
     }
     match head {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
-        HeadState::Branch { oid: None, .. } => Err(crate::error::Error::Ref(RefError::UnbornHead).into()),
+        HeadState::Branch { oid: None, .. } => {
+            Err(crate::error::Error::Ref(RefError::UnbornHead).into())
+        }
         HeadState::Invalid => Err(crate::error::Error::Ref(RefError::InvalidHead).into()),
     }
 }

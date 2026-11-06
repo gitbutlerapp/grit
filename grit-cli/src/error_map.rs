@@ -9,6 +9,7 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
+use grit_lib::refs::RefError;
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
@@ -217,7 +218,7 @@ pub fn resolve_rebase_upstream_revision(
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
         LibError::RevisionNotFound(spec) => crate::json_error::revision_not_found(&spec),
-        LibError::UnbornHead => crate::unborn_errors::unborn_head_from_cwd()
+        LibError::Ref(RefError::UnbornHead) => crate::unborn_errors::unborn_head_from_cwd()
             .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         other => {
             let wrapped = Error::new(other);
@@ -740,9 +741,8 @@ pub fn map_branch_error(err: LibError) -> Error {
             })
         }
         LibError::Branch(BranchError::CheckedOut { worktree, .. }) => {
-            let worktree = grit_lib::config::git_path::path_for_error_message(
-                std::path::Path::new(&worktree),
-            );
+            let worktree =
+                grit_lib::config::git_path::path_for_error_message(std::path::Path::new(&worktree));
             let human = format!("branch is checked out in '{worktree}'");
             Error::new(StructuredCliError {
                 payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
@@ -1054,7 +1054,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 .or_else(|| Some(git_dir_path_io_hint(path))),
             Some(vec![path.clone()]),
         )),
-        LibError::UnbornHead => Some(
+        LibError::Ref(grit_lib::refs::RefError::UnbornHead) => Some(
             crate::unborn_errors::unborn_head_from_cwd()
                 .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         ),

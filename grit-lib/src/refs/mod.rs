@@ -90,9 +90,9 @@ pub const SYMREF_MAXDEPTH: usize = 5;
 
 fn map_public_ref_store_error(err: Error, refname: &str) -> Error {
     match err {
-        Error::Ref(RefError::Store(store::RefStoreError::SymrefLoop)) => {
-            Error::Ref(RefError::invalid_reason(format!("ref symlink too deep: {refname}")))
-        }
+        Error::Ref(RefError::Store(store::RefStoreError::SymrefLoop)) => Error::Ref(
+            RefError::invalid_reason(format!("ref symlink too deep: {refname}")),
+        ),
         other => other,
     }
 }
@@ -111,7 +111,12 @@ fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
     {
         return Err(directory_in_the_way(git_dir, refname, &path));
     }
-    if path.is_file() && matches!(read_ref_file(&path), Err(Error::Ref(RefError::InvalidName { .. }))) {
+    if path.is_file()
+        && matches!(
+            read_ref_file(&path),
+            Err(Error::Ref(RefError::InvalidName { .. }))
+        )
+    {
         return Err(Error::Ref(RefError::invalid_reason(format!(
             "cannot update ref '{refname}': reference broken"
         ))));
@@ -2710,7 +2715,12 @@ fn write_ref_at_storage(
     {
         return Err(directory_in_the_way(git_dir, refname, &path));
     }
-    if path.is_file() && matches!(read_ref_file(&path), Err(Error::Ref(RefError::InvalidName { .. }))) {
+    if path.is_file()
+        && matches!(
+            read_ref_file(&path),
+            Err(Error::Ref(RefError::InvalidName { .. }))
+        )
+    {
         return Err(Error::Ref(RefError::invalid_reason(format!(
             "cannot update ref '{refname}': reference broken"
         ))));
@@ -5184,12 +5194,18 @@ pub fn resolve_at_n_branch(git_dir: &Path, spec: &str) -> Result<String> {
     let inner = spec
         .strip_prefix("@{-")
         .and_then(|s| s.strip_suffix('}'))
-        .ok_or_else(|| Error::Ref(RefError::invalid_reason(format!("not an @{{-N}} ref: {spec}"))))?;
+        .ok_or_else(|| {
+            Error::Ref(RefError::invalid_reason(format!(
+                "not an @{{-N}} ref: {spec}"
+            )))
+        })?;
     let n: usize = inner
         .parse()
         .map_err(|_| Error::Ref(RefError::invalid_reason(format!("invalid N in {spec}"))))?;
     if n == 0 {
-        return Err(Error::Ref(RefError::invalid_reason("@{-0} is not valid".to_string())));
+        return Err(Error::Ref(RefError::invalid_reason(
+            "@{-0} is not valid".to_string(),
+        )));
     }
     let entries = crate::reflog::read_reflog(git_dir, "HEAD")?;
     let mut count = 0usize;
@@ -5653,7 +5669,10 @@ mod ref_storage_traversal_guard_tests {
     }
 
     fn assert_invalid_ref_preserves_config(git_dir: &Path, result: Result<()>) {
-        assert!(matches!(result, Err(Error::Ref(RefError::InvalidName { .. }))));
+        assert!(matches!(
+            result,
+            Err(Error::Ref(RefError::InvalidName { .. }))
+        ));
         assert!(
             git_dir.join("config").is_file(),
             "repository config must not be touched"

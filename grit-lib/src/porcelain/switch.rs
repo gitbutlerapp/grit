@@ -34,9 +34,9 @@ use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
 use crate::rev_parse_error::RevParseError;
 
+use crate::refs::RefError;
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::state::{resolve_head_for_repository, HeadState};
-use crate::refs::RefError;
 
 /// Resolved switch target after DWIM and revision parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2219,7 +2219,10 @@ mod tests {
         let not_commit =
             resolve_create_branch(&repo, "from-tree", Some(&tree_spec), TrackMode::Auto)
                 .expect_err("tree start");
-        assert!(matches!(not_commit, Error::Ref(RefError::InvalidName { .. })));
+        assert!(matches!(
+            not_commit,
+            Error::Ref(RefError::InvalidName { .. })
+        ));
         let _ = tip;
     }
 

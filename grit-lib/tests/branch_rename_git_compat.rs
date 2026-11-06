@@ -13,13 +13,13 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
     ReflogUpdate,
 };
+use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 
 use crate::support;
 
 use support::{git_init_reftable_repo, require_reftable_git};
-use crate::refs::RefError;
 
 fn oid(dir: &Path, rev: &str) -> ObjectId {
     git(dir, &["rev-parse", rev]).trim().parse().expect("oid")
@@ -502,9 +502,14 @@ fn rename_aborts_when_destination_reflog_path_is_directory() {
     assert!(
         matches!(
             err,
-            Error::Ref(RefError::Store(grit_lib::refs::store::RefStoreError::NameUnavailable {
-                reason: grit_lib::refs::RefnameUnavailable::DescendantExists { ref blocking, .. }
-            }) if blocking == "refs/heads/new/x/y"
+            Error::Ref(RefError::Store(
+                grit_lib::refs::store::RefStoreError::NameUnavailable {
+                    reason: grit_lib::refs::RefnameUnavailable::DescendantExists {
+                        ref blocking,
+                        ..
+                    },
+                },
+            )) if blocking == "refs/heads/new/x/y"
         ),
         "{err:?}"
     );

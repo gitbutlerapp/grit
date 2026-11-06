@@ -67,11 +67,11 @@ fn cancel_watch_for_walk(cancel: &Option<CancelToken>) -> Option<Arc<AtomicBool>
 }
 use crate::reflog::{read_reflog_on_store, reflog_refs_on_store};
 use crate::refs;
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
 use crate::revwalk::filter::CommitFilter;
-use crate::refs::RefError;
 
 /// Behavior when reachable objects are missing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1128,7 +1128,9 @@ pub fn rev_list(
                 commit_data: OidHashMap::default(),
             });
         }
-        return Err(Error::Ref(RefError::invalid_reason("no revisions specified".to_owned())));
+        return Err(Error::Ref(RefError::invalid_reason(
+            "no revisions specified".to_owned(),
+        )));
     }
 
     if let Some(result) = try_rev_list_accelerated(
@@ -2378,7 +2380,11 @@ fn resolve_specs_with_options(
     for spec in specs {
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. })) if ignore_missing => continue,
+            Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. }))
+                if ignore_missing =>
+            {
+                continue
+            }
             Err(err) => return Err(err),
         };
         match repo.odb().peel_to_commit(oid) {
@@ -2390,7 +2396,8 @@ fn resolve_specs_with_options(
             // (e.g. submodule-change detection over a remote carrying a tag-of-blob, t5516
             // "refuse fetch to current branch of worktree") do not abort.
             Ok(None) => {}
-            Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. })) if ignore_missing => {}
+            Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. }))
+                if ignore_missing => {}
             Err(err) => return Err(err),
         }
     }
@@ -2502,14 +2509,18 @@ fn resolve_specs_for_objects_with_options(
             if !path.is_empty() {
                 let treeish_oid = match resolve_revision_for_range_end(repo, treeish) {
                     Ok(oid) => oid,
-                    Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. })) if ignore_missing => {
+                    Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. }))
+                        if ignore_missing =>
+                    {
                         continue;
                     }
                     Err(err) => return Err(err),
                 };
                 let object_oid = match resolve_treeish_path(repo, treeish_oid, path) {
                     Ok(oid) => oid,
-                    Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. })) if ignore_missing => {
+                    Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. }))
+                        if ignore_missing =>
+                    {
                         continue;
                     }
                     Err(err) => return Err(err),
@@ -2537,7 +2548,11 @@ fn resolve_specs_for_objects_with_options(
 
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. })) if ignore_missing => continue,
+            Err(Error::ObjectNotFound(_) | Error::Ref(RefError::InvalidName { .. }))
+                if ignore_missing =>
+            {
+                continue
+            }
             Err(err) => return Err(err),
         };
         match repo.odb().peel_to_commit(oid) {

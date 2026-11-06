@@ -19,6 +19,7 @@ use crate::objects::parse_tree;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::odb::Odb;
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
@@ -28,7 +29,6 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
-use crate::refs::RefError;
 
 /// Maximum length of a single `.gitattributes` line (bytes), matching Git (`ATTR_MAX_LINE_LENGTH`).
 /// Lines of this length or longer are ignored with a warning.

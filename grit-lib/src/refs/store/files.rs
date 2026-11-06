@@ -47,8 +47,8 @@ use super::validation::{
     verify_create_casefold_with_lookup, verify_create_conflicts, verify_name_available_for_create,
 };
 use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
-use crate::refs::RefnameUnavailable;
 use crate::refs::RefError;
+use crate::refs::RefnameUnavailable;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -1285,9 +1285,9 @@ impl FilesRefStore {
     /// [`GitDirPathOperation::CreateDir`] failure; otherwise as [`Self::acquire_ref_lock_mapped`].
     fn lock_ref(&self, refname: &str, lock_path: &Path, wait: LockWait) -> Result<()> {
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
-            return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                reason,
-            })));
+            return Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable { reason },
+            )));
         }
         let Err(first_err) = self.acquire_ref_lock_mapped(lock_path, refname, wait) else {
             return Ok(());
@@ -1303,34 +1303,38 @@ impl FilesRefStore {
         }
         if let Some(parent) = lock_path.parent() {
             if parent.is_file() {
-                return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                    reason: RefnameUnavailable::AncestorExists {
-                        blocking: loose_storage_path_to_refname(&self.common_dir, parent),
-                        new_ref: refname.to_owned(),
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: RefnameUnavailable::AncestorExists {
+                            blocking: loose_storage_path_to_refname(&self.common_dir, parent),
+                            new_ref: refname.to_owned(),
+                        },
                     },
-                })));
+                )));
             }
             if let Err(source) = fs::create_dir_all(parent) {
                 if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
-                    return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                        reason,
-                    })));
+                    return Err(Error::Ref(RefError::Store(
+                        RefStoreError::NameUnavailable { reason },
+                    )));
                 }
                 self.io_ref_store(parent, GitDirPathOperation::CreateDir, Err(source))?;
             }
             if parent.is_file() {
-                return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                    reason: RefnameUnavailable::AncestorExists {
-                        blocking: loose_storage_path_to_refname(&self.common_dir, parent),
-                        new_ref: refname.to_owned(),
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: RefnameUnavailable::AncestorExists {
+                            blocking: loose_storage_path_to_refname(&self.common_dir, parent),
+                            new_ref: refname.to_owned(),
+                        },
                     },
-                })));
+                )));
             }
         }
         if let Some(reason) = self.name_unavailable_if_ancestor_is_loose_file(refname) {
-            return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                reason,
-            })));
+            return Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable { reason },
+            )));
         }
         match self.acquire_ref_lock_mapped(lock_path, refname, wait) {
             Ok(()) => Ok(()),
@@ -1352,9 +1356,9 @@ impl FilesRefStore {
             lock_path,
             &err,
         ) {
-            Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                reason,
-            })))
+            Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable { reason },
+            )))
         } else {
             Err(err)
         }
@@ -1453,18 +1457,22 @@ impl FilesRefStore {
     ) -> Result<()> {
         if let Some(parent) = lock.parent() {
             if parent.is_file() {
-                return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                    reason: RefnameUnavailable::AncestorExists {
-                        blocking: loose_storage_path_to_refname(common_dir, parent),
-                        new_ref: refname.to_owned(),
+                return Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: RefnameUnavailable::AncestorExists {
+                            blocking: loose_storage_path_to_refname(common_dir, parent),
+                            new_ref: refname.to_owned(),
+                        },
                     },
-                })));
+                )));
             }
         }
         if path.is_dir() && crate::refs::dir_tree_has_files(path) {
-            return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
-            })));
+            return Err(Error::Ref(RefError::Store(
+                RefStoreError::NameUnavailable {
+                    reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
+                },
+            )));
         }
         let content = match value {
             RawRef::Direct(oid) => format!("{oid}\n"),
@@ -1483,9 +1491,9 @@ impl FilesRefStore {
                     name_unavailable_if_lock_path_io_blocked(common_dir, refname, path, lock, &err)
                 {
                     let _ = fs::remove_file(lock);
-                    return Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                reason,
-            })));
+                    return Err(Error::Ref(RefError::Store(
+                        RefStoreError::NameUnavailable { reason },
+                    )));
                 }
                 return Err(err);
             }
@@ -1507,9 +1515,13 @@ impl FilesRefStore {
                 ) =>
             {
                 let _ = fs::remove_file(lock);
-                Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable {
-                    reason: name_unavailable_after_loose_rename_conflict(refname, path, common_dir),
-                })))
+                Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable {
+                        reason: name_unavailable_after_loose_rename_conflict(
+                            refname, path, common_dir,
+                        ),
+                    },
+                )))
             }
             Err(err) => io_with_ref_store_path(
                 common_dir,

@@ -5,6 +5,7 @@ use std::io::Write;
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
+use grit_lib::notes::NotesError;
 use grit_lib::notes::{resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::repo::Repository;

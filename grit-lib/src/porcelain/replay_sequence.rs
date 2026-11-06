@@ -35,6 +35,7 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
+use crate::refs::RefError;
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -50,7 +51,6 @@ use crate::state::{
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
-use crate::refs::RefError;
 
 /// How to handle a replay step whose merged tree matches `HEAD` (empty patch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

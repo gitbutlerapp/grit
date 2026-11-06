@@ -22,6 +22,7 @@ use grit_lib::porcelain::replay_sequence::{
     skip_replay_step, start_replay_sequence, ReplayAbortOutcome, ReplayCreated, ReplayOptions,
     ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
+use grit_lib::refs::RefError;
 use grit_lib::state::InProgressOperation;
 use grit_lib::state::{operation_alternatives, operation_next_steps_empty};
 use schemars::JsonSchema;

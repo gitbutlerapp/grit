@@ -24,12 +24,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
-use crate::refs::RefError;
 use crate::fetch::{NoProgress, Progress};
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
+use crate::refs::RefError;
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use std::num::NonZeroU32;
 
@@ -3085,11 +3085,9 @@ fn push_status_for_ref_store_error(err: &Error) -> PushRefStatus {
             expected: crate::refs::store::Expected::Missing,
             ..
         })) => PushRefStatus::RejectAlreadyExists,
-        Error::Ref(RefError::Store(
-            crate::refs::store::RefStoreError::ExpectedMismatch { .. },
-        )) => {
-            PushRefStatus::RejectStale
-        }
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::ExpectedMismatch {
+            ..
+        })) => PushRefStatus::RejectStale,
         _ => PushRefStatus::RemoteRejected,
     }
 }
@@ -4137,10 +4135,15 @@ pub(crate) struct FetchRefRejectHint<'a> {
 fn fetch_ref_store_error_rejectable(err: &Error) -> bool {
     matches!(
         err,
-        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::NameUnavailable { .. }))
-            | Error::Ref(RefError::Store(crate::refs::store::RefStoreError::LockHeld { .. }))
-            | Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CreateExists { .. }))
-            | Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CaseConflict { .. }))
+        Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::NameUnavailable { .. }
+        )) | Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::LockHeld { .. }
+        )) | Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::CreateExists { .. }
+        )) | Error::Ref(RefError::Store(
+            crate::refs::store::RefStoreError::CaseConflict { .. }
+        ))
     )
 }
 
@@ -4193,9 +4196,10 @@ fn mark_fetch_ref_update_rejected(
         Error::Ref(RefError::Store(crate::refs::store::RefStoreError::LockHeld { name })) => {
             format!("ref '{name}' is locked")
         }
-        Error::Ref(RefError::Store(
-            crate::refs::store::RefStoreError::CaseConflict { name, other },
-        )) => {
+        Error::Ref(RefError::Store(crate::refs::store::RefStoreError::CaseConflict {
+            name,
+            other,
+        })) => {
             format!(
                 "cannot store '{name}' and '{other}' as loose refs when core.ignorecase is enabled \
                  — use `grit init --ref-format=reftable` and fetch again to keep both spellings"

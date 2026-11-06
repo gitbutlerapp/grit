@@ -3342,9 +3342,9 @@ pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
 /// errors when it is missing or malformed.
 pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> {
     odb.commit_tree(commit_oid).map_err(|err| match err {
-        Error::UnexpectedObjectKind { .. } => {
-            Error::Ref(RefError::invalid_reason(format!("invalid ref: {commit_oid} is not a commit")))
-        }
+        Error::UnexpectedObjectKind { .. } => Error::Ref(RefError::invalid_reason(format!(
+            "invalid ref: {commit_oid} is not a commit"
+        ))),
         other => other,
     })
 }
@@ -3547,13 +3547,13 @@ fn diff_trees_opts(
     Ok(result)
 }
 
+use crate::refs::RefError;
 #[cfg(test)]
 use std::cell::RefCell;
 #[cfg(test)]
 use std::rc::Rc;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
-use crate::refs::RefError;
 
 #[cfg(test)]
 thread_local! {

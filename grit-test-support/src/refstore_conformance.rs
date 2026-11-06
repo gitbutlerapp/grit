@@ -27,11 +27,11 @@ use std::thread;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::ReflogEntry;
-use grit_lib::refs::RefError;
 use grit_lib::refs::store::{
     Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefStore, RefStoreError, RefTransaction,
     RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
+use grit_lib::refs::RefError;
 
 /// One conformance case: receives a fresh empty store and panics on a violation.
 pub type Case = fn(Arc<dyn RefStore>);

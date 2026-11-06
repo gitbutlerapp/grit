@@ -19,7 +19,6 @@ use grit_lib::refs::{
 use grit_lib::repo::{InitOptions, Repository};
 
 use support::{
-use crate::refs::RefError;
     assert_fsck_when_git_interop, duplicate_repo, each_backend, git, git_empty_commit_oid,
     git_interop_available, git_show_ref, git_update_ref_stdin, ref_store_bytes_snapshot,
     reflog_bytes_snapshot, reftable_tables_snapshot, two_commit_oids, Backend,
@@ -501,6 +500,7 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     use grit_lib::error::Error;
     use grit_lib::refs::store::{Expected, RawRef, RefStoreError};
     use grit_lib::refs::verify_branch_commit_cas;
+    use grit_lib::refs::RefError;
 
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
@@ -547,10 +547,10 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     assert!(matches!(
         verify_branch_commit_cas(Some(oid), None, "refs/heads/gone"),
         Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
-            expected: Expected::Oid(want)),
+            expected: Expected::Oid(want),
             actual: None,
             ..
-        })) if want == oid
+        }))) if want == oid
     ));
 }
 

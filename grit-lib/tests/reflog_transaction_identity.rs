@@ -12,10 +12,10 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
     RefUpdateFlags, ReflogUpdate,
 };
+use grit_lib::refs::RefError;
 use grit_lib::repo::{InitOptions, Repository};
 use support::require_reftable_git;
 use tempfile::TempDir;
-use crate::refs::RefError;
 
 fn forged_log() -> ReflogUpdate {
     ReflogUpdate {
@@ -43,7 +43,10 @@ fn forged_head_update(tip: ObjectId) -> RefUpdate {
 
 fn assert_invalid_reflog_signature(err: Error) {
     let is_invalid = matches!(err, Error::InvalidSignature(_))
-        || matches!(err, Error::Ref(RefError::Store(RefStoreError::InvalidReflog(_)));
+        || matches!(
+            err,
+            Error::Ref(RefError::Store(RefStoreError::InvalidReflog(_)))
+        );
     assert!(is_invalid, "expected invalid reflog/signature, got {err:?}");
 }
 

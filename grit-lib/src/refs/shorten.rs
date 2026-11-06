@@ -4,10 +4,10 @@ use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 use crate::diagnostics::Warning;
 use crate::error::{Error, Result};
 use crate::refs::store::RawRef;
+use crate::refs::RefError;
 use crate::refs::SYMREF_MAXDEPTH;
 use crate::repo::Repository;
 use crate::worktree_ref::DWIM_RULES;
-use crate::refs::RefError;
 
 /// Rev-parse DWIM rules in Git precedence order (see `ref_rev_parse_rules` in upstream Git).
 const REV_PARSE_RULES: &[&str] = &[

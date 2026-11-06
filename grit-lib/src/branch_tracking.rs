@@ -11,8 +11,8 @@ use crate::merge_base::ahead_behind_of_target_commits;
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
-use crate::refs::RefError;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+use crate::refs::RefError;
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
@@ -485,7 +485,9 @@ pub fn compare_with_target_optional(
         HeadState::Branch { .. } => return Err(crate::error::Error::Ref(RefError::UnbornHead)),
         HeadState::Detached { .. } => return Err(crate::error::Error::Ref(RefError::DetachedHead)),
         HeadState::Invalid => {
-            return Err(crate::error::Error::Ref(RefError::invalid_reason("invalid HEAD")));
+            return Err(crate::error::Error::Ref(RefError::invalid_reason(
+                "invalid HEAD",
+            )));
         }
     };
 
@@ -1301,7 +1303,10 @@ mod tests {
             compare_with_target(&repo, &opts).map(Some),
             compare_with_target_optional(&repo, &opts),
         ] {
-            assert!(matches!(result, Err(crate::error::Error::Ref(RefError::UnbornHead))));
+            assert!(matches!(
+                result,
+                Err(crate::error::Error::Ref(RefError::UnbornHead))
+            ));
         }
         std::fs::write(
             repo.git_dir().join("HEAD"),
@@ -1312,7 +1317,10 @@ mod tests {
             compare_with_target(&repo, &opts).map(Some),
             compare_with_target_optional(&repo, &opts),
         ] {
-            assert!(matches!(result, Err(crate::error::Error::Ref(RefError::DetachedHead))));
+            assert!(matches!(
+                result,
+                Err(crate::error::Error::Ref(RefError::DetachedHead))
+            ));
         }
         std::fs::write(repo.git_dir().join("HEAD"), "invalid\n").unwrap();
         for result in [

@@ -86,9 +86,9 @@ use crate::porcelain::commit::{
     create_commit_with_loaded_index, default_commit_scope_from_config, run_commit_message_hooks,
     CommitRequest, CommitScope, HookPolicy, MessageSource,
 };
+use crate::refs::RefError;
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
-use crate::refs::RefError;
 
 /// Flatten a tree object into a recursive list of [`IndexEntry`] values.
 ///
@@ -1014,9 +1014,11 @@ fn canonical_integrate_into_ref(repo: &Repository, into_ref: &str) -> Result<Str
     }
     let canonical = format!("refs/heads/{into_ref}");
     if repo.refs().resolve(&canonical).is_err() {
-        return Err(Error::Branch(crate::porcelain::branch_error::BranchError::NotFound {
-            name: into_ref.to_owned(),
-        }));
+        return Err(Error::Branch(
+            crate::porcelain::branch_error::BranchError::NotFound {
+                name: into_ref.to_owned(),
+            },
+        ));
     }
     Ok(canonical)
 }

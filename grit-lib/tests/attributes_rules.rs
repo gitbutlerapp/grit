@@ -7,6 +7,7 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::index::Index;
+use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::attributes::{
     attribute_matching_ignore_case, builtin_objectmode_index, builtin_objectmode_worktree,
@@ -18,7 +19,6 @@ use grit_lib::worktree::attributes::{
     resolve_tree_oid, validate_rules_for_add, AttrValue, MAX_ATTR_FILE_BYTES, MAX_ATTR_LINE_BYTES,
 };
 use support::{
-use crate::refs::RefError;
     assert_all_attrs_match, assert_attrs_match, grit_attr_value, grit_repo, hermetic_git,
     hermetic_git_ok, init_git_repo, load_cached_parsed, load_source_parsed, load_worktree_parsed,
     rel_path_for_check, setup_t0003_tags, setup_t0003_worktree, t0003_corpus_paths,

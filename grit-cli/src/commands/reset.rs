@@ -7,6 +7,7 @@ use grit_lib::porcelain::reset::{
     reset_to_commit, OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome,
     DEFAULT_ORPHAN_LIMIT,
 };
+use grit_lib::refs::RefError;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -271,7 +272,7 @@ pub fn run(
 
 fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
     match err {
-        Error::Ref(RefError::invalid_reason(msg)) => anyhow::anyhow!(msg),
+        Error::Ref(RefError::InvalidName { reason, .. }) => anyhow::anyhow!(reason.clone()),
         Error::ObjectNotFound(msg) => crate::json_error::structured_revision_not_found(format!(
             "invalid revision '{spec}': {msg}"
         )),

@@ -31,8 +31,8 @@ use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_PATHNAME};
 
 mod selector;
-pub use selector::{parse_reflog_ref, ReflogSelector};
 use crate::refs::RefError;
+pub use selector::{parse_reflog_ref, ReflogSelector};
 
 /// A single reflog entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1613,9 +1613,7 @@ fn rewrite_reflog_from_snapshot(
         match store.rewrite_reflog(refname, &mut move |current| {
             if current.len() < snap.len() || current[..snap.len()] != snap[..] {
                 return Err(Error::Ref(RefError::Store(
-                    RefStoreError::ReflogRewriteStale {
-                        name: name.clone(),
-                    },
+                    RefStoreError::ReflogRewriteStale { name: name.clone() },
                 )));
             }
             let mut kept = Vec::new();
@@ -1639,9 +1637,9 @@ fn rewrite_reflog_from_snapshot(
             Err(err) => return Err(err),
         }
     }
-    Err(Error::Ref(RefError::Store(RefStoreError::Corrupt(format!(
-        "reflog '{refname}' kept changing during rewrite"
-    )))))
+    Err(Error::Ref(RefError::Store(RefStoreError::Corrupt(
+        format!("reflog '{refname}' kept changing during rewrite"),
+    ))))
 }
 
 /// Per-ref `gc.<pattern>.reflogExpire*` rules plus global `gc.reflogExpire` / `gc.reflogExpireUnreachable`.

@@ -25,8 +25,8 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter};
 use crate::odb::Odb;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
-use crate::refs::{self, Ref};
 use crate::refs::RefError;
+use crate::refs::{self, Ref};
 
 /// Result of a loose-object prune.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

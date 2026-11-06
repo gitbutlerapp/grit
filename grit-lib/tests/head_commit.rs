@@ -15,13 +15,13 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
 };
+use grit_lib::refs::RefError;
 use grit_lib::repo::{Repository, RepositoryBuilder};
 use grit_lib::revwalk::history::{
     move_commit, EmptyPolicy, HistoryError, Placement, RefScope, RewriteOptions,
 };
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_test_support::git;
-use crate::refs::RefError;
 
 fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("discover")

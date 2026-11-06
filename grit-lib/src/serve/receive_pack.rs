@@ -26,10 +26,10 @@ use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::receive_quarantine::{MigratedPackKeepGuard, ReceiveQuarantine};
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::shallow::{add_shallow_boundaries, load_shallow_boundaries, PushShallowInfo};
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
-use crate::refs::RefError;
 
 /// Bytes read from the client per call while spooling a pushed pack.
 const SPOOL_CHUNK: usize = 256 * 1024;

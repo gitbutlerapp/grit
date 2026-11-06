@@ -31,13 +31,13 @@ use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefStore, RefStoreError,
     RefTransaction, RefUpdate, RefUpdateFlags,
 };
+use grit_lib::refs::RefError;
 use grit_lib::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store, prepare_with_lock_wait,
 };
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use time::OffsetDateTime;
-use crate::refs::RefError;
 
 const IDENT_TS: &str = "T <t@e.x> 1700000000 +0000";
 
@@ -622,7 +622,9 @@ fn assert_a_vs_a_slash_b_create_race_once(path: &Path) {
         .filter(|r| {
             matches!(
                 r,
-                Err(Error::Ref(RefError::Store(RefStoreError::NameUnavailable { .. }))
+                Err(Error::Ref(RefError::Store(
+                    RefStoreError::NameUnavailable { .. }
+                )))
             )
         })
         .count();

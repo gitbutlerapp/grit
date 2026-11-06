@@ -49,6 +49,7 @@ use crate::porcelain::merge::squash_conflict_merge_in_progress;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::replay_sequence::finish_replay_commit_state;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::refs::RefError;
 use crate::refs::{
     update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
@@ -73,7 +74,6 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use crate::refs::RefError;
 
 /// Whether the verifying hooks run before a commit object is written.
 ///

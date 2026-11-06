@@ -62,17 +62,23 @@ fn structured(kind: ErrorKind, human: &str, hint: Option<&str>) -> Error {
 }
 
 fn human_ref_branch_missing() -> String {
-    human_message_for_lib(&LibError::Ref(grit_lib::refs::RefError::Store(RefStoreError::NotFound {
-        name: "refs/heads/missing".into(),
-    }))
+    human_message_for_lib(&LibError::Ref(grit_lib::refs::RefError::Store(
+        RefStoreError::NotFound {
+            name: "refs/heads/missing".into(),
+        },
+    )))
 }
 
 static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "ref_store_branch_not_found",
-        build: || Error::new(LibError::Ref(grit_lib::refs::RefError::Store(RefStoreError::NotFound {
-            name: "refs/heads/missing".into(),
-        })),
+        build: || {
+            Error::new(LibError::Ref(grit_lib::refs::RefError::Store(
+                RefStoreError::NotFound {
+                    name: "refs/heads/missing".into(),
+                },
+            )))
+        },
         kind: None,
         exit: ExitStatus::Failure,
         human: human_ref_branch_missing,
@@ -658,7 +664,11 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "lib_invalid_ref",
-        build: || Error::new(LibError::InvalidRef("not a valid object name: bad".into())),
+        build: || {
+            Error::new(LibError::Ref(grit_lib::refs::RefError::invalid_reason(
+                "not a valid object name: bad",
+            )))
+        },
         kind: None,
         exit: ExitStatus::Failure,
         human: || "invalid ref: not a valid object name: bad".to_owned(),
@@ -701,7 +711,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "unborn_head",
-        build: || map_lib_error(LibError::UnbornHead),
+        build: || map_lib_error(LibError::Ref(grit_lib::refs::RefError::UnbornHead)),
         kind: Some(ErrorKind::BranchNoCommits),
         exit: ExitStatus::Failure,
         human: || {
@@ -891,13 +901,14 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "branch_checked_out",
         build: || {
-            map_branch_error(LibError::BranchCheckedOutInWorktree {
-                branch: "main".into(), worktree: "/wt".into(),
-            })
+            map_branch_error(LibError::Branch(BranchError::CheckedOut {
+                name: "main".into(),
+                worktree: "/wt".into(),
+            }))
         },
         kind: Some(ErrorKind::BranchCheckedOut),
         exit: ExitStatus::Failure,
-        human: || "branch is checked out in '/wt'".to_owned(),
+        human: || "branch 'main' is already checked out in '/wt'".to_owned(),
         hint: None,
     },
     ContractRow {

@@ -238,7 +238,10 @@ fn plan_reset(
 ) -> Result<(ObjectId, HeadState, ResetPreview)> {
     opts.identity.validate().map_err(Error::InvalidSignature)?;
     let head = resolve_head_for_repository(repo)?;
-    let previous = head.oid().copied().ok_or(Error::Ref(RefError::UnbornHead))?;
+    let previous = head
+        .oid()
+        .copied()
+        .ok_or(Error::Ref(RefError::UnbornHead))?;
 
     ensure_reset_worktree_mode(repo, opts.mode)?;
     ensure_keep_index_merged(repo, opts.mode)?;
@@ -392,7 +395,9 @@ fn commit_tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId> {
         ObjectKind::Tree | ObjectKind::Blob => Err(Error::Ref(RefError::invalid_reason(format!(
             "object {commit} does not name a commit"
         )))),
-        ObjectKind::Tag => Err(Error::Ref(RefError::invalid_reason("unexpected tag after peel"))),
+        ObjectKind::Tag => Err(Error::Ref(RefError::invalid_reason(
+            "unexpected tag after peel",
+        ))),
     }
 }
 

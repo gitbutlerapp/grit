@@ -6,6 +6,7 @@ use grit_lib::diff::{commit_diff_files, DiffDetail, DiffMerges, DiffOptions};
 use grit_lib::error::Error;
 use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
+use grit_lib::refs::RefError;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::revwalk::rev_parse::resolve_revision;
@@ -13,7 +14,6 @@ use grit_test_support::git;
 use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;
-use crate::refs::RefError;
 
 fn git_out(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")

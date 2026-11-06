@@ -7,6 +7,7 @@ use grit_lib::error::{
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::RefError;
 use grit_lib::refs::RefnameUnavailable;
 use grit_lib::worktree::crlf::{
     convert_to_git_with_opts, ConversionConfig, ConvertToGitOpts, FileAttrs,
@@ -14,7 +15,6 @@ use grit_lib::worktree::crlf::{
 use grit_test_support::{git, git_cmd};
 use std::fs;
 use tempfile::tempdir;
-use crate::refs::RefError;
 
 #[test]
 fn malformed_config_line_is_bad_config_line_typed() {
@@ -111,7 +111,10 @@ fn ref_lock_directory_in_the_way_matches_git_update_ref() {
     fs::write(git_dir.join("refs/heads/feature/extra.lock"), "").unwrap();
     let err = grit_lib::refs::write_ref(&git_dir, "refs/heads/feature", &oid).unwrap_err();
     assert!(
-        matches!(err, Error::Ref(RefError::RefLock(RefLockError::DirectoryInTheWay { .. })),
+        matches!(
+            err,
+            Error::Ref(RefError::RefLock(RefLockError::DirectoryInTheWay { .. }))
+        ),
         "{err:?}"
     );
     let git_out = git_cmd(&["update-ref", "refs/heads/feature", &oid.to_hex()])

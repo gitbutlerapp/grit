@@ -30,6 +30,7 @@ use crate::error::{Error, Result};
 use crate::fs_publish::publish_no_clobber;
 use crate::objects::ObjectId;
 use crate::refs::store::{RefStore as _, RefStoreError};
+use crate::refs::RefError;
 use memmap2::Mmap;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -39,7 +40,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tempfile::TempPath;
-use crate::refs::RefError;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -5174,19 +5174,25 @@ mod tests {
         mismatched[footer_start + 4] = 2;
         assert!(matches!(
             ReftableReader::new(mismatched),
-            Err(Error::Ref(RefError::Reftable(ReftableError::FooterVersionMismatch {
-                header: 1,
-                footer: 2,
-            })))
+            Err(Error::Ref(RefError::Reftable(
+                ReftableError::FooterVersionMismatch {
+                    header: 1,
+                    footer: 2,
+                }
+            )))
         ));
 
         assert!(matches!(
             ReftableReader::new(data[..10].to_vec()),
-            Err(Error::Ref(RefError::Reftable(ReftableError::TooSmall { len: 10 })))
+            Err(Error::Ref(RefError::Reftable(ReftableError::TooSmall {
+                len: 10
+            })))
         ));
         assert!(matches!(
             ReftableReader::new(data[..HEADER_SIZE + 4].to_vec()),
-            Err(Error::Ref(RefError::Reftable(ReftableError::TooSmall { .. })))
+            Err(Error::Ref(RefError::Reftable(
+                ReftableError::TooSmall { .. }
+            )))
         ));
     }
 

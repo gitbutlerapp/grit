@@ -33,8 +33,8 @@ use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::reflog;
 use crate::refs::store::RefStoreError;
-use crate::repo::Repository;
 use crate::refs::RefError;
+use crate::repo::Repository;
 
 /// The current state of HEAD.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1369,9 +1369,9 @@ mod head_state_tests {
     #![allow(clippy::unwrap_used)]
 
     use super::{resolve_head, resolve_head_for_repository, HeadState};
-    use crate::refs::RefError;
     use crate::error::Error;
     use crate::objects::{ObjectId, ObjectKind};
+    use crate::refs::RefError;
     use crate::repo::init_repository;
     use crate::RefStorageFormat;
     use tempfile::TempDir;
@@ -1451,7 +1451,10 @@ mod head_state_tests {
         let repo =
             init_repository(tmp.path(), false, "main", None, RefStorageFormat::Files).unwrap();
         std::fs::write(repo.git_dir().join("HEAD"), "ref: refs/tags/missing\n").unwrap();
-        assert!(matches!(repo.head_tree(), Err(Error::Ref(RefError::InvalidHead))));
+        assert!(matches!(
+            repo.head_tree(),
+            Err(Error::Ref(RefError::InvalidHead))
+        ));
         assert_eq!(HeadState::Invalid.tree(repo.odb()).unwrap(), None);
     }
 

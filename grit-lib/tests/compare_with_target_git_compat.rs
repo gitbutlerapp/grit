@@ -9,9 +9,9 @@ use grit_lib::refs::branch_tracking::{
     compare_with_target, compare_with_target_optional, BaseSource, TargetComparisonOptions,
     TargetSpec,
 };
+use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, unique_tmp, write_file};
-use crate::refs::RefError;
 
 fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open repo")

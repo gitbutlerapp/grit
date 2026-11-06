@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
 use grit_lib::refs::reflog::{parse_reflog_ref, reflog_identity_timestamp, ReflogSelector};
+use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, IndexedReflogEntry, MessageMatcher, ReflogQuery};
 use schemars::JsonSchema;

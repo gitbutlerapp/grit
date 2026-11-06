@@ -110,12 +110,10 @@ mod tests {
             assert_eq!(parse_reflog_ref(input).unwrap().as_str(), expected);
         }
         for spec in ["", " main ", "refs/bad..name", "bad name", "a.lock", "@{"] {
-            assert!(
-                matches!(
-                    parse_reflog_ref(spec),
-                    Err(Error::Ref(RefError::ReflogUnknownRef { refname })) if refname == spec
-                )
-            );
+            assert!(matches!(
+                parse_reflog_ref(spec),
+                Err(Error::Ref(RefError::ReflogUnknownRef { refname })) if refname == spec
+            ));
         }
     }
 
@@ -139,13 +137,11 @@ mod tests {
     #[test]
     fn selectors_return_distinct_typed_failures() {
         for input in ["", "HEAD", "HEAD@0", "HEAD@{0", "HEAD@{0}tail", " @{0} "] {
-            assert!(
-                matches!(
-                    input.parse::<ReflogSelector>(),
-                    Err(Error::Ref(RefError::ReflogInvalidSelector { spec }))
-                        if spec == input.trim()
-                )
-            );
+            assert!(matches!(
+                input.parse::<ReflogSelector>(),
+                Err(Error::Ref(RefError::ReflogInvalidSelector { spec }))
+                    if spec == input.trim()
+            ));
         }
         for input in [
             "HEAD@{}",
@@ -155,29 +151,23 @@ mod tests {
             "HEAD@{0}}",
             "HEAD@{1}@{2}",
         ] {
-            assert!(
-                matches!(
-                    input.parse::<ReflogSelector>(),
-                    Err(Error::Ref(RefError::ReflogInvalidIndex { spec, .. })) if spec == input
-                )
-            );
+            assert!(matches!(
+                input.parse::<ReflogSelector>(),
+                Err(Error::Ref(RefError::ReflogInvalidIndex { spec, .. })) if spec == input
+            ));
         }
         let overflow = format!("HEAD@{{{}0}}", usize::MAX);
         let err = overflow.parse::<ReflogSelector>().unwrap_err();
-        assert!(
-            matches!(
-                &err,
-                Error::Ref(RefError::ReflogInvalidIndex { source, .. })
-                    if *source.kind() == std::num::IntErrorKind::PosOverflow
-            )
-        );
+        assert!(matches!(
+            &err,
+            Error::Ref(RefError::ReflogInvalidIndex { source, .. })
+                if *source.kind() == std::num::IntErrorKind::PosOverflow
+        ));
         assert!(std::error::Error::source(&err).is_some());
-        assert!(
-            matches!(
-                "bad name@{0}".parse::<ReflogSelector>(),
-                Err(Error::Ref(RefError::ReflogUnknownRef { refname })) if refname == "bad name"
-            )
-        );
+        assert!(matches!(
+            "bad name@{0}".parse::<ReflogSelector>(),
+            Err(Error::Ref(RefError::ReflogUnknownRef { refname })) if refname == "bad name"
+        ));
         // Preserve index validation before checking an empty reference.
         assert!(matches!(
             "@{bad}".parse::<ReflogSelector>(),

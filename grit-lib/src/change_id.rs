@@ -35,11 +35,11 @@ use crate::objects::{
 };
 use crate::pack::SingleLocalPackReader;
 use crate::parallel::{try_par_map_with_local, ParallelOp};
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::repo_caches::RepoCaches;
 use crate::rev_list::{all_ref_commit_tips_for_walk, walk_closure_ordered, CommitGraph};
 use crate::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
-use crate::refs::RefError;
 
 const REVERSE_HEX_LEN: usize = 32;
 const CHANGE_ID_KEY: &[u8] = b"change-id";

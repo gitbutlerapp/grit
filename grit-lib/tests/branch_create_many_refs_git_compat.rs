@@ -12,10 +12,10 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions, TrackMode};
 use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::RefError;
 use grit_lib::refs::RefnameUnavailable;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
-use crate::refs::RefError;
 
 fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("discover")

@@ -24,6 +24,7 @@ use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
+use crate::refs::RefError;
 use crate::refs::{
     should_autocreate_reflog_with_config, update_branch_for_commit_on_store,
     update_detached_head_for_commit_on_store, BranchCommitRefLock, BranchCommitRefUpdate,
@@ -31,7 +32,6 @@ use crate::refs::{
 use crate::replay_merge_session::ReplayMergeSession;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
-use crate::refs::RefError;
 
 /// Whether [`replay_commit`] applies a commit's patch or its inverse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

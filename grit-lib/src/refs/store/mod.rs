@@ -53,8 +53,8 @@ use crate::error::Result;
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
-use crate::refs::SYMREF_MAXDEPTH;
 use crate::refs::RefError;
+use crate::refs::SYMREF_MAXDEPTH;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 

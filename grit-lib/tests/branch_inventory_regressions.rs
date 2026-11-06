@@ -247,7 +247,6 @@ fn names_detail_rejects_date_sort_without_reading_objects() {
             ..RefQuery::default()
         },
     };
-    list_branches(&repo, &date_query, BranchDetail::Names).expect(
-        "library allows date sort with Names; grit branch rejects that combination",
-    );
+    list_branches(&repo, &date_query, BranchDetail::Names)
+        .expect("library allows date sort with Names; grit branch rejects that combination");
 }

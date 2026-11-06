@@ -18,7 +18,7 @@ use grit_lib::refs::reftable::{
     WriteOptions,
 };
 use grit_lib::refs::store::{RefStore, ReftableRefStore};
-use crate::refs::RefError;
+use grit_lib::refs::RefError;
 
 fn oid(byte: u8) -> ObjectId {
     ObjectId::from_bytes(&[byte; 20]).expect("oid")
@@ -492,7 +492,7 @@ fn every_truncation_is_typed_error_no_panic() {
         }));
         assert!(result.is_ok(), "panic at truncation length {len}");
         match ReftableReader::new(slice) {
-            Err(Error::Ref(RefError::Reftable(_)) | Err(Error::Zlib(_)) => {}
+            Err(Error::Ref(RefError::Reftable(_))) | Err(Error::Zlib(_)) => {}
             Err(other) => panic!("unexpected error type at len {len}: {other:?}"),
             Ok(reader) => {
                 if reader.read_refs().is_ok() && reader.read_logs().is_ok() {
@@ -528,7 +528,7 @@ fn corrupt_index_block_restart_count_is_typed_error_no_panic() {
         "lookup must not panic on corrupt restart count"
     );
     match result.unwrap() {
-        Err(Error::Ref(RefError::Reftable(ReftableError::InvalidRestartTable)) => {}
+        Err(Error::Ref(RefError::Reftable(ReftableError::InvalidRestartTable))) => {}
         Ok(None) => {}
         other => panic!("unexpected lookup result: {other:?}"),
     }
@@ -546,7 +546,7 @@ fn corruption_bad_magic_version_and_crc() {
     data[0] = b'X';
     assert!(matches!(
         ReftableReader::new(data.clone()),
-        Err(Error::Ref(RefError::Reftable(ReftableError::BadMagic))
+        Err(Error::Ref(RefError::Reftable(ReftableError::BadMagic)))
     ));
 
     data = write_table(
@@ -559,9 +559,9 @@ fn corruption_bad_magic_version_and_crc() {
     data[4] = 99;
     assert!(matches!(
         ReftableReader::new(data.clone()),
-        Err(Error::Ref(RefError::Reftable(ReftableError::UnsupportedVersion {
-            version: 99
-        }))
+        Err(Error::Ref(RefError::Reftable(
+            ReftableError::UnsupportedVersion { version: 99 }
+        )))
     ));
 
     data = write_table(
@@ -575,8 +575,10 @@ fn corruption_bad_magic_version_and_crc() {
     data[n - 1] ^= 0xff;
     assert!(matches!(
         ReftableReader::new(data),
-        Err(Error::Ref(RefError::Reftable(ReftableError::FooterChecksumMismatch { stored, computed }))
-            if stored != computed
+        Err(Error::Ref(RefError::Reftable(ReftableError::FooterChecksumMismatch {
+            stored,
+            computed,
+        }))) if stored != computed
     ));
 }
 

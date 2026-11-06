@@ -3,6 +3,7 @@
 use crate::error::Result;
 use crate::ident::Signature;
 use crate::list_limit::{fetch_plus_one, Limited};
+use crate::notes::NotesError;
 use crate::notes::{
     lookup_note_blob_oid, materialize_notes_tree, note_object_name, preview_notes_commit,
     preview_notes_commit_on_tree, read_blob_bytes, read_notes_snapshot, read_notes_tree_limited,
@@ -13,7 +14,6 @@ use crate::notes::{
 use crate::objects::{ObjectId, ObjectKind};
 use crate::porcelain::merge::MemOverlayGuard;
 use crate::repo::Repository;
-use crate::notes::NotesError;
 
 /// Author, committer, and commit message for a notes ref update.
 #[derive(Debug, Clone)]
@@ -443,7 +443,9 @@ impl<'repo> RepositoryNotes<'repo> {
             None => false,
         };
         if exists && !force {
-            return Err(crate::error::Error::Notes(NotesError::NoteAlreadyExists { object: *object }));
+            return Err(crate::error::Error::Notes(NotesError::NoteAlreadyExists {
+                object: *object,
+            }));
         }
         let outcome = if exists {
             NoteAddOutcome::Replaced

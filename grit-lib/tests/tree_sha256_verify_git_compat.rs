@@ -513,7 +513,7 @@ fn non_tag_object_rejected() {
             },
         )
         .unwrap_err();
-    assert!(matches!(err, Error::Tag(crate::porcelain::tag::TagError::VerifyNotTag { .. }));
+    assert!(matches!(err, Error::Tag(TagError::VerifyNotTag { .. })));
 }
 
 #[test]

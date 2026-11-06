@@ -19,13 +19,13 @@ use crate::objects::{
 use crate::pack_bitmap::BitmapIndex;
 use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse::{
     load_graft_parents, peel_to_commit_for_merge_base, resolve_revision,
     resolve_upstream_symbolic_name, try_peel_to_commit_for_merge_base, upstream_suffix_info,
 };
 use crate::shallow::load_shallow_boundaries;
-use crate::refs::RefError;
 
 /// Resolve commit-ish command arguments to commit object IDs.
 ///
@@ -3502,7 +3502,9 @@ impl<'r> CommitGraphCache<'r> {
         if self.shallow_boundaries.contains(&oid) {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::Ref(RefError::InvalidName { reason: msg, .. }) => Error::CorruptObject(msg),
+                    Error::Ref(RefError::InvalidName { reason: msg, .. }) => {
+                        Error::CorruptObject(msg)
+                    }
                     other => other,
                 })?;
             let object = self.repo.odb().read(&commit_oid)?;
@@ -3561,7 +3563,9 @@ impl<'r> CommitGraphCache<'r> {
         } else {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::Ref(RefError::InvalidName { reason: msg, .. }) => Error::CorruptObject(msg),
+                    Error::Ref(RefError::InvalidName { reason: msg, .. }) => {
+                        Error::CorruptObject(msg)
+                    }
                     other => other,
                 })?;
             let kind =

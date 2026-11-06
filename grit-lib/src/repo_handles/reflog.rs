@@ -10,9 +10,9 @@ use crate::reflog::{
     ReflogEntry, ReflogExpireParams, ReflogExpireResult, ReflogExpiryCache,
 };
 use crate::refs::store::{RefName, RefStore};
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::worktree_ref::resolve_ref_dwim;
-use crate::refs::RefError;
 
 /// Options for [`RepositoryReflogs::expire`].
 #[derive(Debug, Clone)]

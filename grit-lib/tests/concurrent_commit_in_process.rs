@@ -8,8 +8,8 @@ use grit_lib::ident::Signature;
 use grit_lib::porcelain::commit::create_commit;
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::refs::lock_path_for_ref;
+use grit_lib::refs::RefError;
 use grit_lib::repo::{InitOptions, Repository};
-use crate::refs::RefError;
 
 struct Harness {
     _dir: tempfile::TempDir,

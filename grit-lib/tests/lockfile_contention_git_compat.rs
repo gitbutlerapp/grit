@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::RefError;
 use grit_lib::refs::{lock_path_for_ref, write_ref};
 
 use support::{
-use crate::refs::RefError;
     assert_fsck_when_git_interop, files_repo, git, git_empty_commit_oid, git_interop_available,
     Backend,
 };

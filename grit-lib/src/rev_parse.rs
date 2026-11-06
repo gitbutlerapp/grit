@@ -28,9 +28,9 @@ use crate::objects::{parse_commit, parse_tag, parse_tree, CommitRef, ObjectId, O
 use crate::reflog::ReflogEntry;
 use crate::refs;
 use crate::refs::store::RawRef;
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse_error::{AmbiguousObjectHint, RevParseError};
-use crate::refs::RefError;
 
 /// Return `Some(repo)` when a repository can be discovered at `start`.
 ///
@@ -214,9 +214,11 @@ pub fn expand_at_minus_to_branch_name(repo: &Repository, spec: &str) -> Result<O
         return Ok(None);
     }
     let inner = &spec[3..spec.len() - 1];
-    let n: usize = inner
-        .parse()
-        .map_err(|_| Error::Ref(RefError::invalid_reason(format!("invalid N in @{{-N}} for '{spec}'"))))?;
+    let n: usize = inner.parse().map_err(|_| {
+        Error::Ref(RefError::invalid_reason(format!(
+            "invalid N in @{{-N}} for '{spec}'"
+        )))
+    })?;
     if n < 1 {
         return Ok(None);
     }
@@ -267,7 +269,9 @@ pub fn upstream_suffix_info(spec: &str) -> Option<(&str, bool)> {
 /// Resolve `@{upstream}` / `@{u}` / `@{push}` to the symbolic full ref name (for `rev-parse --symbolic-full-name`).
 pub fn resolve_upstream_symbolic_name(repo: &Repository, spec: &str) -> Result<String> {
     let Some((base, is_push)) = upstream_suffix_info(spec) else {
-        return Err(Error::Ref(RefError::invalid_reason(format!("not an upstream spec: {spec}"))));
+        return Err(Error::Ref(RefError::invalid_reason(format!(
+            "not an upstream spec: {spec}"
+        ))));
     };
     resolve_upstream_full_ref_name(repo, base, is_push)
 }
@@ -293,9 +297,11 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         }
         return Ok(format!("refs/heads/{m}"));
     }
-    let merge_branch = merge
-        .strip_prefix("refs/heads/")
-        .ok_or_else(|| Error::Ref(RefError::invalid_reason(format!("invalid merge ref: {merge}"))))?;
+    let merge_branch = merge.strip_prefix("refs/heads/").ok_or_else(|| {
+        Error::Ref(RefError::invalid_reason(format!(
+            "invalid merge ref: {merge}"
+        )))
+    })?;
     let tracking = format!("refs/remotes/{remote}/{merge_branch}");
     if repo.resolve_ref_oid(&tracking).is_err() {
         return Err(RevParseError::UpstreamNotTracked {
@@ -1437,9 +1443,11 @@ fn resolve_revision_with_navigation(
             })
         })?;
         let line = raw.lines().next().unwrap_or("").trim();
-        return line
-            .parse::<ObjectId>()
-            .map_err(|_| Error::Ref(RefError::invalid_reason("AUTO_MERGE: invalid object id".to_owned())));
+        return line.parse::<ObjectId>().map_err(|_| {
+            Error::Ref(RefError::invalid_reason(
+                "AUTO_MERGE: invalid object id".to_owned(),
+            ))
+        });
     }
 
     // `refs/...` spelled in full (e.g. `refs/tags/other`): resolve as a ref before any
@@ -1558,7 +1566,9 @@ fn resolve_revision_with_navigation(
             }
             let clean_path = match normalize_colon_path_for_tree(repo, after) {
                 Ok(p) => p,
-                Err(Error::Ref(RefError::InvalidName { reason: msg, .. })) if msg == "outside repository" => {
+                Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
+                    if msg == "outside repository" =>
+                {
                     let wt = repo
                         .work_tree()
                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -1678,7 +1688,9 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
     let full = normalize_path_components(full);
 
     if !path_is_within(&full, &wt_canon) {
-        return Err(Error::Ref(RefError::invalid_reason("outside repository".to_owned())));
+        return Err(Error::Ref(RefError::invalid_reason(
+            "outside repository".to_owned(),
+        )));
     }
     let rel = full
         .strip_prefix(&wt_canon)
@@ -1708,8 +1720,11 @@ fn is_unreplaced_commit(repo: &Repository, oid: ObjectId) -> bool {
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
 pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
-    peel_tags_to_commit(repo, oid)?
-        .map_err(|other| Error::Ref(RefError::invalid_reason(format!("object {other} does not name a commit"))))
+    peel_tags_to_commit(repo, oid)?.map_err(|other| {
+        Error::Ref(RefError::invalid_reason(format!(
+            "object {other} does not name a commit"
+        )))
+    })
 }
 
 /// Peel tags starting at `oid` until a non-tag object.
@@ -1744,7 +1759,9 @@ pub fn try_peel_to_commit_for_merge_base(
     match obj.kind {
         ObjectKind::Commit => Ok(Some(oid)),
         ObjectKind::Tree | ObjectKind::Blob => Ok(None),
-        ObjectKind::Tag => Err(Error::Ref(RefError::invalid_reason("unexpected tag after peel".to_owned()))),
+        ObjectKind::Tag => Err(Error::Ref(RefError::invalid_reason(
+            "unexpected tag after peel".to_owned(),
+        ))),
     }
 }
 
@@ -1852,8 +1869,11 @@ pub struct TreeishBlobAtPath {
 /// Fails when `spec` is not `treeish:path`, when the path is missing, or when the
 /// target is a tree or gitlink rather than a blob/symlink blob.
 pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<TreeishBlobAtPath> {
-    let (before, after) = split_treeish_colon(spec)
-        .ok_or_else(|| Error::Ref(RefError::invalid_reason(format!("'{spec}' is not a treeish:path revision"))))?;
+    let (before, after) = split_treeish_colon(spec).ok_or_else(|| {
+        Error::Ref(RefError::invalid_reason(format!(
+            "'{spec}' is not a treeish:path revision"
+        )))
+    })?;
 
     let rev_oid =
         match resolve_revision_impl(repo, before, true, false, true, true, false, false, true) {
@@ -1886,7 +1906,9 @@ pub fn resolve_treeish_blob_at_path(repo: &Repository, spec: &str) -> Result<Tre
 
     let clean_path = match normalize_colon_path_for_tree(repo, after) {
         Ok(p) => p,
-        Err(Error::Ref(RefError::InvalidName { reason: msg, .. })) if msg == "outside repository" => {
+        Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
+            if msg == "outside repository" =>
+        {
             let wt = repo
                 .work_tree()
                 .and_then(|p| p.canonicalize_simplified().ok())
@@ -1935,7 +1957,10 @@ fn walk_tree_to_blob_entry(
         if name == first {
             if rest.is_empty() {
                 if entry.mode == crate::index::MODE_TREE {
-                    return Err(Error::Ref(RefError::invalid_reason(format!("'{path}' is a tree, not a blob"))).into());
+                    return Err(Error::Ref(RefError::invalid_reason(format!(
+                        "'{path}' is a tree, not a blob"
+                    )))
+                    .into());
                 }
                 return Ok((entry.oid, entry.mode_str()));
             }
@@ -2428,7 +2453,9 @@ fn resolve_base(
 
     if spec == "HEAD" {
         return match crate::state::resolve_head_for_repository(repo) {
-            Ok(crate::state::HeadState::Branch { oid: None, .. }) => Err(Error::Ref(RefError::UnbornHead)),
+            Ok(crate::state::HeadState::Branch { oid: None, .. }) => {
+                Err(Error::Ref(RefError::UnbornHead))
+            }
             Ok(crate::state::HeadState::Branch { oid: Some(oid), .. }) => Ok(oid),
             Ok(crate::state::HeadState::Detached { oid }) => Ok(oid),
             Ok(crate::state::HeadState::Invalid) | Err(_) => {
@@ -2454,9 +2481,11 @@ fn resolve_base(
                 continue;
             };
             if ObjectId::is_full_hex(oid_hex) {
-                let oid = oid_hex
-                    .parse::<ObjectId>()
-                    .map_err(|_| Error::Ref(RefError::invalid_reason("invalid FETCH_HEAD object id".to_owned())))?;
+                let oid = oid_hex.parse::<ObjectId>().map_err(|_| {
+                    Error::Ref(RefError::invalid_reason(
+                        "invalid FETCH_HEAD object id".to_owned(),
+                    ))
+                })?;
                 first_oid.get_or_insert(oid);
                 let not_for_merge = parts.next().is_some_and(|v| v == "not-for-merge");
                 if !not_for_merge {
@@ -2530,7 +2559,9 @@ fn resolve_base(
                             let raw_path = &rest[2..];
                             let path = match normalize_colon_path_for_tree(repo, raw_path) {
                                 Ok(p) => p,
-                                Err(Error::Ref(RefError::InvalidName { reason: msg, .. })) if msg == "outside repository" => {
+                                Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
+                                    if msg == "outside repository" =>
+                                {
                                     let wt = repo
                                         .work_tree()
                                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -2553,7 +2584,9 @@ fn resolve_base(
             }
             let clean_rest = match normalize_colon_path_for_tree(repo, rest) {
                 Ok(p) => p,
-                Err(Error::Ref(RefError::InvalidName { reason: msg, .. })) if msg == "outside repository" => {
+                Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
+                    if msg == "outside repository" =>
+                {
                     let wt = repo
                         .work_tree()
                         .and_then(|p| p.canonicalize_simplified().ok())
@@ -3108,9 +3141,11 @@ fn resolve_at_minus_token_to_branch(repo: &Repository, token: &str) -> Result<Op
         return Ok(None);
     }
     let inner = &token[3..token.len() - 1];
-    let n: usize = inner
-        .parse()
-        .map_err(|_| Error::Ref(RefError::invalid_reason(format!("invalid N in @{{-N}} for '{token}'"))))?;
+    let n: usize = inner.parse().map_err(|_| {
+        Error::Ref(RefError::invalid_reason(format!(
+            "invalid N in @{{-N}} for '{token}'"
+        )))
+    })?;
     if n < 1 {
         return Ok(None);
     }
@@ -3581,7 +3616,9 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
     };
     let path = match normalize_colon_path_for_tree(repo, colon.raw_path) {
         Ok(p) => p,
-        Err(Error::Ref(RefError::InvalidName { reason: msg, .. })) if msg == "outside repository" => {
+        Err(Error::Ref(RefError::InvalidName { reason: msg, .. }))
+            if msg == "outside repository" =>
+        {
             let wt = repo
                 .work_tree()
                 .and_then(|p| p.canonicalize_simplified().ok())
@@ -3769,7 +3806,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             if obj.kind == ObjectKind::Commit {
                 Ok(oid)
             } else {
-                Err(Error::Ref(RefError::invalid_reason("expected commit".to_owned())))
+                Err(Error::Ref(RefError::invalid_reason(
+                    "expected commit".to_owned(),
+                )))
             }
         }
         Some("tree") => {
@@ -3779,7 +3818,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             match obj.kind {
                 ObjectKind::Tree => Ok(oid),
                 ObjectKind::Commit => Ok(parse_commit(&obj.data)?.tree),
-                _ => Err(Error::Ref(RefError::invalid_reason("expected tree or commit".to_owned()))),
+                _ => Err(Error::Ref(RefError::invalid_reason(
+                    "expected tree or commit".to_owned(),
+                ))),
             }
         }
         Some("blob") => {
@@ -3792,7 +3833,11 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
                     ObjectKind::Tag => {
                         cur = parse_tag_target(&obj.data)?;
                     }
-                    _ => return Err(Error::Ref(RefError::invalid_reason("expected blob".to_owned()))),
+                    _ => {
+                        return Err(Error::Ref(RefError::invalid_reason(
+                            "expected blob".to_owned(),
+                        )))
+                    }
                 }
             }
         }
@@ -3803,7 +3848,9 @@ fn apply_peel(repo: &Repository, mut oid: ObjectId, peel: Option<&str>) -> Resul
             if obj.kind == ObjectKind::Tag {
                 Ok(oid)
             } else {
-                Err(Error::Ref(RefError::invalid_reason("expected tag".to_owned())))
+                Err(Error::Ref(RefError::invalid_reason(
+                    "expected tag".to_owned(),
+                )))
             }
         }
         Some(other) => Err(Error::Ref(RefError::invalid_reason(format!(
@@ -5278,7 +5325,10 @@ mod line_coverage_tests {
         assert_eq!(resolve_walk_range_end(&repo, &spec)?, root);
         let nav = NavParentCache::new(&repo, NavigationMetadata::RetainForWalk);
         assert_eq!(nav.parents_of(child)?, vec![root]);
-        assert!(matches!(nav.parents_of(blob), Err(Error::Ref(RefError::InvalidName { .. }))));
+        assert!(matches!(
+            nav.parents_of(blob),
+            Err(Error::Ref(RefError::InvalidName { .. }))
+        ));
         assert_eq!(nav.parents_of(root)?, Vec::<ObjectId>::new());
         assert!(matches!(
             nav.parents_of(malformed),

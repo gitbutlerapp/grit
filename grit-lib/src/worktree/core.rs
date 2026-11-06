@@ -1591,7 +1591,9 @@ mod tests {
         assert_eq!(found.worktree_path, path_for_disk_compare(&linked));
         assert!(matches!(
             ensure_branch_not_checked_out_in_any_worktree(&repo, "feature"),
-            Err(Error::Branch(crate::porcelain::branch_error::BranchError::CheckedOut { .. }))
+            Err(Error::Branch(
+                crate::porcelain::branch_error::BranchError::CheckedOut { .. }
+            ))
         ));
         git(&linked, &["rebase", "--abort"]);
 

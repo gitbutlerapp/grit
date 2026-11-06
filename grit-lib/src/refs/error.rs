@@ -86,7 +86,6 @@ pub enum RefError {
         /// Requested newest-first index.
         index: usize,
     },
-
 }
 
 impl RefError {

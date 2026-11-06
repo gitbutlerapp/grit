@@ -24,6 +24,7 @@ use crate::error::{Error, Result};
 use crate::ident::parse_signature_times;
 use crate::ident_resolve::{IdentRole, IdentityEnv};
 use crate::merge_base::merge_bases_first_vs_rest;
+use crate::notes::NotesError;
 use crate::objects::{
     parse_commit, parse_tree, serialize_commit, serialize_tree, tree_entry_cmp, CommitData,
     ObjectId, ObjectKind, TreeEntry,
@@ -32,12 +33,11 @@ use crate::refs::list_refs_for_repository;
 use crate::refs::should_autocreate_reflog_with_config;
 use crate::refs::store::{Expected, RawRef, ReflogUpdate};
 use crate::refs::store_write_value_on_store;
+use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use crate::wildmatch::wildmatch;
 use merge3::{Merge3, StandardMarkers};
-use crate::refs::RefError;
-use crate::notes::NotesError;
 
 /// Per-worktree subdirectory holding the conflicted note blobs during a notes merge.
 const NOTES_MERGE_WORKTREE: &str = "NOTES_MERGE_WORKTREE";
@@ -1113,11 +1113,15 @@ impl NotesRef {
     /// values are not trimmed or otherwise normalized).
     pub fn from_full(full: &str) -> Result<Self> {
         if !full.starts_with("refs/notes/") {
-            return Err(Error::Notes(NotesError::InvalidNotesRef { name: full.to_owned() }));
+            return Err(Error::Notes(NotesError::InvalidNotesRef {
+                name: full.to_owned(),
+            }));
         }
         use crate::check_ref_format::{check_refname_format, RefFormatOptions};
         if check_refname_format(full, &RefFormatOptions::default()).is_err() {
-            return Err(Error::Notes(NotesError::InvalidNotesRef { name: full.to_owned() }));
+            return Err(Error::Notes(NotesError::InvalidNotesRef {
+                name: full.to_owned(),
+            }));
         }
         Ok(Self(full.to_owned()))
     }
@@ -1779,7 +1783,9 @@ impl NotesRewriteMode {
             "cat_sort_uniq" => Ok(Self::CatSortUniq),
             "overwrite" => Ok(Self::Overwrite),
             "ignore" => Ok(Self::Ignore),
-            other => Err(Error::Notes(NotesError::NotesRewriteMode { mode: other.to_owned() })),
+            other => Err(Error::Notes(NotesError::NotesRewriteMode {
+                mode: other.to_owned(),
+            })),
         }
     }
 }
@@ -2061,9 +2067,15 @@ mod tests {
     #[test]
     fn from_full_rejects_whitespace_padded_ref() {
         let err = NotesRef::from_full(" refs/notes/spaced ").expect_err("padded");
-        assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })));
+        assert!(matches!(
+            err,
+            Error::Notes(NotesError::InvalidNotesRef { name: _ })
+        ));
         let err = NotesRef::from_full("refs/notes/spaced ").expect_err("trailing");
-        assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })));
+        assert!(matches!(
+            err,
+            Error::Notes(NotesError::InvalidNotesRef { name: _ })
+        ));
         let ok = NotesRef::from_full("refs/notes/spaced").expect("valid");
         assert_eq!(ok.as_str(), "refs/notes/spaced");
     }
@@ -2087,7 +2099,10 @@ mod tests {
         let env = MapEnv(HashMap::from([("GIT_NOTES_REF".to_owned(), String::new())]));
         let err = resolve_configured_notes_ref(&env, &ConfigSet::default())
             .expect_err("empty GIT_NOTES_REF");
-        assert!(matches!(err, Error::Notes(NotesError::InvalidNotesRef { name: _ })));
+        assert!(matches!(
+            err,
+            Error::Notes(NotesError::InvalidNotesRef { name: _ })
+        ));
     }
 
     #[test]

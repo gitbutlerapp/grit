@@ -11,6 +11,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::store::{open_ref_store, RefStoreError};
+use grit_lib::refs::RefError;
 use grit_lib::refs::{
     append_reflog, delete_ref, list_refs, list_refs_glob, list_refs_physical,
     packed_refs_entry_exists, read_head, read_log_refs_config, read_raw_ref, read_ref_file,
@@ -20,7 +21,6 @@ use grit_lib::refs::{
 };
 
 use support::{
-use crate::refs::RefError;
     assert_git_fsck_strict, each_backend, empty_commit_oid, git, git_check_ref_format,
     git_fsck_strict, git_interop_available, git_show_ref, git_update_ref, loose_ref_path, Backend,
 };
@@ -379,7 +379,8 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
         assert!(
             matches!(
                 store.resolve("refs/heads/dangling"),
-                Err(Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })) if name == "refs/heads/gone"
+                Err(Error::Ref(RefError::Store(RefStoreError::NotFound { ref name })))
+                    if name == "refs/heads/gone"
             ),
             "{}",
             backend_label(backend)
@@ -478,7 +479,9 @@ fn t0600_directory_of_lock_files_blocks_create() {
         assert!(
             matches!(
                 err,
-                Error::Ref(RefError::RefLock(grit_lib::error::RefLockError::DirectoryInTheWay { .. })
+                Error::Ref(RefError::RefLock(
+                    grit_lib::error::RefLockError::DirectoryInTheWay { .. }
+                ))
             ),
             "a directory holding no ref should block create: {err:?}"
         );

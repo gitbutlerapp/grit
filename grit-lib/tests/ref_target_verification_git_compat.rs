@@ -11,10 +11,10 @@ use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::store::{
     Expected, RawRef, RefName, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
 };
+use grit_lib::refs::RefError;
 use grit_lib::repo::Repository;
 
 use support::{
-use crate::refs::RefError;
     assert_fsck_when_git_interop, each_backend, empty_commit_oid, git, git_for_each_ref,
     git_interop_available, git_ok, TestRepo,
 };
@@ -96,7 +96,7 @@ fn issue_2176_reproduction_is_refused_and_git_fsck_stays_clean() {
                 Err(Error::Ref(RefError::Store(RefStoreError::NotACommit {
                     kind: ObjectKind::Tree,
                     ..
-                }))
+                })))
             ),
             "{backend:?}: {to_tree:?}"
         );
@@ -107,7 +107,9 @@ fn issue_2176_reproduction_is_refused_and_git_fsck_stays_clean() {
         assert!(
             matches!(
                 &missing,
-                Err(Error::Ref(RefError::Store(RefStoreError::MissingObject { .. }))
+                Err(Error::Ref(RefError::Store(
+                    RefStoreError::MissingObject { .. }
+                )))
             ),
             "{backend:?}: {missing:?}"
         );

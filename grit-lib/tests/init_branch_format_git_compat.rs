@@ -7,9 +7,9 @@ use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::NullProgress;
+use grit_lib::refs::RefError;
 use grit_lib::repo::{resolve_initial_branch, InitOptions, Repository};
 use tempfile::TempDir;
-use crate::refs::RefError;
 
 fn git_fsck_ok(git_dir: &std::path::Path) {
     let output = Command::new("git")

@@ -10,12 +10,12 @@ use grit_lib::objects::NewCommit;
 use grit_lib::refs::append_reflog;
 use grit_lib::refs::store::{RefName, RefStoreError};
 use grit_lib::refs::write_ref;
+use grit_lib::refs::RefError;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;
 use std::fs;
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
-use crate::refs::RefError;
 
 const REFLOG_ID: &str = "T <t@example.com> 1700000000 +0000";
 
