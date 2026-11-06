@@ -184,7 +184,10 @@ fn remote_error_variants() {
                             &mut NoProgress,
                         )
                         .expect_err("401 without credentials");
-                        assert!(matches!(err, Error::Remote(RemoteError::Auth { .. })));
+                        assert!(matches!(
+                            err,
+                            grit_lib::error::Error::Remote(RemoteError::Auth { .. })
+                        ));
                     }
                 }
             }
