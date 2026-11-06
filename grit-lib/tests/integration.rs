@@ -1418,6 +1418,8 @@ mod push_lease_git_compat;
 mod push_local_receive_hooks_git_compat;
 #[path = "push_packed_tag_regression.rs"]
 mod push_packed_tag_regression;
+#[path = "push_path_tracking_git_compat.rs"]
+mod push_path_tracking_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "push_plan_git_compat.rs"]
 mod push_plan_git_compat;

@@ -917,6 +917,10 @@ pub struct PushOptions {
     pub dry_run: bool,
     /// When set, update `refs/remotes/<name>/...` in the local repo after a
     /// successful push (matching Git's post-push tracking ref maintenance).
+    /// A name that is a URL or path rather than a remote name (it contains
+    /// `/`, starts with `.`, or is not a valid remote name) updates nothing.
+    /// [`Remote::push`](crate::remote::Remote::push) fills this from the
+    /// remote's configured name when unset.
     pub tracking_remote: Option<String>,
     /// Server-side push options to transmit (`git push --push-option <value>`).
     ///

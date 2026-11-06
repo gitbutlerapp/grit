@@ -160,8 +160,9 @@ pub(crate) fn apply_push_set_upstream(
 /// Refs reported as [`PushRefStatus::Ok`] or [`PushRefStatus::UpToDate`] are mapped through
 /// the remote's `remote.<name>.fetch` refspecs and updated in one ref-store batch (matching
 /// Git `transport_update_tracking_ref`); a pushed deletion removes the tracking ref. Path-like
-/// remote names (containing `/` or starting with `.`) and an unreadable config skip tracking
-/// updates entirely.
+/// remote names (containing `/`, starting with `.`, or not a valid remote name, such as
+/// `C:\t\remote.git` or `git@host:repo.git`) and an unreadable config skip tracking updates
+/// entirely.
 ///
 /// # Parameters
 ///
@@ -212,9 +213,11 @@ pub(crate) fn apply_push_remote_tracking_updates_in(
     commit_push_tracking_updates(repo.ref_store(), &config, remote_name, results)
 }
 
-/// Path-like remote names (a URL or path given as the push destination) have no tracking refs.
+/// Path-like remote names (a URL or path given as the push destination, such as
+/// `C:\t\remote.git` or `git@host:repo.git`) have no tracking refs.
 fn tracks_pushes_to(remote_name: &str) -> bool {
     !(remote_name.contains('/') || remote_name.starts_with('.'))
+        && crate::remote::is_valid_remote_name(remote_name)
 }
 
 fn commit_push_tracking_updates(
@@ -1649,6 +1652,54 @@ mod tests {
                 .tracking_ref("origin", "refs/heads/main")
                 .as_deref(),
             Some("refs/remotes/origin/main")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn push_tracking_skips_url_and_path_destinations() -> TestResult {
+        let tmp = TempDir::new()?;
+        let (repo, _) = Repository::init(tmp.path(), &crate::repo::InitOptions::default())?;
+        let oid = repo
+            .odb()
+            .write(crate::objects::ObjectKind::Blob, b"pushed\n")?;
+        let pushed = PushRefResult {
+            local_ref: Some("refs/heads/main".to_owned()),
+            remote_ref: "refs/heads/main".to_owned(),
+            old_oid: None,
+            new_oid: Some(oid),
+            forced: false,
+            deletion: false,
+            status: PushRefStatus::Ok,
+            message: None,
+        };
+        let results = std::slice::from_ref(&pushed);
+        for destination in [
+            r"C:\t\remote.git",
+            r"t\remote.git",
+            "git@host:repo.git",
+            "/srv/remote.git",
+            "../remote.git",
+            ".",
+        ] {
+            assert!(!tracks_pushes_to(destination), "{destination}");
+            apply_push_remote_tracking_updates_in(&repo, destination, results)?;
+            apply_push_remote_tracking_updates(repo.git_dir(), destination, results)?;
+        }
+        let mut tracking = Vec::new();
+        repo.ref_store()
+            .for_each_ref("refs/remotes/", &mut |entry| {
+                tracking.push(entry.name.to_string());
+                std::ops::ControlFlow::Continue(())
+            })?;
+        assert!(tracking.is_empty(), "{tracking:?}");
+
+        apply_push_remote_tracking_updates_in(&repo, "origin", results)?;
+        assert_eq!(
+            repo.ref_store()
+                .resolve(RefNameRef::from_trusted("refs/remotes/origin/main"))
+                .ok(),
+            Some(oid)
         );
         Ok(())
     }

@@ -502,6 +502,8 @@ mod push_interrupt;
 #[cfg(feature = "full-tests")]
 #[path = "push_json_flags.rs"]
 mod push_json_flags;
+#[path = "push_path_destination_tracking.rs"]
+mod push_path_destination_tracking;
 #[cfg(feature = "full-tests")]
 #[path = "push_pre_push_hook.rs"]
 mod push_pre_push_hook;
