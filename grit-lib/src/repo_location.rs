@@ -70,7 +70,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
-    use crate::config::ConfigSet;
+    use crate::config::{ConfigSet, LoadConfigOptions};
     use crate::environment::{Environment, RepositoryOptions};
     use crate::repo::InitOptions;
     use std::ffi::OsString;
@@ -211,9 +211,13 @@ mod tests {
         );
         let handle = Repository::discover(None, &options).unwrap();
         let location = RepositoryLocation::from(&handle);
-        let config = handle.config().unwrap();
-        let expected =
-            ConfigSet::load(&options.environment, Some(location.git_dir()), true).unwrap();
+        let config = handle.config().snapshot().unwrap();
+        let expected = ConfigSet::load(
+            &options.environment,
+            Some(location.git_dir()),
+            &LoadConfigOptions::default(),
+        )
+        .unwrap();
         let keyed = |set: &ConfigSet| -> Vec<(String, Option<String>)> {
             set.entries()
                 .iter()
@@ -221,8 +225,11 @@ mod tests {
                 .collect()
         };
         assert_eq!(keyed(&config), keyed(&expected));
-        assert_eq!(config.get("user.name").as_deref(), Some("Global"));
-        assert_eq!(config.get("review.cmdline").as_deref(), Some("yes"));
+        assert_eq!(config.get("user.name").unwrap().as_deref(), Some("Global"));
+        assert_eq!(
+            config.get("review.cmdline").unwrap().as_deref(),
+            Some("yes")
+        );
     }
 
     #[test]
