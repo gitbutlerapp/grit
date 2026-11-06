@@ -372,6 +372,11 @@ path = "tests/matrix_credentials.rs"
 required-features = ["full-tests"]
 
 [[test]]
+name = "mailmap_issue_2551_group_by_author_git_compat"
+path = "tests/mailmap_issue_2551_group_by_author_git_compat.rs"
+required-features = ["full-tests"]
+
+[[test]]
 name = "pack_ingest_memory"
 path = "tests/pack_ingest_memory.rs"
 required-features = ["full-tests"]
