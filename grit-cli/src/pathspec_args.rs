@@ -60,6 +60,24 @@ fn pathspec_options_from_repo(
     options
 }
 
+fn resolve_typed_pathspec(
+    repo: &Repository,
+    paths: &[String],
+    pathspec_from_file: Option<&str>,
+    pathspec_file_nul: bool,
+) -> Result<Pathspec> {
+    let from_file = match pathspec_from_file {
+        None => None,
+        Some(path) => {
+            let data = read_pathspec_source(path)?;
+            Some(PathspecInput::new(data, pathspec_file_nul))
+        }
+    };
+    let options = pathspec_options_from_repo(repo, from_file);
+    repo.pathspec(paths, &options)
+        .map_err(map_pathspec_resolve)
+}
+
 impl PathspecArgs {
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
     pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
@@ -73,16 +91,12 @@ impl PathspecArgs {
 
     /// Resolve into a [`Pathspec`] (preferred for porcelain options).
     pub fn resolve_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
-        let from_file = match self.pathspec_from_file.as_deref() {
-            None => None,
-            Some(path) => {
-                let data = read_pathspec_source(path)?;
-                Some(PathspecInput::new(data, self.pathspec_file_nul))
-            }
-        };
-        let options = pathspec_options_from_repo(repo, from_file);
-        repo.pathspec(&self.paths, &options)
-            .map_err(map_pathspec_resolve)
+        resolve_typed_pathspec(
+            repo,
+            &self.paths,
+            self.pathspec_from_file.as_deref(),
+            self.pathspec_file_nul,
+        )
     }
 
     /// Require at least one pathspec source (argv or from-file).
@@ -155,20 +169,6 @@ impl TrailingPathspecArgs {
             self.pathspec_from_file.as_deref(),
             self.pathspec_file_nul,
         )
-    }
-
-    /// Resolve into a [`Pathspec`] (preferred for porcelain options).
-    pub fn resolve_pathspec(&self, repo: &Repository) -> Result<Pathspec> {
-        let from_file = match self.pathspec_from_file.as_deref() {
-            None => None,
-            Some(path) => {
-                let data = read_pathspec_source(path)?;
-                Some(PathspecInput::new(data, self.pathspec_file_nul))
-            }
-        };
-        let options = pathspec_options_from_repo(repo, from_file);
-        repo.pathspec(&self.paths, &options)
-            .map_err(map_pathspec_resolve)
     }
 
     /// Require at least one pathspec source (argv or from-file).
