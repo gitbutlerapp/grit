@@ -300,7 +300,7 @@ impl CancelToken {
         }
     }
 
-    /// Returns a token and the number of [`Self::is_cancelled`] calls (integration tests only).
+    /// Returns a token and the number of cancellation checks (integration tests only).
     #[cfg(feature = "test-support")]
     #[must_use]
     pub fn with_check_counter() -> (Self, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
@@ -327,10 +327,15 @@ impl CancelToken {
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         #[cfg(feature = "test-support")]
+        self.record_check_only();
+        self.flag.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    #[cfg(feature = "test-support")]
+    fn record_check_only(&self) {
         if let Some(counter) = self.check_counter.as_ref() {
             counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-        self.flag.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Like [`Self::poll`], but only applies the test [`Self::after_polls`] budget — avoids
@@ -824,6 +829,18 @@ mod tests {
         assert!(token.poll().is_ok());
         assert!(token.poll().is_err());
         assert!(token.is_cancelled());
+    }
+
+    #[cfg(feature = "test-support")]
+    #[test]
+    fn every_cancellation_check_path_is_counted_once() {
+        let (token, checks) = CancelToken::with_check_counter();
+        assert!(!token.is_cancelled());
+        assert_eq!(checks.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert!(token.poll().is_ok());
+        assert_eq!(checks.load(std::sync::atomic::Ordering::Relaxed), 2);
+        token.poll_before_wait();
+        assert_eq!(checks.load(std::sync::atomic::Ordering::Relaxed), 3);
     }
 
     #[test]
