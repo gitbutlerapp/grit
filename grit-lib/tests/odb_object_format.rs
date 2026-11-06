@@ -1,5 +1,5 @@
 //! [`Repository::open`] with an injected object store checks format against the repository's
-//! `extensions.objectformat` and fails with [`Error::ObjectFormatMismatch`].
+//! `extensions.objectformat` and fails with [`RepositoryError::ObjectFormatMismatch`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 
 const MISMATCHED_PAIRS: [(HashAlgo, HashAlgo); 2] = [
     (HashAlgo::Sha256, HashAlgo::Sha1),
@@ -51,9 +51,9 @@ fn expect_format_mismatch(
     store_format: HashAlgo,
 ) {
     match result {
-        Err(Error::ObjectFormatMismatch {
+        Err(Error::Repository(RepositoryError::ObjectFormatMismatch {
             repository, store, ..
-        }) => {
+        })) => {
             assert_eq!(repository, repository_format);
             assert_eq!(store, store_format);
         }

@@ -1,10 +1,11 @@
-//! Map filesystem failures under the repository git directory to [`Error::GitDirPathIo`].
+//! Map filesystem failures under the repository git directory to [`RepositoryError::git_dir_path_io`].
 
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::objects::odb::Odb;
+use crate::repo::RepositoryError;
 
 /// Git-directory filesystem operation that failed on a single path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -153,7 +154,7 @@ pub fn is_git_dir_transient_contention(operation: GitDirPathOperation, source: &
     ) && crate::atomic_replace::is_replace_contention(source)
 }
 
-/// Human-readable summary for [`Error::GitDirPathIo`].
+/// Human-readable summary for [`RepositoryError::git_dir_path_io`].
 #[must_use]
 pub fn format_git_dir_io_message(
     path: &str,
@@ -183,11 +184,7 @@ pub fn map_git_dir_io(
     operation: GitDirPathOperation,
     source: io::Error,
 ) -> Error {
-    Error::GitDirPathIo {
-        path: display_git_dir_path(git_dir, path),
-        operation,
-        source,
-    }
+    RepositoryError::git_dir_path_io(display_git_dir_path(git_dir, path), operation, source).into()
 }
 
 /// Like [`map_git_dir_io`], for the files ref store (`common_dir` + checkout `git_dir`).
@@ -199,11 +196,12 @@ pub fn map_ref_store_path_io(
     operation: GitDirPathOperation,
     source: io::Error,
 ) -> Error {
-    Error::GitDirPathIo {
-        path: display_ref_store_path(common_dir, checkout_git_dir, path),
+    RepositoryError::git_dir_path_io(
+        display_ref_store_path(common_dir, checkout_git_dir, path),
         operation,
         source,
-    }
+    )
+    .into()
 }
 
 /// Attach git-dir context to [`std::io::Result`].
@@ -216,7 +214,7 @@ pub fn io_with_git_path<T>(
     result.map_err(|source| map_git_dir_io(git_dir, path, operation, source))
 }
 
-/// Map a bare [`Error::Io`] from index persistence to [`Error::GitDirPathIo`].
+/// Map a bare [`Error::Io`] from index persistence to [`RepositoryError::git_dir_path_io`].
 #[must_use]
 pub fn map_index_write_error(git_dir: &Path, index_path: &Path, err: Error) -> Error {
     let display_path = if let Some(common) = crate::refs::common_dir(git_dir) {
@@ -225,11 +223,10 @@ pub fn map_index_write_error(git_dir: &Path, index_path: &Path, err: Error) -> E
         display_git_dir_path(git_dir, index_path)
     };
     match err {
-        Error::Io(source) => Error::GitDirPathIo {
-            path: display_path,
-            operation: GitDirPathOperation::WriteIndex,
-            source,
-        },
+        Error::Io(source) => {
+            RepositoryError::git_dir_path_io(display_path, GitDirPathOperation::WriteIndex, source)
+                .into()
+        }
         other => other,
     }
 }

@@ -7,7 +7,7 @@ use grit_lib::config::environment::Environment;
 use grit_lib::error::Error;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::{resolve_initial_branch, InitOptions, Repository};
+use grit_lib::repo::{resolve_initial_branch, InitOptions, Repository, RepositoryError};
 use tempfile::TempDir;
 
 fn git_fsck_ok(git_dir: &std::path::Path) {
@@ -193,7 +193,10 @@ fn init_rejects_bare_with_separate_git_dir() {
             .with_separate_git_dir(Some(separate.path().to_path_buf())),
     )
     .unwrap_err();
-    assert!(matches!(err, Error::InitBareWithSeparateGitDir));
+    assert!(matches!(
+        err,
+        Error::Repository(RepositoryError::InitBareWithSeparateGitDir)
+    ));
 }
 
 #[test]

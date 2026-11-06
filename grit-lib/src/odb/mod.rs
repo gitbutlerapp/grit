@@ -65,6 +65,7 @@ use crate::objects::{
 };
 use crate::pack;
 use crate::pack_store::PackStore;
+use crate::repo::RepositoryError;
 use filetime::{set_file_mtime, FileTime};
 use flate2::Compression;
 
@@ -1253,7 +1254,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::UnsupportedObjectStore`] (`operation: "primary"`) when
+    /// - [`RepositoryError::UnsupportedObjectStore`] (`operation: "primary"`) when
     ///   [`OdbBuilder::primary`] replaced the files-backed primary.
     /// - Failures while opening pack, MIDX, or loose backends.
     pub fn primary(&self) -> Result<Arc<FilesSource>> {
@@ -1816,7 +1817,7 @@ impl Odb {
     /// This is always the repository layout path (including for custom primaries that do not
     /// store objects on disk). Prefer [`Self::files_objects_dir`] when the operation requires a
     /// files-backed primary; filesystem maintenance returns
-    /// [`Error::UnsupportedObjectStore`] otherwise.
+    /// [`RepositoryError::UnsupportedObjectStore`] otherwise.
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
@@ -2164,12 +2165,11 @@ impl Odb {
     /// Propagates the primary store failure. Only valid when [`Self::uses_files_primary`]
     /// is false.
     pub(crate) fn missing_materialized_many(&self, oids: &[ObjectId]) -> Result<Vec<ObjectId>> {
-        let primary =
-            self.custom_primary
-                .as_ref()
-                .ok_or_else(|| Error::UnsupportedObjectStore {
-                    operation: "missing_materialized_many",
-                })?;
+        let primary = self.custom_primary.as_ref().ok_or_else(|| {
+            RepositoryError::UnsupportedObjectStore {
+                operation: "missing_materialized_many",
+            }
+        })?;
         if oids.is_empty() {
             return Ok(Vec::new());
         }
@@ -4056,9 +4056,10 @@ impl Odb {
     /// Same as [`Self::write`].
     pub fn write_local(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(RepositoryError::UnsupportedObjectStore {
                 operation: "write_local",
-            });
+            }
+            .into());
         }
         let oid = hash_object_data_with(self.hash_algo(), kind, data)?;
 
@@ -4095,9 +4096,10 @@ impl Odb {
         supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
     ) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(RepositoryError::UnsupportedObjectStore {
                 operation: "write_local_stream",
-            });
+            }
+            .into());
         }
         let loose = self.local_loose()?;
         let oid = loose.write_payload_stream_with(
@@ -4119,9 +4121,10 @@ impl Odb {
     /// promisor pack are still written because [`Self::exists_local`] treats those as absent.
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(RepositoryError::UnsupportedObjectStore {
                 operation: "write_loose_materialize",
-            });
+            }
+            .into());
         }
         let oid = hash_object_data_with(self.hash_algo(), kind, data)?;
         if let Ok(primary) = self.primary() {
@@ -4182,9 +4185,10 @@ impl Odb {
     /// Same as [`Self::write_raw`].
     pub fn write_raw_local(&self, store_bytes: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(RepositoryError::UnsupportedObjectStore {
                 operation: "write_raw_local",
-            });
+            }
+            .into());
         }
         let obj = parse_object_bytes(store_bytes)?;
         let oid = hash_object_data_with(self.hash_algo(), obj.kind, &obj.data)?;

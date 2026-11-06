@@ -261,7 +261,7 @@ impl RepoCaches {
             let cache = self
                 .config_cache
                 .lock()
-                .map_err(|e| Error::Message(format!("config cache lock poisoned: {e}")))?;
+                .map_err(|_| Error::Config(crate::error::ConfigError::ConfigCacheLockPoisoned))?;
             if let Some(cached) = config_cache_lookup(&cache, &key, &env_fp, &base_stamps) {
                 return Ok(cached);
             }
@@ -277,7 +277,7 @@ impl RepoCaches {
         let mut cache = self
             .config_cache
             .lock()
-            .map_err(|e| Error::Message(format!("config cache lock poisoned: {e}")))?;
+            .map_err(|_| Error::Config(crate::error::ConfigError::ConfigCacheLockPoisoned))?;
         config_cache_store(
             &mut cache,
             key,
@@ -441,7 +441,7 @@ impl RepoCaches {
             let cache = self
                 .attr_stack
                 .lock()
-                .map_err(|e| Error::Message(format!("attr stack cache lock poisoned: {e}")))?;
+                .map_err(|_| Error::Config(crate::error::ConfigError::ConfigCacheLockPoisoned))?;
             if let Some(entry) = cache.get(&key) {
                 if attr_stamps_valid(entry) {
                     return Ok(Arc::clone(&entry.parsed));
@@ -453,7 +453,7 @@ impl RepoCaches {
         let mut cache = self
             .attr_stack
             .lock()
-            .map_err(|e| Error::Message(format!("attr stack cache lock poisoned: {e}")))?;
+            .map_err(|_| Error::Config(crate::error::ConfigError::ConfigCacheLockPoisoned))?;
         cache.insert(
             key,
             AttrStackCacheEntry {
@@ -484,7 +484,7 @@ impl RepoCaches {
             let cache = self
                 .attr_bare
                 .lock()
-                .map_err(|e| Error::Message(format!("attr bare cache lock poisoned: {e}")))?;
+                .map_err(|_| Error::Config(crate::error::ConfigError::ConfigCacheLockPoisoned))?;
             if let Some(entry) = cache.get(&key) {
                 if attr_stamps_valid(entry) {
                     return Ok(Arc::clone(&entry.parsed));
@@ -501,7 +501,7 @@ impl RepoCaches {
         let mut cache = self
             .attr_bare
             .lock()
-            .map_err(|e| Error::Message(format!("attr bare cache lock poisoned: {e}")))?;
+            .map_err(|_| Error::Config(crate::error::ConfigError::ConfigCacheLockPoisoned))?;
         cache.insert(
             key,
             AttrStackCacheEntry {

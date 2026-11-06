@@ -47,6 +47,7 @@ use crate::objects::ObjectId;
 use crate::refs::store::{RawRef, RefNameRef};
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 
 /// Errors produced while serving a fetch or a push.
 #[derive(Debug, thiserror::Error)]

@@ -15,7 +15,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStor
 use grit_lib::objects::odb::{Odb, OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::store::MemoryRefStore;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use grit_test_support::odb_conformance::run_read_suite;
 use grit_test_support::{git, git_packed_history, rev_parse};
 
@@ -128,14 +128,13 @@ fn read_store_covers_primary_read_sources_and_alternates() {
     assert!(!sources.contains(&extra_oid).expect("read source"));
     assert!(matches!(
         odb.primary(),
-        Err(Error::UnsupportedObjectStore {
-            operation: "primary"
-        })
+        Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
+            operation: "primary",
+        }))
     ));
 }
 
-/// Exactly the reported program: a repository opened through `RepositoryBuilder` with a
-/// memory primary and no alternates.
+/// Exactly the reported program: a repository opened with a memory primary and no alternates.
 #[test]
 fn read_store_of_custom_primary_repository_sees_written_object() {
     let tmp = tempfile::tempdir().expect("tempdir");

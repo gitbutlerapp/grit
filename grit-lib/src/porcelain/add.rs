@@ -50,6 +50,7 @@ use crate::porcelain::status::{
 };
 use crate::progress::{CancelToken, ProgressPhase, ProgressScope, ProgressSink};
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::repo_relpath::{as_utf8_for_matching, storage_bytes};
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
@@ -272,7 +273,7 @@ pub(crate) fn validate_commit_staging_pathspecs(
     index: &Index,
     opts: &StageOptions,
 ) -> Result<()> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let rules = WorktreeRules::from_repository(repo, index)?;
     validate_pathspecs(repo, index, work_tree, &[], &[], opts, &rules, Some(index))
 }
@@ -664,7 +665,7 @@ fn stage_inner_on_index(
     repo.odb().hot_path_metrics().record_staging_pass();
     let dry_run = opts.dry_run;
     let dry_run_list_only = dry_run && on_disk;
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     scope.poll()?;
     scope.sink().start(ProgressPhase::StagingFiles, None);
 

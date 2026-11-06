@@ -32,6 +32,7 @@ use crate::porcelain::pathspec_match::{
     ensure_pathspec_matches_known_in_repository, pathspec_matches_known_in_repository,
 };
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::rev_parse::peel_tags_to_commit;
 use crate::revwalk::merge_base::{merge_base_for_diff_two_commits, MergeBaseForDiffError};
 use crate::revwalk::rev_parse::{
@@ -858,7 +859,7 @@ fn unstaged_changes_inner(
     rename_threshold: u32,
     restrict_to_paths: Option<Arc<BTreeSet<String>>>,
 ) -> Result<Vec<FileChange>> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let rules = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, index)?));
     let entries = unstaged_entries_in(
         repo,
@@ -960,7 +961,7 @@ fn worktree_changes(
     rename_threshold: u32,
     pathspecs: &[String],
 ) -> Result<Vec<FileChange>> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let mut index = repo.index().load()?;
     let restrict = pathspec_restrict_paths_for_scan(repo, &index, pathspecs, base_tree)?;
     let rules = Arc::new(Mutex::new(WorktreeRules::from_repository(repo, &index)?));

@@ -19,7 +19,7 @@ use grit_lib::porcelain::pull::PullError;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 use time::OffsetDateTime;
@@ -946,7 +946,7 @@ fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
 fn guide_lib(err: &LibError) -> Option<Error> {
     match err {
         LibError::Remote(remote) => guide_remote(remote),
-        LibError::NotARepository(_) => Some(guided(
+        LibError::Repository(RepositoryError::NotARepository(_)) => Some(guided(
             ErrorKind::NotARepository,
             err.to_string(),
             None,
@@ -1062,17 +1062,24 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 },
             },
         )),
-        LibError::GitDirPathIo { path, .. } => Some(guided(
-            ErrorKind::GitDirPathIo,
-            err.to_string(),
-            err.is_git_dir_file_in_use()
-                .then(|| {
-                    "another thread or process is updating the same git metadata; retry shortly"
-                        .to_owned()
-                })
-                .or_else(|| Some(git_dir_path_io_hint(path))),
-            Some(vec![path.clone()]),
-        )),
+        LibError::Repository(RepositoryError::GitDirPathIo(io)) => {
+            let path = io
+                .path
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Some(guided(
+                ErrorKind::GitDirPathIo,
+                err.to_string(),
+                err.is_git_dir_file_in_use()
+                    .then(|| {
+                        "another thread or process is updating the same git metadata; retry shortly"
+                            .to_owned()
+                    })
+                    .or_else(|| Some(git_dir_path_io_hint(&path))),
+                Some(vec![path]),
+            ))
+        }
         LibError::UnbornHead => Some(
             crate::unborn_errors::unborn_head_from_cwd()
                 .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
@@ -1439,27 +1446,33 @@ mod tests {
 
     #[test]
     fn git_dir_path_io_suggests_retry_when_in_use() {
-        let in_use = payload(Error::new(LibError::GitDirPathIo {
-            path: ".git/index".into(),
-            operation: grit_lib::error::GitDirPathOperation::WriteIndex,
-            source: std::io::Error::from_raw_os_error(libc::EBUSY as i32),
-        }));
+        let in_use = payload(Error::new(LibError::Repository(
+            RepositoryError::git_dir_path_io(
+                ".git/index",
+                grit_lib::error::GitDirPathOperation::WriteIndex,
+                std::io::Error::from_raw_os_error(libc::EBUSY as i32),
+            ),
+        )));
         assert!(in_use.hint.expect("hint").contains("retry shortly"));
     }
 
     #[test]
     fn git_dir_path_io_hint_matches_layout() {
-        let worktree = payload(Error::new(LibError::GitDirPathIo {
-            path: ".git/objects/pack/tmp".into(),
-            operation: grit_lib::error::GitDirPathOperation::GcPack,
-            source: std::io::Error::from_raw_os_error(libc::EACCES as i32),
-        }));
+        let worktree = payload(Error::new(LibError::Repository(
+            RepositoryError::git_dir_path_io(
+                ".git/objects/pack/tmp",
+                grit_lib::error::GitDirPathOperation::GcPack,
+                std::io::Error::from_raw_os_error(libc::EACCES as i32),
+            ),
+        )));
         assert!(worktree.hint.expect("hint").contains("ls -l .git"));
-        let bare = payload(Error::new(LibError::GitDirPathIo {
-            path: "objects/pack/tmp_repack_1".into(),
-            operation: grit_lib::error::GitDirPathOperation::GcPack,
-            source: std::io::Error::from_raw_os_error(libc::EACCES as i32),
-        }));
+        let bare = payload(Error::new(LibError::Repository(
+            RepositoryError::git_dir_path_io(
+                "objects/pack/tmp_repack_1",
+                grit_lib::error::GitDirPathOperation::GcPack,
+                std::io::Error::from_raw_os_error(libc::EACCES as i32),
+            ),
+        )));
         let bare_hint = bare.hint.expect("hint");
         assert!(
             !bare_hint.contains("ls -l .git"),
@@ -1619,10 +1632,10 @@ mod tests {
     #[test]
     fn not_a_repository_has_kind() {
         use grit_lib::error::NotARepositoryReason;
-        let p = payload(Error::new(LibError::NotARepository(
-            NotARepositoryReason::NoRepositoryAt {
+        let p = payload(Error::new(LibError::Repository(
+            RepositoryError::NotARepository(NotARepositoryReason::NoRepositoryAt {
                 path: "/tmp".into(),
-            },
+            }),
         )));
         assert_eq!(p.kind, ErrorKind::NotARepository);
     }

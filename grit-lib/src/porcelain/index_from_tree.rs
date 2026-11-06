@@ -11,6 +11,7 @@ use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
 use crate::porcelain::merge::tree_to_index_entries;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::repo_relpath::join_rel;
 use crate::sparse_checkout::SparseCheckout;
 use crate::worktree_rules::WorktreeRules;
@@ -381,7 +382,7 @@ fn prepare_sparse_rows(
     }
     let protect = ProtectOptions::from_config(config.as_ref());
     let sparse = SparseCheckout::load(repo)?;
-    let worktree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let worktree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let index_sparse = config.bool_with_default("index.sparse", false);
     let mut candidates = std::collections::BTreeMap::new();
     for row in &index.entries {

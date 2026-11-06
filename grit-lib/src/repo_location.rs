@@ -72,7 +72,7 @@ mod tests {
     use super::*;
     use crate::config::{ConfigSet, LoadConfigOptions};
     use crate::environment::{Environment, RepositoryOptions};
-    use crate::repo::InitOptions;
+    use crate::repo::{InitOptions, RepositoryError};
     use std::ffi::OsString;
     use std::fs;
 
@@ -116,7 +116,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let options = options_at(tmp.path(), &[("GIT_CEILING_DIRECTORIES", "/")]);
         let err = Repository::discover(None, &options).unwrap_err();
-        assert!(matches!(err, crate::error::Error::NotARepository(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Repository(crate::repo::RepositoryError::NotARepository(_))
+        ));
     }
 
     #[test]
@@ -131,7 +134,9 @@ mod tests {
         let err = Repository::discover(None, &options_at(tmp.path(), &[])).unwrap_err();
         assert!(matches!(
             err,
-            crate::error::Error::UnsupportedRepositoryFormatVersion(2)
+            crate::error::Error::Repository(RepositoryError::UnsupportedRepositoryFormatVersion {
+                version: 2
+            })
         ));
     }
 
@@ -251,7 +256,10 @@ mod tests {
         let err = Repository::discover(None, &foreign).unwrap_err();
         assert!(matches!(
             err,
-            crate::error::Error::DubiousOwnership { .. } | crate::error::Error::NotARepository(_)
+            crate::error::Error::Repository(
+                crate::repo::RepositoryError::DubiousOwnership { .. }
+                    | crate::repo::RepositoryError::NotARepository(_)
+            )
         ));
     }
 

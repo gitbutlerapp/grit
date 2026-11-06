@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::error::{Error, Result};
 use crate::lockfile::{LockError, LockFile, LockWait};
 use crate::odb::Odb;
+use crate::repo::RepositoryError;
 
 static QUARANTINE_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -170,12 +171,12 @@ impl ReceiveQuarantine {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnsupportedObjectStore`] when `source` is not files-backed,
+    /// Returns [`RepositoryError::UnsupportedObjectStore`] when `source` is not files-backed,
     /// or [`Error::Io`] when the directory cannot be created.
     pub fn create(source: &Odb, git_dir: &Path) -> Result<Self> {
         let main_objects = source
             .files_objects_dir()
-            .ok_or(Error::UnsupportedObjectStore {
+            .ok_or(RepositoryError::UnsupportedObjectStore {
                 operation: "receive quarantine",
             })?
             .to_path_buf();

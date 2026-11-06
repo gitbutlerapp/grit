@@ -28,7 +28,7 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError, RemoteResult};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::state::InProgressOperation;
 use grit_lib::test_support::objects_pack::{
     clear_pack_cache, read_pack_index, read_packed_delta_dependency,
@@ -598,7 +598,9 @@ fn refusals_are_typed() {
     append_config(&fx.git_dir, "[extensions]\n\tpreciousObjects = true\n");
     assert!(matches!(
         drop_promised_blobs(&fx.offline(), &opts(LIMIT, None)),
-        Err(Error::PreciousObjectsRepository { .. })
+        Err(Error::Repository(
+            RepositoryError::PreciousObjectsRepository { .. }
+        ))
     ));
     assert!(fx.offline().odb().exists_stored(&fx.big[0]));
 }

@@ -57,7 +57,10 @@ fn ownership_check_foreign_repo_matches_git_safe_directory_rejection() {
         RepositoryOptions::with_environment(env).with_ownership_check(Arc::new(TreatAllForeign));
     let grit_err = Repository::discover(Some(&repo_root), &options).unwrap_err();
     assert!(
-        matches!(grit_err, Error::DubiousOwnership(_)),
+        matches!(
+            grit_err,
+            Error::Repository(RepositoryError::DubiousOwnership { .. })
+        ),
         "grit should match git: {grit_err:?}"
     );
 }

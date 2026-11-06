@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::error::Error;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 
 fn main() -> Result<(), Error> {
     let cwd = std::env::current_dir().map_err(Error::Io)?;
@@ -13,7 +13,7 @@ fn main() -> Result<(), Error> {
 
     let repo = match Repository::discover(None, &options) {
         Ok(r) => r,
-        Err(Error::NotARepository(_)) => {
+        Err(Error::Repository(RepositoryError::NotARepository(_))) => {
             let git_dir = cwd.join(".git");
             Repository::open(&git_dir, &options.clone().with_work_tree(&cwd))?
         }

@@ -68,6 +68,7 @@ use crate::pack::PackedType;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::state::InProgressOperation;
 
 use super::{GcLock, GcLockAttempt};
@@ -426,8 +427,8 @@ impl DropPromisedBlobsReport {
 ///
 /// # Errors
 ///
-/// - [`Error::UnsupportedObjectStore`] without a files-backed object store;
-/// - [`Error::PreciousObjectsRepository`] when `extensions.preciousObjects` is set;
+/// - [`RepositoryError::UnsupportedObjectStore`] without a files-backed object store;
+/// - [`RepositoryError::PreciousObjectsRepository`] when `extensions.preciousObjects` is set;
 /// - [`Error::NoPromisorRemote`] when no remote is a promisor and
 ///   `extensions.partialClone` is unset;
 /// - [`Error::OperationInProgress`] when a worktree is in the middle of a merge,
@@ -543,9 +544,10 @@ impl From<Refusal> for DropPromisedBlobsSkip {
 impl From<Refusal> for Error {
     fn from(refusal: Refusal) -> Self {
         match refusal {
-            Refusal::PreciousObjects => Error::PreciousObjectsRepository {
+            Refusal::PreciousObjects => RepositoryError::PreciousObjectsRepository {
                 operation: OPERATION,
-            },
+            }
+            .into(),
             Refusal::NoPromisorRemote => Error::NoPromisorRemote {
                 operation: OPERATION,
             },

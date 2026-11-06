@@ -15,7 +15,7 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_test_support::git_fsck;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -476,8 +476,8 @@ fn custom_backend_unsupported_error() {
     let err = repack(&custom, &RepackOptions::default()).expect_err("custom backend");
     assert!(matches!(
         err,
-        Error::UnsupportedObjectStore {
-            operation: "repack"
-        }
+        Error::Repository(RepositoryError::UnsupportedObjectStore {
+            operation: "repack",
+        })
     ));
 }

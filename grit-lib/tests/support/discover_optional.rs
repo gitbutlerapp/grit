@@ -4,14 +4,14 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, NotARepositoryReason, Result};
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 
 pub fn discover_optional(start: Option<&Path>) -> Result<Option<Repository>> {
     let err = match Repository::discover(start, &RepositoryOptions::empty()) {
         Ok(repo) => return Ok(Some(repo)),
         Err(err) => err,
     };
-    let Error::NotARepository(reason) = &err else {
+    let Error::Repository(RepositoryError::NotARepository(reason)) = &err else {
         return Err(err);
     };
     let malformed_gitfile = matches!(

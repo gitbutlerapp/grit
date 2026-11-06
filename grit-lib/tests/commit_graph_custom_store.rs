@@ -18,7 +18,7 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, WritableObjectStor
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::refs::write_ref;
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use grit_lib::revwalk::RevWalkListOptions;
 use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -500,11 +500,11 @@ fn attached_graph_of_another_object_format_is_refused_on_open() {
     let store = Arc::new(CountingStore::new(HashAlgo::Sha1));
     assert!(matches!(
         open_custom(sha1.path(), store, Some(graph)),
-        Err(Error::ObjectFormatMismatch {
+        Err(Error::Repository(RepositoryError::ObjectFormatMismatch {
             repository: HashAlgo::Sha1,
             store: HashAlgo::Sha256,
             ..
-        })
+        }))
     ));
 }
 

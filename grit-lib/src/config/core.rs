@@ -2554,8 +2554,11 @@ impl ConfigSet {
     ///
     /// Used by `git config --get-regexp`. Returns an error if the pattern
     /// is not a valid regex.
-    pub fn get_regexp(&self, pattern: &str) -> std::result::Result<Vec<&ConfigEntry>, String> {
-        let re = regex::Regex::new(pattern).map_err(|e| format!("invalid key pattern: {e}"))?;
+    pub fn get_regexp(&self, pattern: &str) -> std::result::Result<Vec<&ConfigEntry>, ConfigError> {
+        let re = regex::Regex::new(pattern).map_err(|source| ConfigError::InvalidPattern {
+            pattern: pattern.to_owned(),
+            reason: source.to_string(),
+        })?;
         Ok(self
             .entries
             .iter()
@@ -5018,9 +5021,14 @@ mod get_regexp_tests {
 
     #[test]
     fn get_regexp_invalid_pattern_is_error() {
+        use crate::error::ConfigError;
+
         let set = set_from_snippet("[user]\n\tname = x\n");
         let err = set.get_regexp("(").expect_err("unclosed group");
-        assert!(err.contains("invalid key pattern"), "got: {err}");
+        assert!(
+            matches!(err, ConfigError::InvalidPattern { .. }),
+            "got: {err:?}"
+        );
     }
 
     #[test]

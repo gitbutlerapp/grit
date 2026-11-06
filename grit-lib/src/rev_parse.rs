@@ -4136,7 +4136,7 @@ mod line_coverage_tests {
 
     use crate::config::environment::RepositoryOptions;
     use crate::ref_storage::RefStorageFormat;
-    use crate::repo::{init_repository, InitOptions, Repository};
+    use crate::repo::{init_repository, InitOptions, Repository, RepositoryError};
     use crate::write_tree::write_tree_from_index;
     use std::fs;
     use tempfile::tempdir;
@@ -4146,7 +4146,7 @@ mod line_coverage_tests {
             Ok(repo) => return Ok(Some(repo)),
             Err(err) => err,
         };
-        let Error::NotARepository(reason) = &err else {
+        let Error::Repository(RepositoryError::NotARepository(reason)) = &err else {
             return Err(err);
         };
         let malformed_gitfile = matches!(

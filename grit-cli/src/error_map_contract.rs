@@ -17,6 +17,7 @@ use grit_lib::porcelain::merge::ContinueMergeError;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::RemoteError;
+use grit_lib::repo::RepositoryError;
 
 use crate::error_kind::ErrorKind;
 use crate::error_map::{
@@ -275,16 +276,20 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "not_a_repository",
         build: || {
-            Error::new(LibError::NotARepository(NotARepositoryReason::NoRepositoryAt {
-                path: "/tmp".into(),
-            }))
+            Error::new(LibError::Repository(RepositoryError::NotARepository(
+                NotARepositoryReason::NoRepositoryAt {
+                    path: "/tmp".into(),
+                },
+            )))
         },
         kind: Some(ErrorKind::NotARepository),
         exit: ExitStatus::Failure,
         human: || {
-            LibError::NotARepository(NotARepositoryReason::NoRepositoryAt {
-                path: "/tmp".into(),
-            })
+            LibError::Repository(RepositoryError::NotARepository(
+                NotARepositoryReason::NoRepositoryAt {
+                    path: "/tmp".into(),
+                },
+            ))
             .to_string()
         },
         hint: None,
@@ -815,20 +820,22 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "git_dir_path_io",
         build: || {
-            Error::new(LibError::GitDirPathIo {
-                path: ".git/index".into(),
-                operation: GitDirPathOperation::WriteIndex,
-                source: std::io::Error::from_raw_os_error(16),
-            })
+            Error::new(LibError::Repository(RepositoryError::git_dir_path_io(
+                ".git/index",
+                GitDirPathOperation::WriteIndex,
+                std::io::Error::from_raw_os_error(16),
+            )))
         },
         kind: Some(ErrorKind::GitDirPathIo),
         exit: ExitStatus::Failure,
-        human: || LibError::GitDirPathIo {
-            path: ".git/index".into(),
-            operation: GitDirPathOperation::WriteIndex,
-            source: std::io::Error::from_raw_os_error(16),
-        }
-        .to_string(),
+        human: || {
+            LibError::Repository(RepositoryError::git_dir_path_io(
+                ".git/index",
+                GitDirPathOperation::WriteIndex,
+                std::io::Error::from_raw_os_error(16),
+            ))
+            .to_string()
+        },
         hint: Some("another thread or process is updating the same git metadata; retry shortly"),
     },
     ContractRow {

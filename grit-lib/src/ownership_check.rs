@@ -40,7 +40,7 @@
 //! let options = RepositoryOptions::with_environment(env)
 //!     .with_ownership_check(Arc::new(SandboxForeign));
 //! let err = Repository::discover(Some(dir.path()), &options).unwrap_err();
-//! assert!(matches!(err, grit_lib::error::Error::DubiousOwnership(_)));
+//! assert!(matches!(err, grit_lib::error::Error::Repository(grit_lib::error::RepositoryError::DubiousOwnership { .. })));
 //!
 //! let mut owned_env = Environment::empty();
 //! owned_env.cwd = dir.path().to_path_buf();
@@ -54,6 +54,7 @@
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
+use crate::repo::RepositoryError;
 use thiserror::Error;
 
 /// Whether a path on disk is owned by the effective user.
@@ -289,6 +290,9 @@ mod tests {
         let options = RepositoryOptions::with_environment(env)
             .with_ownership_check(Arc::new(ForeignOwnershipCheck));
         let err = Repository::discover(Some(td.path()), &options).unwrap_err();
-        assert!(matches!(err, crate::error::Error::DubiousOwnership(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Repository(RepositoryError::DubiousOwnership { .. })
+        ));
     }
 }

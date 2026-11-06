@@ -581,7 +581,10 @@ fn write_patch_resolved_worktree_side_needs_work_tree() {
     let err = write_patch_resolved(&repo, &files, &opts, &mut std::io::sink())
         .expect_err("bare repository has no work tree");
     assert!(
-        matches!(err, grit_lib::error::Error::RequiresWorkTree),
+        matches!(
+            err,
+            grit_lib::error::Error::Repository(RepositoryError::RequiresWorkTree)
+        ),
         "unexpected error: {err:?}"
     );
 }

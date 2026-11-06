@@ -13,7 +13,7 @@ use grit_lib::objects::{serialize_tag, TagData};
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::refs::gc::prune_loose_unreachable;
 use grit_lib::refs::write_ref;
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
 use std::process::Command;
@@ -222,10 +222,10 @@ fn custom_primary_rejects_a_different_objects_dir() {
     .err()
     .expect("different objects dir must be rejected");
     match err {
-        Error::OdbObjectsDirMismatch {
+        Error::Repository(RepositoryError::OdbObjectsDirMismatch {
             builder,
             repository,
-        } => {
+        }) => {
             assert_eq!(
                 builder,
                 other.join("objects").canonicalize().expect("canon")
@@ -246,7 +246,13 @@ fn custom_primary_rejects_a_different_objects_dir() {
     .err()
     .expect("missing objects dir must be rejected");
     assert!(
-        matches!(err, Error::OdbObjectsDirMismatch { ref builder, .. } if builder == &missing),
+        matches!(
+            err,
+            Error::Repository(RepositoryError::OdbObjectsDirMismatch {
+                ref builder,
+                ..
+            }) if builder == &missing
+        ),
         "unexpected error: {err:?}"
     );
 }
@@ -512,12 +518,14 @@ fn memory_primary_rejects_filesystem_gc_and_commit_graph() {
     let (_dir, repo, _store) = memory_repo();
     assert!(matches!(
         repo.odb().gc(),
-        Err(Error::UnsupportedObjectStore { operation: "gc" })
+        Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
+            operation: "gc",
+        }))
     ));
     assert!(matches!(
         repo.odb().write_commit_graph(),
-        Err(Error::UnsupportedObjectStore {
-            operation: "commit-graph write"
-        })
+        Err(Error::Repository(RepositoryError::UnsupportedObjectStore {
+            operation: "commit-graph write",
+        }))
     ));
 }

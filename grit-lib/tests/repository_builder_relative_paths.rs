@@ -1,4 +1,4 @@
-//! `RepositoryBuilder` with an `OdbBuilder` accepts relative paths.
+//! `Repository::open` with an `OdbBuilder` accepts relative paths.
 //!
 //! This binary holds a single test because it changes the process working directory.
 
@@ -10,7 +10,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectKind};
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 
 #[test]
 fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
@@ -43,7 +43,12 @@ fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
             .with_work_tree(Path::new("repo"))),
     );
     assert!(
-        matches!(mismatch, Err(Error::OdbObjectsDirMismatch { .. })),
+        matches!(
+            mismatch,
+            Err(Error::Repository(
+                RepositoryError::OdbObjectsDirMismatch { .. }
+            ))
+        ),
         "{mismatch:?}"
     );
 
@@ -59,7 +64,12 @@ fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
             .with_work_tree(Path::new("repo"))),
     );
     assert!(
-        matches!(wrong_custom, Err(Error::OdbObjectsDirMismatch { .. })),
+        matches!(
+            wrong_custom,
+            Err(Error::Repository(
+                RepositoryError::OdbObjectsDirMismatch { .. }
+            ))
+        ),
         "a custom primary must still name the repository's objects dir: {wrong_custom:?}"
     );
 

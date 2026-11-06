@@ -9,7 +9,7 @@ use grit_lib::porcelain::commit::create_commit;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::lock_path_for_ref;
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::{InitOptions, Repository, RepositoryError};
 
 struct Harness {
     _dir: tempfile::TempDir,
@@ -169,8 +169,9 @@ fn concurrent_commit_while_index_and_ref_handles_open() {
                 ),
                 "unexpected ref store error: {store:?}"
             ),
-            Error::LockHeld(..) | Error::GitDirPathIo { .. } if err.is_git_dir_file_in_use() => {}
-            Error::GitDirPathIo { .. } => {
+            Error::LockHeld(..) | Error::Repository(RepositoryError::GitDirPathIo(_))
+                if err.is_git_dir_file_in_use() => {}
+            Error::Repository(RepositoryError::GitDirPathIo(_)) => {
                 panic!("unexpected git-dir I/O (not in-use): {err:?}")
             }
             other => panic!("unexpected concurrent commit error: {other:?}"),

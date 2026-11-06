@@ -50,6 +50,7 @@ use super::{
     RefUpdate,
 };
 use crate::refs::RefnameUnavailable;
+use crate::repo::RepositoryError;
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
@@ -1361,7 +1362,9 @@ impl FilesRefStore {
     /// Whether a failed lock acquisition likely means the lock path's parent directory is missing.
     fn lock_acquire_suggests_missing_parent(err: &Error) -> bool {
         match err {
-            Error::GitDirPathIo { source, .. } => source.kind() == io::ErrorKind::NotFound,
+            Error::Repository(RepositoryError::GitDirPathIo(io)) => {
+                io.source.kind() == io::ErrorKind::NotFound
+            }
             Error::Io(source) => source.kind() == io::ErrorKind::NotFound,
             _ => false,
         }
@@ -1413,11 +1416,23 @@ impl FilesRefStore {
 
     fn ref_store_error_from_lib(err: Error) -> RefStoreError {
         match err {
-            Error::GitDirPathIo {
-                path,
-                operation,
-                source,
-            } => RefStoreError::git_dir_path_io(path, operation, source),
+            Error::Repository(RepositoryError::GitDirPathIo(io)) => {
+                let crate::error::PathIoError {
+                    path: path_buf,
+                    operation,
+                    source,
+                } = io;
+                let path = path_buf
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let crate::error::PathIoOperation::GitDir(operation) = operation else {
+                    return RefStoreError::Corrupt(
+                        "unexpected path I/O operation for ref store".into(),
+                    );
+                };
+                RefStoreError::git_dir_path_io(path, operation, source)
+            }
             Error::RefStore(store_err) => store_err,
             other => RefStoreError::Corrupt(other.to_string()),
         }
@@ -2683,7 +2698,7 @@ fn name_unavailable_if_lock_path_io_blocked(
     err: &Error,
 ) -> Option<RefnameUnavailable> {
     let source = match err {
-        Error::GitDirPathIo { source, .. } => source,
+        Error::Repository(RepositoryError::GitDirPathIo(io)) => &io.source,
         Error::Io(source) => source,
         _ => return None,
     };

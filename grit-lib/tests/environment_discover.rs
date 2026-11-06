@@ -156,7 +156,10 @@ fn ceiling_directories_stop_discovery() {
 
     let err = Repository::discover(Some(&child), &RepositoryOptions::with_environment(env))
         .expect_err("ceiling blocks parent .git");
-    assert!(matches!(err, grit_lib::error::Error::NotARepository(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Repository(RepositoryError::NotARepository(_))
+    ));
 }
 
 #[test]

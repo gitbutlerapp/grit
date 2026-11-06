@@ -407,7 +407,7 @@ fn bare_repository_rejects_working_tree_diffs() {
     let mut diff = UncommittedDiff::new(&repo, Index::default());
     assert!(matches!(
         diff.worktree_entries(Some(&ObjectId::zero()), RenameDetection::Off),
-        Err(Error::RequiresWorkTree)
+        Err(Error::Repository(RepositoryError::RequiresWorkTree))
     ));
 
     let head = rev_parse(&bare, "HEAD");
@@ -440,6 +440,6 @@ fn bare_repository_rejects_working_tree_diffs() {
             &Pathspec::entire_tree(PathspecGlobalFlags::default()),
             &options
         ),
-        Err(Error::RequiresWorkTree)
+        Err(Error::Repository(RepositoryError::RequiresWorkTree))
     ));
 }

@@ -14,7 +14,7 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
     RefUpdateFlags,
 };
-use grit_lib::repo::Repository;
+use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 
@@ -178,7 +178,10 @@ fn a_files_object_store_still_needs_its_objects_directory() {
             .with_ref_store(Arc::new(MemoryRefStore::new()))),
     );
     assert!(
-        matches!(result, Err(Error::NotARepository(_))),
+        matches!(
+            result,
+            Err(Error::Repository(RepositoryError::NotARepository(_)))
+        ),
         "{result:?}"
     );
 }

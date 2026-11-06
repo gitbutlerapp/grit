@@ -34,6 +34,7 @@ use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
 use crate::rev_parse_error::RevParseError;
 
+use crate::repo::RepositoryError;
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
 use crate::state::{resolve_head_for_repository, HeadState};
 
@@ -943,9 +944,9 @@ fn plan_allow_local_tree_transition_core(
             None,
         )?;
     cancel.as_ref().map(|signal| signal.poll()).transpose()?;
-    let work_tree = repo
-        .work_tree()
-        .ok_or(TreeTransitionPrepareError::Failed(Error::RequiresWorkTree))?;
+    let work_tree = repo.work_tree().ok_or(TreeTransitionPrepareError::Failed(
+        RepositoryError::RequiresWorkTree.into(),
+    ))?;
     let (local_blocked_paths, preserve_worktree_paths) =
         match ensure_local_changes_compatible_with_switch(
             work_tree,
@@ -1187,9 +1188,9 @@ pub(crate) fn verify_tree_transition_allow_local(
             None,
         )
         .map_err(TreeTransitionVerifyError::Failed)?;
-    let work_tree = repo
-        .work_tree()
-        .ok_or(TreeTransitionVerifyError::Failed(Error::RequiresWorkTree))?;
+    let work_tree = repo.work_tree().ok_or(TreeTransitionVerifyError::Failed(
+        RepositoryError::RequiresWorkTree.into(),
+    ))?;
     ensure_local_changes_compatible_with_switch(
         work_tree,
         &prepared.index,

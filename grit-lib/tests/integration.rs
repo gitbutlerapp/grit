@@ -1655,6 +1655,8 @@ mod repo_setup_git_compat;
 mod repo_shared_init_git_compat;
 #[path = "repo_total_coverage_sweep.rs"]
 mod repo_total_coverage_sweep;
+#[path = "repository_config_hook_errors.rs"]
+mod repository_config_hook_errors;
 #[path = "repository_injected_backends_no_layout.rs"]
 mod repository_injected_backends_no_layout;
 #[cfg(feature = "full-tests")]

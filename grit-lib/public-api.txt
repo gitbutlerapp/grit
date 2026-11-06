@@ -23547,7 +23547,7 @@ pub fn grit_lib::repo::repository_format_warning(&std::path::Path) -> grit_lib::
 pub fn grit_lib::repo::resolve_dot_git(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::repo::resolve_git_directory_arg(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::repo::resolve_initial_branch(&grit_lib::config::environment::Environment, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), alloc::string::String>
+pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), grit_lib::error::ConfigError>
 pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool
 pub fn grit_lib::repo::worktree_config_enabled_for_text(core::option::Option<&str>) -> bool

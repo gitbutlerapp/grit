@@ -17,6 +17,7 @@ use crate::refs::store::{
     Expected, RawRef, RefName, RefNameRef, RefTransaction, RefUpdate, RefUpdateFlags,
 };
 use crate::repo::Repository;
+use crate::repo::RepositoryError;
 use crate::state::{
     merge_completion_sentinels, resolve_head_for_repository, HeadState, InProgressOperation,
 };
@@ -171,7 +172,7 @@ mod index_mtime_serde {
 ///
 /// # Errors
 ///
-/// Returns [`Error::RequiresWorkTree`] on a bare repository and propagates index, ODB, and I/O
+/// Returns [`RepositoryError::RequiresWorkTree`] on a bare repository and propagates index, ODB, and I/O
 /// failures.
 pub fn capture_workspace_snapshot(
     repo: &Repository,
@@ -290,7 +291,7 @@ fn restore_index_bytes(repo: &Repository, bytes: &[u8], mtime: Option<SystemTime
 }
 
 fn build_worktree_tree(repo: &Repository, include_untracked: bool) -> Result<ObjectId> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let source = repo.load_index()?;
     let mut paths: BTreeSet<Vec<u8>> = source.entries.iter().map(|e| e.path.clone()).collect();
     if include_untracked {
@@ -468,7 +469,7 @@ fn build_pre_restore_disk_tree(
     source: &Index,
     snapshot_worktree_tree: &ObjectId,
 ) -> Result<ObjectId> {
-    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let work_tree = repo.work_tree().ok_or(RepositoryError::RequiresWorkTree)?;
     let protect = ProtectOptions::default();
     let mut paths: BTreeSet<Vec<u8>> = source.entries.iter().map(|e| e.path.clone()).collect();
     for entry in flatten_tree_full(repo.odb(), snapshot_worktree_tree, "", protect)? {

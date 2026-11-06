@@ -75,9 +75,9 @@ Use [`CommitRequest::new`](rustdoc:grit_lib::porcelain::commit::CommitRequest::n
 
 ## Errors
 
-Library operations return `grit_lib::error::Result`. The `Error` enum covers I/O, missing objects, bad repository layout, and invalid user input. Match on variants in application code; the `grit` CLI maps them to exit codes and messages separately.
+Library operations return `grit_lib::error::Result`. The top-level [`Error`](rustdoc:grit_lib::error::Error) enum groups failures by area; repository layout, discovery, init, and embedding checks are [`Error::Repository`](rustdoc:grit_lib::error::Error::Repository) wrapping [`RepositoryError`](rustdoc:grit_lib::repo::RepositoryError). Match on the inner variant in application code; the `grit` CLI maps them to exit codes and messages separately.
 
-Discovery and open failures are [`Error::NotARepository`](rustdoc:grit_lib::error::Error::NotARepository), which carries a [`NotARepositoryReason`](rustdoc:grit_lib::error::NotARepositoryReason): `NoRepositoryAt` when there is simply no repository at or above the path, or a gitfile problem (`GitfileNotRegularFile`, `GitfileMissingGitdir`, `GitfileUnreadable`) naming the `.git` entry. Discovery stops at a malformed gitfile instead of searching parent directories, as Git does, so treat the gitfile reasons as errors to report rather than "not in a repository".
+[`RepositoryError::NotARepository`](rustdoc:grit_lib::repo::RepositoryError::NotARepository) carries a [`NotARepositoryReason`](rustdoc:grit_lib::error::NotARepositoryReason): `NoRepositoryAt` when there is simply no repository at or above the path, or a gitfile problem (`GitfileNotRegularFile`, `GitfileMissingGitdir`, `GitfileUnreadable`) naming the `.git` entry. Discovery stops at a malformed gitfile instead of searching parent directories, as Git does, so treat the gitfile reasons as errors to report rather than "not in a repository". Other common [`RepositoryError`](rustdoc:grit_lib::repo::RepositoryError) variants include `DubiousOwnership` (`safe.directory`), `UnsupportedRepositoryFormatVersion`, `RequiresWorkTree`, `GitDirPathIo` (typed [`PathIoError`](rustdoc:grit_lib::error::PathIoError)), `ObjectFormatMismatch`, and init refusals such as `InitObjectFormatChange`.
 
 ## Example
 

@@ -276,13 +276,14 @@ fn error_kind_names_are_stable() {
 #[test]
 fn path_io_preserves_raw_os_error_identity() {
     use grit_lib::error::{Error, GitDirPathOperation};
+    use grit_lib::repo::RepositoryError;
 
     let source = std::io::Error::from_raw_os_error(libc::EBUSY as i32);
-    let err = Error::GitDirPathIo {
-        path: ".git/index".into(),
-        operation: GitDirPathOperation::WriteIndex,
+    let err = Error::Repository(RepositoryError::git_dir_path_io(
+        ".git/index",
+        GitDirPathOperation::WriteIndex,
         source,
-    };
+    ));
     assert!(err.is_git_dir_file_in_use());
     let leaf = err.path_io().expect("path_io");
     let roundtrip: Error = leaf.into();
