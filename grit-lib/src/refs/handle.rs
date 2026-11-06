@@ -53,10 +53,14 @@ impl<'repo> References<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::refs::store::RefNameRef;
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// let _ = repo.references().store().read_raw("HEAD")?;
+    /// let _ = repo
+    ///     .references()
+    ///     .store()
+    ///     .read_raw(RefNameRef::from_trusted("HEAD"))?;
     /// # Ok(())
     /// # }
     /// ```
