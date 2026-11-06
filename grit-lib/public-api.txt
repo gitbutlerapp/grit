@@ -5652,6 +5652,8 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::RemoteError
@@ -6799,6 +6801,7 @@ pub grit_lib::index::error::IndexError::FsmonitorExtensionBadVersion(u32)
 pub grit_lib::index::error::IndexError::FsmonitorExtensionEwahInvalid
 pub grit_lib::index::error::IndexError::FsmonitorExtensionTruncated
 pub grit_lib::index::error::IndexError::LockHeld(grit_lib::error::LockHeldError)
+pub grit_lib::index::error::IndexError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::index::error::IndexError::PathIo(grit_lib::error::PathIoError)
 pub grit_lib::index::error::IndexError::PathPrefixConflict
 pub grit_lib::index::error::IndexError::PathPrefixConflict::directory: std::path::PathBuf
@@ -6808,6 +6811,8 @@ pub grit_lib::index::error::IndexError::Unmerged::paths: alloc::vec::Vec<alloc::
 impl grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::kind_name(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::unmerged() -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
@@ -7231,6 +7236,7 @@ pub grit_lib::index::IndexError::FsmonitorExtensionBadVersion(u32)
 pub grit_lib::index::IndexError::FsmonitorExtensionEwahInvalid
 pub grit_lib::index::IndexError::FsmonitorExtensionTruncated
 pub grit_lib::index::IndexError::LockHeld(grit_lib::error::LockHeldError)
+pub grit_lib::index::IndexError::Nested(alloc::boxed::Box<grit_lib::error::Error>)
 pub grit_lib::index::IndexError::PathIo(grit_lib::error::PathIoError)
 pub grit_lib::index::IndexError::PathPrefixConflict
 pub grit_lib::index::IndexError::PathPrefixConflict::directory: std::path::PathBuf
@@ -7240,6 +7246,8 @@ pub grit_lib::index::IndexError::Unmerged::paths: alloc::vec::Vec<alloc::string:
 impl grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::kind_name(&self) -> &'static str
 pub fn grit_lib::index::error::IndexError::unmerged() -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::ConfigError> for grit_lib::index::error::IndexError
@@ -7369,7 +7377,7 @@ pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) 
 pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::index::error::IndexResult<()>
 pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::index::error::IndexResult<()>
 pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::index::error::IndexResult<()>
-pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::index::error::IndexResult<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::Index
@@ -15020,6 +15028,8 @@ pub fn grit_lib::error::Error::path_io(&self) -> core::option::Option<grit_lib::
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::index::error::IndexError
+pub fn grit_lib::index::error::IndexError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(alloc::boxed::Box<grit_lib::error::Error>) -> Self
 impl core::convert::From<alloc::boxed::Box<grit_lib::error::Error>> for grit_lib::remote::RemoteError
@@ -15611,7 +15621,7 @@ pub fn grit_lib::index::Index::unmerge_path_from_resolve_undo(&mut self, &[u8]) 
 pub fn grit_lib::index::Index::write(&mut self, &std::path::Path) -> grit_lib::index::error::IndexResult<()>
 pub fn grit_lib::index::Index::write_to_path(&mut self, &std::path::Path, bool) -> grit_lib::index::error::IndexResult<()>
 pub fn grit_lib::index::Index::write_with_config(&mut self, &std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::index::error::IndexResult<()>
-pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::error::Result<()>
+pub fn grit_lib::index::Index::write_with_config_and_policy(&mut self, &std::path::Path, &grit_lib::config::ConfigSet, grit_lib::parallel::ThreadPolicy) -> grit_lib::index::error::IndexResult<()>
 impl core::clone::Clone for grit_lib::index::Index
 pub fn grit_lib::index::Index::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::Index

@@ -290,6 +290,11 @@ pub enum IndexError {
         /// Why the mode change was rejected.
         reason: IndexChmodReason,
     },
+
+    /// Failure from another subsystem while building or persisting the index (for example ODB I/O
+    /// during write-tree) that is not mapped to a dedicated [`IndexError`] leaf.
+    #[error("{0}")]
+    Nested(#[from] Box<crate::error::Error>),
 }
 
 impl IndexError {
@@ -307,6 +312,7 @@ impl IndexError {
             Self::LockHeld(_) => "lock_held",
             Self::PathIo(_) => "git_dir_path_io",
             Self::Chmod { .. } => "message",
+            Self::Nested(inner) => inner.kind_name(),
         }
     }
 
@@ -499,6 +505,7 @@ impl From<IndexError> for crate::error::Error {
         match err {
             IndexError::LockHeld(h) => Self::LockHeld(h),
             IndexError::PathIo(p) => p.into(),
+            IndexError::Nested(inner) => *inner,
             IndexError::Unmerged { .. } => Self::Index(err),
             IndexError::PathPrefixConflict { .. } => Self::Index(err),
             IndexError::FsmonitorExtensionTruncated => Self::Index(err),
@@ -550,10 +557,7 @@ impl From<crate::error::Error> for IndexError {
                 path: Some(PathBuf::from(path)),
                 source,
             }),
-            other => IndexError::Corrupt {
-                corrupt: IndexCorrupt::new(IndexCorruptReason::BadEntry),
-                detail: other.to_string(),
-            },
+            other => IndexError::Nested(Box::new(other)),
         }
     }
 }

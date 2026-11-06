@@ -40,6 +40,21 @@ fn corrupt_at_ctx(
     IndexError::corrupt_at(ctx.source_path.as_deref(), offset, reason)
 }
 
+fn index_parse_err(err: Error, ctx: &IndexParseContext) -> IndexError {
+    match err {
+        Error::Index(IndexError::Corrupt { corrupt, detail }) => IndexError::Corrupt {
+            corrupt: IndexCorrupt {
+                path: corrupt.path.or_else(|| ctx.source_path.clone()),
+                offset: corrupt.offset,
+                reason: corrupt.reason,
+            },
+            detail,
+        },
+        Error::Index(other) => other,
+        other => IndexError::from(other),
+    }
+}
+
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::error::{GitDirPathOperation, PathIoError, PathIoOperation};
@@ -1418,26 +1433,33 @@ impl Index {
 
         let (entries, ext_fields): (Vec<IndexEntry>, ParsedIndexExtensions) = if try_parallel {
             let Some(ext_off) = extension_offset else {
-                return Err(IndexError::corrupt(IndexCorrupt::new(
+                return Err(corrupt_at_ctx(
+                    &parse_context,
+                    None,
                     IndexCorruptReason::ParallelLoadMissingEoie,
-                )));
+                ));
             };
             let ieot = read_ieot_extension(body, ext_off, extensions_end);
             let mut loaded_entries = if let Some(ref ieot) = ieot {
-                parse_entries_parallel(body, version, count, hash_len, ieot, workers)?
+                parse_entries_parallel(body, version, count, hash_len, ieot, workers)
+                    .map_err(|e| index_parse_err(e, &parse_context))?
             } else {
-                parse_entries_serial(body, version, count, hash_len, 12)?.0
+                parse_entries_serial(body, version, count, hash_len, 12)
+                    .map_err(|e| index_parse_err(e, &parse_context))?
+                    .0
             };
-            let ext_fields =
-                parse_index_extensions(body, ext_off, extensions_end, hash_algo, None)?;
+            let ext_fields = parse_index_extensions(body, ext_off, extensions_end, hash_algo, None)
+                .map_err(|e| index_parse_err(e, &parse_context))?;
             if let Some(dirty) = ext_fields.fsmonitor_dirty.as_ref() {
                 apply_fsmonitor_dirty_to_entries(&mut loaded_entries, dirty);
             }
             (loaded_entries, ext_fields)
         } else {
-            let (mut entries, pos) = parse_entries_serial(body, version, count, hash_len, 12)?;
+            let (mut entries, pos) = parse_entries_serial(body, version, count, hash_len, 12)
+                .map_err(|e| index_parse_err(e, &parse_context))?;
             let ext_fields =
-                parse_index_extensions(body, pos, body.len(), hash_algo, Some(&mut entries))?;
+                parse_index_extensions(body, pos, body.len(), hash_algo, Some(&mut entries))
+                    .map_err(|e| index_parse_err(e, &parse_context))?;
             (entries, ext_fields)
         };
 
@@ -1498,7 +1520,6 @@ impl Index {
     /// Same as [`Self::write`].
     pub fn write_with_config(&mut self, path: &Path, config: &ConfigSet) -> IndexResult<()> {
         self.write_with_config_and_policy(path, config, crate::parallel::ThreadPolicy::default())
-            .map_err(IndexError::from)
     }
 
     /// Write the index using config and an explicit thread policy (EOIE/IEOT emission).
@@ -1507,7 +1528,7 @@ impl Index {
         path: &Path,
         config: &ConfigSet,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         let skip_hash = index_skip_hash_for_write(Some(config));
         self.write_to_path_with_config_and_policy(path, skip_hash, Some(config), policy)
     }
@@ -1517,7 +1538,6 @@ impl Index {
     /// When `skip_hash` is true, the trailing SHA-1 is written as all zeros (Git `index.skipHash`).
     pub fn write_to_path(&mut self, path: &Path, skip_hash: bool) -> IndexResult<()> {
         self.write_to_path_with_config(path, skip_hash, None)
-            .map_err(IndexError::from)
     }
 
     /// Like [`Self::write_to_path`], but uses `config` for `core.lockfilepid` instead of reloading.
@@ -1526,7 +1546,7 @@ impl Index {
         path: &Path,
         skip_hash: bool,
         config: Option<&ConfigSet>,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_to_path_with_config_and_policy(
             path,
             skip_hash,
@@ -1541,7 +1561,7 @@ impl Index {
         skip_hash: bool,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_to_path_with_config_and_lock_policy(path, skip_hash, config, None, policy)
     }
 
@@ -1552,7 +1572,7 @@ impl Index {
         config: Option<&ConfigSet>,
         existing_lock: Option<&mut IndexLock>,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.write_to_path_with_config_and_lock_mode_policy(
             path,
             skip_hash,
@@ -1571,7 +1591,7 @@ impl Index {
         existing_lock: Option<&mut IndexLock>,
         commit: bool,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         if let Some(lock) = existing_lock {
             if lock.index_path != path {
                 use crate::error::{GitDirPathOperation, PathIoError, PathIoOperation};
@@ -1582,8 +1602,7 @@ impl Index {
                         std::io::ErrorKind::InvalidInput,
                         "index lock path does not match write target",
                     ),
-                })
-                .into());
+                }));
             }
             self.stream_index_file(&mut lock.file, skip_hash, config, policy)?;
             lock.reopen_after_write()?;
@@ -1599,18 +1618,18 @@ impl Index {
 
         use crate::lockfile::{LockFile, LockWait};
         let wait = LockWait::files_ref_lock(config);
-        let mut lock_file = LockFile::acquire(&tmp_path, wait).map_err(Error::from)?;
+        let mut lock_file = LockFile::acquire(&tmp_path, wait).map_err(IndexError::from)?;
         if lockfile_pid_enabled {
             if let Err(e) = lock_file
                 .write_holder_pid()
                 .map_err(crate::error::Error::from)
             {
                 lock_file.rollback();
-                return Err(e);
+                return Err(IndexError::from(e));
             }
         }
         let wrote_pid_file = lockfile_pid_enabled;
-        let (tmp_path, mut lock_file) = lock_file.into_open_file()?;
+        let (tmp_path, mut lock_file) = lock_file.into_open_file().map_err(IndexError::from)?;
 
         if let Err(e) = self.stream_index_file(&mut lock_file, skip_hash, config, policy) {
             drop(lock_file);
@@ -1627,7 +1646,7 @@ impl Index {
             if wrote_pid_file {
                 let _ = fs::remove_file(&pid_path);
             }
-            return Err(Error::Io(e));
+            return Err(IndexError::from(e));
         }
         if wrote_pid_file {
             let _ = fs::remove_file(&pid_path);
@@ -1646,7 +1665,7 @@ impl Index {
         skip_hash: bool,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         self.ensure_canonical_order();
         let mut hasher = (!skip_hash).then(|| self.hash_algo.checksum_hasher());
         let mut sink = |chunk: &[u8]| -> io::Result<()> {
@@ -1665,7 +1684,7 @@ impl Index {
             Some(hasher) => hasher.finalize(),
             None => vec![0u8; self.hash_algo.len()],
         };
-        file.write_all(&checksum)?;
+        file.write_all(&checksum).map_err(IndexError::from)?;
         Ok(())
     }
 
@@ -1673,7 +1692,7 @@ impl Index {
     /// Serialise the index body (without trailing checksum) into `out`.
     ///
     /// Callers must have sorted entries when using format 4 (path compression depends on order).
-    pub(crate) fn serialize_into(&self, out: &mut Vec<u8>) -> Result<()> {
+    pub(crate) fn serialize_into(&self, out: &mut Vec<u8>) -> IndexResult<()> {
         let mut body = IndexBodyOut {
             buf: std::mem::take(out),
             drained: 0,
@@ -1690,7 +1709,7 @@ impl Index {
         out: &mut IndexBodyOut<'_>,
         config: Option<&ConfigSet>,
         policy: crate::parallel::ThreadPolicy,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         use crate::index_eoie_ieot::{
             entries_per_ieot_block, ieot_block_count_for_write, record_end_of_index_entries,
             write_ieot_payload, IeotEntry, IeotTable, INDEX_EXT_EOIE, INDEX_EXT_IEOT,
@@ -4002,22 +4021,22 @@ pub struct IndexLock {
 
 impl IndexLock {
     /// Close the handle the index was just written through and hold the lock with a fresh one.
-    pub(crate) fn reopen_after_write(&mut self) -> Result<()> {
+    pub(crate) fn reopen_after_write(&mut self) -> IndexResult<()> {
         drop(std::mem::replace(
             &mut self.file,
             fs::OpenOptions::new()
                 .write(true)
                 .open(&self.lock_path)
-                .map_err(Error::Io)?,
+                .map_err(IndexError::from)?,
         ));
         Ok(())
     }
 
     /// Rename the staged lock file over the on-disk index.
-    pub(crate) fn commit_replace_index(&mut self) -> Result<()> {
-        crate::atomic_replace::detach_open_handle(&mut self.file).map_err(Error::Io)?;
+    pub(crate) fn commit_replace_index(&mut self) -> IndexResult<()> {
+        crate::atomic_replace::detach_open_handle(&mut self.file).map_err(IndexError::from)?;
         crate::atomic_replace::replace_file(&self.lock_path, &self.index_path)
-            .map_err(Error::Io)?;
+            .map_err(IndexError::from)?;
         self.committed = true;
         if self.wrote_pid {
             let _ = fs::remove_file(&self.pid_path);

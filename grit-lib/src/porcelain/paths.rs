@@ -450,7 +450,8 @@ pub fn move_paths(
     }
 
     repo.flush_index_update(&mut lock, &mut index)?;
-    repo.finish_index_update(&mut lock, true)?;
+    repo.finish_index_update(&mut lock, true)
+        .map_err(Error::from)?;
 
     Ok(MoveOutcome { moves })
 }

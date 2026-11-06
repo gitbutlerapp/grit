@@ -22,26 +22,42 @@ fn index_error_variants() {
     let (_tmp, index_path) = git_index_fixture();
     let algo = HashAlgo::Sha1;
 
-    // Truncated file (cannot read trailer).
+    // Structurally truncated body: header intact, entry region incomplete, trailer recomputed.
     {
-        let mut bytes = fs::read(&index_path).expect("read index");
-        bytes.truncate(bytes.len().saturating_sub(10));
-        fs::write(index_path.with_extension("trunc"), &bytes).expect("write trunc");
-        let err = Index::load(&index_path.with_extension("trunc")).unwrap_err();
-        let trunc = index_path.with_extension("trunc");
-        assert!(matches!(
-            &err,
-            IndexError::Corrupt {
-                corrupt,
-                ..
-            } if corrupt.path.as_deref() == Some(trunc.as_path())
-                && matches!(
-                    corrupt.reason,
-                    IndexCorruptReason::Truncated
-                        | IndexCorruptReason::FileTooShortForHeader
-                        | IndexCorruptReason::ChecksumMismatch { .. }
-                )
-        ));
+        const INDEX_HEADER_LEN: usize = 12;
+        let bytes = fs::read(&index_path).expect("read index");
+        let hash_len = algo.len();
+        let body_len = bytes.len() - hash_len;
+        assert!(
+            body_len > INDEX_HEADER_LEN + 8,
+            "fixture index body too small"
+        );
+        let mut body = bytes[..body_len].to_vec();
+        body.truncate(INDEX_HEADER_LEN + 8);
+        let digest = algo.checksum_digest(&body);
+        body.extend_from_slice(&digest);
+        let trunc_path = index_path.with_extension("trunc_body");
+        fs::write(&trunc_path, &body).expect("write trunc_body");
+        let err = Index::load(&trunc_path).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                IndexError::Corrupt {
+                    corrupt,
+                    ..
+                } if corrupt.path.as_deref() == Some(trunc_path.as_path())
+                    && corrupt.offset == Some(12)
+                    && matches!(
+                        corrupt.reason,
+                        IndexCorruptReason::EntryCountMismatch {
+                            declared: 1,
+                            max_fit: 0,
+                            remaining: 8
+                        }
+                    )
+            ),
+            "trunc_body: {err:?}"
+        );
         assert_eq!(err.kind_name(), "index_error");
     }
 

@@ -371,13 +371,14 @@ pub(crate) fn parse_entries_serial(
     let min_entry = min_on_disk_index_entry_size(version, hash_len);
     let max_by_bytes = remaining / min_entry;
     if count as usize > max_by_bytes {
-        return Err(Error::from(IndexError::corrupt(IndexCorrupt::new(
-            IndexCorruptReason::EntryCountMismatch {
+        return Err(Error::from(IndexError::corrupt(
+            IndexCorrupt::new(IndexCorruptReason::EntryCountMismatch {
                 declared: count,
                 max_fit: max_by_bytes,
                 remaining,
-            },
-        ))));
+            })
+            .at_offset(start),
+        )));
     }
 
     let mut pos = start;

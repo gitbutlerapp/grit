@@ -2226,7 +2226,6 @@ impl Repository {
     ) -> IndexResult<()> {
         self.flush_index_update(lock, index)?;
         self.finish_index_update(lock, updated_workdir)
-            .map_err(IndexError::from)
     }
 
     /// Serialize `index` into a held [`crate::index::IndexLock`] without replacing the on-disk index.
@@ -2257,10 +2256,11 @@ impl Repository {
         &self,
         lock: &mut crate::index::IndexLock,
         updated_workdir: bool,
-    ) -> Result<()> {
+    ) -> IndexResult<()> {
         lock.commit_replace_index()?;
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
-        let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None);
+        let _ = run_hook(self, "post-index-change", &[updated_workdir_arg, "0"], None)
+            .map_err(|e| IndexError::from(Error::from(e)))?;
         Ok(())
     }
 

@@ -747,7 +747,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> IndexRes
         }
     }
 
-    ensure_empty_blob_for_intent_to_add(odb, index).map_err(IndexError::from)?;
+    ensure_empty_blob_for_intent_to_add(odb, index).map_err(|e| IndexError::Nested(Box::new(e)))?;
 
     let prefix_bytes = prefix.as_bytes();
     let mut entries: Vec<&IndexEntry> = index
@@ -761,7 +761,7 @@ pub fn write_tree_from_index(odb: &Odb, index: &Index, prefix: &str) -> IndexRes
         })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
-    build_tree(odb, &entries, prefix_bytes).map_err(IndexError::from)
+    build_tree(odb, &entries, prefix_bytes).map_err(|e| IndexError::Nested(Box::new(e)))
 }
 
 /// Build a valid cache-tree extension from the index and write any missing tree objects.

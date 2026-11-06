@@ -560,14 +560,16 @@ fn write_index_through_lock(
     commit_lock: bool,
     thread_policy: crate::parallel::ThreadPolicy,
 ) -> Result<()> {
-    index.write_to_path_with_config_and_lock_mode_policy(
-        path,
-        skip_hash,
-        Some(cfg),
-        existing_lock,
-        commit_lock,
-        thread_policy,
-    )
+    index
+        .write_to_path_with_config_and_lock_mode_policy(
+            path,
+            skip_hash,
+            Some(cfg),
+            existing_lock,
+            commit_lock,
+            thread_policy,
+        )
+        .map_err(Error::from)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -740,12 +742,9 @@ pub(crate) fn write_index_file_split(
         // The shared index always carries a real checksum, even under `index.skipHash`: readers
         // match the link's base oid against the shared file's trailer, and a zero base oid means
         // "not split", so a skipped trailer would leave the index unreadable.
-        shared_index.write_to_path_with_config_and_policy(
-            &tmp_path,
-            false,
-            Some(cfg),
-            thread_policy,
-        )?;
+        shared_index
+            .write_to_path_with_config_and_policy(&tmp_path, false, Some(cfg), thread_policy)
+            .map_err(Error::from)?;
         adjust_shared_perm_file(&tmp_path, shared_repo).map_err(Error::Io)?;
         let oid = read_index_trailer(&tmp_path, index.hash_algo)?;
         let dest = git_dir.join(format!("sharedindex.{}", oid.to_hex()));
