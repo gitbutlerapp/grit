@@ -1351,7 +1351,9 @@ fn shell_words(paths: &[String]) -> String {
 pub(crate) fn discover_for_config_write() -> Result<Repository, LibError> {
     match crate::context::discover_lib_error() {
         Ok(repo) => Ok(repo),
-        Err(LibError::NotARepository(_)) => Err(LibError::Config(ConfigError::RepositoryRequired)),
+        Err(LibError::Repository(RepositoryError::NotARepository(_))) => {
+            Err(LibError::Config(ConfigError::RepositoryRequired))
+        }
         Err(e) => Err(e),
     }
 }

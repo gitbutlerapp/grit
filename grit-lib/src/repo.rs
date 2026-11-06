@@ -3938,7 +3938,6 @@ fn resolve_git_dir_env_path(git_dir: &Path) -> Result<PathBuf> {
 pub fn resolve_git_directory_arg(git_directory: &Path) -> Result<PathBuf> {
     resolve_git_dir_env_path(git_directory)
 }
-}
 
 /// Resolves a work tree's `.git` path (directory or gitfile) to the real git directory.
 ///

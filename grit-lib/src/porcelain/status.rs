@@ -37,7 +37,7 @@ use crate::operation::{
 };
 use crate::parallel::ParallelOp;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
-use crate::repo::Repository;
+use crate::repo::{Repository, RepositoryError};
 use crate::state::{status_operation, HeadState, NextStep, Operation, WtStatusState};
 use crate::unicode_normalization::precompose_utf8_segment;
 
@@ -2355,7 +2355,6 @@ pub fn normalize_status_conflicts(
 // --- The status operation ---------------------------------------------------
 
 use crate::progress::ProgressSink;
-use crate::repo::RepositoryError;
 
 fn embedded_unregistered_git_repositories(
     work_tree: &Path,

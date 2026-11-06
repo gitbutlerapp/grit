@@ -9,7 +9,8 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::config::{ConfigEditor, ConfigScope, ConfigWriteOptions};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::odb::{Odb, OdbBuilder};
@@ -22,7 +23,7 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -37,6 +38,21 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     )
     .expect("init");
     let git_dir = root.join(".git");
+    let editor = ConfigEditor::open(
+        &Environment::empty(),
+        git_dir.join("config"),
+        ConfigScope::Local,
+    );
+    let opts = ConfigWriteOptions::new();
+    editor
+        .set("user.name", "A U Thor", &opts)
+        .expect("user.name");
+    editor
+        .set("user.email", "author@example.com", &opts)
+        .expect("user.email");
+    editor
+        .set("grit.changeIds", "false", &opts)
+        .expect("changeIds");
     let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
     let repo = Repository::open(
         &git_dir,
@@ -49,31 +65,6 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
             .with_work_tree(&root)),
     )
     .expect("open");
-    let opts = grit_lib::config::ConfigWriteOptions::new();
-    repo.config()
-        .set(
-            grit_lib::config::ConfigScope::Local,
-            "user.name",
-            "A U Thor",
-            &opts,
-        )
-        .expect("user.name");
-    repo.config()
-        .set(
-            grit_lib::config::ConfigScope::Local,
-            "user.email",
-            "author@example.com",
-            &opts,
-        )
-        .expect("user.email");
-    repo.config()
-        .set(
-            grit_lib::config::ConfigScope::Local,
-            "grit.changeIds",
-            "false",
-            &opts,
-        )
-        .expect("changeIds");
     (dir, repo, store)
 }
 
