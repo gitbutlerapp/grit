@@ -17,7 +17,7 @@ use grit_lib::refs::store::{
 };
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    move_commit, EmptyPolicy, HistoryError, Placement, RefScope, RewriteOptions,
+    move_commit, EmptyPolicy, HistoryEngineError, HistoryError, Placement, RefScope, RewriteOptions,
 };
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_test_support::git;
@@ -173,7 +173,7 @@ fn history_planning_reports_unborn_head_as_typed_library_error() {
     };
     let err = move_commit(&repo, commit, Placement::Before(commit), &opts).expect_err("unborn");
     assert!(
-        matches!(&err, HistoryError::Library(inner) if matches!(**inner, Error::UnbornHead)),
+        matches!(&err, HistoryError::Engine(HistoryEngineError::UnbornHead)),
         "{err:?}"
     );
 }
@@ -186,6 +186,6 @@ fn history_error_from_library_error_unwraps_history_failures() {
     ));
     assert!(matches!(
         HistoryError::from(Error::UnbornHead),
-        HistoryError::Library(inner) if matches!(*inner, Error::UnbornHead)
+        HistoryError::Engine(HistoryEngineError::UnbornHead)
     ));
 }

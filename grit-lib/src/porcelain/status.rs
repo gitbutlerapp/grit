@@ -29,6 +29,7 @@ use crate::diff::{
 };
 use crate::error::{ConfigError, Error, Result};
 use crate::hash::{try_par_hash_with, ParallelHashError};
+use crate::history::HistoryEngineError;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
@@ -2415,9 +2416,7 @@ pub fn status(
     let interrupted_rewrite = if persist_index_to_disk {
         match crate::history::recover_interrupted_rewrite_apply(repo) {
             Ok(recovery) => recovery.map(InterruptedRewrite::from),
-            Err(crate::history::HistoryError::Library(err))
-                if matches!(*err, crate::error::Error::LockHeld(..)) =>
-            {
+            Err(crate::history::HistoryError::Engine(HistoryEngineError::LockHeld(_))) => {
                 Some(InterruptedRewrite::Pending)
             }
             Err(err) => return Err(crate::error::Error::History(err)),

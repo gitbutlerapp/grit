@@ -41,11 +41,13 @@ use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, P
 use crate::porcelain::add::{
     stage_on_index, validate_commit_staging_pathspecs, StageMode, StageOptions,
 };
+use crate::porcelain::commit_error::CommitError;
 use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, HunkSelection,
 };
 use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stats;
 use crate::porcelain::merge::squash_conflict_merge_in_progress;
+use crate::porcelain::merge_error::MergeError;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::replay_sequence::finish_replay_commit_state;
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
@@ -497,26 +499,32 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 ///   for the wrong side, and [`Error::Apply`] when the selected patch does not apply to the
 ///   index. These carry the same values as [`CommitError::HunkSelect`] and
 ///   [`CommitError::PatchApply`] from [`commit_with_patch`].
+///
+/// Underlying repository, hook, index, or I/O failures are returned as [`CommitError::Library`].
 pub fn commit_with_scope(
     repo: &Repository,
     req: &CommitRequest,
     scope: CommitScope,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<CommitOutcome> {
-    guard_incomplete_rewrite_apply(repo)?;
+) -> std::result::Result<CommitOutcome, CommitError> {
+    guard_incomplete_rewrite_apply(repo).map_err(CommitError::from)?;
     match scope {
-        CommitScope::AutoStage => commit_worktree(repo, req, progress, cancel),
+        CommitScope::AutoStage => {
+            commit_worktree(repo, req, progress, cancel).map_err(CommitError::from)
+        }
         CommitScope::Staged => {
             let mut req = req.clone();
             // Index stats were refreshed when paths were staged; skip full-tree refresh (#1622).
             req.assume_worktree_synced = true;
             req.index_only = true;
-            create_commit(repo, &req, progress, cancel)
+            create_commit(repo, &req, progress, cancel).map_err(CommitError::from)
         }
-        CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress, cancel),
+        CommitScope::Paths(paths) => {
+            commit_paths_scope(repo, req, &paths, progress, cancel).map_err(CommitError::from)
+        }
         CommitScope::Patch { input, pathspecs } => {
-            commit_with_patch(repo, req, input, &pathspecs, progress, cancel).map_err(Into::into)
+            commit_with_patch(repo, req, input, &pathspecs, progress, cancel)
         }
     }
 }
@@ -538,7 +546,7 @@ pub fn commit_with_patch(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> std::result::Result<CommitOutcome, CommitPatchError> {
-    guard_incomplete_rewrite_apply(repo).map_err(CommitPatchError::Commit)?;
+    guard_incomplete_rewrite_apply(repo).map_err(CommitError::from)?;
     commit_patch_scope(repo, req, input, pathspecs, progress, cancel)
 }
 
@@ -581,12 +589,10 @@ fn commit_patch_scope(
         }
     };
 
-    let head = resolve_head_for_repository(repo).map_err(CommitPatchError::Commit)?;
+    let head = resolve_head_for_repository(repo).map_err(CommitError::from)?;
     let mut index = repo.load_index()?;
     if index.has_unmerged_entries() {
-        return Err(CommitPatchError::Commit(
-            Error::from(IndexError::unmerged()),
-        ));
+        return Err(CommitError::from(Error::from(IndexError::unmerged())));
     }
 
     let dry_run = req.dry_run;
@@ -631,7 +637,7 @@ pub fn plan_commit(
 ) -> Result<CommitPlan> {
     let mut req = req.clone();
     req.dry_run = true;
-    let outcome = commit_with_scope(repo, &req, scope, progress, cancel)?;
+    let outcome = commit_with_scope(repo, &req, scope, progress, cancel).map_err(Error::from)?;
     Ok(CommitPlan {
         files: outcome.files,
         parents: outcome.parents,
@@ -689,7 +695,7 @@ fn commit_paths_scope(
     cancel: &CancelToken,
 ) -> Result<CommitOutcome> {
     if paths.is_entire_tree() {
-        return Err(Error::CommitPathsRequired);
+        return Err(CommitError::CommitPathsRequired.into());
     }
     if !read_merge_heads(repo.git_dir())?.is_empty() {
         return Err(CommitError::PartialCommitDuringMerge.into());
@@ -2150,6 +2156,7 @@ mod tests {
     use crate::environment::RepositoryOptions;
 
     use super::*;
+    use crate::error::Error;
     use crate::index::{entry_from_stat, Index, MODE_REGULAR};
     use crate::objects::ObjectKind;
     use crate::pathspec::{Pathspec, PathspecGlobalFlags};
@@ -2302,6 +2309,26 @@ mod tests {
         let mut req = commit_req(message);
         req.dry_run = true;
         req
+    }
+
+    fn assert_commit_with_scope_err(
+        repo: &Repository,
+        req: &CommitRequest,
+        scope: CommitScope,
+        f: impl FnOnce(&Error),
+    ) {
+        let err = commit_with_scope(
+            repo,
+            req,
+            scope,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap_err();
+        match &err {
+            CommitError::Library(inner) => f(inner),
+            other => panic!("expected CommitError::Library, got {other:?}"),
+        }
     }
 
     #[cfg(unix)]
@@ -3311,15 +3338,14 @@ mod tests {
         .unwrap();
 
         let paths = Pathspec::scoped(["missing.txt"], PathspecGlobalFlags::default());
-        let err = commit_with_scope(
+        assert_commit_with_scope_err(
             &repo,
             &commit_req("nope"),
             CommitScope::Paths(paths),
-            &mut NullProgress,
-            &crate::progress::CancelToken::never(),
-        )
-        .unwrap_err();
-        assert!(matches!(err, Error::PathspecNoMatch { .. }));
+            |err| {
+                assert!(matches!(err, Error::PathspecNoMatch { .. }));
+            },
+        );
     }
 
     #[test]
@@ -3354,10 +3380,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Commit(CommitError::PartialCommitDuringMerge)
-        ));
+        assert!(matches!(err, CommitError::PartialCommitDuringMerge));
     }
 
     fn system_git(root: &Path, args: &[&str]) -> String {
@@ -3627,14 +3650,17 @@ mod tests {
         )
         .unwrap_err();
         match &err {
-            Error::LockHeld(crate::error::LockHeldError {
-                path: reported,
-                holder,
-            }) => {
-                assert_eq!(reported, &lock_path);
-                assert_eq!(*holder, None);
-            }
-            other => panic!("expected Error::LockHeld, got {other:?}"),
+            CommitError::Library(inner) => match inner.as_ref() {
+                Error::LockHeld(crate::error::LockHeldError {
+                    path: reported,
+                    holder,
+                }) => {
+                    assert_eq!(reported, &lock_path);
+                    assert_eq!(*holder, None);
+                }
+                other => panic!("expected Error::LockHeld, got {other:?}"),
+            },
+            other => panic!("expected CommitError::Library, got {other:?}"),
         }
         assert!(err.to_string().contains("index.lock"), "{err}");
 
@@ -3709,18 +3735,12 @@ mod tests {
         let lock_path = repo.git_dir().join("index.lock");
         fs::write(&lock_path, b"foreign\n").unwrap();
         let tip_before = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
-        let err = commit_with_scope(
-            &repo,
-            &commit_req("x"),
-            CommitScope::Staged,
-            &mut NullProgress,
-            &crate::progress::CancelToken::never(),
-        )
-        .unwrap_err();
-        assert!(
-            matches!(&err, Error::LockHeld(lock) if lock.path == repo.git_dir().join("index.lock")),
-            "{err:?}"
-        );
+        assert_commit_with_scope_err(&repo, &commit_req("x"), CommitScope::Staged, |inner| {
+            assert!(
+                matches!(inner, Error::LockHeld(lock) if lock.path == repo.git_dir().join("index.lock")),
+                "{inner:?}"
+            );
+        });
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
             tip_before
@@ -5386,7 +5406,7 @@ mod tests {
         )
         .unwrap_err();
         match &err {
-            Error::Commit(CommitError::HunkSelect(HunkSelectError::StaleId { id, .. })) => {
+            CommitError::HunkSelect(HunkSelectError::StaleId { id, .. }) => {
                 assert_eq!(id, &stale)
             }
             other => panic!("expected stale hunk id error, got {other:?}"),
@@ -5488,10 +5508,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(
-            matches!(err, Error::Commit(CommitError::PatchApply(_))),
-            "got {err:?}"
-        );
+        assert!(matches!(err, CommitError::PatchApply(_)), "got {err:?}");
         assert_eq!(err.kind_name(), "apply");
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
@@ -5525,7 +5542,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::Commit(CommitError::CommitPathsRequired)),
+            matches!(err, CommitError::CommitPathsRequired),
             "got {err:?}"
         );
         assert_eq!(err.to_string(), "you must specify path(s)");

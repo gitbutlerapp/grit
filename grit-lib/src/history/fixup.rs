@@ -4,12 +4,13 @@ use std::fs;
 
 use super::absorb::{blob_at_path, index_blob_at_path, remaining_index_blob_for_path};
 use super::apply::{apply_fixup_rewrite_then, apply_index_to_worktree_delta};
-use super::error::HistoryError;
+use super::error::{worktree_apply_engine, worktree_apply_io, HistoryError};
 use super::plan::{conflict_error, plan_rewrite};
 use super::reword::normalize_rewrite_message;
 use super::types::{AppliedRewrite, ApplyOptions};
 use super::types::{CommitEdit, EmptyPolicy, HistoryEdits, RewriteOptions, RewritePlan};
 use super::undo_work::capture_path_states;
+use super::PlanningError;
 use super::{commit_tree, load_commit};
 use crate::apply::{apply_patch_to_blob, BlobApplyOptions};
 use crate::diff::diff_index_to_tree;
@@ -241,9 +242,7 @@ fn capture_hunk_fixup_apply_snapshot(
     repo: &Repository,
     paths: &[String],
 ) -> Result<HunkFixupApplySnapshot, HistoryError> {
-    let index_bytes = fs::read(repo.index_path()).map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
+    let index_bytes = fs::read(repo.index_path()).map_err(worktree_apply_io)?;
     let pre_head_tree = commit_tree(repo, repo.head_commit()?)?;
     let index = repo.load_index()?;
     let mut path_states = Vec::with_capacity(paths.len());
@@ -270,9 +269,7 @@ fn capture_hunk_fixup_apply_snapshot(
 }
 
 fn restore_index_bytes(repo: &Repository, bytes: &[u8]) -> Result<(), HistoryError> {
-    fs::write(repo.index_path(), bytes).map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })
+    fs::write(repo.index_path(), bytes).map_err(worktree_apply_io)
 }
 
 fn restore_full_hunk_fixup_snapshot(
@@ -288,18 +285,12 @@ fn restore_full_hunk_fixup_snapshot(
         match &path_state.pre_worktree_bytes {
             Some(bytes) => {
                 if let Some(parent) = abs.parent() {
-                    fs::create_dir_all(parent).map_err(|e| HistoryError::WorktreeApply {
-                        message: e.to_string(),
-                    })?;
+                    fs::create_dir_all(parent).map_err(worktree_apply_io)?;
                 }
-                fs::write(&abs, bytes).map_err(|e| HistoryError::WorktreeApply {
-                    message: e.to_string(),
-                })?;
+                fs::write(&abs, bytes).map_err(worktree_apply_io)?;
             }
             None if abs.exists() => {
-                fs::remove_file(&abs).map_err(|e| HistoryError::WorktreeApply {
-                    message: e.to_string(),
-                })?;
+                fs::remove_file(&abs).map_err(worktree_apply_io)?;
             }
             None => {}
         }
@@ -341,21 +332,15 @@ fn restore_after_hunk_fixup_apply(
             );
             let abs = wt.join(&path_state.path);
             if let Some(parent) = abs.parent() {
-                fs::create_dir_all(parent).map_err(|e| HistoryError::WorktreeApply {
-                    message: e.to_string(),
-                })?;
+                fs::create_dir_all(parent).map_err(worktree_apply_io)?;
             }
-            fs::write(&abs, &new_worktree).map_err(|e| HistoryError::WorktreeApply {
-                message: e.to_string(),
-            })?;
+            fs::write(&abs, &new_worktree).map_err(worktree_apply_io)?;
         }
     }
     if index_changed {
         index.sort();
         repo.write_index(&mut index)
-            .map_err(|e| HistoryError::WorktreeApply {
-                message: e.to_string(),
-            })?;
+            .map_err(worktree_apply_engine)?;
     }
     Ok(())
 }
@@ -426,9 +411,7 @@ fn index_tree_for_fixup_selection(
     for patch in &patches {
         let path = patch
             .effective_path()
-            .ok_or_else(|| HistoryError::Planning {
-                message: "fixup selection patch missing path".into(),
-            })?;
+            .ok_or_else(|| HistoryError::Planning(PlanningError::FixupSelectionPatchMissingPath))?;
         let head_blob = blob_at_path(repo, head_tree, path)?;
         let index_blob = index_blob_at_path(repo, &disk_index, path);
         let after_index = apply_patch_to_blob(&index_blob, patch, &BlobApplyOptions::default())

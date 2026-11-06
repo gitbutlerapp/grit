@@ -113,13 +113,27 @@ impl CommitError {
 }
 
 impl CommitError {
-    /// Build [`Self::Signing`] from a legacy single-string signing failure summary.
+    /// Build [`Self::Signing`] when only a free-form summary is available (program and status unknown).
     #[must_use]
     pub fn signing_from_message(message: String) -> Self {
         Self::Signing {
             program: String::new(),
             status: None,
             stderr: message,
+        }
+    }
+
+    /// Commit or tag signing failed running `program` with subprocess `status` and captured `stderr`.
+    #[must_use]
+    pub fn signing_failure(
+        program: impl Into<String>,
+        status: Option<i32>,
+        stderr: impl Into<String>,
+    ) -> Self {
+        Self::Signing {
+            program: program.into(),
+            status,
+            stderr: stderr.into(),
         }
     }
 }

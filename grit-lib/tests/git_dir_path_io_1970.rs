@@ -133,6 +133,7 @@ fn commit_should_fail_with_git_dir_io(repo: &Repository, root: &Path) -> Error {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit should fail")
+    .into()
 }
 
 #[test]
@@ -317,6 +318,7 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("commit should fail");
+    let err: Error = err.into();
     let path = assert_git_dir_path_io(&err);
     assert!(
         path.contains(".git/worktrees/") && path.contains("index"),

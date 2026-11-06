@@ -20,6 +20,7 @@ use crate::merge_trees::{
 use crate::objects::{parse_commit, CommitData, ObjectId};
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
+use crate::porcelain::merge_error::MergeError;
 use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;

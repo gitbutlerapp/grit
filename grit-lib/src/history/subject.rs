@@ -7,6 +7,7 @@ use crate::repo::Repository;
 use super::error::HistoryError;
 use super::load_commit;
 use super::types::RewrittenCommit;
+use super::PlanningError;
 
 /// First line of a commit message, without trailing newline on that line.
 ///
@@ -55,9 +56,9 @@ pub fn rewritten_row_subject(
         let old = load_commit(repo, row.old)?;
         return Ok(Some(message_first_line(&old.message)));
     }
-    let new = row.new.ok_or(HistoryError::Planning {
-        message: "rewrite row missing replacement oid".into(),
-    })?;
+    let new = row.new.ok_or(HistoryError::Planning(
+        PlanningError::RewriteRowMissingReplacementOid,
+    ))?;
     let commit = load_commit(repo, new)?;
     Ok(Some(message_first_line(&commit.message)))
 }

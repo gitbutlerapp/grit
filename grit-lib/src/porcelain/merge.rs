@@ -50,6 +50,7 @@ use crate::porcelain::checkout;
 use crate::porcelain::commit::{
     normalize_commit_message, stamp_change_id_on_new_commit, write_commit_object,
 };
+use crate::porcelain::merge_error::MergeError;
 use crate::porcelain::restore::conflict_style_from_config;
 use crate::porcelain::switch::{
     checkout_prepared_tree_transition_for_merge, prepare_tree_transition_allow_local,

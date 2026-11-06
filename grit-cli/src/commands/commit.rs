@@ -370,7 +370,7 @@ pub fn run(
         progress,
         &crate::interrupt::process_cancel_token(),
     )
-    .map_err(map_commit_error)?;
+    .map_err(|e| map_commit_error(e.into()))?;
     finish_commit_outcome(req, outcome, scope_json, dry_run)
 }
 

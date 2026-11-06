@@ -8,7 +8,10 @@ use crate::objects::ObjectId;
 use crate::refs::store::RefName;
 use crate::repo::Repository;
 
-use super::error::HistoryError;
+use super::error::{
+    undo_record_read_io, undo_record_read_str, undo_record_write_io, undo_record_write_str,
+    HistoryError,
+};
 use super::types::{HeadEffect, PlannedRefUpdate, RewritePlan};
 use super::undo_work::{remove_undo_work, StagedUndoWork, UndoWork};
 
@@ -104,27 +107,19 @@ pub(crate) fn write_history_last(
     work: Option<&UndoWork>,
 ) -> Result<(), HistoryError> {
     let grit_dir = repo.git_dir().join("grit");
-    std::fs::create_dir_all(&grit_dir).map_err(|e| HistoryError::UndoRecordWrite {
-        message: e.to_string(),
-    })?;
+    std::fs::create_dir_all(&grit_dir).map_err(undo_record_write_io)?;
     let body = serialize_record(record);
     let lock_path = history_last_lock_path(repo);
     let target = history_last_path(repo);
     let wait = LockWait::Immediately;
     let mut lock =
-        LockFile::acquire(&lock_path, wait).map_err(|e| HistoryError::UndoRecordWrite {
-            message: e.to_string(),
-        })?;
+        LockFile::acquire(&lock_path, wait).map_err(|e| undo_record_write_str(e.to_string()))?;
     lock.write_all(body.as_bytes())
-        .map_err(|e| HistoryError::UndoRecordWrite {
-            message: e.to_string(),
-        })?;
+        .map_err(undo_record_write_io)?;
     remove_undo_work(repo)?;
     let staged = work.map(|w| StagedUndoWork::stage(repo, w)).transpose()?;
     lock.commit_to(&target)
-        .map_err(|e| HistoryError::UndoRecordWrite {
-            message: e.to_string(),
-        })?;
+        .map_err(|e| undo_record_write_str(e.to_string()))?;
     if let Some(staged) = staged {
         if let Err(err) = staged.commit() {
             let _ = std::fs::remove_file(&target);
@@ -144,9 +139,7 @@ pub fn read_history_last(repo: &Repository) -> Result<Option<HistoryLastRecord>,
     if !path.is_file() {
         return Ok(None);
     }
-    let bytes = std::fs::read(&path).map_err(|e| HistoryError::UndoRecordRead {
-        message: e.to_string(),
-    })?;
+    let bytes = std::fs::read(&path).map_err(undo_record_read_io)?;
     parse_record(&bytes).map(Some)
 }
 
@@ -175,9 +168,7 @@ fn serialize_record(record: &HistoryLastRecord) -> String {
 }
 
 fn parse_record(bytes: &[u8]) -> Result<HistoryLastRecord, HistoryError> {
-    let text = std::str::from_utf8(bytes).map_err(|e| HistoryError::UndoRecordRead {
-        message: e.to_string(),
-    })?;
+    let text = std::str::from_utf8(bytes).map_err(|e| undo_record_read_str(e.to_string()))?;
     let mut version: Option<u32> = None;
     let mut operation: Option<String> = None;
     let mut head_ref: Option<Option<String>> = None;
@@ -254,19 +245,15 @@ fn parse_record(bytes: &[u8]) -> Result<HistoryLastRecord, HistoryError> {
     }
 
     if version != Some(FORMAT_VERSION) {
-        return Err(HistoryError::UndoRecordRead {
-            message: format!("unsupported or missing version (expected {FORMAT_VERSION})"),
-        });
+        return Err(undo_record_read_str(format!(
+            "unsupported or missing version (expected {FORMAT_VERSION})"
+        )));
     }
-    let operation = operation.ok_or_else(|| HistoryError::UndoRecordRead {
-        message: "missing operation line".into(),
-    })?;
+    let operation = operation.ok_or_else(|| undo_record_read_str("missing operation line"))?;
     let head_ref = match head_ref {
         Some(v) => v,
         None => {
-            return Err(HistoryError::UndoRecordRead {
-                message: "missing head line".into(),
-            })
+            return Err(undo_record_read_str("missing head line"));
         }
     };
 
@@ -287,9 +274,7 @@ fn parse_oid(token: Option<&str>, line_no: usize, label: &str) -> Result<ObjectI
 }
 
 fn parse_err(line_no: usize, detail: &str) -> HistoryError {
-    HistoryError::UndoRecordRead {
-        message: format!("line {}: {detail}", line_no + 1),
-    }
+    undo_record_read_str(format!("line {}: {detail}", line_no + 1))
 }
 
 #[cfg(test)]

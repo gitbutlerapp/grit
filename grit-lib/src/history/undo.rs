@@ -5,7 +5,7 @@ use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 
 use super::apply::{apply_undo_rewrite, verify_undo_worktree};
-use super::error::HistoryError;
+use super::error::{undo_record_read_str, HistoryError};
 use super::last::{read_history_last, HistoryLastRecord};
 use super::types::{ApplyOptions, UndoOutcome};
 use super::undo_work::{read_undo_work, UndoWork};
@@ -67,9 +67,7 @@ pub fn undo_last_rewrite_with_cancel(
         let head_after = head_change
             .map(|(_, new)| new)
             .or(record.head_old_commit)
-            .ok_or_else(|| HistoryError::UndoRecordRead {
-                message: "record missing head commit for dry-run".into(),
-            })?;
+            .ok_or_else(|| undo_record_read_str("record missing head commit for dry-run"))?;
         return Ok(UndoOutcome {
             ref_updates: plan.ref_updates.clone(),
             head: head_after,

@@ -26,7 +26,7 @@ use std::fs;
 use std::path::Path;
 
 use super::apply::commit_tree_for_apply;
-use super::error::HistoryError;
+use super::error::{worktree_apply_engine, worktree_apply_io, worktree_apply_str, HistoryError};
 use super::plan::{commit_parents, replay_commit_onto_mapping, write_resolved_replay};
 use super::subject::replay_conflict_labels;
 use super::types::{RewriteOptions, RewritePlan};
@@ -639,14 +639,9 @@ fn execute_plan(
         )?;
         repo.odb()
             .flush_for_publish()
-            .map_err(|e| HistoryError::WorktreeApply {
-                message: e.to_string(),
-            })?;
-        update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &tip).map_err(
-            |e| HistoryError::WorktreeApply {
-                message: e.to_string(),
-            },
-        )?;
+            .map_err(worktree_apply_engine)?;
+        update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &tip)
+            .map_err(worktree_apply_engine)?;
         if let Err(err) =
             checkout_exec_tree_transition(repo, Some(&session.current_tree), &tip_tree)
         {
@@ -788,11 +783,8 @@ fn execute_plan(
     rewrites.finish(repo, plan)?;
     session.restore()?;
     if clear_state_on_success {
-        super::rebase_session::clear_rebase_state(repo.git_dir()).map_err(|e| {
-            HistoryError::WorktreeApply {
-                message: e.to_string(),
-            }
-        })?;
+        super::rebase_session::clear_rebase_state(repo.git_dir())
+            .map_err(|e| worktree_apply_str(e.to_string()))?;
     }
     Ok(ExecReport { runs })
 }
@@ -923,16 +915,10 @@ fn checkout_exec_tree_transition(
             return Err(HistoryError::LocalChangesWouldBeOverwritten { paths });
         }
         Err(TreeTransitionVerifyError::Failed(err)) => {
-            return Err(HistoryError::WorktreeApply {
-                message: err.to_string(),
-            });
+            return Err(worktree_apply_engine(err));
         }
     }
-    checkout_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: e.to_string(),
-        }
-    })
+    checkout_tree_transition_allow_local(repo, from_tree, to_tree).map_err(worktree_apply_engine)
 }
 
 fn run_exec_command(
@@ -947,25 +933,18 @@ fn run_exec_command(
         CommandStdin::Null,
         CommandStdio::Pipe,
     )
-    .map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })
+    .map_err(worktree_apply_io)
 }
 
 fn map_clean_error(err: crate::error::Error) -> HistoryError {
     match err {
         crate::error::Error::DirtyWorktree { .. } => HistoryError::UncommittedChanges,
-        other => HistoryError::WorktreeApply {
-            message: other.to_string(),
-        },
+        other => worktree_apply_engine(other),
     }
 }
 
 fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError> {
-    let head_state =
-        resolve_head_for_repository(repo).map_err(|e| HistoryError::WorktreeApply {
-            message: e.to_string(),
-        })?;
+    let head_state = resolve_head_for_repository(repo).map_err(worktree_apply_engine)?;
     // The clean check ran against this same HEAD, so the saved HEAD and the tree restored
     // afterwards must come from this one read; mixing sources restores a HEAD that does
     // not match the restored index and worktree.
@@ -978,15 +957,11 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
         HeadState::Detached { oid } => (SavedHead::Detached(oid), oid),
         HeadState::Branch { oid: None, .. } => return Err(Error::UnbornHead.into()),
         HeadState::Invalid => {
-            return Err(HistoryError::WorktreeApply {
-                message: "HEAD is in an unknown state".into(),
-            });
+            return Err(worktree_apply_str("HEAD is in an unknown state"));
         }
     };
     let head_tree = commit_tree_for_apply(repo, head_commit)?;
-    let index_bytes = fs::read(repo.index_path()).map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
+    let index_bytes = fs::read(repo.index_path()).map_err(worktree_apply_io)?;
     let untracked_paths = snapshot_untracked_paths(repo)?;
     Ok(ExecPrestate {
         head,
@@ -1040,16 +1015,11 @@ fn restore_exec_prestate(
                 });
             }
             write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", refname.as_str())
-                .map_err(|e| HistoryError::WorktreeApply {
-                    message: e.to_string(),
-                })?;
+                .map_err(worktree_apply_engine)?;
         }
         SavedHead::Detached(oid) => {
-            update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", oid).map_err(
-                |e| HistoryError::WorktreeApply {
-                    message: e.to_string(),
-                },
-            )?;
+            update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", oid)
+                .map_err(worktree_apply_engine)?;
         }
     }
     checkout_hard_to_tree_from_head_tree(
@@ -1059,12 +1029,8 @@ fn restore_exec_prestate(
         &mut crate::progress::NullProgress,
         &crate::progress::CancelToken::never(),
     )
-    .map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
-    fs::write(repo.index_path(), &pre.index_bytes).map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
+    .map_err(worktree_apply_engine)?;
+    fs::write(repo.index_path(), &pre.index_bytes).map_err(worktree_apply_io)?;
     Ok(())
 }
 
@@ -1105,9 +1071,7 @@ struct StoredExec {
 }
 
 fn exec_io(err: impl std::fmt::Display) -> HistoryError {
-    HistoryError::WorktreeApply {
-        message: err.to_string(),
-    }
+    worktree_apply_str(err.to_string())
 }
 
 /// Write the exec recovery record. `grit-exec` is committed last, so on failure no

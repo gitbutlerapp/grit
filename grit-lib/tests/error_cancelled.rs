@@ -5,13 +5,14 @@
 
 use grit_lib::bundle::BundleError;
 use grit_lib::error::Error;
+use grit_lib::porcelain::commit_error::CommitError;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local_with_progress, FetchOptions, TagMode};
 use grit_lib::remote::RemoteError;
-use grit_lib::revwalk::history::{HistoryError, RebaseSessionError};
+use grit_lib::revwalk::history::{HistoryEngineError, HistoryError, RebaseSessionError};
 use grit_test_support::git;
 
 fn cancelled() -> Error {
@@ -35,19 +36,20 @@ fn wrapper_helpers_classify_only_cancelled() {
     assert!(PullError::Nested(Box::new(cancelled())).is_cancelled());
     assert!(!PullError::DetachedHead.is_cancelled());
 
-    assert!(HistoryError::Library(Box::new(cancelled())).is_cancelled());
+    assert!(HistoryError::Engine(HistoryEngineError::Cancelled).is_cancelled());
     assert!(!HistoryError::EmptyMessage.is_cancelled());
 
     assert!(RebaseSessionError::Library(cancelled()).is_cancelled());
     assert!(
-        RebaseSessionError::History(HistoryError::Library(Box::new(cancelled()))).is_cancelled()
+        RebaseSessionError::History(HistoryError::Engine(HistoryEngineError::Cancelled))
+            .is_cancelled()
     );
     assert!(!RebaseSessionError::NoRebaseInProgress.is_cancelled());
 
     assert!(BundleError::Cancelled.is_cancelled());
     assert!(!BundleError::BadSignature.is_cancelled());
 
-    assert!(Error::History(HistoryError::Library(Box::new(cancelled()))).is_cancelled());
+    assert!(Error::History(HistoryError::Engine(HistoryEngineError::Cancelled)).is_cancelled());
 }
 
 #[test]

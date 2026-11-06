@@ -954,9 +954,10 @@ fn replaying_what_is_new_onto_the_target() {
     let tip = f.commit(Some(&b), &[("f.txt", Some("f\n"))], "Add F", Some(&id('o')));
     let repo = f.repo();
     let skip = [id('l'), id('m')].into_iter().collect();
-    let head = replay_onto(&repo, oid(&tip), &[oid(&merge)], oid(&merge), &skip)
-        .unwrap()
-        .unwrap();
+    let head = match replay_onto(&repo, oid(&tip), &[oid(&merge)], oid(&merge), &skip).unwrap() {
+        grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
+        other => panic!("expected Ok, got {other:?}"),
+    };
     assert_eq!(subjects(&f, &merge, &head.to_hex()), ["Add F"]);
     assert_eq!(file(&f, &head.to_hex(), "f.txt").as_deref(), Some("f\n"));
     // A integrated, then amended here, then G: the amended A was
@@ -987,14 +988,16 @@ a3
         "Add G",
         Some(&id('p')),
     );
-    let head = replay_onto(&repo, oid(&g), &[oid(&merge)], oid(&merge), &skip)
-        .unwrap()
-        .unwrap();
+    let head = match replay_onto(&repo, oid(&g), &[oid(&merge)], oid(&merge), &skip).unwrap() {
+        grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
+        other => panic!("expected Ok, got {other:?}"),
+    };
     assert_eq!(subjects(&f, &merge, &head.to_hex()), ["Add G"]);
     // Nothing new: the target itself.
-    let head = replay_onto(&repo, oid(&b), &[oid(&merge)], oid(&merge), &skip)
-        .unwrap()
-        .unwrap();
+    let head = match replay_onto(&repo, oid(&b), &[oid(&merge)], oid(&merge), &skip).unwrap() {
+        grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
+        other => panic!("expected Ok, got {other:?}"),
+    };
     assert_eq!(head, oid(&merge));
 }
 

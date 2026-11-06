@@ -15,9 +15,10 @@ use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 /// # Errors
 ///
 /// Returns [`HistoryError::RootCommit`] when `commit` has no parents, or
-/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge, and [`HistoryError::Library`]
+/// [`HistoryError::MergeCommitInReplay`] when `commit` is a merge, and [`HistoryError::Engine`]
 /// when `commit` cannot be read as a commit (for example
-/// [`Error::UnexpectedObjectKind`](crate::error::Error::UnexpectedObjectKind)). Other failures
+/// [`HistoryEngineError::UnexpectedObjectKind`](super::HistoryEngineError::UnexpectedObjectKind)).
+/// Other failures
 /// come from [`plan_rewrite`].
 pub fn drop(
     repo: &Repository,

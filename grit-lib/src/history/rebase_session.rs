@@ -28,7 +28,7 @@ use crate::state::{resolve_head_for_repository, write_orig_head, HeadState};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 use super::apply::{apply_rewrite, log_head_move};
-use super::error::HistoryError;
+use super::error::{engine_message, undo_record_write_str, HistoryError};
 use super::last::{write_history_last, HistoryLastRecord};
 use super::plan::{
     commit_parents, plan_rewrite_with_order_resumable_seeded, write_rebase_staged_resolution,
@@ -246,7 +246,7 @@ impl RebaseSessionError {
 ///
 /// Unless the branch is already up to date, runs `pre-rebase` before any commit is replayed
 /// (see [`StartRebaseOptions::pre_rebase`]); a refusal returns [`RebaseSessionError::History`]
-/// wrapping [`HistoryError::Library`] with [`Error::Hook`](crate::error::Error::Hook), and
+/// wrapping [`HistoryError::Engine`] with [`HistoryEngineError::Hook`](super::HistoryEngineError::Hook), and
 /// nothing is changed or written.
 ///
 /// On a clean replay, applies the plan atomically and returns [`RebaseOutcome::Done`].
@@ -290,9 +290,9 @@ pub fn start_rebase(
     poll_cancel(progress, cancel).map_err(map_lib)?;
     match plan {
         Err(RebasePlan::UpToDate) => Ok(up_to_date_outcome(orig_head)),
-        Err(RebasePlan::Plan(_) | RebasePlan::Conflict { .. }) => Err(HistoryError::Planning {
-            message: "unexpected non-resumable rebase plan".into(),
-        }
+        Err(RebasePlan::Plan(_) | RebasePlan::Conflict { .. }) => Err(HistoryError::Planning(
+            super::PlanningError::UnexpectedNonResumableRebasePlan,
+        )
         .into()),
         Ok(ResumablePlanOutcome::Complete(plan)) => {
             let applied =
@@ -422,9 +422,9 @@ pub fn start_rebase_with_exec(
                 exec,
             })
         }
-        Err(RebasePlan::Plan(_) | RebasePlan::Conflict { .. }) => Err(HistoryError::Planning {
-            message: "unexpected non-resumable rebase plan".into(),
-        }
+        Err(RebasePlan::Plan(_) | RebasePlan::Conflict { .. }) => Err(HistoryError::Planning(
+            super::PlanningError::UnexpectedNonResumableRebasePlan,
+        )
         .into()),
         Ok(ResumablePlanOutcome::Partial(partial)) => {
             let orig_tree = commit_tree(repo, orig_head)?;
@@ -1819,9 +1819,7 @@ fn replan_rewrite_options(state: &LoadedState) -> RewriteOptions {
 }
 
 fn map_persist_json(err: serde_json::Error) -> RebaseSessionError {
-    RebaseSessionError::History(HistoryError::UndoRecordWrite {
-        message: err.to_string(),
-    })
+    RebaseSessionError::History(undo_record_write_str(err.to_string()))
 }
 
 impl From<RebaseSessionError> for crate::error::Error {
@@ -1831,9 +1829,7 @@ impl From<RebaseSessionError> for crate::error::Error {
             RebaseSessionError::Library(e) => e,
             RebaseSessionError::History(h) => Self::History(h),
             RebaseSessionError::NothingToCommit => Self::Commit(CommitError::NothingToCommit),
-            other => Self::History(HistoryError::Planning {
-                message: other.to_string(),
-            }),
+            other => Self::History(engine_message(other.to_string())),
         }
     }
 }

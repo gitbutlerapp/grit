@@ -22,7 +22,7 @@ use crate::repo::Repository;
 use crate::revwalk::rev_list::topo_order_commit_subset;
 use crate::state::{resolve_head_for_repository, HeadState};
 
-use super::error::HistoryError;
+use super::error::{engine_err, HistoryError};
 use super::plan::{
     collect_scoped_refs, commit_parents, head_effect, plan_ref_updates, plan_rewrite_with_order,
     plan_rewrite_with_order_resumable, ResumablePlanOutcome,
@@ -31,6 +31,7 @@ use super::types::{
     CommitEdit, HistoryEdits, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan,
     RewrittenCommit,
 };
+use super::PlanningError;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod patch_id_inject {
@@ -108,17 +109,9 @@ pub fn rebase_request_after_fetch(
         });
     }
     let fork =
-        try_reflog_fork_point(repo, upstream_reflog_ref, upstream_tip, head).map_err(|e| {
-            HistoryError::Planning {
-                message: e.to_string(),
-            }
-        })?;
+        try_reflog_fork_point(repo, upstream_reflog_ref, upstream_tip, head).map_err(engine_err)?;
     let mut boundary =
-        rebase_boundary_from_fork_point(repo, head, upstream_tip, fork).map_err(|e| {
-            HistoryError::Planning {
-                message: e.to_string(),
-            }
-        })?;
+        rebase_boundary_from_fork_point(repo, head, upstream_tip, fork).map_err(engine_err)?;
     if let Some(base) = landed {
         if base != boundary
             && is_ancestor(repo, base, head).map_err(history_repo_err)?
@@ -148,9 +141,7 @@ fn pick_newer_boundary(
 }
 
 fn history_repo_err(err: crate::error::Error) -> HistoryError {
-    HistoryError::Planning {
-        message: err.to_string(),
-    }
+    engine_err(err)
 }
 
 /// Builds a [`RebaseRequest`] for `grit rebase` / `grit history rebase`.
@@ -223,18 +214,17 @@ fn rebase_upstream_reflog_ref(
         HeadState::Branch { refname, .. } => refname
             .strip_prefix("refs/heads/")
             .map(str::to_owned)
-            .ok_or_else(|| HistoryError::Planning {
-                message: "cannot rebase from a non-branch HEAD".into(),
+            .ok_or_else(|| {
+                HistoryError::Planning(PlanningError::RebaseUpstreamRequiresBranchHead)
             })?,
         _ => {
-            return Err(HistoryError::Planning {
-                message: "cannot rebase detached HEAD without an upstream argument".into(),
-            });
+            return Err(HistoryError::Planning(
+                PlanningError::RebaseDetachedHeadNeedsUpstream,
+            ));
         }
     };
-    upstream_tracking_full_ref(repo, &branch).ok_or_else(|| HistoryError::Planning {
-        message: format!("no upstream configured for branch '{branch}'"),
-    })
+    upstream_tracking_full_ref(repo, &branch)
+        .ok_or_else(|| HistoryError::Planning(PlanningError::NoUpstreamForBranch { branch }))
 }
 
 /// Result of [`plan_rebase`]: already current, a rewrite plan, or a conflict report (not an error).
@@ -417,8 +407,9 @@ pub fn plan_rebase(
 ///
 /// # Errors
 ///
-/// Same as [`plan_rebase`], plus [`HistoryError::Library`] wrapping
-/// [`crate::error::Error::Hook`] when the hook refuses the rebase or cannot start.
+/// Same as [`plan_rebase`], plus [`HistoryError::Engine`] with
+/// [`HistoryEngineError::Hook`](super::HistoryEngineError::Hook) when the hook refuses the rebase
+/// or cannot start.
 pub fn plan_rebase_with_hook(
     repo: &Repository,
     request: &RebaseRequest,
@@ -507,16 +498,12 @@ pub(crate) fn rebase_fork(
     branch_tip: ObjectId,
 ) -> Result<ObjectId, HistoryError> {
     let bases = merge_bases_first_vs_rest(repo, branch_tip, &[upstream])?;
-    bases
-        .into_iter()
-        .next()
-        .ok_or_else(|| HistoryError::Planning {
-            message: format!(
-                "no merge base between upstream {} and tip {}",
-                upstream.to_hex(),
-                branch_tip.to_hex()
-            ),
+    bases.into_iter().next().ok_or_else(|| {
+        HistoryError::Planning(PlanningError::NoMergeBaseBetweenUpstreamAndTip {
+            upstream,
+            tip: branch_tip,
         })
+    })
 }
 
 fn plan_rebase_fast_forward(
@@ -585,20 +572,14 @@ pub(crate) fn build_rebase_rewrite_inputs(
     range: Option<&[ObjectId]>,
 ) -> Result<(HistoryEdits, Vec<ObjectId>, Vec<ObjectId>), HistoryError> {
     if tips.is_empty() {
-        return Err(HistoryError::Planning {
-            message: "at least one tip commit is required".into(),
-        });
+        return Err(HistoryError::Planning(PlanningError::RebaseTipsRequired));
     }
 
     for &tip in tips {
         if !is_ancestor(repo, fork, tip)? {
-            return Err(HistoryError::Planning {
-                message: format!(
-                    "fork {} is not an ancestor of tip {}",
-                    fork.to_hex(),
-                    tip.to_hex()
-                ),
-            });
+            return Err(HistoryError::Planning(
+                PlanningError::ForkNotAncestorOfTip { fork, tip },
+            ));
         }
     }
 
@@ -767,9 +748,9 @@ fn priority_topo_replay_order(
             .min_by(|a, b| prefer_side_branch(a, b))
             .copied()
         else {
-            return Err(HistoryError::Planning {
-                message: "rebase replay order has a cycle among in-range parents".into(),
-            });
+            return Err(HistoryError::Planning(
+                PlanningError::RebaseReplayOrderCycle,
+            ));
         };
         ready.retain(|commit| commit != &next);
         ordered.push(next);

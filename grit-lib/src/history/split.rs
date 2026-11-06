@@ -14,6 +14,7 @@ use super::reword::normalize_rewrite_message;
 use super::types::{
     CommitEdit, HistoryEdits, NewCommit, Pathspec, RewriteOptions, RewritePlan, SplitOptions,
 };
+use super::PlanningError;
 
 /// Plan a pathspec-limited split of `commit`: matching changes move into a new parent commit.
 ///
@@ -188,10 +189,9 @@ fn apply_diff_entry_to_index(
             if !sides.new {
                 return Ok(());
             }
-            let path = entry
-                .new_path
-                .as_deref()
-                .ok_or_else(|| planning_err("added diff entry missing new path"))?;
+            let path = entry.new_path.as_deref().ok_or_else(|| {
+                HistoryError::Planning(PlanningError::SplitAddedDiffMissingNewPath)
+            })?;
             let mode = entry.new_mode.bits();
             add_index_blob(index, path, mode, entry.new_oid);
         }
@@ -199,10 +199,9 @@ fn apply_diff_entry_to_index(
             if !sides.old {
                 return Ok(());
             }
-            let path = entry
-                .old_path
-                .as_deref()
-                .ok_or_else(|| planning_err("deleted diff entry missing old path"))?;
+            let path = entry.old_path.as_deref().ok_or_else(|| {
+                HistoryError::Planning(PlanningError::SplitDeletedDiffMissingOldPath)
+            })?;
             index.remove_paths([path.as_bytes()]);
         }
         DiffStatus::Modified | DiffStatus::TypeChanged => {
@@ -213,7 +212,9 @@ fn apply_diff_entry_to_index(
                 .new_path
                 .as_deref()
                 .or(entry.old_path.as_deref())
-                .ok_or_else(|| planning_err("modified diff entry missing path"))?;
+                .ok_or_else(|| {
+                    HistoryError::Planning(PlanningError::SplitModifiedDiffMissingPath)
+                })?;
             let mode = entry.new_mode.bits();
             add_index_blob(index, path, mode, entry.new_oid);
         }
@@ -222,29 +223,28 @@ fn apply_diff_entry_to_index(
                 if let Some(old) = &entry.old_path {
                     index.remove_paths([old.as_bytes()]);
                 }
-                let path = entry
-                    .new_path
-                    .as_deref()
-                    .ok_or_else(|| planning_err("rename diff entry missing new path"))?;
+                let path = entry.new_path.as_deref().ok_or_else(|| {
+                    HistoryError::Planning(PlanningError::SplitRenameMissingNewPath)
+                })?;
                 let mode = entry.new_mode.bits();
                 add_index_blob(index, path, mode, entry.new_oid);
             } else if sides.new {
-                let path = entry
-                    .new_path
-                    .as_deref()
-                    .ok_or_else(|| planning_err("rename diff entry missing new path"))?;
+                let path = entry.new_path.as_deref().ok_or_else(|| {
+                    HistoryError::Planning(PlanningError::SplitRenameMissingNewPath)
+                })?;
                 let mode = entry.new_mode.bits();
                 add_index_blob(index, path, mode, entry.new_oid);
             } else if sides.old {
-                let path = entry
-                    .old_path
-                    .as_deref()
-                    .ok_or_else(|| planning_err("rename diff entry missing old path"))?;
+                let path = entry.old_path.as_deref().ok_or_else(|| {
+                    HistoryError::Planning(PlanningError::SplitRenameMissingOldPath)
+                })?;
                 index.remove_paths([path.as_bytes()]);
             }
         }
         DiffStatus::Unmerged => {
-            return Err(planning_err("unexpected unmerged diff entry in split"));
+            return Err(HistoryError::Planning(
+                PlanningError::SplitUnexpectedUnmergedDiff,
+            ));
         }
     }
     Ok(())
@@ -268,11 +268,5 @@ fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
         flags_extended: None,
         path: path_bytes,
         base_index_pos: 0,
-    }
-}
-
-fn planning_err(message: impl Into<String>) -> HistoryError {
-    HistoryError::Planning {
-        message: message.into(),
     }
 }

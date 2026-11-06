@@ -13,12 +13,13 @@ use crate::merge_file::MergeFavor;
 use crate::merge_trees::{ReplayConflictLabels, TreeMergeOutput};
 use crate::objects::{serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::porcelain::commit::prepare_commit_bytes;
+use crate::porcelain::commit_error::CommitError;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::resolve_head_for_repository;
 use crate::worktree::{find_worktree_with_branch_checked_out, worktree_admin_dir};
 
-use super::error::HistoryError;
+use super::error::{engine_err, error_to_engine, HistoryError};
 use super::subject::{
     commit_message_subject_line, replay_conflict_labels, subject_for_rewrite_row,
 };
@@ -27,6 +28,8 @@ use super::types::{
     RewritePlan, RewrittenCommit,
 };
 use crate::refs::store::RefName;
+
+use super::PlanningError;
 use crate::replay_merge_session::ReplayMergeSession;
 
 // hygiene: resumable replay control (thread-local for parallel tests)
@@ -140,7 +143,7 @@ impl ChangeIdWriteContext {
 /// # Errors
 ///
 /// Returns [`HistoryError`] for conflicts, unsupported merges, scope violations, empty-policy
-/// aborts, [`HistoryError::Planning`] for invalid planning inputs, and [`HistoryError::Library`]
+/// aborts, [`HistoryError::Planning`] for invalid planning inputs, and [`HistoryError::Engine`]
 /// for object/revwalk/ref failures.
 pub fn plan_rewrite(
     repo: &Repository,
@@ -787,15 +790,15 @@ pub(crate) fn plan_replay_linear_segment(
         })
         .collect::<Result<Vec<_>, HistoryError>>()?;
 
-    let replay_tip = *replay_order.last().ok_or(HistoryError::Planning {
-        message: "empty replay order".into(),
-    })?;
+    let replay_tip = *replay_order
+        .last()
+        .ok_or(HistoryError::Planning(PlanningError::EmptyReplayOrder))?;
     let segment_tip_new = mapping
         .get(&replay_tip)
         .copied()
-        .ok_or(HistoryError::Planning {
-            message: "replay tip missing from mapping".into(),
-        })?;
+        .ok_or(HistoryError::Planning(
+            PlanningError::ReplayTipMissingFromMapping,
+        ))?;
     let ref_updates =
         plan_ref_updates_reordered(&scoped_refs, &mapping, segment_tip_old, segment_tip_new);
     let mut head_mapping = mapping.clone();
@@ -819,31 +822,29 @@ fn validate_replay_order_segment(
     replay_order: &[ObjectId],
 ) -> Result<(Vec<ObjectId>, ObjectId), HistoryError> {
     if replay_order.is_empty() {
-        return Err(HistoryError::Planning {
-            message: "replay order must not be empty".into(),
-        });
+        return Err(HistoryError::Planning(PlanningError::ReplayOrderEmpty));
     }
     let set: HashSet<ObjectId> = replay_order.iter().copied().collect();
     if set.len() != replay_order.len() {
-        return Err(HistoryError::Planning {
-            message: "replay order must not list the same commit twice".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::ReplayOrderDuplicateCommit,
+        ));
     }
     let segment_tip = segment_tip_in_replay_order(repo, replay_order)?;
     let Some(canonical) = first_parent_segment_between(repo, oldest, segment_tip)? else {
-        return Err(HistoryError::Planning {
-            message: "replay order is not a first-parent segment from oldest".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::ReplayOrderNotFirstParentSegment,
+        ));
     };
     if canonical.first() != Some(&oldest) {
-        return Err(HistoryError::Planning {
-            message: "oldest does not start the replay segment".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::OldestDoesNotStartReplaySegment,
+        ));
     }
     if canonical.iter().copied().collect::<HashSet<_>>() != set {
-        return Err(HistoryError::Planning {
-            message: "replay order must cover exactly one first-parent segment".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::ReplayOrderWrongSegmentCoverage,
+        ));
     }
     Ok((canonical, segment_tip))
 }
@@ -867,15 +868,15 @@ fn segment_tip_in_replay_order(
         }
     }
     if tips.len() != 1 {
-        return Err(HistoryError::Planning {
-            message: "replay order must have exactly one segment tip".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::ReplayOrderMultipleTips,
+        ));
     }
     let tip = tips[0];
     if !set.contains(&tip) {
-        return Err(HistoryError::Planning {
-            message: "replay segment tip missing from replay order".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::ReplaySegmentTipMissingFromOrder,
+        ));
     }
     Ok(tip)
 }
@@ -929,10 +930,7 @@ fn library_err(err: Error) -> HistoryError {
     if let Error::History(inner) = err {
         return inner;
     }
-    if matches!(err, Error::ObjectNotFound(_)) {
-        return HistoryError::Library(Box::new(err));
-    }
-    HistoryError::Library(Box::new(err))
+    engine_err(err)
 }
 
 fn oldest_from_resume_seed(
@@ -1393,9 +1391,9 @@ fn replay_merge_tree(
     replay_session: &mut ReplayMergeSession,
 ) -> Result<ObjectId, HistoryError> {
     if old.parents.len() != new_parents.len() {
-        return Err(HistoryError::Planning {
-            message: "merge replay parent count mismatch".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::MergeReplayParentCountMismatch,
+        ));
     }
 
     let labels = replay_conflict_labels(old_oid, old);
@@ -1828,8 +1826,17 @@ fn write_commit_data(
 }
 
 fn signing_err(err: Error) -> HistoryError {
-    HistoryError::Signing {
-        message: err.to_string(),
+    match err {
+        Error::Commit(CommitError::Signing {
+            program,
+            status,
+            stderr,
+        }) => HistoryError::Signing {
+            program,
+            status,
+            stderr,
+        },
+        other => HistoryError::Engine(error_to_engine(other)),
     }
 }
 
@@ -1907,16 +1914,12 @@ pub(crate) fn plan_fold_range_at_head(
     opts: &RewriteOptions,
 ) -> Result<RewritePlan, HistoryError> {
     if !matches!(opts.scope, RefScope::Head) {
-        return Err(HistoryError::Planning {
-            message: "head-only fold requires RefScope::Head".into(),
-        });
+        return Err(HistoryError::Planning(PlanningError::FoldRequiresHeadScope));
     }
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
     let head = repo.head_commit()?;
     if tip != head {
-        return Err(HistoryError::Planning {
-            message: "fold fast path requires the range tip to be HEAD".into(),
-        });
+        return Err(HistoryError::Planning(PlanningError::FoldRequiresTipIsHead));
     }
     let oldest_commit = load_commit(repo, oldest)?;
     if oldest_commit.parents.is_empty() {

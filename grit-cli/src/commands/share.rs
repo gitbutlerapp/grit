@@ -1478,14 +1478,19 @@ fn resolve_integrated(
                 .filter_map(|s| s.integrated.as_ref())
                 .flat_map(|i| i.changes.iter().cloned())
                 .collect();
-            let head =
-                match grit_lib::divergence::replay_onto(&here.repo, ours, &[onto], onto, &skip)? {
-                    Ok(head) => head,
-                    Err(paths) => bail!(
-                        "rebasing {branch} onto {target} conflicts in {}: run `grit rebase origin/{target}` and settle them by hand",
-                        paths.join(", ")
-                    ),
-                };
+            let head = match grit_lib::divergence::replay_onto(
+                &here.repo,
+                ours,
+                &[onto],
+                onto,
+                &skip,
+            )? {
+                grit_lib::divergence::ReplayOntoOutcome::Ok { tip } => tip,
+                grit_lib::divergence::ReplayOntoOutcome::Conflict { paths } => bail!(
+                    "rebasing {branch} onto {target} conflicts in {}: run `grit rebase origin/{target}` and settle them by hand",
+                    paths.join(", ")
+                ),
+            };
             if head != ours {
                 move_branch(&here.repo, branch, head)?;
             }

@@ -47,6 +47,7 @@
 mod absorb;
 mod apply;
 mod drop;
+mod engine_error;
 mod error;
 mod exec;
 mod fixup;
@@ -54,6 +55,7 @@ mod last;
 mod message;
 mod r#move;
 mod plan;
+mod planning_error;
 mod rebase;
 mod rebase_session;
 
@@ -79,6 +81,7 @@ pub use apply::{
     verify_rewrite_plan, RewriteApplyRecovery,
 };
 pub use drop::drop;
+pub use engine_error::HistoryEngineError;
 pub use error::HistoryError;
 pub use exec::{verify_rebase_with_exec, ExecReport, ExecRunRecord, ExecSpec};
 pub use fixup::{
@@ -87,6 +90,7 @@ pub use fixup::{
 };
 pub use last::{read_history_last, HistoryLastRecord};
 pub use plan::plan_rewrite;
+pub use planning_error::PlanningError;
 pub use r#move::{move_commit, Placement};
 pub use rebase::{
     plan_rebase, plan_rebase_check, plan_rebase_with_hook, rebase_onto, rebase_request_after_fetch,
@@ -111,9 +115,9 @@ pub use undo::{undo_last_rewrite, undo_last_rewrite_with_cancel};
 
 /// Read and parse commit `oid`.
 ///
-/// Returns the library [`Error`](crate::error::Error) unwrapped so `?` lands it in the caller's
-/// own library variant: [`HistoryError::Library`] for rewrites, and
-/// [`RebaseSessionError::Library`] for rebase sessions, which the CLI forwards typed.
+/// Returns the library [`Error`](crate::error::Error); [`?`] maps it through [`super::error::engine_err`]
+/// (typically [`HistoryError::Engine`]) for rewrites, and [`RebaseSessionError::Library`] for rebase
+/// sessions, which the CLI forwards typed.
 fn load_commit(
     repo: &crate::repo::Repository,
     oid: crate::objects::ObjectId,
@@ -219,7 +223,12 @@ mod tests {
         let history = || -> Result<ObjectId, HistoryError> { Ok(commit_tree(&repo, blob)?) };
         let err = history().unwrap_err();
         assert!(
-            matches!(&err, HistoryError::Library(inner) if matches!(**inner, Error::UnexpectedObjectKind { .. })),
+            matches!(
+                &err,
+                HistoryError::Engine(
+                    crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
+                )
+            ),
             "{err:?}"
         );
         let session = || -> Result<ObjectId, RebaseSessionError> { Ok(commit_tree(&repo, blob)?) };
@@ -240,7 +249,9 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                HistoryError::Library(inner) if matches!(**inner, Error::UnexpectedObjectKind { .. })
+                HistoryError::Engine(
+                    crate::history::HistoryEngineError::UnexpectedObjectKind { .. }
+                )
             ),
             "{err:?}"
         );
@@ -254,7 +265,16 @@ mod tests {
             rewrite: rewrite_opts(),
         };
         let err = squash(&repo, &["no-such-branch..main"], &opts).unwrap_err();
-        assert!(matches!(err, HistoryError::Library(_)), "{err:?}");
+        assert!(
+            matches!(
+                err,
+                HistoryError::Engine(crate::history::HistoryEngineError::RevisionNotFound(_))
+                    | HistoryError::Engine(crate::history::HistoryEngineError::RevParse(
+                        crate::rev_parse_error::RevParseError::AmbiguousArgument { .. }
+                    ))
+            ),
+            "{err:?}"
+        );
     }
 
     #[test]

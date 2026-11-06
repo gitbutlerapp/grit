@@ -286,13 +286,16 @@ fn auto_stage_commit_stops_when_the_sink_asks() {
     let before = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
     let cancel = sink.flag.clone();
-    assert_cancelled(commit_with_scope(
-        &repo,
-        &commit_req("change"),
-        CommitScope::AutoStage,
-        &mut sink,
-        &cancel,
-    ));
+    assert_cancelled(
+        commit_with_scope(
+            &repo,
+            &commit_req("change"),
+            CommitScope::AutoStage,
+            &mut sink,
+            &cancel,
+        )
+        .map_err(Error::from),
+    );
     assert_eq!(head(&repo), base, "HEAD must not move");
     assert_index_untouched(&repo, &before);
 }
@@ -315,13 +318,16 @@ fn staged_and_path_commits_stop_on_cancel_argument() {
             grit_lib::worktree::pathspec::PathspecGlobalFlags::default(),
         )),
     ] {
-        assert_cancelled(commit_with_scope(
-            &repo,
-            &commit_req("change"),
-            scope,
-            &mut NullProgress,
-            &cancelled_flag(),
-        ));
+        assert_cancelled(
+            commit_with_scope(
+                &repo,
+                &commit_req("change"),
+                scope,
+                &mut NullProgress,
+                &cancelled_flag(),
+            )
+            .map_err(Error::from),
+        );
         assert_eq!(head(&repo), base);
         assert_index_untouched(&repo, &before);
     }

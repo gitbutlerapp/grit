@@ -18,10 +18,11 @@ use grit_lib::revwalk::history::{
     format_hunk_range_header, move_commit, plan_rebase, plan_rebase_check, rebase_run_request,
     reword_with, skip_rebase, split, squash, staged_fixup_paths, start_rebase,
     start_rebase_with_exec, undo_last_rewrite_with_cancel, verify_rewrite_plan, AbsorbOptions,
-    ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec, FixupOptions, HistoryError, HunkAssignment,
-    HunkRange, Placement, PreRebase, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan,
-    RebaseRequest, RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan,
-    SplitOptions, SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
+    ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec, FixupOptions, HistoryEngineError,
+    HistoryError, HunkAssignment, HunkRange, Placement, PreRebase, RebaseCheckPlan,
+    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
+    RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
+    StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -1802,8 +1803,16 @@ pub(crate) fn history_error(
 
 fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
     match err {
-        HistoryError::Library(lib) if lib.is_cancelled() => anyhow::Error::new(*lib),
-        HistoryError::Library(lib) if matches!(*lib, LibError::Hook(_)) => anyhow::Error::new(*lib),
+        HistoryError::Engine(engine) if matches!(engine, HistoryEngineError::Cancelled) => {
+            anyhow::Error::new(LibError::Cancelled)
+        }
+        HistoryError::Engine(HistoryEngineError::Hook(hook)) => {
+            anyhow::Error::new(LibError::Hook(hook))
+        }
+        HistoryError::Engine(engine) => anyhow::Error::new(engine),
+        HistoryError::Planning(planning) => {
+            anyhow::anyhow!("history rewrite planning failed: {planning}")
+        }
         HistoryError::EmptyMessage => anyhow::anyhow!("commit message cannot be empty"),
         HistoryError::NothingToReword => {
             anyhow::anyhow!("reword requires a new message or author")
@@ -1831,12 +1840,13 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
             conflict_paths(conflicts),
             refs,
         ),
-        HistoryError::Planning { message } => {
-            anyhow::anyhow!("history rewrite planning failed: {message}")
-        }
-        HistoryError::Signing { message } => {
-            anyhow::anyhow!("commit signing failed: {message}")
-        }
+        HistoryError::Signing {
+            program,
+            status,
+            stderr,
+        } => anyhow::anyhow!(
+            "commit signing failed (program {program}, status {status:?}): {stderr}"
+        ),
         HistoryError::InsertBeforeOnMerge { commit } => {
             let short = commit.to_short_hex();
             anyhow::anyhow!("insert-before on merge commit {short} is not supported")
@@ -1889,11 +1899,23 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         HistoryError::RefCasMismatch { name } => anyhow::anyhow!(
             "ref {name} changed since the rewrite plan was built — retry the command"
         ),
-        HistoryError::RefApply { message } => {
-            anyhow::anyhow!("ref update failed: {message}")
+        HistoryError::HeadMovedSincePlan {
+            planned_ref,
+            planned_commit,
+        } => {
+            let oid = planned_commit.to_short_hex();
+            match planned_ref {
+                Some(name) => anyhow::anyhow!(
+                    "HEAD moved since the rewrite plan was built (expected {name} at {oid})"
+                ),
+                None => {
+                    anyhow::anyhow!("HEAD moved since the rewrite plan was built (expected {oid})")
+                }
+            }
         }
-        HistoryError::WorktreeApply { message } => {
-            anyhow::anyhow!("worktree update failed: {message}")
+        HistoryError::RefApply(store) => anyhow::anyhow!("ref update failed: {store}"),
+        HistoryError::WorktreeApply { source } => {
+            anyhow::anyhow!("worktree update failed: {source}")
         }
         HistoryError::SplitSelectsNothing => {
             anyhow::anyhow!("pathspec did not select any changes from the commit")
@@ -1905,9 +1927,101 @@ fn map_history_error(err: HistoryError, operation: &str) -> anyhow::Error {
         HistoryError::UndoStale { name } => anyhow::anyhow!(
             "ref {name} changed since the last history rewrite — undo is no longer safe"
         ),
-        HistoryError::UndoRecordRead { message } | HistoryError::UndoRecordWrite { message } => {
-            anyhow::anyhow!("history undo record error: {message}")
+        HistoryError::UndoRecordRead { source } | HistoryError::UndoRecordWrite { source } => {
+            anyhow::anyhow!("history undo record error: {source}")
         }
-        _ => anyhow::anyhow!("{err}"),
+        HistoryError::HunkSelect(h) => anyhow::Error::new(h),
+        HistoryError::ChangeId(h) => anyhow::Error::new(h),
+        HistoryError::RangeNotConnected => {
+            anyhow::anyhow!("the selected commits are not a connected revision range")
+        }
+        HistoryError::MultipleTips => {
+            anyhow::anyhow!("the revision range contains more than one tip commit")
+        }
+        HistoryError::MarkerTargetOutsideRange { commit } => {
+            let short = commit.to_short_hex();
+            anyhow::anyhow!(
+                "cannot squash {short}: its fixup/amend/squash target is outside the range"
+            )
+        }
+        HistoryError::SquashDiscardsMessage { commit } => {
+            let short = commit.to_short_hex();
+            anyhow::anyhow!("squashing {short} would discard its message; use --combine or -m")
+        }
+        HistoryError::UncommittedChanges => anyhow::anyhow!(
+            "you have uncommitted changes — commit them before rebasing with --exec"
+        ),
+        HistoryError::ExecDirty {
+            commit,
+            command,
+            paths,
+            runs: _,
+        } => {
+            let short = commit.to_short_hex();
+            let mut paths = paths;
+            paths.sort();
+            paths.dedup();
+            anyhow::anyhow!(
+                "rebase --exec left tracked changes at commit {short} after `{command}`; save the edits before continuing, or abort the rebase:\n  {}",
+                paths.join("\n  ")
+            )
+        }
+        HistoryError::ExecConflict {
+            commit,
+            conflicts,
+            runs: _,
+        } => json_error::replay_conflict(
+            operation,
+            commit,
+            "(during rebase --exec)",
+            conflict_paths(conflicts),
+            Vec::new(),
+        ),
+        HistoryError::ExecFailed {
+            commit,
+            exit_code,
+            stdout,
+            stderr,
+            completed_runs: _,
+        } => {
+            let short = commit.to_short_hex();
+            let stdout = String::from_utf8_lossy(&stdout);
+            let stderr = String::from_utf8_lossy(&stderr);
+            anyhow::anyhow!(
+                "rebase --exec command failed at commit {short} (exit {exit_code})\nstdout:\n{stdout}\nstderr:\n{stderr}"
+            )
+        }
+        HistoryError::ExecHeadMoved { commit, head } => {
+            let short = commit.to_short_hex();
+            match head {
+                Some(h) => anyhow::anyhow!(
+                    "rebase --exec command moved HEAD away from commit {short}; HEAD is now {}",
+                    h.to_short_hex()
+                ),
+                None => {
+                    anyhow::anyhow!("rebase --exec command moved HEAD away from commit {short}")
+                }
+            }
+        }
+        HistoryError::RewriteApplyIncomplete => {
+            anyhow::anyhow!("history rewrite checkout is incomplete")
+        }
+        HistoryError::ApplyRollbackIncomplete {
+            checkout,
+            ref_rollback,
+            worktree_restore,
+        } => {
+            let mut parts = vec![format!(
+                "checkout failed after refs were updated: {checkout}"
+            )];
+            if let Some(r) = ref_rollback {
+                parts.push(format!("ref rollback also failed: {r}"));
+            }
+            if let Some(w) = worktree_restore {
+                parts.push(format!("worktree restore also failed: {w}"));
+            }
+            anyhow::Error::msg(parts.join("; "))
+        }
+        other => anyhow::anyhow!("{other}"),
     }
 }

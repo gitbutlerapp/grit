@@ -1247,7 +1247,7 @@ pub enum NotARepositoryReason {
     },
 }
 
-fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
+pub(crate) fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
     match (holder.pid, holder.host.as_deref()) {
         (Some(pid), Some(host)) => {
             format!("repository maintenance is already running (process {pid} on {host})")
@@ -2210,12 +2210,6 @@ pub enum Error {
     },
 }
 
-impl From<crate::config::ident_resolve::IdentityError> for Error {
-    fn from(err: crate::config::ident_resolve::IdentityError) -> Self {
-        crate::porcelain::commit_error::CommitError::from(err).into()
-    }
-}
-
 impl From<crate::ident::CommitIdentityError> for Error {
     fn from(err: crate::ident::CommitIdentityError) -> Self {
         crate::porcelain::commit_error::CommitError::from(err).into()
@@ -2661,6 +2655,36 @@ impl From<crate::hooks::HookError> for Error {
     }
 }
 
+impl From<crate::porcelain::commit_error::CommitError> for Error {
+    fn from(err: crate::porcelain::commit_error::CommitError) -> Self {
+        use crate::porcelain::commit_error::CommitError;
+        match err {
+            CommitError::Library(boxed) => match *boxed {
+                inner @ (Self::Cancelled | Self::IndexUnmerged | Self::GitDirPathIo { .. }) => {
+                    inner
+                }
+                other => Self::Commit(CommitError::Library(Box::new(other))),
+            },
+            other => Self::Commit(other),
+        }
+    }
+}
+
+impl From<crate::porcelain::merge_error::MergeError> for Error {
+    fn from(err: crate::porcelain::merge_error::MergeError) -> Self {
+        use crate::porcelain::merge_error::MergeError;
+        match err {
+            MergeError::Library(boxed) => match *boxed {
+                inner @ (Self::Cancelled | Self::IndexUnmerged | Self::GitDirPathIo { .. }) => {
+                    inner
+                }
+                other => Self::Merge(MergeError::Library(Box::new(other))),
+            },
+            other => Self::Merge(other),
+        }
+    }
+}
+
 impl From<crate::refs::store::RefStoreError> for Error {
     fn from(err: crate::refs::store::RefStoreError) -> Self {
         match err {
@@ -2731,7 +2755,7 @@ impl From<crate::lockfile::LockError> for Error {
 /// Convenience alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn promisor_fetch_failed_message(
+pub(crate) fn promisor_fetch_failed_message(
     missing: &crate::objects::ObjectId,
     failures: &[(String, Error)],
 ) -> String {
