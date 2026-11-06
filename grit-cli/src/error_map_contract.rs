@@ -5,7 +5,8 @@ use std::path::Path;
 use anyhow::Error;
 use grit_lib::command_runner::hooks::{HookError, HookOutput};
 use grit_lib::error::{
-    AuthFailure, ConfigError, Error as LibError, NotARepositoryReason, OverwriteReason,
+    AuthFailure, ConfigError, Error as LibError, LockHeldError, NotARepositoryReason,
+    OverwriteReason,
 };
 use grit_lib::error::{RemoteUnreadableReason, WorktreeOperation};
 use grit_lib::objects::ObjectId;
@@ -212,13 +213,13 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "lock_held",
         build: || {
-            Error::new(LibError::LockHeld {
+            Error::new(LibError::LockHeld(LockHeldError {
                 path: Path::new("/repo/.git/index.lock").into(),
                 holder: Some(LockHolder {
                     pid: 42,
                     running: false,
                 }),
-            })
+            }))
         },
         kind: Some(ErrorKind::LockHeld),
         exit: ExitStatus::Failure,
@@ -1132,6 +1133,10 @@ static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
         file: "src/commands/history.rs",
         line_contains: "LibError::Hook(_)",
     },
+    ControlFlowAllowance {
+        file: "src/unborn_errors.rs",
+        line_contains: "LibError::Ref(grit_lib::refs::RefError::UnbornHead)",
+    },
 ];
 
 const LIB_ERROR_MATCH_PREFIXES: &[&str] = &["LibError::", "grit_lib::error::Error::"];
@@ -1158,7 +1163,10 @@ fn visit_rs_sources(manifest: &Path, dir: &Path) {
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        if rel == "src/error_map.rs" || rel == "src/error_map_contract.rs" {
+        if rel == "src/error_map.rs"
+            || rel == "src/error_map_contract.rs"
+            || rel == "src/cli_messages.rs"
+        {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));

@@ -9,13 +9,13 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
-use grit_lib::refs::RefError;
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::porcelain::paths::BlockedRemoval;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::refs::store::RefStoreError;
+use grit_lib::refs::RefError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
@@ -320,7 +320,7 @@ pub fn map_commit_spec_error(err: LibError) -> Error {
         LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
             Error::msg(format!("invalid reflog date '{date}'"))
         }
-        LibError::InvalidRef(msg) => Error::msg(msg),
+        LibError::Ref(RefError::InvalidName { reason, .. }) => Error::msg(reason),
         other => map_lib_error(other),
     }
 }
@@ -1673,11 +1673,13 @@ mod tests {
     }
 
     fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
+        use grit_lib::error::LockHeldError;
+
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(WrappedLib(LibError::LockHeld {
+        let err = Error::new(WrappedLib(LibError::LockHeld(LockHeldError {
             path: path.clone(),
             holder,
-        }))
+        })))
         .context("staging files");
         (err, path)
     }

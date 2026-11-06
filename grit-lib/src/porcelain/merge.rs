@@ -86,7 +86,6 @@ use crate::porcelain::commit::{
     create_commit_with_loaded_index, default_commit_scope_from_config, run_commit_message_hooks,
     CommitRequest, CommitScope, HookPolicy, MessageSource,
 };
-use crate::refs::RefError;
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
 
@@ -2182,6 +2181,7 @@ mod integrate_tests {
     use super::*;
     use crate::environment::RepositoryOptions;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::refs::RefError;
     use std::collections::BTreeMap;
 
     fn index_entry(path: &str, stage: u8) -> IndexEntry {

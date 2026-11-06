@@ -25,7 +25,6 @@ use crate::error::{Error, Result};
 use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter};
 use crate::odb::Odb;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
-use crate::refs::RefError;
 use crate::refs::{self, Ref};
 
 /// Result of a loose-object prune.
@@ -481,6 +480,7 @@ mod update_refs_tests {
     use super::*;
     use crate::error::Error;
     use crate::refs::store::RefStoreError;
+    use crate::refs::RefError;
     use crate::repo::init_repository;
     use tempfile::TempDir;
 

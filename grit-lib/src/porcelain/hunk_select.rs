@@ -35,7 +35,6 @@ use crate::porcelain::checkout::{
 };
 use crate::porcelain::index_from_tree::refresh_stage0_index_stats_for_paths;
 use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressSink};
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
@@ -1632,6 +1631,7 @@ mod tests {
     use crate::index::write_tree::write_tree_from_index;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::progress::NullProgress;
+    use crate::refs::RefError;
     use crate::repo::{InitOptions, Repository};
     use std::process::Command;
 

@@ -10,7 +10,6 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 
-use crate::refs::RefError;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -19,6 +18,7 @@ use grit_lib::objects::hash;
 use grit_lib::objects::odb::store::{LooseStore, ObjectStore, ObjectStream, WritableObjectStore};
 use grit_lib::objects::odb::WriteOptions;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use grit_lib::refs::RefError;
 
 const MAGIC: &[u8; 8] = b"GRITPKV1";
 const HEADER_LEN: u64 = 16;

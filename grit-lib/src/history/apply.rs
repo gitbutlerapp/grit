@@ -11,8 +11,7 @@ use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
 use crate::index::MODE_REGULAR;
 use crate::lockfile::LockWait;
 use crate::notes::{
-    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesError, NotesRewriteCommand,
-    NotesRewritePlan,
+    apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
 };
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
@@ -2267,6 +2266,8 @@ mod inject_and_apply_tests {
 
     #[test]
     fn apply_rewrite_invalid_notes_rewrite_mode_leaves_branch_tip() {
+        use crate::notes::NotesError;
+
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");

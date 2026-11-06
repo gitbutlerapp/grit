@@ -15,8 +15,6 @@ use super::store::reference_transaction::{
     branch_commit_reference_transaction_lines, detached_head_commit_reference_transaction_lines,
 };
 use super::store::{Expected, RawRef, RefStore, RefUpdate, RefUpdateFlags, ReflogUpdate};
-use crate::refs::RefError;
-
 use super::{
     append_reflog_with_config, commit_ref_update_on_store, commit_ref_update_on_store_with_wait,
     commit_ref_updates_on_store_with_wait, ensure_refname_safe_for_storage,
@@ -340,6 +338,7 @@ mod tests {
     use crate::config::{ConfigFile, ConfigScope};
     use crate::diff::zero_oid;
     use crate::refs::store::{MemoryRefStore, RefStoreError};
+    use crate::refs::RefError;
 
     const IDENT: &str = "T <t@e.x> 1700000000 +0000";
 

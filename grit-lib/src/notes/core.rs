@@ -33,7 +33,6 @@ use crate::refs::list_refs_for_repository;
 use crate::refs::should_autocreate_reflog_with_config;
 use crate::refs::store::{Expected, RawRef, ReflogUpdate};
 use crate::refs::store_write_value_on_store;
-use crate::refs::RefError;
 use crate::repo::Repository;
 use crate::rev_parse::resolve_revision;
 use crate::wildmatch::wildmatch;
@@ -2016,6 +2015,7 @@ mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
     use crate::objects::ObjectKind;
+    use crate::refs::RefError;
     use crate::repo::Repository;
     use std::io::Write;
     use std::process::Command;

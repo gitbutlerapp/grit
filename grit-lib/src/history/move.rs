@@ -6,8 +6,6 @@ use crate::repo::Repository;
 use super::error::HistoryError;
 use super::plan::plan_replay_linear_segment;
 use super::types::{RewriteOptions, RewritePlan};
-use crate::refs::RefError;
-
 fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, HistoryError> {
     Ok(repo.odb().read_commit(&oid)?.parents)
 }
