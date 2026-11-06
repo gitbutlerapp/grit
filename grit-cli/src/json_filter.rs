@@ -399,10 +399,9 @@ mod tests {
     /// Guards the #2409 hot path: `--filter` must not use JSON-bytes re-parse on
     /// large command outcomes (see `write_json` in `output.rs`).
     #[test]
-    fn large_diff_shaped_direct_serialize_beats_json_reparse() {
-        use std::time::Instant;
-
-        let files: Vec<_> = (0..8000)
+    fn large_diff_shaped_direct_serialize_for_filter() {
+        const N: usize = 8000;
+        let files: Vec<_> = (0..N)
             .map(|i| {
                 json!({
                     "path": format!("src/file{i}.rs"),
@@ -413,19 +412,37 @@ mod tests {
             .collect();
         let input = json!({"files": files});
 
+        assert_eq!(
+            apply_json_filter(&input, ".files|length").expect("filter large diff"),
+            json!(N),
+            "typed serialize path must filter large diff-shaped outcomes"
+        );
+
+        let direct = crate::json_to_jaq::serialize_value(&input).expect("direct jaq");
         let bytes = serde_json::to_vec(&input).expect("serialize");
-        let start = Instant::now();
-        let _ = jaq_json::read::parse_single(&bytes).expect("parse");
-        let reparse = start.elapsed();
+        let parsed = jaq_json::read::parse_single(&bytes).expect("parse");
+        let mut direct_buf = Vec::new();
+        let mut parsed_buf = Vec::new();
+        super::write_json_filter_val(&mut direct_buf, direct, ".files|length").expect("direct");
+        super::write_json_filter_val(&mut parsed_buf, parsed, ".files|length").expect("parsed");
+        assert_eq!(
+            direct_buf, parsed_buf,
+            "direct serialize and JSON re-parse must agree on large payloads"
+        );
 
-        let start = Instant::now();
-        let _ = crate::json_to_jaq::serialize_value(&input).expect("direct jaq");
-        let direct = start.elapsed();
-
+        let src = include_str!("output.rs");
         assert!(
-            direct < reparse,
-            "typed serde→jaq ({direct:?}) must be faster than JSON bytes + parse \
-             ({reparse:?}); the `--filter` hot path uses the former (see `write_json`)"
+            src.contains("json_to_jaq::serialize_value(value)"),
+            "write_json filter path must build jaq input via typed serialize (#2409)"
+        );
+        let filter_branch = src
+            .split("if let Some(expr) = filter")
+            .nth(1)
+            .and_then(|s| s.split("} else {").next())
+            .expect("write_json filter branch");
+        assert!(
+            !filter_branch.contains("parse_single"),
+            "write_json must not re-parse JSON bytes for --filter (#2409)"
         );
     }
 }
