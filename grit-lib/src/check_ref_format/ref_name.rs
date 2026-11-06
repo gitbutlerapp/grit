@@ -224,10 +224,10 @@ impl RefNameRef {
 /// `--allow-onelevel` when `storable()` or `advertised_symref()` is enabled.
 fn effective_format_options(name: &str, policy: &RefNamePolicy) -> RefFormatOptions {
     let mut format = policy.format_options().clone();
-    if !name.starts_with("refs/") {
-        if policy.requires_storable() || policy.requires_advertised_symref() {
-            format.allow_onelevel = true;
-        }
+    if !name.starts_with("refs/")
+        && (policy.requires_storable() || policy.requires_advertised_symref())
+    {
+        format.allow_onelevel = true;
     }
     format
 }
