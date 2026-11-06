@@ -70,11 +70,13 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+    use crate::config::ConfigSet;
     use crate::environment::{Environment, RepositoryOptions};
     use crate::repo::InitOptions;
+    use std::ffi::OsString;
+    use std::fs;
 
     fn options_at(cwd: &Path, vars: &[(&str, &str)]) -> RepositoryOptions {
-        use std::ffi::OsString;
         let vars: Vec<(OsString, OsString)> = vars
             .iter()
             .map(|(k, v)| (OsString::from(k), OsString::from(v)))
@@ -85,10 +87,197 @@ mod tests {
         }
     }
 
+    fn init(dir: &Path) {
+        Repository::init(dir, &InitOptions::default()).unwrap();
+    }
+
+    fn discover_location(options: &RepositoryOptions) -> RepositoryLocation {
+        RepositoryLocation::from(&Repository::discover(None, options).unwrap())
+    }
+
+    #[test]
+    fn dot_git_layout_from_subdirectory_matches_root_discovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(tmp.path());
+        let sub = tmp.path().join("a/b");
+        fs::create_dir_all(&sub).unwrap();
+        let options = options_at(&sub, &[]);
+
+        let location = discover_location(&options);
+        assert_eq!(location, discover_location(&options_at(tmp.path(), &[])));
+        assert_eq!(
+            location.local_config_path(),
+            location.git_dir().join("config")
+        );
+    }
+
+    #[test]
+    fn missing_repository_reports_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let options = options_at(tmp.path(), &[("GIT_CEILING_DIRECTORIES", "/")]);
+        let err = Repository::discover(None, &options).unwrap_err();
+        assert!(matches!(err, crate::error::Error::NotARepository(_)));
+    }
+
+    #[test]
+    fn unsupported_format_version_is_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(tmp.path());
+        fs::write(
+            tmp.path().join(".git/config"),
+            "[core]\n\trepositoryformatversion = 2\n",
+        )
+        .unwrap();
+        let err = Repository::discover(None, &options_at(tmp.path(), &[])).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::Error::UnsupportedRepositoryFormatVersion(2)
+        ));
+    }
+
+    #[test]
+    fn layout_changing_local_config_still_discovers() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(tmp.path());
+        let other = tmp.path().join("elsewhere");
+        fs::create_dir(&other).unwrap();
+        fs::write(tmp.path().join(".git/extra"), "[core]\n\tbare = true\n").unwrap();
+        let config = tmp.path().join(".git/config");
+        let original = fs::read_to_string(&config).unwrap();
+        for extra in [
+            format!("[core]\n\tworktree = {}\n", other.display()),
+            "[core]\n\tbare = true\n".to_owned(),
+            "[include]\n\tpath = extra\n".to_owned(),
+        ] {
+            fs::write(&config, format!("{original}{extra}")).unwrap();
+            let options = options_at(tmp.path(), &[]);
+            let _ = Repository::discover(None, &options).expect("discover {extra}");
+        }
+    }
+
+    #[test]
+    fn layout_changing_override_and_global_config_match_discovery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        init(&repo);
+        let other = tmp.path().join("elsewhere");
+        fs::create_dir(&other).unwrap();
+        let global = tmp.path().join("global.cfg");
+        fs::write(
+            &global,
+            format!("[core]\n\tworktree = {}\n", other.display()),
+        )
+        .unwrap();
+        let global = global.to_str().unwrap().to_owned();
+        let cases: [Vec<(&str, &str)>; 3] = [
+            vec![
+                ("GIT_CONFIG_COUNT", "1"),
+                ("GIT_CONFIG_KEY_0", "core.bare"),
+                ("GIT_CONFIG_VALUE_0", "true"),
+            ],
+            vec![("GIT_CONFIG_PARAMETERS", "'core.bare'='true'")],
+            vec![("GIT_CONFIG_GLOBAL", global.as_str())],
+        ];
+        for vars in cases {
+            let options = options_at(&repo, &vars);
+            let _ = Repository::discover(None, &options).expect("discover {vars:?}");
+        }
+        let bare_override = options_at(
+            &repo,
+            &[
+                ("GIT_CONFIG_COUNT", "1"),
+                ("GIT_CONFIG_KEY_0", "core.bare"),
+                ("GIT_CONFIG_VALUE_0", "true"),
+            ],
+        );
+        assert_eq!(discover_location(&bare_override).work_tree(), None);
+    }
+
+    #[test]
+    fn discover_loads_merged_config_cascade() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().join("repo");
+        init(&repo);
+        let global = tmp.path().join("global.cfg");
+        fs::write(&global, "[user]\n\tname = Global\n").unwrap();
+        let options = options_at(
+            &repo,
+            &[
+                ("GIT_CONFIG_GLOBAL", global.to_str().unwrap()),
+                ("GIT_CONFIG_COUNT", "1"),
+                ("GIT_CONFIG_KEY_0", "review.cmdline"),
+                ("GIT_CONFIG_VALUE_0", "yes"),
+            ],
+        );
+        let handle = Repository::discover(None, &options).unwrap();
+        let location = RepositoryLocation::from(&handle);
+        let config = handle.config().unwrap();
+        let expected =
+            ConfigSet::load(&options.environment, Some(location.git_dir()), true).unwrap();
+        let keyed = |set: &ConfigSet| -> Vec<(String, Option<String>)> {
+            set.entries()
+                .iter()
+                .map(|e| (e.key.clone(), e.value.clone()))
+                .collect()
+        };
+        assert_eq!(keyed(&config), keyed(&expected));
+        assert_eq!(config.get("user.name").as_deref(), Some("Global"));
+        assert_eq!(config.get("review.cmdline").as_deref(), Some("yes"));
+    }
+
+    #[test]
+    fn environment_overrides_still_discover() {
+        let tmp = tempfile::tempdir().unwrap();
+        init(tmp.path());
+        let git_dir = tmp.path().join(".git");
+        let git_dir = git_dir.to_str().unwrap();
+        let ceiling = tmp.path().parent().unwrap().to_str().unwrap().to_owned();
+        for vars in [
+            vec![("GIT_DIR", git_dir)],
+            vec![("GIT_CEILING_DIRECTORIES", ceiling.as_str())],
+        ] {
+            let options = options_at(tmp.path(), &vars);
+            let _ = Repository::discover(None, &options).expect("discover {vars:?}");
+        }
+        let foreign = {
+            use crate::ownership_check::ForeignOwnershipCheck;
+            use std::sync::Arc;
+            options_at(tmp.path(), &[]).with_ownership_check(Arc::new(ForeignOwnershipCheck))
+        };
+        let err = Repository::discover(None, &foreign).unwrap_err();
+        assert!(matches!(
+            err,
+            crate::error::Error::DubiousOwnership { .. } | crate::error::Error::NotARepository(_)
+        ));
+    }
+
+    #[test]
+    fn gitfile_and_bare_layouts_discover() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("bare.git");
+        Repository::init(
+            &bare,
+            &InitOptions {
+                bare: true,
+                ..InitOptions::default()
+            },
+        )
+        .unwrap();
+        let options = options_at(&bare, &[]);
+        let location = discover_location(&options);
+        assert_eq!(location.work_tree(), None);
+
+        let linked = tmp.path().join("linked");
+        fs::create_dir(&linked).unwrap();
+        fs::write(linked.join(".git"), format!("gitdir: {}\n", bare.display())).unwrap();
+        let options = options_at(&linked, &[]);
+        assert_eq!(discover_location(&options).git_dir(), location.git_dir());
+    }
+
     #[test]
     fn location_from_repository_copies_paths() {
         let tmp = tempfile::tempdir().unwrap();
-        Repository::init(tmp.path(), &InitOptions::default()).unwrap();
+        init(tmp.path());
         let repo = Repository::discover(None, &options_at(tmp.path(), &[])).unwrap();
         let location = RepositoryLocation::from(&repo);
         assert_eq!(location.git_dir(), repo.git_dir());

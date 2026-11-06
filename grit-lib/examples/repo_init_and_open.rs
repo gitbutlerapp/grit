@@ -10,7 +10,7 @@ fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
     let path = root.path();
 
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         path,
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

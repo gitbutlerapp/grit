@@ -207,6 +207,7 @@ fn open_and_discover_git_created_layouts() {
     let td = TempDir::new().expect("tempdir");
 
     let normal = td.path().join("git-normal");
+    fs::create_dir_all(&normal).expect("git-normal dir");
     assert!(Command::new("git")
         .current_dir(&normal)
         .args(["init", "-q"])
@@ -235,6 +236,7 @@ fn open_and_discover_git_created_layouts() {
     Repository::discover(Some(&bare), &RepositoryOptions::empty()).expect("discover git bare");
 
     let linked_root = td.path().join("git-linked");
+    fs::create_dir_all(&linked_root).expect("git-linked dir");
     assert!(Command::new("git")
         .current_dir(&linked_root)
         .args(["init", "-q"])
@@ -267,6 +269,7 @@ fn open_and_discover_git_created_layouts() {
 
     if git_supports_reftable_fsck() {
         let reftable = td.path().join("git-reftable");
+        fs::create_dir_all(&reftable).expect("git-reftable dir");
         assert!(Command::new("git")
             .current_dir(&reftable)
             .args(["init", "-q", "--ref-format=reftable"])

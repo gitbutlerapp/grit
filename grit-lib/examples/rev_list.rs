@@ -57,7 +57,7 @@ fn make_initial_commit(repo: &Repository) -> grit_lib::error::Result<grit_lib::o
 
 fn main() -> grit_lib::error::Result<()> {
     let root = tempfile::tempdir()?;
-    let repo = Repository::init(
+    let (repo, _) = Repository::init(
         root.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())

@@ -1015,13 +1015,16 @@ fn subprocess_push_os(out: &mut Vec<(OsString, OsString)>, key: &str, val: Optio
 ///
 /// ```
 /// use grit_lib::config::environment::RepositoryOptions;
-/// use grit_lib::repo::Repository;
+/// use grit_lib::repo::{InitOptions, Repository};
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
-/// let repo = Repository::open(
-///     "/path/to/repo/.git",
-///     &RepositoryOptions::from_process(),
+/// let dir = tempfile::tempdir()?;
+/// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+/// let again = Repository::open(
+///     repo.git_dir(),
+///     &RepositoryOptions::empty().with_work_tree(dir.path()),
 /// )?;
+/// assert_eq!(again.git_dir(), repo.git_dir());
 /// # Ok(())
 /// # }
 /// ```
@@ -1030,13 +1033,13 @@ fn subprocess_push_os(out: &mut Vec<(OsString, OsString)>, key: &str, val: Optio
 ///
 /// ```
 /// use grit_lib::config::environment::RepositoryOptions;
-/// use grit_lib::repo::Repository;
+/// use grit_lib::repo::{InitOptions, Repository};
 ///
 /// # fn main() -> grit_lib::error::Result<()> {
-/// let repo = Repository::discover(
-///     Some(std::path::Path::new("/path/to/checkout")),
-///     &RepositoryOptions::from_process(),
-/// )?;
+/// let dir = tempfile::tempdir()?;
+/// Repository::init(dir.path(), &InitOptions::default())?;
+/// let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty())?;
+/// assert!(repo.work_tree().is_some());
 /// # Ok(())
 /// # }
 /// ```
