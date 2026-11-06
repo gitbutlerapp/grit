@@ -21,7 +21,6 @@ use super::{
 };
 use crate::history::error::HistoryError;
 use crate::history::types::{ApplyOptions, HeadEffect, PlannedRefUpdate, RewritePlan};
-use crate::progress::CancelToken;
 
 const FORMAT_VERSION: u32 = 2;
 const META: &str = "meta";

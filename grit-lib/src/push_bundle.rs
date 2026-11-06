@@ -25,7 +25,7 @@ use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
-use crate::progress::CancelToken;
+use crate::remote::RemoteError;
 use crate::resumable::{resolve_url, ResumableError, TusUpload};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
 

@@ -35,7 +35,6 @@ use crate::repo::Repository;
 use super::refs::{log_head_move, swap_ref, Swap};
 use super::tree::{edit, lookup};
 use super::{valid_branch_name, CheckoutError, IntegrateStatus, Result, Slice};
-use crate::progress::CancelToken;
 
 /// Where the slices live on the target branch.
 pub const SLICES_PATH: &str = ".grit/slices.toml";

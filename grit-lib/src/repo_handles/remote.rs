@@ -7,7 +7,7 @@ use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Error;
 use crate::error::Result;
 use crate::fetch::Progress;
-use crate::progress::CancelToken;
+use crate::fetch_request::FetchRefspecError;
 use crate::refs::store::{Expected, RefUpdate, RefUpdateFlags};
 use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
 use crate::refspec::{fetch_specs_bind_local_ref, parse_fetch_refspec, RefspecItem};
@@ -259,7 +259,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Examples
     ///
     /// ```
-    /// # use grit_lib::progress::NeverCancel;
+    /// # use grit_lib::progress::CancelToken;
     /// # use grit_lib::remote::fetch::NoProgress;
     /// # use grit_lib::remote::Remote;
     /// # use grit_lib::repo::Repository;
@@ -354,7 +354,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # Examples
     ///
     /// ```
-    /// # use grit_lib::progress::NeverCancel;
+    /// # use grit_lib::progress::CancelToken;
     /// # use grit_lib::remote::fetch::NoProgress;
     /// # use grit_lib::remote::Remote;
     /// # use grit_lib::repo::Repository;

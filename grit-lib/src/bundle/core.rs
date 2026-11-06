@@ -19,7 +19,7 @@ use crate::index_pack::{ingest_received_pack_path_with_progress, IngestPackOptio
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pack_objects::PackStats;
-use crate::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
+use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
 use crate::rev_list::{
     FilterObjectKind, MissingAction, ObjectFilter, RevListOptions, RevListResult,

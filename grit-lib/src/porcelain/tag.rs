@@ -32,7 +32,6 @@ use crate::ident::signature_timestamp_for_pretty;
 use crate::ident::Signature;
 use crate::objects::{parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::parallel::ParallelOp;
-use crate::progress::CancelToken;
 use crate::refs;
 use crate::refs::listing::{
     creator_date as listing_creator_date, epoch_from_identity, query_refs,

@@ -207,7 +207,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::apply::IndexApplyOutcome
 pub fn grit_lib::apply::apply_hunks_to_blob(&[u8], &[grit_lib::apply::Hunk], &grit_lib::apply::ApplyOptions) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::ApplyError>
 pub fn grit_lib::apply::apply_patch_to_blob(&[u8], &grit_lib::apply::FilePatch, &grit_lib::apply::BlobApplyOptions) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::ApplyError>
 pub fn grit_lib::apply::apply_patch_to_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &[grit_lib::apply::FilePatch], &grit_lib::apply::IndexApplyOptions) -> core::result::Result<grit_lib::apply::IndexApplyOutcome, grit_lib::error::ApplyError>
-pub fn grit_lib::apply::apply_patch_to_index_and_write(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::apply::IndexApplyOptions, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::apply::IndexApplyOutcome, grit_lib::error::ApplyError>
+pub fn grit_lib::apply::apply_patch_to_index_and_write(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::apply::IndexApplyOptions, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::apply::IndexApplyOutcome, grit_lib::error::ApplyError>
 pub fn grit_lib::apply::inflate_binary_payload(&[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::apply::materialize_binary_patch_forward(&grit_lib::apply::BinaryPatchPayload, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::apply::materialize_binary_patch_reverse(&grit_lib::apply::BinaryPatchPayload, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -523,7 +523,7 @@ impl core::marker::Unpin for grit_lib::bundle::bundle_remote::BundleCreateOption
 impl core::marker::UnsafeUnpin for grit_lib::bundle::bundle_remote::BundleCreateOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bundle::bundle_remote::BundleCreateOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::bundle::bundle_remote::BundleCreateOptions
-pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle_with_progress(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
+pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle_with_progress(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_from_rev_specs(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String]) -> grit_lib::error::Result<usize>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<usize>
 #[non_exhaustive] pub enum grit_lib::bundle::BundleError
@@ -591,7 +591,7 @@ pub fn grit_lib::bundle::Bundle::pack_byte_offset(&self) -> u64
 pub fn grit_lib::bundle::Bundle::pack_object_count(&self) -> core::result::Result<u32, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::Bundle::path(&self) -> &std::path::Path
 pub fn grit_lib::bundle::Bundle::unbundle(&self, &grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<grit_lib::bundle::UnbundledRef>, grit_lib::bundle::BundleError>
-pub fn grit_lib::bundle::Bundle::unbundle_with_progress(&self, &grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::bundle::UnbundleOutcome, grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::Bundle::unbundle_with_progress(&self, &grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::bundle::UnbundleOutcome, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::Bundle::verify(&self, &grit_lib::repo::Repository) -> core::result::Result<grit_lib::bundle::BundleVerifyReport, grit_lib::bundle::BundleError>
 impl core::clone::Clone for grit_lib::bundle::Bundle
 pub fn grit_lib::bundle::Bundle::clone(&self) -> Self
@@ -831,8 +831,8 @@ pub fn grit_lib::bundle::plan_bundle_unbundle(&grit_lib::bundle::Bundle, &grit_l
 pub fn grit_lib::bundle::read_header(&mut dyn alloc::io::buf_read::BufRead) -> core::result::Result<grit_lib::bundle::BundleHeader, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle_header(&mut dyn core::io::write::Write, grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectId, core::option::Option<alloc::string::String>)], &[(grit_lib::objects::ObjectId, alloc::string::String)]) -> core::result::Result<(), grit_lib::bundle::BundleError>
-pub fn grit_lib::bundle::write_bundle_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
-pub fn grit_lib::bundle::write_bundle_with_cancel_and_progress(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::write_bundle_with_cancel(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &grit_lib::progress::CancelToken) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::write_bundle_with_cancel_and_progress(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub mod grit_lib::change_id
 pub enum grit_lib::change_id::ChangeIdError
 pub grit_lib::change_id::ChangeIdError::HashCollision
@@ -7703,7 +7703,7 @@ impl<'a> core::marker::UnsafeUnpin for grit_lib::maintenance::repository_fsck::F
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::repository_fsck::FsckSummary<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::repository_fsck::FsckSummary<'a>
 pub fn grit_lib::maintenance::repository_fsck::format_fsck_line(&grit_lib::maintenance::repository_fsck::FsckIssue, &grit_lib::config::ConfigSet, bool) -> alloc::string::String
-pub fn grit_lib::maintenance::repository_fsck::fsck(&grit_lib::repo::Repository, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
+pub fn grit_lib::maintenance::repository_fsck::fsck(&grit_lib::repo::Repository, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::maintenance::repository_fsck::issue_msg_id(&grit_lib::maintenance::repository_fsck::FsckIssue) -> &'static str
 pub fn grit_lib::maintenance::repository_fsck::issue_severity(&grit_lib::maintenance::repository_fsck::FsckIssue, &grit_lib::config::ConfigSet, bool) -> grit_lib::maintenance::repository_fsck::FsckSeverity
 pub fn grit_lib::maintenance::repository_fsck::issue_visible_by_default(&grit_lib::maintenance::repository_fsck::FsckIssue, &grit_lib::config::ConfigSet, bool) -> bool
@@ -8515,13 +8515,13 @@ pub fn grit_lib::maintenance::drop_large_blobs_enabled(&grit_lib::config::Config
 pub fn grit_lib::maintenance::drop_promised_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::DropPromisedBlobsOptions) -> grit_lib::error::Result<grit_lib::maintenance::DropPromisedBlobsReport>
 pub fn grit_lib::maintenance::gc(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
 pub fn grit_lib::maintenance::gc_auto(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions) -> grit_lib::error::Result<grit_lib::maintenance::AutoGcOutcome>
-pub fn grit_lib::maintenance::gc_with_cancel(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
+pub fn grit_lib::maintenance::gc_with_cancel(&grit_lib::repo::Repository, &grit_lib::maintenance::GcOptions, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::maintenance::GcStats>
 pub fn grit_lib::maintenance::offload_blobs(&grit_lib::repo::Repository, &grit_lib::maintenance::OffloadOptions) -> grit_lib::error::Result<grit_lib::maintenance::OffloadReport>
 pub fn grit_lib::maintenance::pack_refs(&grit_lib::repo::Repository, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
 pub fn grit_lib::maintenance::prune_loose_objects(&grit_lib::repo::Repository, &grit_lib::maintenance::PruneOptions) -> grit_lib::error::Result<grit_lib::refs::gc::PruneStats>
 pub fn grit_lib::maintenance::repack(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::maintenance::repack_all(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackStats>
-pub fn grit_lib::maintenance::repack_all_with_cancel(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::RepackStats>
+pub fn grit_lib::maintenance::repack_all_with_cancel(&grit_lib::repo::Repository, &grit_lib::maintenance::RepackOptions, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::maintenance::RepackStats>
 pub fn grit_lib::maintenance::write_commit_graph(&grit_lib::repo::Repository, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
 pub fn grit_lib::maintenance::write_midx(&grit_lib::repo::Repository, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
 pub mod grit_lib::notes
@@ -9135,10 +9135,10 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::index_pack::Obj
 pub fn grit_lib::objects::index_pack::build_pack_index_records(&[u8], &grit_lib::prelude::Odb, grit_lib::parallel::Parallelism, bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::unpack_objects::PackIndexRecord>>
 pub fn grit_lib::objects::index_pack::ingest_received_pack(alloc::vec::Vec<u8>, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
 pub fn grit_lib::objects::index_pack::ingest_received_pack_path(std::path::PathBuf, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
-pub fn grit_lib::objects::index_pack::ingest_received_pack_path_with_progress(std::path::PathBuf, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&dyn grit_lib::progress::Cancel>) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
+pub fn grit_lib::objects::index_pack::ingest_received_pack_path_with_progress(std::path::PathBuf, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&grit_lib::progress::CancelToken>) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
 pub fn grit_lib::objects::index_pack::install_pack_bytes(alloc::vec::Vec<u8>, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
 pub fn grit_lib::objects::index_pack::install_pack_path(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
-pub fn grit_lib::objects::index_pack::install_pack_path_with_progress(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&dyn grit_lib::progress::Cancel>) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
+pub fn grit_lib::objects::index_pack::install_pack_path_with_progress(&std::path::Path, &grit_lib::prelude::Odb, &grit_lib::objects::index_pack::IngestPackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&grit_lib::progress::CancelToken>) -> grit_lib::error::Result<grit_lib::objects::index_pack::IngestedPack>
 pub mod grit_lib::objects::midx
 #[non_exhaustive] pub enum grit_lib::objects::midx::MidxBitmapWriteOutcome
 pub grit_lib::objects::midx::MidxBitmapWriteOutcome::NotRequested
@@ -11579,9 +11579,9 @@ impl core::marker::Unpin for grit_lib::porcelain::add::StageOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::add::StageOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::add::StageOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::add::StageOutcome
-pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
-pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
-pub fn grit_lib::porcelain::add::stage_on_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
+pub fn grit_lib::porcelain::add::stage(&grit_lib::repo::Repository, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
+pub fn grit_lib::porcelain::add::stage_for_commit(&grit_lib::repo::Repository, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
+pub fn grit_lib::porcelain::add::stage_on_index(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &grit_lib::porcelain::add::StageOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::add::StageOutcome>
 pub mod grit_lib::porcelain::branch
 #[non_exhaustive] pub enum grit_lib::porcelain::branch::BranchError
 pub grit_lib::porcelain::branch::BranchError::AlreadyExists
@@ -11859,8 +11859,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::checkout::
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::checkout::CheckoutOutcome
 pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u32) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::checkout::CheckoutOutcome>
-pub fn grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::checkout::CheckoutOutcome>
+pub fn grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::remove_empty_parent_dirs(&std::path::Path, &std::path::Path)
 pub mod grit_lib::porcelain::checkout_reflog
@@ -11938,7 +11938,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::clean::CleanOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::clean::CleanOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::clean::CleanOutcome
 pub fn grit_lib::porcelain::clean::clean_untracked(&grit_lib::repo::Repository, &grit_lib::porcelain::clean::CleanOptions, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<grit_lib::porcelain::clean::CleanOutcome>
-pub fn grit_lib::porcelain::clean::clean_untracked_with_cancel(&grit_lib::repo::Repository, &grit_lib::porcelain::clean::CleanOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::clean::CleanOutcome>
+pub fn grit_lib::porcelain::clean::clean_untracked_with_cancel(&grit_lib::repo::Repository, &grit_lib::porcelain::clean::CleanOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::clean::CleanOutcome>
 pub mod grit_lib::porcelain::commit
 pub enum grit_lib::porcelain::commit::CommitPatchError
 pub grit_lib::porcelain::commit::CommitPatchError::Apply(grit_lib::error::ApplyError)
@@ -12141,15 +12141,15 @@ impl core::marker::Unpin for grit_lib::porcelain::commit::CommitRequest
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::commit::CommitRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::CommitRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitRequest
-pub fn grit_lib::porcelain::commit::commit_with_patch(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitPatchInput, &[alloc::string::String], &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::porcelain::commit::CommitOutcome, grit_lib::porcelain::commit::CommitPatchError>
-pub fn grit_lib::porcelain::commit::commit_with_scope(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitScope, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
-pub fn grit_lib::porcelain::commit::commit_worktree(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
-pub fn grit_lib::porcelain::commit::create_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
+pub fn grit_lib::porcelain::commit::commit_with_patch(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitPatchInput, &[alloc::string::String], &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::porcelain::commit::CommitOutcome, grit_lib::porcelain::commit::CommitPatchError>
+pub fn grit_lib::porcelain::commit::commit_with_scope(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitScope, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
+pub fn grit_lib::porcelain::commit::commit_worktree(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
+pub fn grit_lib::porcelain::commit::create_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitOutcome>
 pub fn grit_lib::porcelain::commit::default_commit_scope(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitScope>
 pub fn grit_lib::porcelain::commit::default_commit_scope_from_config(&grit_lib::config::ConfigSet) -> grit_lib::porcelain::commit::CommitScope
 pub fn grit_lib::porcelain::commit::normalize_commit_message(&str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::porcelain::commit::pending_commit_message(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
-pub fn grit_lib::porcelain::commit::plan_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitScope, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitPlan>
+pub fn grit_lib::porcelain::commit::plan_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::commit::CommitRequest, grit_lib::porcelain::commit::CommitScope, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::commit::CommitPlan>
 pub fn grit_lib::porcelain::commit::prepare_commit_bytes(&grit_lib::repo::Repository, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::porcelain::commit::write_commit_object(&grit_lib::repo::Repository, &grit_lib::objects::CommitData, core::option::Option<bool>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub mod grit_lib::porcelain::hunk_select
@@ -12319,8 +12319,8 @@ pub fn grit_lib::porcelain::hunk_select::list_unstaged_hunk_ids(&grit_lib::repo:
 pub fn grit_lib::porcelain::hunk_select::parse_hunk_id_list(&[alloc::string::String]) -> core::result::Result<grit_lib::porcelain::hunk_select::HunkSelection, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::resolve_selection(&grit_lib::repo::Repository, grit_lib::diff::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], grit_lib::diff::DiffOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::restore_hunks(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool, bool, bool) -> core::result::Result<grit_lib::porcelain::hunk_select::RestoreHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
-pub fn grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<(), grit_lib::error::ApplyError>
-pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], grit_lib::diff::DiffOptions, bool, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
+pub fn grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<(), grit_lib::error::ApplyError>
+pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], grit_lib::diff::DiffOptions, bool, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::unstaged_file_diffs(&grit_lib::repo::Repository, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<(grit_lib::diff::FileDiff, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>, grit_lib::error::Error>
 pub mod grit_lib::porcelain::index_mode
 pub enum grit_lib::porcelain::index_mode::StageExecutableHint
@@ -12803,12 +12803,12 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::Wri
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::WrittenMergeTree
 pub fn grit_lib::porcelain::merge::abort_branch_merge(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::merge::compose_fast_forward_index(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::index::Index) -> grit_lib::error::Result<grit_lib::index::Index>
-pub fn grit_lib::porcelain::merge::continue_merge(&grit_lib::repo::Repository, &grit_lib::porcelain::merge::ContinueOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::porcelain::merge::ContinueOutcome, grit_lib::porcelain::merge::ContinueMergeError>
-pub fn grit_lib::porcelain::merge::integrate_branch(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_branch_with(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_branch_with_options(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, grit_lib::porcelain::merge::IntegrateBranchOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_detached_head(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
-pub fn grit_lib::porcelain::merge::integrate_detached_head_with(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::porcelain::merge::continue_merge(&grit_lib::repo::Repository, &grit_lib::porcelain::merge::ContinueOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::porcelain::merge::ContinueOutcome, grit_lib::porcelain::merge::ContinueMergeError>
+pub fn grit_lib::porcelain::merge::integrate_branch(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::porcelain::merge::integrate_branch_with(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::porcelain::merge::integrate_branch_with_options(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, grit_lib::porcelain::merge::IntegrateBranchOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::porcelain::merge::integrate_detached_head(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
+pub fn grit_lib::porcelain::merge::integrate_detached_head_with(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::merge::IntegrateBranchOutcome>
 pub fn grit_lib::porcelain::merge::plan_branch_merge(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::porcelain::merge::MergeOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergeDryRunPlan>
 pub fn grit_lib::porcelain::merge::predict_merge(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &grit_lib::porcelain::merge::MergePredictionOptions) -> grit_lib::error::Result<grit_lib::porcelain::merge::MergePrediction>
 pub fn grit_lib::porcelain::merge::resolve_merge_conflict_style(&grit_lib::repo::Repository, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> grit_lib::diff::merge_file::ConflictStyle
@@ -12958,9 +12958,9 @@ impl core::marker::Unpin for grit_lib::porcelain::paths::RemoveOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::RemoveOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::RemoveOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::RemoveOutcome
-pub fn grit_lib::porcelain::paths::move_path(&grit_lib::repo::Repository, &str, &str, bool, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
-pub fn grit_lib::porcelain::paths::move_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::MoveOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
-pub fn grit_lib::porcelain::paths::remove_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::RemoveOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::paths::RemoveOutcome>
+pub fn grit_lib::porcelain::paths::move_path(&grit_lib::repo::Repository, &str, &str, bool, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
+pub fn grit_lib::porcelain::paths::move_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::MoveOptions, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
+pub fn grit_lib::porcelain::paths::remove_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::RemoveOptions, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::paths::RemoveOutcome>
 pub mod grit_lib::porcelain::pathspec_match
 pub fn grit_lib::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::pathspec_match::pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<bool>
@@ -13137,7 +13137,7 @@ impl core::marker::Unpin for grit_lib::porcelain::pull::PullOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullOutcome
-pub fn grit_lib::porcelain::pull::pull<P>(&grit_lib::repo::Repository, &grit_lib::porcelain::pull::PullOptions, &mut P, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::porcelain::pull::PullOutcome, grit_lib::porcelain::pull::PullError> where P: grit_lib::remote::fetch::Progress
+pub fn grit_lib::porcelain::pull::pull<P>(&grit_lib::repo::Repository, &grit_lib::porcelain::pull::PullOptions, &mut P, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::porcelain::pull::PullOutcome, grit_lib::porcelain::pull::PullError> where P: grit_lib::remote::fetch::Progress
 pub fn grit_lib::porcelain::pull::resolve_pull_autostash(&grit_lib::config::ConfigSet, grit_lib::porcelain::pull::PullMode, bool) -> bool
 pub fn grit_lib::porcelain::pull::resolve_pull_mode(&grit_lib::config::ConfigSet, core::option::Option<&str>, core::option::Option<grit_lib::porcelain::pull::PullMode>) -> core::result::Result<grit_lib::porcelain::pull::PullMode, grit_lib::porcelain::pull::PullError>
 pub mod grit_lib::porcelain::quote_path
@@ -13205,7 +13205,7 @@ impl core::marker::Unpin for grit_lib::porcelain::replay::ReplayRequest
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay::ReplayRequest
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay::ReplayRequest
-pub fn grit_lib::porcelain::replay::replay_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::replay::ReplayRequest, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
+pub fn grit_lib::porcelain::replay::replay_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::replay::ReplayRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay::ReplayOutcome>
 pub mod grit_lib::porcelain::replay_sequence
 pub enum grit_lib::porcelain::replay_sequence::ReplayAbortOutcome
 pub grit_lib::porcelain::replay_sequence::ReplayAbortOutcome::ClearedInPlace
@@ -13365,10 +13365,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_seq
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::ReplaySequenceRequest
 pub fn grit_lib::porcelain::replay_sequence::abort_replay_sequence(&grit_lib::repo::Repository) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::ReplayAbortOutcome>
 pub fn grit_lib::porcelain::replay_sequence::commits_to_replay(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub fn grit_lib::porcelain::replay_sequence::predict_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequencePrediction>
-pub fn grit_lib::porcelain::replay_sequence::skip_replay_step(&grit_lib::repo::Repository, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
-pub fn grit_lib::porcelain::replay_sequence::start_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::porcelain::replay_sequence::skip_replay_step(&grit_lib::repo::Repository, &grit_lib::ident::Signature, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::porcelain::replay_sequence::start_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub mod grit_lib::porcelain::reset
 pub enum grit_lib::porcelain::reset::ResetMode
 pub grit_lib::porcelain::reset::ResetMode::Hard
@@ -13484,7 +13484,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::reset::Res
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::reset::ResetPreview
 pub const grit_lib::porcelain::reset::DEFAULT_ORPHAN_LIMIT: usize
 pub fn grit_lib::porcelain::reset::preview_reset(&grit_lib::repo::Repository, &grit_lib::porcelain::reset::ResetOptions) -> grit_lib::error::Result<grit_lib::porcelain::reset::ResetPreview>
-pub fn grit_lib::porcelain::reset::reset_to_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::reset::ResetOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::reset::ResetOutcome>
+pub fn grit_lib::porcelain::reset::reset_to_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::reset::ResetOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::reset::ResetOutcome>
 pub mod grit_lib::porcelain::restore
 pub enum grit_lib::porcelain::restore::ConflictSide
 pub grit_lib::porcelain::restore::ConflictSide::Ours
@@ -13564,7 +13564,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::restore::RestoreOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::restore::RestoreOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::RestoreOutcome
 pub fn grit_lib::porcelain::restore::conflict_style_from_config(&grit_lib::repo::Repository) -> grit_lib::diff::merge_file::ConflictStyle
-pub fn grit_lib::porcelain::restore::restore_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::restore::RestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::restore::RestoreOutcome>
+pub fn grit_lib::porcelain::restore::restore_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::restore::RestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::restore::RestoreOutcome>
 pub mod grit_lib::porcelain::revert
 pub fn grit_lib::porcelain::revert::commits_to_revert(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::revert::merge_commit_message_for_revert(&grit_lib::objects::CommitData, grit_lib::objects::ObjectId, bool, char, core::option::Option<grit_lib::objects::ObjectId>) -> (alloc::string::String, alloc::string::String)
@@ -13917,7 +13917,7 @@ pub fn grit_lib::porcelain::status::normalize_status_conflicts(&mut alloc::vec::
 pub fn grit_lib::porcelain::status::pathspec_may_match_directory(&str, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::pathspec_may_match_directory_with_globals(&str, &[alloc::string::String], grit_lib::worktree::pathspec::PathspecGlobalFlags) -> bool
 pub fn grit_lib::porcelain::status::short_status_lines(&grit_lib::porcelain::status::StatusModel) -> alloc::vec::Vec<grit_lib::porcelain::status::StatusShortLine>
-pub fn grit_lib::porcelain::status::status(&grit_lib::repo::Repository, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>
+pub fn grit_lib::porcelain::status::status(&grit_lib::repo::Repository, &grit_lib::porcelain::status::StatusOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::status::StatusModel>
 pub fn grit_lib::porcelain::status::status_diff_entry_matches_pathspec(&grit_lib::diff::DiffEntry, &[alloc::string::String]) -> bool
 pub fn grit_lib::porcelain::status::status_diff_entry_matches_pathspec_typed(&grit_lib::repo::Repository, &grit_lib::diff::DiffEntry, &grit_lib::worktree::pathspec::Pathspec) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::status::status_options_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<grit_lib::porcelain::status::StatusOptions, grit_lib::error::ConfigError>
@@ -14002,7 +14002,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::Switc
 pub fn grit_lib::porcelain::switch::resolve_create_branch(&grit_lib::repo::Repository, &str, core::option::Option<&str>, grit_lib::porcelain::branch::TrackMode) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
 pub fn grit_lib::porcelain::switch::resolve_revision_spec(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::switch::resolve_switch_target(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
-pub fn grit_lib::porcelain::switch::switch_repository(&grit_lib::repo::Repository, &grit_lib::porcelain::switch::SwitchOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchOutcome>
+pub fn grit_lib::porcelain::switch::switch_repository(&grit_lib::repo::Repository, &grit_lib::porcelain::switch::SwitchOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchOutcome>
 pub mod grit_lib::porcelain::tag
 pub enum grit_lib::porcelain::tag::TagDetail
 pub grit_lib::porcelain::tag::TagDetail::Annotation
@@ -14293,7 +14293,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::workspace_sna
 pub const grit_lib::porcelain::workspace_snapshot::WORKSPACE_SNAPSHOT_PIN_REF_PREFIX: &str
 pub fn grit_lib::porcelain::workspace_snapshot::capture_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions) -> grit_lib::error::Result<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>
 pub fn grit_lib::porcelain::workspace_snapshot::pin_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::workspace_snapshot::restore_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::workspace_snapshot::restore_workspace_snapshot(&grit_lib::repo::Repository, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::workspace_snapshot::unpin_workspace_snapshot(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::workspace_snapshot::workspace_snapshot_pin_ref_name(&str) -> grit_lib::error::Result<alloc::string::String>
 pub mod grit_lib::porcelain::worktree_guard
@@ -15507,7 +15507,7 @@ pub fn grit_lib::repo::Repository::diff(&self) -> grit_lib::diff::Diff<'_>
 pub fn grit_lib::repo::Repository::discover(core::option::Option<&std::path::Path>, &grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::discovery_info(&self) -> grit_lib::repo::DiscoveryInfo
 pub fn grit_lib::repo::Repository::environment(&self) -> &grit_lib::config::environment::Environment
-pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
+pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::repo::Repository::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::hook_stdio(&self) -> grit_lib::command_runner::hooks::HookStdio
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
@@ -15755,6 +15755,7 @@ impl grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::cancel(&self)
 pub fn grit_lib::progress::CancelToken::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::CancelToken::never() -> Self
+pub fn grit_lib::progress::CancelToken::never_ref() -> &'static Self
 pub fn grit_lib::progress::CancelToken::new() -> Self
 pub fn grit_lib::progress::CancelToken::reset(&self)
 impl core::clone::Clone for grit_lib::progress::CancelToken
@@ -15763,7 +15764,6 @@ impl core::default::Default for grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::default() -> Self
 impl core::fmt::Debug for grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl grit_lib::progress::Cancel for grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::CancelToken::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::CancelToken::poll_before_wait(&self)
@@ -15791,25 +15791,6 @@ impl core::marker::Unpin for grit_lib::progress::Cancelled
 impl core::marker::UnsafeUnpin for grit_lib::progress::Cancelled
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::progress::Cancelled
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::progress::Cancelled
-pub struct grit_lib::progress::NeverCancel
-impl core::clone::Clone for grit_lib::progress::NeverCancel
-pub fn grit_lib::progress::NeverCancel::clone(&self) -> Self
-impl core::default::Default for grit_lib::progress::NeverCancel
-pub fn grit_lib::progress::NeverCancel::default() -> Self
-impl core::fmt::Debug for grit_lib::progress::NeverCancel
-pub fn grit_lib::progress::NeverCancel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::progress::NeverCancel
-impl grit_lib::progress::Cancel for grit_lib::progress::NeverCancel
-pub fn grit_lib::progress::NeverCancel::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
-pub fn grit_lib::progress::NeverCancel::is_cancelled(&self) -> bool
-pub fn grit_lib::progress::NeverCancel::poll_before_wait(&self)
-impl core::marker::Freeze for grit_lib::progress::NeverCancel
-impl core::marker::Send for grit_lib::progress::NeverCancel
-impl core::marker::Sync for grit_lib::progress::NeverCancel
-impl core::marker::Unpin for grit_lib::progress::NeverCancel
-impl core::marker::UnsafeUnpin for grit_lib::progress::NeverCancel
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::progress::NeverCancel
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::progress::NeverCancel
 pub struct grit_lib::progress::NullProgress
 impl core::clone::Clone for grit_lib::progress::NullProgress
 pub fn grit_lib::progress::NullProgress::clone(&self) -> Self
@@ -15920,18 +15901,9 @@ impl core::marker::Unpin for grit_lib::progress::ReceivedObjects
 impl core::marker::UnsafeUnpin for grit_lib::progress::ReceivedObjects
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::progress::ReceivedObjects
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::progress::ReceivedObjects
-pub trait grit_lib::progress::Cancel: core::marker::Send + core::marker::Sync
-pub fn grit_lib::progress::Cancel::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
-pub fn grit_lib::progress::Cancel::is_cancelled(&self) -> bool
-pub fn grit_lib::progress::Cancel::poll_before_wait(&self)
-impl grit_lib::progress::Cancel for grit_lib::progress::CancelToken
 pub fn grit_lib::progress::CancelToken::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
 pub fn grit_lib::progress::CancelToken::is_cancelled(&self) -> bool
 pub fn grit_lib::progress::CancelToken::poll_before_wait(&self)
-impl grit_lib::progress::Cancel for grit_lib::progress::NeverCancel
-pub fn grit_lib::progress::NeverCancel::backing_token(&self) -> core::option::Option<&grit_lib::progress::CancelToken>
-pub fn grit_lib::progress::NeverCancel::is_cancelled(&self) -> bool
-pub fn grit_lib::progress::NeverCancel::poll_before_wait(&self)
 pub trait grit_lib::progress::ProgressSink
 pub fn grit_lib::progress::ProgressSink::finish(&mut self)
 pub fn grit_lib::progress::ProgressSink::inc(&mut self, u64)
@@ -15956,7 +15928,7 @@ pub fn &mut T::inc(&mut self, u64)
 pub fn &mut T::set(&mut self, u64)
 pub fn &mut T::start(&mut self, grit_lib::progress::ProgressPhase, core::option::Option<u64>)
 pub fn &mut T::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, grit_lib::progress::ProgressUnit, core::option::Option<u64>)
-pub fn grit_lib::progress::poll_cancel(&mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::progress::poll_cancel(&mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
 pub mod grit_lib::refs
 pub mod grit_lib::refs::branch_tracking
 pub enum grit_lib::refs::branch_tracking::BaseSource
@@ -18364,9 +18336,9 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneOutcome
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneOutcome
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::cleanup_failed_clone(&std::path::Path, bool)
-pub fn grit_lib::remote::clone::clone(grit_lib::remote::clone::CloneOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneOutcome, grit_lib::remote::clone::CloneError>
+pub fn grit_lib::remote::clone::clone(grit_lib::remote::clone::CloneOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneOutcome, grit_lib::remote::clone::CloneError>
 pub fn grit_lib::remote::clone::clone_effective_single_branch(&grit_lib::remote::clone::CloneOptions) -> bool
-pub fn grit_lib::remote::clone::clone_into(grit_lib::repo::Repository, grit_lib::remote::clone::CloneIntoOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneIntoOutcome, grit_lib::remote::clone::CloneError>
+pub fn grit_lib::remote::clone::clone_into(grit_lib::repo::Repository, grit_lib::remote::clone::CloneIntoOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneIntoOutcome, grit_lib::remote::clone::CloneError>
 pub fn grit_lib::remote::clone::derive_clone_dir(&str, bool) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
 pub fn grit_lib::remote::clone::dest_preexisted_empty(&std::path::Path) -> bool
 pub mod grit_lib::remote::credentials
@@ -18499,8 +18471,8 @@ pub fn grit_lib::remote::fetch::NoProgress::received_objects(&mut self, grit_lib
 pub fn grit_lib::remote::fetch::NoProgress::remote_sideband_progress(&self) -> bool
 pub fn grit_lib::remote::fetch::NoProgress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
 pub fn grit_lib::remote::fetch::NoProgress::wants_received_objects(&self) -> bool
-pub fn grit_lib::remote::fetch::fetch_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &mut grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
-pub fn grit_lib::remote::fetch::fetch_remote_into(&grit_lib::repo::Repository, &mut dyn grit_lib::remote::transport::Connection, &mut grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
+pub fn grit_lib::remote::fetch::fetch_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &mut grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
+pub fn grit_lib::remote::fetch::fetch_remote_into(&grit_lib::repo::Repository, &mut dyn grit_lib::remote::transport::Connection, &mut grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
 pub mod grit_lib::remote::fetch_request
 pub enum grit_lib::remote::fetch_request::FetchRefspecError
 pub grit_lib::remote::fetch_request::FetchRefspecError::AmbiguousSource
@@ -19429,7 +19401,6 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl !core::marker::Freeze for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl core::marker::Send for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -19449,7 +19420,6 @@ pub fn grit_lib::remote::http_client::HttpClient::post_into_reader(&self, &str, 
 pub fn grit_lib::remote::http_client::HttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::http_client::HttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::http_client::HttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn grit_lib::remote::http_client::HttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::http_client::HttpClient::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get(&self, &str, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<u8>>
@@ -19462,7 +19432,6 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::reset_auth_after_redirect_rebase(&self)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self, &str, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<u8>>
@@ -19475,7 +19444,6 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl<C: grit_lib::remote::transport::http::HttpClient> grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<C>
 pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<u8>>
@@ -19488,7 +19456,6 @@ pub fn alloc::rcs::arc::Arc<C>::post_into_reader(&self, &str, &str, &str, &[u8],
 pub fn alloc::rcs::arc::Arc<C>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<C>::reset_auth_after_redirect_rebase(&self)
 pub fn alloc::rcs::arc::Arc<C>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn alloc::rcs::arc::Arc<C>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn alloc::rcs::arc::Arc<C>::smart_http_enabled(&self) -> bool
 pub mod grit_lib::remote::partial_clone
 pub enum grit_lib::remote::partial_clone::ObjectFilterSpec
@@ -19614,8 +19581,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::protocol::Protoc
 pub fn grit_lib::remote::protocol::check_protocol_allowed_with(&str, &grit_lib::remote::protocol::ProtocolPolicyInputs) -> core::result::Result<(), grit_lib::remote::protocol::ProtocolError>
 pub fn grit_lib::remote::protocol::try_effective_client_protocol_version_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<u8, grit_lib::error::Error>
 pub mod grit_lib::remote::push
-pub fn grit_lib::remote::push::push_http(alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &std::path::Path, &str, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
-pub fn grit_lib::remote::push::push_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
+pub fn grit_lib::remote::push::push_http(alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &std::path::Path, &str, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
+pub fn grit_lib::remote::push::push_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
 pub mod grit_lib::remote::push_bundle
 pub const grit_lib::remote::push_bundle::RECEIVE_SUFFIX: &str
 pub mod grit_lib::remote::push_plan
@@ -19975,7 +19942,7 @@ pub const grit_lib::remote::resumable::TUS_PATCH_CONTENT_TYPE: &str
 pub const grit_lib::remote::resumable::TUS_VERSION: &str
 pub fn grit_lib::remote::resumable::claim_resumable_download(&std::path::Path, &std::path::Path) -> core::io::error::Result<grit_lib::remote::resumable::ResumableDownloadDest>
 pub fn grit_lib::remote::resumable::discard_download(&std::path::Path) -> core::io::error::Result<()>
-pub fn grit_lib::remote::resumable::download_resumable(&dyn grit_lib::remote::transport::http::HttpClient, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::resumable::DownloadOutcome, grit_lib::remote::resumable::ResumableError>
+pub fn grit_lib::remote::resumable::download_resumable(&dyn grit_lib::remote::transport::http::HttpClient, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::resumable::DownloadOutcome, grit_lib::remote::resumable::ResumableError>
 pub mod grit_lib::remote::serve
 pub enum grit_lib::remote::serve::DeepenNotError
 pub grit_lib::remote::serve::DeepenNotError::AmbiguousRef
@@ -20359,9 +20326,9 @@ pub fn F::update_ctx(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::pre
 pub fn grit_lib::remote::serve::io_error_is_request_body_limit(&core::io::error::Error) -> bool
 pub fn grit_lib::remote::serve::receive_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::receive_pack_with_hook(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
-pub fn grit_lib::remote::serve::receive_pack_with_hook_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
+pub fn grit_lib::remote::serve::receive_pack_with_hook_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook, &grit_lib::progress::CancelToken) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::UploadOutcome>
-pub fn grit_lib::remote::serve::upload_pack_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::UploadOutcome>
+pub fn grit_lib::remote::serve::upload_pack_cancellable(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions, &grit_lib::progress::CancelToken) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::UploadOutcome>
 pub type grit_lib::remote::serve::Result<T> = core::result::Result<T, grit_lib::remote::serve::ServeError>
 pub mod grit_lib::remote::shallow
 pub fn grit_lib::remote::shallow::load_shallow_oids(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
@@ -21692,7 +21659,7 @@ pub const grit_lib::remote::snapshot_checkout::SLICES_PATH: &str
 pub fn grit_lib::remote::snapshot_checkout::branches_with_work(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker) -> grit_lib::remote::snapshot_checkout::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::remote::snapshot_checkout::edit_slices(&grit_lib::repo::Repository, &str, &grit_lib::remote::snapshot_checkout::SliceEdit, &grit_lib::ident::Signature) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::SlicesEdited, grit_lib::remote::snapshot_checkout::TargetRefusal>>
 pub fn grit_lib::remote::snapshot_checkout::ensure_refreshable(&grit_lib::repo::Repository) -> grit_lib::remote::snapshot_checkout::Result<()>
-pub fn grit_lib::remote::snapshot_checkout::fetch_branch(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::BranchInfo, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::transfer::TransferStats>
+pub fn grit_lib::remote::snapshot_checkout::fetch_branch(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::BranchInfo, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::transfer::TransferStats>
 pub fn grit_lib::remote::snapshot_checkout::fetch_promised_blobs(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<usize>
 pub fn grit_lib::remote::snapshot_checkout::give_change_ids(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, core::option::Option<&[alloc::string::String]>, time::offset_date_time::OffsetDateTime) -> grit_lib::remote::snapshot_checkout::Result<usize>
 pub fn grit_lib::remote::snapshot_checkout::graft(&grit_lib::repo::Repository, &[grit_lib::remote::snapshot_checkout::SnapshotRoot], &[alloc::string::String], core::option::Option<&grit_lib::remote::snapshot_checkout::GraftLog>, &[grit_lib::objects::ObjectId], grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::Grafted, grit_lib::snapshot_checkout::graft::GraftError>>
@@ -21701,14 +21668,14 @@ pub fn grit_lib::remote::snapshot_checkout::integrate(&grit_lib::repo::Repositor
 pub fn grit_lib::remote::snapshot_checkout::keeps_every_commit(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId], &[alloc::string::String]) -> grit_lib::remote::snapshot_checkout::Result<bool>
 pub fn grit_lib::remote::snapshot_checkout::land_integration(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::IntegrateResponse, core::option::Option<grit_lib::objects::ObjectId>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::Landing>
 pub fn grit_lib::remote::snapshot_checkout::make_snapshot(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[alloc::string::String], core::option::Option<grit_lib::objects::ObjectId>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::Snapshot>
-pub fn grit_lib::remote::snapshot_checkout::materialize(&std::path::Path, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &std::path::Path, &str, &str, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::Materialized>
+pub fn grit_lib::remote::snapshot_checkout::materialize(&std::path::Path, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &std::path::Path, &str, &str, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::Materialized>
 pub fn grit_lib::remote::snapshot_checkout::normalize_paths(&[alloc::string::String]) -> grit_lib::remote::snapshot_checkout::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::remote::snapshot_checkout::out_ref(&str, &str) -> alloc::string::String
 pub fn grit_lib::remote::snapshot_checkout::project(&grit_lib::repo::Repository, &[grit_lib::remote::snapshot_checkout::SnapshotRoot], &[alloc::string::String], core::option::Option<&grit_lib::remote::snapshot_checkout::GraftLog>, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::snapshot_checkout::project::Projection, grit_lib::remote::snapshot_checkout::ProjectError>>
 pub fn grit_lib::remote::snapshot_checkout::project_branch(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &grit_lib::remote::snapshot_checkout::GraftLog, &str) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::BranchInfo, grit_lib::remote::snapshot_checkout::ProjectError>>
-pub fn grit_lib::remote::snapshot_checkout::push_for_checkin(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &[(alloc::string::String, grit_lib::objects::ObjectId)], &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::transfer::PushOutcome>
+pub fn grit_lib::remote::snapshot_checkout::push_for_checkin(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &[(alloc::string::String, grit_lib::objects::ObjectId)], &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::transfer::PushOutcome>
 pub fn grit_lib::remote::snapshot_checkout::read_slices(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<alloc::vec::Vec<grit_lib::remote::snapshot_checkout::Slice>>
-pub fn grit_lib::remote::snapshot_checkout::refresh<P: grit_lib::remote::fetch::Progress>(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &grit_lib::porcelain::pull::PullOptions, &mut P, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::RefreshOutcome>
+pub fn grit_lib::remote::snapshot_checkout::refresh<P: grit_lib::remote::fetch::Progress>(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &grit_lib::porcelain::pull::PullOptions, &mut P, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::RefreshOutcome>
 pub fn grit_lib::remote::snapshot_checkout::refresh_branch(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutMarker, &grit_lib::remote::snapshot_checkout::BranchInfo, bool) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::BranchRefresh>
 pub fn grit_lib::remote::snapshot_checkout::same_branch_name(&str, &str) -> bool
 pub fn grit_lib::remote::snapshot_checkout::set_checked_in_branch(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, &[grit_lib::objects::ObjectId], &[alloc::string::String], core::option::Option<grit_lib::objects::ObjectId>, bool, &grit_lib::ident::Signature, &str) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::BranchSet, grit_lib::remote::snapshot_checkout::CheckinRefusal>>
@@ -22110,8 +22077,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::Transf
 pub fn grit_lib::remote::transfer::build_pack(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_objects::PackBuildOptions) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transfer::build_pack_from_send_list(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &grit_lib::objects::pack_objects::PackBuildOptions, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, u32>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transfer::fetch_local(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
-pub fn grit_lib::remote::transfer::fetch_local_with_progress(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
-pub fn grit_lib::remote::transfer::push_local(&std::path::Path, &std::path::Path, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
+pub fn grit_lib::remote::transfer::fetch_local_with_progress(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
+pub fn grit_lib::remote::transfer::push_local(&std::path::Path, &std::path::Path, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
 pub fn grit_lib::remote::transfer::reachable_closure(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, bool, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transfer::resolve_fetch_prune(&grit_lib::config::ConfigSet, &str, core::option::Option<bool>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::remote::transfer::resolve_fetch_tags(&grit_lib::config::ConfigSet, &str, core::option::Option<bool>) -> grit_lib::remote::transfer::TagMode
@@ -22140,7 +22107,6 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl !core::marker::Freeze for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl core::marker::Send for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -22217,7 +22183,7 @@ pub struct grit_lib::remote::transport::http::SmartHttpTransport<C: grit_lib::re
 impl<C: grit_lib::remote::transport::http::HttpClient + core::clone::Clone + 'static> grit_lib::remote::transport::http::SmartHttpTransport<C>
 pub fn grit_lib::remote::transport::http::SmartHttpTransport<C>::client(&self) -> &C
 pub fn grit_lib::remote::transport::http::SmartHttpTransport<C>::new(C) -> Self
-pub fn grit_lib::remote::transport::http::SmartHttpTransport<C>::push(&self, &std::path::Path, &str, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
+pub fn grit_lib::remote::transport::http::SmartHttpTransport<C>::push(&self, &std::path::Path, &str, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
 impl<C: grit_lib::remote::transport::http::HttpClient + core::clone::Clone + 'static> grit_lib::remote::transport::Transport for grit_lib::remote::transport::http::SmartHttpTransport<C>
 pub fn grit_lib::remote::transport::http::SmartHttpTransport<C>::connect(&self, &str, grit_lib::remote::transport::Service, &grit_lib::remote::transport::ConnectOptions) -> grit_lib::error::Result<alloc::boxed::Box<dyn grit_lib::remote::transport::Connection>>
 impl<C> core::marker::Freeze for grit_lib::remote::transport::http::SmartHttpTransport<C> where C: core::marker::Freeze
@@ -22238,7 +22204,6 @@ pub fn grit_lib::remote::transport::http::HttpClient::post_into_reader(&self, &s
 pub fn grit_lib::remote::transport::http::HttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::HttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::HttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn grit_lib::remote::transport::http::HttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::HttpClient::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get(&self, &str, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<u8>>
@@ -22251,7 +22216,6 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::reset_auth_after_redirect_rebase(&self)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self, &str, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<u8>>
@@ -22264,7 +22228,6 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl<C: grit_lib::remote::transport::http::HttpClient> grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<C>
 pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<u8>>
@@ -22277,7 +22240,6 @@ pub fn alloc::rcs::arc::Arc<C>::post_into_reader(&self, &str, &str, &str, &[u8],
 pub fn alloc::rcs::arc::Arc<C>::post_streaming(&self, &str, &str, &str, &mut dyn alloc::io::read::Read, core::option::Option<&str>) -> grit_lib::remote::RemoteResult<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<C>::reset_auth_after_redirect_rebase(&self)
 pub fn alloc::rcs::arc::Arc<C>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transport::http::HttpResponse>
-pub fn alloc::rcs::arc::Arc<C>::set_operation_cancel(&self, core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>)
 pub fn alloc::rcs::arc::Arc<C>::smart_http_enabled(&self) -> bool
 pub fn grit_lib::remote::transport::http::http_client_arc(impl grit_lib::remote::transport::http::HttpClient + 'static) -> alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn grit_lib::remote::transport::http::http_fetch(alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &std::path::Path, &str, &mut grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
@@ -22340,7 +22302,6 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::transport::Advertisement
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::Advertisement
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::Advertisement
 pub struct grit_lib::remote::transport::ConnectOptions
-pub grit_lib::remote::transport::ConnectOptions::cancel: core::option::Option<alloc::rcs::arc::Arc<(dyn grit_lib::progress::Cancel + core::marker::Send + core::marker::Sync)>>
 pub grit_lib::remote::transport::ConnectOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
 pub grit_lib::remote::transport::ConnectOptions::network_trace: bool
 pub grit_lib::remote::transport::ConnectOptions::protocol_version: u8
@@ -22406,16 +22367,16 @@ pub trait grit_lib::remote::transport::Connection
 pub fn grit_lib::remote::transport::Connection::advertised_refs(&self) -> &[(alloc::string::String, grit_lib::objects::ObjectId)]
 pub fn grit_lib::remote::transport::Connection::advertised_tag_peel(&self) -> core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, grit_lib::objects::ObjectId>>
 pub fn grit_lib::remote::transport::Connection::capabilities(&self) -> &[alloc::string::String]
-pub fn grit_lib::remote::transport::Connection::drain_pending_http(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::transport::Connection::drain_pending_http(&mut self, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::Connection::finish(&mut self) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::Connection::finish_send(&mut self)
 pub fn grit_lib::remote::transport::Connection::head_symref(&self) -> core::option::Option<&str>
-pub fn grit_lib::remote::transport::Connection::mirror_http_cancel(&mut self, &dyn grit_lib::progress::Cancel)
+pub fn grit_lib::remote::transport::Connection::mirror_http_cancel(&mut self, &grit_lib::progress::CancelToken)
 pub fn grit_lib::remote::transport::Connection::protocol_version(&self) -> u8
 pub fn grit_lib::remote::transport::Connection::reader(&mut self) -> &mut dyn alloc::io::read::Read
 pub fn grit_lib::remote::transport::Connection::saw_ref_advertisement_flush(&self) -> bool
 pub fn grit_lib::remote::transport::Connection::stateless_rpc(&self) -> bool
-pub fn grit_lib::remote::transport::Connection::wait_for_response(&mut self, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::transport::Connection::wait_for_response(&mut self, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::transport::Connection::writer(&mut self) -> &mut dyn core::io::write::Write
 pub trait grit_lib::remote::transport::Transport
 pub fn grit_lib::remote::transport::Transport::connect(&self, &str, grit_lib::remote::transport::Service, &grit_lib::remote::transport::ConnectOptions) -> grit_lib::error::Result<alloc::boxed::Box<dyn grit_lib::remote::transport::Connection>>
@@ -22688,13 +22649,13 @@ pub grit_lib::remote::Remote::fetch_refspecs: alloc::vec::Vec<alloc::string::Str
 pub grit_lib::remote::Remote::name: core::option::Option<alloc::string::String>
 impl grit_lib::remote::Remote
 pub const grit_lib::remote::Remote::ANONYMOUS_FETCH_REFSPEC: &'static str
-pub fn grit_lib::remote::Remote::fetch(&self, &grit_lib::repo::Repository, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transfer::FetchOutcome>
+pub fn grit_lib::remote::Remote::fetch(&self, &grit_lib::repo::Repository, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transfer::FetchOutcome>
 pub fn grit_lib::remote::Remote::fetch_url(&self) -> &grit_lib::remote::RemoteUrl
 pub fn grit_lib::remote::Remote::from_config(&grit_lib::config::ConfigSet, &str) -> grit_lib::remote::RemoteResult<Self>
 pub fn grit_lib::remote::Remote::from_url(&str) -> grit_lib::remote::RemoteResult<Self>
 pub fn grit_lib::remote::Remote::list_push_refs(&self, &grit_lib::repo::Repository, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<grit_lib::remote::RemoteRef>>
 pub fn grit_lib::remote::Remote::list_refs(&self, core::option::Option<&grit_lib::repo::Repository>, &grit_lib::remote::ListRefsOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<grit_lib::remote::RemoteRef>>
-pub fn grit_lib::remote::Remote::push(&self, &grit_lib::repo::Repository, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transfer::PushOutcome>
+pub fn grit_lib::remote::Remote::push(&self, &grit_lib::repo::Repository, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transfer::PushOutcome>
 pub fn grit_lib::remote::Remote::push_url(&self) -> &grit_lib::remote::RemoteUrl
 impl core::clone::Clone for grit_lib::remote::Remote
 pub fn grit_lib::remote::Remote::clone(&self) -> Self
@@ -22920,7 +22881,7 @@ pub fn grit_lib::repo::Repository::diff(&self) -> grit_lib::diff::Diff<'_>
 pub fn grit_lib::repo::Repository::discover(core::option::Option<&std::path::Path>, &grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::discovery_info(&self) -> grit_lib::repo::DiscoveryInfo
 pub fn grit_lib::repo::Repository::environment(&self) -> &grit_lib::config::environment::Environment
-pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
+pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::repo::Repository::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::hook_stdio(&self) -> grit_lib::command_runner::hooks::HookStdio
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
@@ -23473,8 +23434,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RemoveOpti
 pub struct grit_lib::repo_handles::RepositoryBundles<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryBundles<'repo>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create(&self, &grit_lib::bundle::BundleSpec, &std::path::Path) -> core::result::Result<(), grit_lib::bundle::BundleError>
-pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create_with_options(&self, &grit_lib::bundle::bundle_remote::BundleCreateOptions, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<usize, grit_lib::bundle::BundleError>
-pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create_with_progress(&self, &grit_lib::bundle::BundleSpec, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<usize, grit_lib::bundle::BundleError>
+pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create_with_options(&self, &grit_lib::bundle::bundle_remote::BundleCreateOptions, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<usize, grit_lib::bundle::BundleError>
+pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create_with_progress(&self, &grit_lib::bundle::BundleSpec, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<usize, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::list_heads(&self, &std::path::Path, core::option::Option<usize>) -> core::result::Result<grit_lib::list_limit::Limited<grit_lib::repo_handles::bundle::BundleHead>, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::open(&self, impl core::convert::AsRef<std::path::Path>) -> core::result::Result<grit_lib::bundle::Bundle, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::plan_create(&self, &grit_lib::bundle::BundleSpec) -> core::result::Result<grit_lib::bundle::BundleCreatePlan, grit_lib::bundle::BundleError>
@@ -23482,7 +23443,7 @@ pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::plan_create_with_option
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::plan_unbundle(&self, &std::path::Path) -> core::result::Result<grit_lib::bundle::BundleUnbundlePlan, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::unbundle(&self, &std::path::Path) -> core::result::Result<grit_lib::bundle::UnbundleOutcome, grit_lib::bundle::BundleError>
-pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::unbundle_with_progress(&self, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::bundle::UnbundleOutcome, grit_lib::bundle::BundleError>
+pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::unbundle_with_progress(&self, &std::path::Path, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::bundle::UnbundleOutcome, grit_lib::bundle::BundleError>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::verify(&self, &std::path::Path) -> core::result::Result<grit_lib::bundle::BundleVerifyReport, grit_lib::bundle::BundleError>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryBundles<'repo>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::clone(&self) -> Self
@@ -23561,15 +23522,15 @@ impl<'repo> grit_lib::repo_handles::RepositoryRemotes<'repo>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::add(&self, &str, &str) -> core::result::Result<(), grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::add_origin_if_none(&self, &str) -> core::result::Result<bool, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::configured(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::repo_handles::ConfiguredRemote>>
-pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::fetch(&self, &grit_lib::remote::Remote, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>
-pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::fetch_all(&self, &grit_lib::config::ConfigSet, &grit_lib::remote::transfer::FetchOptions, core::option::Option<bool>, core::option::Option<bool>, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>)>>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::fetch(&self, &grit_lib::remote::Remote, grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::fetch_all(&self, &grit_lib::config::ConfigSet, &grit_lib::remote::transfer::FetchOptions, core::option::Option<bool>, core::option::Option<bool>, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, core::result::Result<grit_lib::remote::transfer::FetchOutcome, grit_lib::remote::RemoteError>)>>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::get(&self, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::get_or_default(&self, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::inspect(&self, &str, &grit_lib::remote::InspectOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::RemoteSummary, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::list(&self) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::ls_remote(&self, &grit_lib::remote::Remote, &grit_lib::remote::ListRefsOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<alloc::vec::Vec<grit_lib::remote::RemoteRef>, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::prune(&self, &str, bool, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::remote::RemoteError>
-pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::push(&self, &grit_lib::remote::Remote, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::PushOutcome, grit_lib::remote::RemoteError>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::push(&self, &grit_lib::remote::Remote, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &grit_lib::progress::CancelToken, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::PushOutcome, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::remove(&self, &str, grit_lib::repo_handles::RemoveOptions) -> core::result::Result<grit_lib::repo_handles::RemoteRemoval, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::set_head(&self, &str, grit_lib::repo_handles::SetHead, bool, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::repo_handles::SetHeadOutcome, grit_lib::remote::RemoteError>
@@ -23590,9 +23551,9 @@ impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles:
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RepositoryRemotes<'repo>
 pub struct grit_lib::repo_handles::RepositoryStash<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryStash<'repo>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply(&self, usize, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply_commit(&self, &grit_lib::objects::ObjectId, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply_reference(&self, grit_lib::stash::StashReference, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply(&self, usize, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply_commit(&self, &grit_lib::objects::ObjectId, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply_reference(&self, grit_lib::stash::StashReference, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::branch(&self, &str, usize) -> grit_lib::stash::StashResult<grit_lib::stash::StashBranchOutcome>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::branch_reference(&self, &str, grit_lib::stash::StashReference) -> grit_lib::stash::StashResult<grit_lib::stash::StashBranchOutcome>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::clear(&self) -> grit_lib::stash::StashResult<usize>
@@ -23603,10 +23564,10 @@ pub fn grit_lib::repo_handles::RepositoryStash<'repo>::drop(&self, usize) -> gri
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::index_for_oid(&self, &grit_lib::objects::ObjectId) -> core::option::Option<usize>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::list(&self) -> grit_lib::stash::StashResult<alloc::vec::Vec<grit_lib::stash::StashEntry>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::parse_reference(&self, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::stash::StashReference>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop(&self, usize, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop_reference(&self, grit_lib::stash::StashReference, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop(&self, usize, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop_reference(&self, grit_lib::stash::StashReference, &grit_lib::stash::StashApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::stash::StashResult<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::preview(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::stash::StashResult<core::option::Option<grit_lib::stash::StashPreview>>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::push(&self, &grit_lib::stash::StashPushOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::stash::StashResult<core::option::Option<grit_lib::stash::StashPushResult>>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::push(&self, &grit_lib::stash::StashPushOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::stash::StashResult<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryStash<'repo>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::clone(&self) -> Self
@@ -23625,7 +23586,7 @@ impl<'repo> grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::capture(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions) -> grit_lib::error::Result<grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::pin(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::restore(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::restore(&self, &grit_lib::porcelain::workspace_snapshot::WorkspaceSnapshot, &grit_lib::porcelain::workspace_snapshot::WorkspaceRestoreOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::unpin(&self, &str) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>
 pub fn grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'repo>::clone(&self) -> Self
@@ -24844,14 +24805,14 @@ pub fn grit_lib::revwalk::history::abort_interrupted_rewrite_apply(&grit_lib::re
 pub fn grit_lib::revwalk::history::abort_rebase(&grit_lib::repo::Repository, &grit_lib::ident::Signature) -> core::result::Result<grit_lib::revwalk::history::RebaseAbort, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::absorb(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbOptions) -> core::result::Result<grit_lib::revwalk::history::AbsorbPlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_absorb_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::apply_absorb_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_absorb_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::apply_fixup_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String], &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_fixup_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String], &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::commit_message_subject_line(&str) -> alloc::string::String
-pub fn grit_lib::revwalk::history::continue_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
+pub fn grit_lib::revwalk::history::continue_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::default_absorb_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::drop(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::ensure_rewrite_apply_ready(&grit_lib::repo::Repository) -> core::result::Result<(), grit_lib::revwalk::history::HistoryError>
@@ -24874,15 +24835,15 @@ pub fn grit_lib::revwalk::history::reword(&grit_lib::repo::Repository, grit_lib:
 pub fn grit_lib::revwalk::history::reword_with(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::RewordOptions, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::rewrite_apply_journal_active(&std::path::Path) -> bool
 pub fn grit_lib::revwalk::history::rewritten_row_subject(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewrittenCommit) -> core::result::Result<core::option::Option<alloc::string::String>, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::skip_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
+pub fn grit_lib::revwalk::history::skip_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::split(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::revwalk::history::Pathspec<'_>, alloc::string::String, &grit_lib::revwalk::history::SplitOptions, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::squash(&grit_lib::repo::Repository, &[&str], &grit_lib::revwalk::history::SquashOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::staged_absorb_paths(&grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::staged_fixup_paths(&grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::start_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
-pub fn grit_lib::revwalk::history::start_rebase_with_exec(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &grit_lib::revwalk::history::ExecSpec, &dyn grit_lib::command_runner::CommandRunner, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
+pub fn grit_lib::revwalk::history::start_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
+pub fn grit_lib::revwalk::history::start_rebase_with_exec(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions, &grit_lib::revwalk::history::ExecSpec, &dyn grit_lib::command_runner::CommandRunner, &mut dyn grit_lib::progress::ProgressSink, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::undo_last_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::ApplyOptions, bool) -> core::result::Result<grit_lib::revwalk::history::UndoOutcome, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::undo_last_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::ApplyOptions, bool, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::UndoOutcome, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::undo_last_rewrite_with_cancel(&grit_lib::repo::Repository, &grit_lib::revwalk::history::ApplyOptions, bool, &grit_lib::progress::CancelToken) -> core::result::Result<grit_lib::revwalk::history::UndoOutcome, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::verify_rebase_with_exec(&grit_lib::repo::Repository, &mut grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ExecSpec, &grit_lib::revwalk::history::RewriteOptions, &dyn grit_lib::command_runner::CommandRunner) -> core::result::Result<grit_lib::revwalk::history::ExecReport, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::verify_rewrite_plan(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan) -> core::result::Result<(), grit_lib::revwalk::history::HistoryError>
 pub type grit_lib::revwalk::history::HistoryEdits = alloc::collections::btree::map::BTreeMap<grit_lib::objects::ObjectId, grit_lib::revwalk::history::CommitEdit>
@@ -28507,7 +28468,7 @@ impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeRepair
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeRepair
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeRepair
 pub fn grit_lib::worktree::add_linked_worktree(&grit_lib::repo::Repository, &grit_lib::worktree::AddLinkedWorktreeOptions) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
-pub fn grit_lib::worktree::add_linked_worktree_with_cancel(&grit_lib::repo::Repository, &grit_lib::worktree::AddLinkedWorktreeOptions, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
+pub fn grit_lib::worktree::add_linked_worktree_with_cancel(&grit_lib::repo::Repository, &grit_lib::worktree::AddLinkedWorktreeOptions, &grit_lib::progress::CancelToken) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
 pub fn grit_lib::worktree::allocate_worktree_admin_dir(&std::path::Path, &std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::worktree::common_git_dir(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::worktree::copy_filtered_worktree_config(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<()>

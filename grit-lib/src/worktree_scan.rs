@@ -28,7 +28,7 @@ use std::time::Duration;
 use std::sync::mpsc::{self, RecvTimeoutError};
 
 use crate::error::{Error, Result};
-use crate::progress::{poll_watch, CancelToken, StatScanCancel, CANCEL_POLL_STRIDE};
+use crate::progress::{poll_watch, StatScanCancel, CANCEL_POLL_STRIDE};
 
 type DirAbsFn = dyn Fn(&[u8]) -> PathBuf + Send + Sync;
 

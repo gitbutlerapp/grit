@@ -6,7 +6,6 @@ use crate::error::{ApplyError, Error};
 use crate::index::{Index, IndexEntry, MODE_REGULAR};
 use crate::merge_diff::read_blob_at_path;
 use crate::objects::{ObjectId, ObjectKind};
-use crate::progress::CancelToken;
 use crate::repo::Repository;
 use std::collections::BTreeMap;
 

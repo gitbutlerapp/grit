@@ -9,7 +9,6 @@ use super::error::HistoryError;
 use super::last::{read_history_last, HistoryLastRecord};
 use super::types::{ApplyOptions, UndoOutcome};
 use super::undo_work::{read_undo_work, UndoWork};
-use crate::progress::CancelToken;
 
 /// Revert the last recorded history rewrite when refs are still at the post-rewrite tips.
 ///

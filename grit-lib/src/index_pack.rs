@@ -22,6 +22,7 @@ use crate::pack::{verify_pack_and_collect, write_v2_pack_index_sorting};
 use crate::pack_index_build::{build_mapped_pack_index, RESIDENT_PACK_BYTES};
 use crate::pack_map::{PackData, ResidentBudget};
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
+use crate::remote::RemoteError;
 use crate::unpack_objects::{IngestedObjects, PackIndexRecord};
 
 pub use crate::pack_index_build::build_pack_index_records;

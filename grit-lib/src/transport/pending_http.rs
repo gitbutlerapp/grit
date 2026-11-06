@@ -1,5 +1,5 @@
 //! Run blocking HTTP client calls on a worker thread so the caller can poll
-//! [`Cancel`] while the socket would otherwise block (discovery GET, upload-pack
+//! [`CancelToken`] while the socket would otherwise block (discovery GET, upload-pack
 //! POST setup, receive-pack report).
 
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
@@ -7,6 +7,11 @@ use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
 use crate::progress::{mirror_stack_cancel, CancelSignal, CancelToken};
+use crate::remote::RemoteError;
+
+fn remote_err(err: RemoteError) -> Error {
+    Error::Remote(err)
+}
 
 /// How often a wait for an HTTP worker checks for cancellation.
 pub(crate) const HTTP_CANCEL_POLL: Duration = Duration::from_millis(20);

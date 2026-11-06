@@ -6,7 +6,7 @@
 //!
 //! ```rust
 //! use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
-//! use grit_lib::progress::{NeverCancel, NullProgress};
+//! use grit_lib::progress::{CancelToken, NullProgress};
 //! use grit_lib::repo::{InitOptions, Repository};
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;

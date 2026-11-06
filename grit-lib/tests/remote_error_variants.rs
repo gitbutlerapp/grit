@@ -6,7 +6,7 @@ use std::process::Command;
 use grit_lib::bundle::{Bundle, BundleError};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, RemoteUnreadableReason};
-use grit_lib::progress::NeverCancel;
+use grit_lib::progress::CancelToken;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
@@ -50,7 +50,7 @@ fn remote_error_variants() {
             &work,
             FetchOptions::default(),
             &mut NoProgress,
-            &NeverCancel,
+            &CancelToken::never(),
             None,
         )
         .expect_err("fetch missing");
@@ -91,7 +91,7 @@ fn remote_error_variants() {
                 let src_url = format!("file://{}", src.display());
                 let remote = Remote::from_url(&src_url).expect("url");
                 let unshallow_err = remote
-                    .fetch(&wt_repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
+                    .fetch(&wt_repo, fetch_opts, &mut NoProgress, &CancelToken::never(), None)
                     .expect_err("unshallow on complete repo");
                 assert!(matches!(
                     unshallow_err,
@@ -285,6 +285,6 @@ fn clone_error_has_no_library_wrapper() {
     classify(CloneError::Remote(RemoteError::FetchUnshallowNotShallow));
     let tmp = tempfile::tempdir().expect("tempdir");
     let opts = CloneOptions::new("file:///nope.git", tmp.path().join("x"));
-    let err = clone(opts, &mut NoProgress, &NeverCancel, None).expect_err("clone missing");
+    let err = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect_err("clone missing");
     classify(err);
 }

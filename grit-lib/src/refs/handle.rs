@@ -5,7 +5,6 @@ use crate::config::ident_resolve::IdentRole;
 use crate::error::{Error, Result};
 use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
-use crate::progress::CancelToken;
 use crate::reflog::ReflogEntry;
 use crate::refs::listing::{query_refs, RefListing, RefQuery, RefQueryError, RefQueryOptions};
 use crate::refs::on_store::reflog_wanted;

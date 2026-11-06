@@ -37,6 +37,7 @@ use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::progress::CancelToken;
+use crate::remote::{RemoteError, RemoteResult};
 use crate::transfer::{FetchOptions, FetchOutcome};
 use crate::transport::pending_http::PendingHttp;
 use crate::transport::stateless_http::StatelessHttpConnection;

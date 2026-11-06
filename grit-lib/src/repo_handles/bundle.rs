@@ -9,7 +9,7 @@ use crate::bundle::{
 };
 use crate::list_limit::Limited;
 use crate::objects::ObjectId;
-use crate::progress::{CancelToken, NullProgress, ProgressSink};
+use crate::progress::{NullProgress, ProgressSink};
 use crate::repo::Repository;
 
 /// One ref tip from a bundle header (`git bundle list-heads`).

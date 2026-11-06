@@ -1798,7 +1798,7 @@ pub(crate) fn push_stash(
     options: &StashPushOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<Option<StashPushResult>> {
+) -> StashResult<Option<StashPushResult>> {
     if options.dry_run {
         return Err(StashError::PushValidation(
             StashPushValidationError::DryRunUsePreview,
@@ -1841,7 +1841,7 @@ fn reset_after_stash_push(
     lock: &mut IndexLock,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<()> {
+) -> StashResult<()> {
     if !built.untracked_paths.is_empty() {
         remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
     }
@@ -2231,7 +2231,7 @@ pub(crate) fn apply_stash_reference(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     match reference {
         StashReference::Index(n) => apply_stash_entry(repo, n, options, progress, cancel),
         StashReference::Commit(oid) => apply_stash_oid(repo, &oid, options, progress, cancel),
@@ -2245,7 +2245,7 @@ pub(crate) fn pop_stash_reference(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let index = match reference {
         StashReference::Index(n) => n,
         StashReference::Commit(oid) => {
@@ -2670,8 +2670,8 @@ pub(crate) fn apply_stash_oid(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<StashApplyOutcome> {
-    let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
+) -> StashResult<StashApplyOutcome> {
+    let work_tree = repo.work_tree().ok_or(StashError::BareRepository)?;
     apply_stash_commit(repo, work_tree, stash_oid, options, progress, cancel)
 }
 
@@ -2711,7 +2711,7 @@ pub(crate) fn apply_stash_entry(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let oid = stash_oid_at(repo, n)?;
     apply_stash_oid(repo, &oid, options, progress, cancel)
 }
@@ -2727,7 +2727,7 @@ pub(crate) fn pop_stash_entry(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let outcome = apply_stash_entry(repo, n, options, progress, cancel)?;
     if !outcome.has_conflicts() {
         drop_stash(repo, n)?;
@@ -2742,7 +2742,7 @@ fn apply_stash_commit(
     options: &StashApplyOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<StashApplyOutcome> {
+) -> StashResult<StashApplyOutcome> {
     let restore_index = options.restore_index;
     let stash_commit = repo.odb().read_commit(stash_oid)?;
 

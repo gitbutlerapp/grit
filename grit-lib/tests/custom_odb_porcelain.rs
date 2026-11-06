@@ -62,7 +62,7 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
 };
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
-use grit_lib::progress::{NeverCancel, NullProgress};
+use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -175,7 +175,7 @@ fn switch(repo: &Repository, mode: SwitchMode) {
             hooks: Default::default(),
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("switch");
 }
@@ -189,14 +189,14 @@ fn commit_path(repo: &Repository, path: &str, contents: &str, message: &str) {
             ..Default::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     commit_worktree(
         repo,
         &commit_request(message),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 }
@@ -271,7 +271,7 @@ fn stage_untracked_path_writes_blob_to_custom_primary() {
             ..Default::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage untracked path");
 
@@ -294,7 +294,7 @@ fn stage_defaults_stage_untracked_paths_into_custom_primary() {
         &repo,
         &StageOptions::default(),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
 
@@ -318,7 +318,7 @@ fn stage_many_untracked_paths_uses_parallel_batch_on_custom_primary() {
     }
 
     let outcome =
-        stage_for_commit(&repo, &mut NullProgress, &NeverCancel).expect("stage_for_commit");
+        stage_for_commit(&repo, &mut NullProgress, &CancelToken::never()).expect("stage_for_commit");
 
     assert_eq!(outcome.added.len(), count);
     for i in 0..count {
@@ -340,7 +340,7 @@ fn commit_worktree_with_untracked_files_on_custom_primary() {
         &repo,
         &commit_request("first"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert!(store.contains(&first.oid).expect("commit in store"));
@@ -352,7 +352,7 @@ fn commit_worktree_with_untracked_files_on_custom_primary() {
         &repo,
         &commit_request("second"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert_eq!(second.parent, Some(first.oid));
@@ -400,7 +400,7 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
             ..Default::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     assert!(git_dir.join("index").is_file());
@@ -409,7 +409,7 @@ fn stage_and_commit_create_a_missing_git_dir_when_every_store_is_injected() {
         &repo,
         &commit_request("first"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     assert!(store.contains(&commit.oid).expect("commit in store"));
@@ -425,13 +425,13 @@ fn fsck_is_clean_on_healthy_custom_primary_repo() {
         &repo,
         &commit_request("first"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
 
     let options = FsckOptions::full_repository(true);
     let report = repo
-        .fsck(&options, &mut NullProgress, &NeverCancel)
+        .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck on custom primary");
     let config = repo.config().snapshot().expect("config");
     assert!(report.ok(&config, &options), "{:?}", report.issues);
@@ -450,7 +450,7 @@ fn fsck_reports_bad_object_in_custom_primary() {
 
     let options = FsckOptions::full_repository(false);
     let report = repo
-        .fsck(&options, &mut NullProgress, &NeverCancel)
+        .fsck(&options, &mut NullProgress, &CancelToken::never())
         .expect("fsck on custom primary");
     assert_eq!(report.objects_checked, 1);
     assert!(
@@ -500,7 +500,7 @@ fn integrate_branch_clean_merge_on_custom_primary() {
         topic,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("integrate");
     let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
@@ -545,7 +545,7 @@ fn start_replay_sequence_pick_on_custom_primary() {
         committer: IDENT.parse().expect("committer"),
         options: ReplayOptions::default(),
     };
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("pick");
+    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     let SequenceOutcome::Completed { created, .. } = out else {
         panic!("expected completed pick, got {out:?}");
     };
@@ -573,7 +573,7 @@ fn start_replay_sequence_revert_on_custom_primary() {
         committer: IDENT.parse().expect("committer"),
         options: ReplayOptions::default(),
     };
-    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &NeverCancel).expect("revert");
+    let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("revert");
     let SequenceOutcome::Completed { created, .. } = out else {
         panic!("expected completed revert, got {out:?}");
     };
@@ -610,14 +610,14 @@ fn integrate_branch_mixed_conflict_persists_clean_blob_on_custom_primary() {
             ..Default::default()
         },
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("stage");
     commit_worktree(
         &repo,
         &commit_request("topic"),
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("commit");
     let topic = head_oid(&repo, "topic");
@@ -641,7 +641,7 @@ fn integrate_branch_mixed_conflict_persists_clean_blob_on_custom_primary() {
         topic,
         "topic",
         &mut NullProgress,
-        &NeverCancel,
+        &CancelToken::never(),
     )
     .expect("integrate");
     let IntegrateBranchOutcome::Conflicts { paths, .. } = outcome else {

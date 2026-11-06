@@ -10,7 +10,6 @@ use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
 use crate::porcelain::merge::tree_to_index_entries;
-use crate::progress::CancelToken;
 use crate::repo::Repository;
 use crate::repo_relpath::join_rel;
 use crate::sparse_checkout::SparseCheckout;

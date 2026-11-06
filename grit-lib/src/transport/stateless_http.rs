@@ -7,6 +7,7 @@
 use crate::error::{Error, Result};
 use crate::objects::ObjectId;
 use crate::progress::CancelToken;
+use crate::remote::RemoteError;
 use crate::transport::http::HttpClient;
 use crate::transport::pending_http::{PendingHttp, HTTP_CANCEL_POLL};
 use crate::transport::{Connection, Service};

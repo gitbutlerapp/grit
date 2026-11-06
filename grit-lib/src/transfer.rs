@@ -28,7 +28,7 @@ use crate::fetch::{NoProgress, Progress};
 use crate::fetch_request::FetchRefspecError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ReceivedObjects};
+use crate::progress::{ProgressPhase, ProgressSink, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::remote::RemoteError;

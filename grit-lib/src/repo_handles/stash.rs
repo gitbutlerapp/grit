@@ -54,7 +54,7 @@ impl<'repo> RepositoryStash<'repo> {
     /// - [`crate::stash::StashPushValidationError::DryRunUsePreview`] when
     ///   [`StashPushOptions::dry_run`] is set (use [`Self::preview`]).
     /// - [`crate::stash::StashError::NoInitialCommit`] before the first commit.
-    /// - [`crate::stash::StashError::Cancelled`] when [`crate::progress::Cancel::is_cancelled`]
+    /// - [`crate::stash::StashError::Cancelled`] when [`crate::progress::CancelToken::is_cancelled`]
     ///   is true on the `cancel` argument. Before `refs/stash` moves, the repository is
     ///   unchanged; once the entry is stored it stays, even when the reset that follows is
     ///   cancelled (the same rule as a failed reset).
@@ -86,7 +86,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashPushOptions,
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
-    ) -> Result<Option<StashPushResult>> {
+    ) -> StashResult<Option<StashPushResult>> {
         push_stash(self.repo, options, progress, cancel)
     }
 
@@ -107,7 +107,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         apply_stash_entry(self.repo, index, options, progress, cancel)
     }
 
@@ -118,7 +118,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         apply_stash_oid(self.repo, stash, options, progress, cancel)
     }
 
@@ -129,7 +129,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         pop_stash_entry(self.repo, index, options, progress, cancel)
     }
 
@@ -156,7 +156,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         apply_stash_reference(self.repo, reference, options, progress, cancel)
     }
 
@@ -167,7 +167,7 @@ impl<'repo> RepositoryStash<'repo> {
         options: &StashApplyOptions,
         progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
-    ) -> Result<StashApplyOutcome> {
+    ) -> StashResult<StashApplyOutcome> {
         pop_stash_reference(self.repo, reference, options, progress, cancel)
     }
 

@@ -26,7 +26,6 @@ use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, stage_hunks, HunkSelection,
 };
 use crate::porcelain::index_from_tree::index_from_tree;
-use crate::progress::CancelToken;
 use crate::repo::Repository;
 
 /// Options for [`fixup`].

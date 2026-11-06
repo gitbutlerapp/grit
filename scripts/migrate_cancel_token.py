@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,37 +32,21 @@ REPLACEMENTS: list[tuple[str, str]] = [
         "Arc<dyn grit_lib::progress::Cancel + Send + Sync>",
         "Arc<grit_lib::progress::CancelToken>",
     ),
+    ("&mut grit_lib::progress::NeverCancel", "&grit_lib::progress::CancelToken::never()"),
     ("&crate::progress::NeverCancel", "&crate::progress::CancelToken::never()"),
     ("&grit_lib::progress::NeverCancel", "&grit_lib::progress::CancelToken::never()"),
     ("&NeverCancel", "&CancelToken::never()"),
+    ("use grit_lib::progress::{NeverCancel, NullProgress};", "use grit_lib::progress::{CancelToken, NullProgress};"),
+    ("use grit_lib::progress::NeverCancel;", "use grit_lib::progress::CancelToken;"),
+    ("use crate::progress::{NeverCancel, NullProgress};", "use crate::progress::{CancelToken, NullProgress};"),
+    ("grit_lib::progress::NeverCancel", "grit_lib::progress::CancelToken"),
 ]
-
-USE_CANCEL_RE = re.compile(
-    r"^(\s*)use ([^;]*\b)(Cancel|NeverCancel)([^;]*);",
-    re.MULTILINE,
-)
-
-
-def clean_use_cancel(text: str) -> str:
-    def repl(m: re.Match[str]) -> str:
-        prefix, before, _name, after = m.group(1, 2, 3, 4)
-        combined = (before + after).strip()
-        combined = re.sub(r",\s*,", ",", combined)
-        combined = combined.strip(",").strip()
-        if not combined or combined in ("grit_lib::progress", "crate::progress"):
-            return f"{prefix}// cancel import removed by migrate_cancel_token"
-        return f"{prefix}use {combined};"
-
-    return USE_CANCEL_RE.sub(repl, text)
-
 
 def process(path: Path) -> bool:
     text = path.read_text(encoding="utf-8")
     orig = text
     for old, new in REPLACEMENTS:
         text = text.replace(old, new)
-    if path.suffix == ".rs":
-        text = clean_use_cancel(text)
     if text != orig:
         path.write_text(text, encoding="utf-8")
         return True

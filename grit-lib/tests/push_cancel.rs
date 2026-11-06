@@ -1,5 +1,5 @@
 //! Cancelling a push: a local (`file://`) push and a smart-HTTP push stop on the
-//! caller's [`Cancel`] while the pack is built, streamed or waited on, leave the
+//! caller's [`CancelToken`] while the pack is built, streamed or waited on, leave the
 //! remote without new refs or stray files, and a retry still lands the push.
 //!
 //! Repositories are built with the library only; the smart-HTTP server is an

@@ -16,7 +16,6 @@ use crate::fs_publish::hard_link_or_copy;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::{BoundedRead, Odb};
 use crate::pack;
-use crate::progress::CancelToken;
 
 fn pack_entry_name_ok(name: &str) -> bool {
     if name.starts_with("tmp_") || name.starts_with(".") {

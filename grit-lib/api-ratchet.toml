@@ -7,7 +7,7 @@ semver_baseline = "7dcbd77142c0da657b7bce20bdc190abc19b21fa"
 
 [counts]
 pub_repo_constructors = 4
-public_api_lines = 28427
+public_api_lines = 28388
 pub_fn_impl_suffix = 0
 pub_fn_with_in_name = 114
 pub_fn_too_many_arguments_allow = 22
@@ -18,7 +18,7 @@ pub_free_fn_git_dir_path_first = 108
 pub_items_multiple_paths = 19
 pub_libc_types = 0
 pub_unsafe_fn = 0
-pub_cancel_types = 86
+pub_cancel_types = 1
 pub_progress_interfaces = 4
 pub_refname_validators = 0
 pub_fn_refname_str = 40

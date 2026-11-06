@@ -21,6 +21,7 @@ use crate::objects::HashAlgo;
 use crate::pack_stream_scan::PackStreamScanner;
 use crate::pkt_line;
 use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressUnit, ReceivedObjects};
+use crate::remote::RemoteError;
 
 /// Where demuxed pack bytes are stored.
 pub enum PackReceiveTarget<'a> {

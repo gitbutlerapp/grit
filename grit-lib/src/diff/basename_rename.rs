@@ -11,7 +11,6 @@ use crate::parallel::ParallelOptions;
 use super::rename_blob_cache::RenameBlobCache;
 use super::rename_lines::RenameLineTable;
 use super::DiffEntry;
-use crate::progress::CancelToken;
 
 fn poll_rename_cancel(cancel: Option<&crate::progress::CancelToken>) -> Result<()> {
     if let Some(token) = cancel {

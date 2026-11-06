@@ -18,7 +18,6 @@ use crate::objects::{
 };
 use crate::pack_index::parse_pack_index_bytes;
 use crate::pkt_line;
-use crate::progress::CancelToken;
 use crate::refs::parse_packed_refs_to_map;
 use crate::refspec::parse_fetch_refspec;
 use url::Url;

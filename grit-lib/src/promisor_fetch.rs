@@ -11,7 +11,6 @@ use crate::objects::pack::clear_pack_cache;
 use crate::objects::ObjectId;
 use crate::objects::OidHashSet;
 use crate::partial_clone::ObjectFilterSpec;
-use crate::progress::CancelToken;
 use crate::promisor::repo_treats_promisor_packs;
 use crate::promisor_remote::lazy_fetch_order;
 use crate::remote::{HttpClientFactory, Remote};

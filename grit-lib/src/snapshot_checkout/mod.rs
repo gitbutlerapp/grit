@@ -103,6 +103,7 @@ use crate::objects::{
     parse_commit, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry,
 };
 use crate::odb::Odb;
+use crate::fetch::Progress;
 use crate::progress::CancelToken;
 use crate::repo::{InitOptions, Repository};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};

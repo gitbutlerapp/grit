@@ -49,7 +49,6 @@ use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
 use crate::objects::{parse_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::progress::CancelToken;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
 use crate::sparse_checkout::effective_cone_mode_for_sparse_file;

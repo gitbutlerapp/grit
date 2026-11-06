@@ -26,6 +26,7 @@ type LsRefsAdvertised = (
     Option<ObjectId>,
 );
 use crate::progress::{poll_cancel, CancelToken, ProgressSink};
+use crate::remote::RemoteError;
 use crate::transfer::{
     classify_update, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
     validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,

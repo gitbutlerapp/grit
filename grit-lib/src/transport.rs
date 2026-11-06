@@ -36,6 +36,29 @@ use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::progress::CancelToken;
+use crate::remote::RemoteError;
+
+fn remote_err(err: RemoteError) -> Error {
+    Error::Remote(err)
+}
+
+fn git_url_err(detail: impl Into<String>) -> Error {
+    remote_err(RemoteError::MalformedTransportUrl {
+        scheme: "git",
+        detail: detail.into(),
+    })
+}
+
+fn ssh_transport_err(detail: impl Into<String>) -> Error {
+    remote_err(RemoteError::Ssh(detail.into()))
+}
+
+fn transport_io_err(detail: impl Into<String>) -> Error {
+    remote_err(RemoteError::Transport {
+        url: None,
+        detail: detail.into(),
+    })
+}
 
 pub mod http;
 pub(crate) mod pending_http;
@@ -79,7 +102,7 @@ pub struct ConnectOptions {
     /// When set, smart-HTTP connect and stateless POST rounds poll this while waiting
     /// on the HTTP stack (discovery GET, upload-pack POST, receive-pack report).
     pub cancel: Option<std::sync::Arc<crate::progress::CancelToken>>,
-    /// Flag mirrored from the stack [`Cancel`] on the owning thread during HTTP waits.
+    /// Flag mirrored from the stack [`CancelToken`] on the owning thread during HTTP waits.
     pub(crate) stack_watch: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -106,7 +129,7 @@ impl ConnectOptions {
         }
     }
 
-    /// Seed `stack_watch` from a stack-scoped [`Cancel`] before connect/fetch.
+    /// Seed `stack_watch` from a stack-scoped [`CancelToken`] before connect/fetch.
     pub(crate) fn bind_stack_cancel(&mut self, cancel: &CancelToken) {
         crate::progress::mirror_stack_cancel(cancel, &self.stack_watch);
     }
@@ -159,7 +182,7 @@ pub trait Connection {
     /// (v0/v1 connections, where the server closes after the single response).
     fn finish_send(&mut self) {}
 
-    /// Mirror a stack-scoped [`Cancel`] into the connection's HTTP wait flag before
+    /// Mirror a stack-scoped [`CancelToken`] into the connection's HTTP wait flag before
     /// writes that may block on smart HTTP (upload-pack POST on flush).
     fn mirror_http_cancel(&mut self, cancel: &CancelToken) {
         let _ = cancel;

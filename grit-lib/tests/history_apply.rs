@@ -1234,7 +1234,7 @@ fn rewrite_apply_journal_stores_from_tree_manifest_for_wide_clean_transition() {
         &plan,
         &apply_opts(),
         &mut grit_lib::progress::NullProgress,
-        &mut grit_lib::progress::NeverCancel,
+        &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("injected abort");
     grit_lib::test_support::inject::set_test_inject_rewrite_apply_abort_after_refs(false);
