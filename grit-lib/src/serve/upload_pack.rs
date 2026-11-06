@@ -23,7 +23,6 @@ use crate::pkt_line::SidebandChannel1Writer;
 use crate::progress::{Cancel, CancelSignal, NeverCancel};
 use crate::promisor_remote::{parse_accepted_reply, PromisorAdvertisement};
 use crate::repo::Repository;
-use crate::repo::RepositoryError;
 use crate::rev_list::ObjectFilter;
 use crate::transfer::PackBuildOptions;
 use std::collections::HashSet;

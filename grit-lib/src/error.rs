@@ -353,7 +353,7 @@ impl std::fmt::Display for WorktreeOperation {
 }
 
 /// Configuration parse and validation failures.
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error, Clone, PartialEq)]
 #[non_exhaustive]
 pub enum ConfigError {
     /// A line in a config file could not be parsed.
@@ -485,12 +485,13 @@ pub enum ConfigError {
     },
 
     /// A config key regexp (for example `git config --get-regexp`) is not valid.
-    #[error("invalid key pattern '{pattern}': {reason}")]
+    #[error("invalid key pattern '{pattern}': {source}")]
     InvalidPattern {
         /// Pattern as given.
         pattern: String,
         /// Why the regular expression engine rejected it.
-        reason: String,
+        #[source]
+        source: regex::Error,
     },
 
     /// Parsed config text declares an unsupported `core.repositoryformatversion`.
@@ -2501,7 +2502,10 @@ impl Error {
             Self::InvalidIdentity(..) => "invalid_identity",
             Self::Cancelled => "cancelled",
             Self::Identity(..) => "identity",
-            Self::Message(..) => "message",
+            Self::Message(..)
+            | Self::Repository(RepositoryError::PromisorFetcherMissing)
+            | Self::Repository(RepositoryError::UnknownRepositoryExtensions(_))
+            | Self::Repository(RepositoryError::V1OnlyExtensionsInFormatZero(_)) => "message",
             Self::NotFastForward => "not_fast_forward",
             Self::NothingToCommit => "nothing_to_commit",
             Self::UnrelatedHistories { .. } => "unrelated_histories",

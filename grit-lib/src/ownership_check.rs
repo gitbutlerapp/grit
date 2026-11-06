@@ -54,7 +54,6 @@
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 
-use crate::repo::RepositoryError;
 use thiserror::Error;
 
 /// Whether a path on disk is owned by the effective user.

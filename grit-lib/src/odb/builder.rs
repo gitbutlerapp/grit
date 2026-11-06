@@ -24,7 +24,7 @@ use std::sync::Arc;
 use crate::commit_graph_file::CommitGraphChain;
 use crate::commit_graph_write::collect_reachable_commit_infos;
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::fsck::reachability_roots;
 use crate::gc::prune_loose_unreachable;
 use crate::objects::HashAlgo;

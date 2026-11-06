@@ -11,7 +11,6 @@ use crate::config::ConfigSet;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::git_path::CanonicalizeExt;
-use crate::repo::RepositoryError;
 
 use super::{
     ensure_valid_ownership, head_file_present, local_config_write_path, parse_repository_format,

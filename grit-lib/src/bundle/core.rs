@@ -21,7 +21,6 @@ use crate::odb::Odb;
 use crate::pack_objects::PackStats;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
-use crate::repo::RepositoryError;
 use crate::rev_list::{
     FilterObjectKind, MissingAction, ObjectFilter, RevListOptions, RevListResult,
 };

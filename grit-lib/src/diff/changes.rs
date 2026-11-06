@@ -26,7 +26,7 @@ use crate::diff::{
     DiffStatus, DiffTarget, DiffTreeToWorktreeExtras, LineStat, RenameDetection,
     RENAME_DETECTION_DISABLED,
 };
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::index::write_tree::cache_tree_extension_valid;
 use crate::index::Index;
 use crate::objects::odb::Odb;
