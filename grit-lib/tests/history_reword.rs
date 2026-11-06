@@ -108,8 +108,9 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
     assert!(
         matches!(
             &err,
-            HistoryError::Library(inner)
-                if matches!(**inner, grit_lib::error::Error::InvalidSignature(_))
+            HistoryError::Engine(
+                grit_lib::revwalk::history::HistoryEngineError::InvalidSignature(_)
+            )
         ),
         "unexpected error: {err:?}"
     );

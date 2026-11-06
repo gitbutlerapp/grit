@@ -218,7 +218,10 @@ impl RemoteUnreadableReason {
     }
 }
 
-fn remote_unreadable_message(url: Option<&str>, reason: &RemoteUnreadableReason) -> String {
+pub(crate) fn remote_unreadable_message(
+    url: Option<&str>,
+    reason: &RemoteUnreadableReason,
+) -> String {
     let target = url.map_or_else(|| "the remote".to_owned(), |u| format!("'{u}'"));
     match reason {
         RemoteUnreadableReason::RepositoryNotFound => {
@@ -1181,7 +1184,7 @@ pub enum NotARepositoryReason {
     },
 }
 
-fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
+pub(crate) fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
     match (holder.pid, holder.host.as_deref()) {
         (Some(pid), Some(host)) => {
             format!("repository maintenance is already running (process {pid} on {host})")
@@ -1191,7 +1194,7 @@ fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> Str
     }
 }
 
-fn restore_unmerged_message(paths: &[String]) -> String {
+pub(crate) fn restore_unmerged_message(paths: &[String]) -> String {
     match paths {
         [path] => format!("path '{path}' is unmerged"),
         _ => format!(
@@ -2820,7 +2823,7 @@ impl From<crate::lockfile::LockError> for Error {
 /// Convenience alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
 
-fn promisor_fetch_failed_message(
+pub(crate) fn promisor_fetch_failed_message(
     missing: &crate::objects::ObjectId,
     failures: &[(String, Error)],
 ) -> String {

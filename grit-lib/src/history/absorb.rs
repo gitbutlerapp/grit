@@ -25,6 +25,7 @@ use super::fixup::staged_fixup_paths;
 use super::message::commit_subject_single_line;
 use super::plan::{conflict_error, plan_rewrite};
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
+use super::PlanningError;
 use super::{commit_tree, load_commit};
 
 /// Default maximum number of commits considered when `--base` is omitted.
@@ -1506,8 +1507,10 @@ pub(super) fn blob_at_path(
     let odb = repo.odb();
     let entry = odb
         .tree_entry_at_path(&tree, path.as_bytes())?
-        .ok_or_else(|| HistoryError::Planning {
-            message: format!("path '{path}' not found in tree"),
+        .ok_or_else(|| {
+            HistoryError::Planning(PlanningError::AbsorbPathNotInTree {
+                path: path.to_string(),
+            })
         })?;
     Ok(odb.read(&entry.oid)?.data)
 }

@@ -19,8 +19,12 @@ use super::{
     apply_head_tree_to_worktree, restore_worktree_after_failed_apply, rollback_ref_updates,
     IndexSnapshot, WorktreePathKind, WorktreePathSnapshot,
 };
-use crate::history::error::HistoryError;
+use crate::history::error::{
+    undo_record_read_io, undo_record_read_str, undo_record_write_engine, undo_record_write_str,
+    HistoryError,
+};
 use crate::history::types::{ApplyOptions, HeadEffect, PlannedRefUpdate, RewritePlan};
+use crate::history::HistoryEngineError;
 
 const FORMAT_VERSION: u32 = 2;
 const META: &str = "meta";
@@ -53,9 +57,9 @@ impl RewriteApplyKind {
             "rewrite" => Ok(Self::Standard),
             "fixup" => Ok(Self::Fixup),
             "absorb" => Ok(Self::Absorb),
-            other => Err(HistoryError::UndoRecordRead {
-                message: format!("unknown rewrite-apply kind {other:?}"),
-            }),
+            other => Err(undo_record_read_str(format!(
+                "unknown rewrite-apply kind {other:?}"
+            ))),
         }
     }
 }
@@ -114,8 +118,8 @@ pub(crate) fn write_rewrite_apply_journal(
     let body = serialize_meta(plan, opts, apply_kind);
     let lock_path = dir.join(format!("{META}.lock"));
     let target = dir.join(META);
-    let mut lock =
-        LockFile::acquire(&lock_path, LockWait::Immediately).map_err(journal_write_err)?;
+    let mut lock = LockFile::acquire(&lock_path, LockWait::Immediately)
+        .map_err(|e| undo_record_write_str(e.to_string()))?;
     lock.write_all(body.as_bytes()).map_err(journal_write_err)?;
     lock.commit_to(&target).map_err(journal_write_err)?;
     Ok(())
@@ -141,7 +145,7 @@ pub(crate) fn clear_rewrite_apply_journal(repo: &Repository) -> Result<(), Histo
 /// # Errors
 ///
 /// Returns [`HistoryError::RewriteApplyIncomplete`] when no journal is pending,
-/// [`HistoryError::Library`] wrapping [`Error::LockHeld`](crate::error::Error::LockHeld) when
+/// [`HistoryError::Engine`] with [`HistoryEngineError::LockHeld`](crate::history::HistoryEngineError::LockHeld) when
 /// another process holds `index.lock`, [`HistoryError::UndoRecordRead`] when the journal is
 /// invalid, and apply failures when rollback cannot complete.
 pub fn abort_interrupted_rewrite_apply(
@@ -194,7 +198,7 @@ pub fn ensure_rewrite_apply_ready(repo: &Repository) -> Result<(), HistoryError>
 ///
 /// # Errors
 ///
-/// Returns [`HistoryError::Library`] wrapping [`Error::LockHeld`](crate::error::Error::LockHeld)
+/// Returns [`HistoryError::Engine`] with [`HistoryEngineError::LockHeld`](crate::history::HistoryEngineError::LockHeld)
 /// when another process holds `index.lock`, [`HistoryError::UndoRecordRead`] when the journal is
 /// present but invalid, and apply failures when rollback cannot complete.
 pub fn recover_interrupted_rewrite_apply(
@@ -290,7 +294,7 @@ fn remove_journal_without_meta(repo: &Repository) -> Result<(), HistoryError> {
     }
     let _index_lock = match lock_index_for_recovery(repo) {
         Ok(lock) => lock,
-        Err(HistoryError::Library(err)) if matches!(*err, crate::error::Error::LockHeld(..)) => {
+        Err(err) if matches!(&err, HistoryError::Engine(HistoryEngineError::LockHeld(_))) => {
             return Ok(());
         }
         Err(err) => return Err(err),
@@ -324,9 +328,7 @@ fn refs_match_plan(
     for planned in updates {
         let current = repo
             .resolve_ref_oid(&planned.name)
-            .map_err(|e| HistoryError::RefApply {
-                message: e.to_string(),
-            })?;
+            .map_err(HistoryError::from)?;
         let expected = if expect_new { planned.new } else { planned.old };
         if current != expected {
             return Ok(false);
@@ -362,16 +364,12 @@ fn journal_dir(git_dir: &Path) -> PathBuf {
     git_dir.join("grit/rewrite-apply")
 }
 
-fn journal_write_err(e: impl std::fmt::Display) -> HistoryError {
-    HistoryError::UndoRecordWrite {
-        message: e.to_string(),
-    }
+fn journal_write_err<E: Into<crate::error::Error>>(e: E) -> HistoryError {
+    undo_record_write_engine(e.into())
 }
 
-fn journal_read_err(e: impl std::fmt::Display) -> HistoryError {
-    HistoryError::UndoRecordRead {
-        message: e.to_string(),
-    }
+fn journal_read_err(e: std::io::Error) -> HistoryError {
+    undo_record_read_io(e)
 }
 
 fn serialize_meta(plan: &RewritePlan, opts: &ApplyOptions, apply_kind: RewriteApplyKind) -> String {
@@ -467,11 +465,9 @@ fn parse_meta(text: &str) -> Result<RewriteApplyJournal, HistoryError> {
     }
 
     if version != Some(FORMAT_VERSION) {
-        return Err(HistoryError::UndoRecordRead {
-            message: format!(
-                "unsupported rewrite-apply journal version (expected {FORMAT_VERSION})"
-            ),
-        });
+        return Err(undo_record_read_str(format!(
+            "unsupported rewrite-apply journal version (expected {FORMAT_VERSION})"
+        )));
     }
     let apply_options = ApplyOptions {
         identity: {
@@ -500,30 +496,29 @@ fn parse_oid(token: Option<&str>, line_no: usize, label: &str) -> Result<ObjectI
 }
 
 fn parse_err(line_no: usize, detail: &str) -> HistoryError {
-    HistoryError::UndoRecordRead {
-        message: format!("rewrite-apply journal line {}: {detail}", line_no + 1),
-    }
+    undo_record_read_str(format!(
+        "rewrite-apply journal line {}: {detail}",
+        line_no + 1
+    ))
 }
 
 fn validate_repo_relative_path(path: &str) -> Result<(), HistoryError> {
     if path.is_empty() {
-        return Err(HistoryError::UndoRecordWrite {
-            message: "empty worktree snapshot path".into(),
-        });
+        return Err(undo_record_write_str("empty worktree snapshot path"));
     }
     let parsed = Path::new(path);
     if parsed.is_absolute() {
-        return Err(HistoryError::UndoRecordWrite {
-            message: format!("absolute worktree snapshot path {path:?}"),
-        });
+        return Err(undo_record_write_str(format!(
+            "absolute worktree snapshot path {path:?}"
+        )));
     }
     for component in parsed.components() {
         match component {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(HistoryError::UndoRecordWrite {
-                    message: format!("invalid worktree snapshot path {path:?}"),
-                });
+                return Err(undo_record_write_str(format!(
+                    "invalid worktree snapshot path {path:?}"
+                )));
             }
         }
     }
@@ -543,29 +538,21 @@ fn encode_snapshot_path(path: &str) -> Result<String, HistoryError> {
 }
 
 fn decode_snapshot_path_hex(hex_str: &str) -> Result<String, HistoryError> {
-    let bytes = hex::decode(hex_str.trim()).map_err(|e| HistoryError::UndoRecordRead {
-        message: format!("worktree snapshot path-hex decode: {e}"),
-    })?;
-    let path = String::from_utf8(bytes).map_err(|e| HistoryError::UndoRecordRead {
-        message: format!("worktree snapshot path-hex utf-8: {e}"),
-    })?;
-    validate_repo_relative_path(&path).map_err(|e| match e {
-        HistoryError::UndoRecordWrite { message } => HistoryError::UndoRecordRead { message },
-        other => other,
-    })?;
+    let bytes = hex::decode(hex_str.trim())
+        .map_err(|e| undo_record_read_str(format!("worktree snapshot path-hex decode: {e}")))?;
+    let path = String::from_utf8(bytes)
+        .map_err(|e| undo_record_read_str(format!("worktree snapshot path-hex utf-8: {e}")))?;
+    validate_repo_relative_path(&path).map_err(|e| undo_record_read_str(e.to_string()))?;
     Ok(path)
 }
 
 fn decode_snapshot_path_legacy(raw: &str) -> Result<String, HistoryError> {
     if raw.contains('\n') || raw.contains('\r') {
-        return Err(HistoryError::UndoRecordRead {
-            message: "legacy worktree snapshot path header must not contain newlines".into(),
-        });
+        return Err(undo_record_read_str(
+            "legacy worktree snapshot path header must not contain newlines",
+        ));
     }
-    validate_repo_relative_path(raw).map_err(|e| match e {
-        HistoryError::UndoRecordWrite { message } => HistoryError::UndoRecordRead { message },
-        other => other,
-    })?;
+    validate_repo_relative_path(raw).map_err(|e| undo_record_read_str(e.to_string()))?;
     Ok(raw.to_owned())
 }
 
@@ -627,9 +614,9 @@ fn read_worktree_from_tree_manifest(
     let header = lines.next().unwrap_or_default().trim();
     let manifest_v2 = header == "from-tree-manifest 2";
     if header != "from-tree-manifest 1" && !manifest_v2 {
-        return Err(HistoryError::UndoRecordRead {
-            message: format!("unsupported from-tree manifest header {header:?}"),
-        });
+        return Err(undo_record_read_str(format!(
+            "unsupported from-tree manifest header {header:?}"
+        )));
     }
     for (line_no, line) in lines.enumerate() {
         let line = line.trim();
@@ -664,14 +651,10 @@ fn read_worktree_from_tree_manifest(
             if oid_hex == "-" || mode_raw == "-" {
                 WorktreePathSnapshot::from_old_tree_legacy(kind)
             } else {
-                let oid =
-                    ObjectId::from_hex(oid_hex).map_err(|e| HistoryError::UndoRecordRead {
-                        message: format!("from-tree manifest oid: {e}"),
-                    })?;
-                let mode =
-                    u32::from_str_radix(mode_raw, 8).map_err(|e| HistoryError::UndoRecordRead {
-                        message: format!("from-tree manifest mode: {e}"),
-                    })?;
+                let oid = ObjectId::from_hex(oid_hex)
+                    .map_err(|e| undo_record_read_str(format!("from-tree manifest oid: {e}")))?;
+                let mode = u32::from_str_radix(mode_raw, 8)
+                    .map_err(|e| undo_record_read_str(format!("from-tree manifest mode: {e}")))?;
                 WorktreePathSnapshot::from_old_tree(kind, oid, mode)
             }
         } else {
@@ -746,13 +729,9 @@ fn parse_worktree_snapshot_file(
     let split_at = bytes
         .windows(sep.len())
         .position(|w| w == sep)
-        .ok_or_else(|| HistoryError::UndoRecordRead {
-            message: "worktree snapshot missing header terminator".into(),
-        })?;
+        .ok_or_else(|| undo_record_read_str("worktree snapshot missing header terminator"))?;
     let header =
-        std::str::from_utf8(&bytes[..split_at]).map_err(|e| HistoryError::UndoRecordRead {
-            message: e.to_string(),
-        })?;
+        std::str::from_utf8(&bytes[..split_at]).map_err(|e| undo_record_read_str(e.to_string()))?;
     let payload = bytes[(split_at + sep.len())..].to_vec();
     let mut repo_path_hex: Option<String> = None;
     let mut repo_path_legacy: Option<String> = None;
@@ -772,9 +751,9 @@ fn parse_worktree_snapshot_file(
                     "regular" => WorktreePathKind::Regular,
                     "symlink" => WorktreePathKind::Symlink,
                     other => {
-                        return Err(HistoryError::UndoRecordRead {
-                            message: format!("unknown worktree snapshot kind {other}"),
-                        })
+                        return Err(undo_record_read_str(format!(
+                            "unknown worktree snapshot kind {other}"
+                        )));
                     }
                 });
             }
@@ -797,12 +776,10 @@ fn parse_worktree_snapshot_file(
     } else if let Some(legacy) = repo_path_legacy {
         decode_snapshot_path_legacy(&legacy)?
     } else {
-        return Err(HistoryError::UndoRecordRead {
-            message: "worktree snapshot missing path".into(),
-        });
+        return Err(undo_record_read_str("worktree snapshot missing path"));
     };
-    let kind = kind.ok_or_else(|| HistoryError::UndoRecordRead {
-        message: format!("worktree snapshot for {path} missing kind"),
+    let kind = kind.ok_or_else(|| {
+        undo_record_read_str(format!("worktree snapshot for {path} missing kind"))
     })?;
     let from_old_tree = payload_kind == Some("from-tree");
     let bytes = if from_old_tree {
@@ -814,9 +791,9 @@ fn parse_worktree_snapshot_file(
             Some("none") | None => None,
             Some("from-tree") => None,
             Some(other) => {
-                return Err(HistoryError::UndoRecordRead {
-                    message: format!("unknown payload kind {other:?} for {path}"),
-                });
+                return Err(undo_record_read_str(format!(
+                    "unknown payload kind {other:?} for {path}"
+                )));
             }
         }
     };

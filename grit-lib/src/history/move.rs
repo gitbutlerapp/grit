@@ -6,6 +6,7 @@ use crate::repo::Repository;
 use super::error::HistoryError;
 use super::plan::plan_replay_linear_segment;
 use super::types::{RewriteOptions, RewritePlan};
+use super::PlanningError;
 
 fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, HistoryError> {
     Ok(repo.odb().read_commit(&oid)?.parents)
@@ -29,9 +30,9 @@ pub enum Placement {
 ///
 /// Returns [`HistoryError::NotInHistory`], [`HistoryError::MoveTargetNotInHistory`],
 /// [`HistoryError::NoOp`], [`HistoryError::NotLinear`], or errors from replay planning.
-/// An unborn or invalid `HEAD` is [`HistoryError::Library`] wrapping
-/// [`Error::UnbornHead`](crate::error::Error::UnbornHead) or
-/// [`Error::InvalidHead`](crate::error::Error::InvalidHead).
+/// An unborn or invalid `HEAD` is [`HistoryError::Engine`] with
+/// [`HistoryEngineError::UnbornHead`](super::HistoryEngineError::UnbornHead) or
+/// [`HistoryEngineError::InvalidHead`](super::HistoryEngineError::InvalidHead).
 pub fn move_commit(
     repo: &Repository,
     commit: ObjectId,
@@ -76,9 +77,9 @@ pub fn move_commit(
     let new_idx = chain
         .iter()
         .position(|&c| c == commit)
-        .ok_or(HistoryError::Planning {
-            message: "commit missing from reordered chain".into(),
-        })?;
+        .ok_or(HistoryError::Planning(
+            PlanningError::MoveCommitMissingFromChain,
+        ))?;
     let segment_start = old_idx.min(new_idx);
     let oldest = original[segment_start];
     let replay_order: Vec<ObjectId> = chain[segment_start..].to_vec();

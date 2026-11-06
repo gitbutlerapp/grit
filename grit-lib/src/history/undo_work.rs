@@ -25,7 +25,10 @@ use crate::repo::Repository;
 use super::apply::{
     read_worktree_path_snapshot, restore_worktree_path, WorktreePathKind, WorktreePathSnapshot,
 };
-use super::error::HistoryError;
+use super::error::{
+    undo_record_read_io, undo_record_read_str, undo_record_write_str, worktree_apply_engine,
+    worktree_apply_io, HistoryError,
+};
 
 const FORMAT_VERSION: u32 = 1;
 
@@ -330,7 +333,7 @@ impl StagedUndoWork {
     pub fn stage(repo: &Repository, work: &UndoWork) -> Result<Self, HistoryError> {
         let target = sidecar_path(repo);
         let mut lock = LockFile::acquire(&target.with_extension("lock"), LockWait::Immediately)
-            .map_err(write_err)?;
+            .map_err(|e| undo_record_write_str(e.to_string()))?;
         lock.write_all(&serialize(work)).map_err(write_err)?;
         Ok(Self { lock, target })
     }
@@ -350,9 +353,7 @@ pub(crate) fn remove_undo_work(repo: &Repository) -> Result<(), HistoryError> {
 }
 
 fn write_err(err: impl std::fmt::Display) -> HistoryError {
-    HistoryError::UndoRecordWrite {
-        message: err.to_string(),
-    }
+    undo_record_write_str(err.to_string())
 }
 
 /// Read the sidecar when present.
@@ -364,9 +365,7 @@ pub(crate) fn read_undo_work(repo: &Repository) -> Result<Option<UndoWork>, Hist
     match fs::read(sidecar_path(repo)) {
         Ok(bytes) => parse(&bytes).map(Some),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(HistoryError::UndoRecordRead {
-            message: e.to_string(),
-        }),
+        Err(e) => Err(undo_record_read_io(e)),
     }
 }
 
@@ -431,14 +430,12 @@ fn hash_blob(algo: HashAlgo, data: &[u8]) -> Result<ObjectId, HistoryError> {
     algo.hash_object(ObjectKind::Blob, data).map_err(apply_err)
 }
 
-fn apply_err(err: impl std::fmt::Display) -> HistoryError {
-    HistoryError::WorktreeApply {
-        message: err.to_string(),
-    }
+fn apply_err(err: crate::error::Error) -> HistoryError {
+    worktree_apply_engine(err)
 }
 
 fn io_err(err: std::io::Error) -> HistoryError {
-    apply_err(err)
+    worktree_apply_io(err)
 }
 
 /// Text header lines with length-prefixed binary payloads:
@@ -648,9 +645,7 @@ fn parse_oid(text: &str) -> Result<ObjectId, HistoryError> {
 }
 
 fn parse_err(detail: &str) -> HistoryError {
-    HistoryError::UndoRecordRead {
-        message: format!("history-last-work: {detail}"),
-    }
+    undo_record_read_str(format!("history-last-work: {detail}"))
 }
 
 #[cfg(test)]

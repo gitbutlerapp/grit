@@ -24,9 +24,9 @@ use grit_lib::porcelain::merge::{
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    plan_rebase_with_hook, start_rebase, ApplyOptions, EmptyPolicy, HistoryError, PreRebase,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    plan_rebase_with_hook, start_rebase, ApplyOptions, EmptyPolicy, HistoryEngineError,
+    HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
+    RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
 
 const IDENT: &str = "Hook Tester <hooks@grit.test> 1700000000 +0000";
@@ -160,6 +160,13 @@ fn commit(repo: &Repository, req: &CommitRequest) -> grit_lib::error::Result<Com
 fn hook_failed(err: &Error) -> Option<&str> {
     match err {
         Error::Hook(HookError::Failed { hook_name, .. }) => Some(hook_name.as_str()),
+        _ => None,
+    }
+}
+
+fn hook_failed_from_hook(err: &HookError) -> Option<&str> {
+    match err {
+        HookError::Failed { hook_name, .. } => Some(hook_name.as_str()),
         _ => None,
     }
 }
@@ -649,7 +656,7 @@ fn rebase(
 
 fn history_hook_failed(err: &HistoryError) -> Option<&str> {
     match err {
-        HistoryError::Library(lib) => hook_failed(lib),
+        HistoryError::Engine(HistoryEngineError::Hook(h)) => hook_failed_from_hook(h),
         _ => None,
     }
 }

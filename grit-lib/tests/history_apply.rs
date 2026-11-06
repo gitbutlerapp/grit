@@ -1029,10 +1029,12 @@ fn interrupted_rewrite_apply_with_lockfile_pid_disabled_leaves_foreign_lock() {
     fs::write(wt.join(".git/index.lock"), "").expect("lock without sidecar");
     let grit = open_grit(wt);
     let err = recover_interrupted_rewrite_apply(&grit).expect_err("foreign lock");
-    let grit_lib::revwalk::history::HistoryError::Library(inner) = &err else {
-        panic!("unexpected error {err:?}");
-    };
-    assert!(matches!(&**inner, grit_lib::error::Error::LockHeld(..)));
+    assert!(matches!(
+        &err,
+        grit_lib::revwalk::history::HistoryError::Engine(
+            grit_lib::revwalk::history::HistoryEngineError::LockHeld(_)
+        )
+    ));
     assert_eq!(
         git_rev_parse(wt, "refs/heads/main"),
         Some(plan.ref_updates[0].new)
@@ -1069,12 +1071,16 @@ fn interrupted_rewrite_apply_waits_for_index_lock_holder() {
     let grit = open_grit(wt);
 
     let err = recover_interrupted_rewrite_apply(&grit).expect_err("lock is held");
-    let grit_lib::revwalk::history::HistoryError::Library(inner) = &err else {
-        panic!("unexpected error {err:?}");
-    };
     assert!(
-        matches!(&**inner, grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError { path, holder: Some(h) }) if *path == lock && h.running),
-        "{inner:?}"
+        matches!(
+            &err,
+            grit_lib::revwalk::history::HistoryError::Engine(
+                grit_lib::revwalk::history::HistoryEngineError::LockHeld(
+                    grit_lib::error::LockHeldError { path, holder: Some(h) }
+                )
+            ) if *path == lock && h.running
+        ),
+        "{err:?}"
     );
     assert_eq!(
         git_rev_parse(wt, "refs/heads/main"),

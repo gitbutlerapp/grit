@@ -265,16 +265,13 @@ fn split_rejects_non_commit_with_typed_error() {
         },
     )
     .unwrap_err();
-    let HistoryError::Library(inner) = err else {
-        panic!("expected a library error, got {err:?}");
-    };
     assert!(matches!(
-        *inner,
-        grit_lib::error::Error::UnexpectedObjectKind {
+        err,
+        HistoryError::Engine(grit_lib::revwalk::history::HistoryEngineError::UnexpectedObjectKind {
             oid,
             expected: ObjectKind::Commit,
             actual: ObjectKind::Tree,
-        } if oid == tree
+        }) if oid == tree
     ));
 }
 

@@ -79,7 +79,7 @@ fn integrate_branch_df_conflict_parks_file_and_keeps_directory() {
         &grit_lib::progress::NeverCancel,
     )
     .expect_err("staged commit with unmerged paths");
-    assert!(matches!(err, Error::IndexUnmerged));
+    assert!(matches!(Error::from(err), Error::IndexUnmerged));
 
     abort_branch_merge(&repo).expect("abort");
     assert!(tmp.path().join("f/i").is_file());

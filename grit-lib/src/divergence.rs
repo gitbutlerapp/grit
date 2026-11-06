@@ -2021,6 +2021,21 @@ pub fn missing_from(
         .collect())
 }
 
+/// Outcome of [`replay_onto`]: either a new tip commit or a conflict list with repository paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayOntoOutcome {
+    /// Replay finished; `tip` is the resulting commit.
+    Ok {
+        /// New tip after replaying eligible commits (may equal `onto` when nothing applied).
+        tip: ObjectId,
+    },
+    /// The first replay step that could not be applied cleanly.
+    Conflict {
+        /// Paths still in conflict after the failed merge, sorted and deduplicated.
+        paths: Vec<String>,
+    },
+}
+
 /// Replay the commits of `head` that `floor` doesn't have onto `onto`,
 /// leaving out those whose key is in `skip`: the new tip (`onto` when
 /// nothing is left), or the paths of the first commit that conflicts.
@@ -2034,7 +2049,7 @@ pub fn replay_onto(
     floor: &[ObjectId],
     onto: ObjectId,
     skip: &HashSet<String>,
-) -> Result<std::result::Result<ObjectId, Vec<String>>> {
+) -> Result<ReplayOntoOutcome> {
     let mut tip = onto;
     for mut version in sequence(repo, head, floor)? {
         if skip.contains(&version.key) || version.merge {
@@ -2051,8 +2066,8 @@ pub fn replay_onto(
         match replay(repo, tip, &step)? {
             Ok(Some(next)) => tip = next,
             Ok(None) => {}
-            Err(paths) => return Ok(Err(paths)),
+            Err(paths) => return Ok(ReplayOntoOutcome::Conflict { paths }),
         }
     }
-    Ok(Ok(tip))
+    Ok(ReplayOntoOutcome::Ok { tip })
 }

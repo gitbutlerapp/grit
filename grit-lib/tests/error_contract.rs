@@ -176,7 +176,7 @@ const ERROR_SIZE_CEILING: usize = 112;
 
 /// Slugs from `Error::kind_name` match arms in `grit-lib/src/error.rs` (must stay in sync with the table).
 fn kind_name_slugs_from_source() -> Vec<String> {
-    let src = include_str!("../src/error.rs");
+    let src = include_str!("../src/error/mod.rs");
     let anchor = "pub fn kind_name";
     let start = src
         .find(anchor)

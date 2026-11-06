@@ -90,8 +90,9 @@ pub fn reword_with(
             let raw = repo
                 .odb()
                 .read(&commit)
-                .map_err(|e| HistoryError::Library(Box::new(e)))?;
-            let parsed = parse_commit(&raw.data).map_err(|e| HistoryError::Library(Box::new(e)))?;
+                .map_err(|e| crate::history::error::engine_err(e))?;
+            let parsed =
+                parse_commit(&raw.data).map_err(|e| crate::history::error::engine_err(e))?;
             Some(resolve_reword_author(repo, &parsed.author, arg)?)
         }
     } else {

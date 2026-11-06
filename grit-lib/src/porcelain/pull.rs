@@ -1079,11 +1079,10 @@ fn local_changes_would_be_overwritten(paths: Vec<String>) -> Error {
 
 fn map_history_error(err: HistoryError) -> PullError {
     match err {
-        HistoryError::Library(e) => PullError::Repository(*e),
         HistoryError::LocalChangesWouldBeOverwritten { paths } => {
             PullError::Repository(local_changes_would_be_overwritten(paths))
         }
-        other => PullError::Repository(Error::Message(other.to_string())),
+        other => PullError::Repository(Error::History(other)),
     }
 }
 

@@ -21,6 +21,7 @@ use super::plan::{plan_fold_range_at_head, plan_rewrite};
 use super::reword::normalize_rewrite_message;
 use super::types::RefScope;
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
+use super::PlanningError;
 
 /// How to choose the message on the squashed commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +57,7 @@ struct ResolvedSquashRange {
 /// # Errors
 ///
 /// Returns [`HistoryError::Planning`] when `range` is empty, is not a `<base>..<tip>` range, or
-/// selects fewer than two commits; [`HistoryError::Library`] when a revision does not resolve or
+/// selects fewer than two commits; [`HistoryError::Engine`] when a revision does not resolve or
 /// an object, ref or revision-walk read fails; and other [`HistoryError`] variants when markers
 /// refuse or planning fails.
 pub fn squash(
@@ -65,9 +66,9 @@ pub fn squash(
     opts: &SquashOptions,
 ) -> Result<RewritePlan, HistoryError> {
     if range.is_empty() {
-        return Err(HistoryError::Planning {
-            message: "revision range is required".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::SquashRevisionRangeRequired,
+        ));
     }
     let resolved = resolve_squash_range(repo, range, &opts.message)?;
     check_divergent_branch_tips(
@@ -147,9 +148,7 @@ fn resolve_squash_range(
         positive, negative, ..
     } = parse_rev_walk_tokens(repo, range)?;
     if negative.is_empty() {
-        return Err(HistoryError::Planning {
-            message: "not a '<base>..<tip>' revision range".into(),
-        });
+        return Err(HistoryError::Planning(PlanningError::SquashRangeNotDotDot));
     }
     let walk_opts = RevListOptions {
         ancestry_path: true,
@@ -162,19 +161,19 @@ fn resolve_squash_range(
     let walk = rev_list(repo, &positive, &negative, &walk_opts)?;
     let commits = walk.commits;
     if commits.is_empty() {
-        return Err(HistoryError::Planning {
-            message: "the revision range is empty".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::SquashRevisionRangeEmpty,
+        ));
     }
     validate_connected_range(repo, &commits)?;
     let oldest = commits[0];
-    let tip = *commits.last().ok_or_else(|| HistoryError::Planning {
-        message: "the revision range is empty".into(),
-    })?;
+    let tip = *commits
+        .last()
+        .ok_or_else(|| HistoryError::Planning(PlanningError::SquashRevisionRangeEmpty))?;
     if oldest == tip {
-        return Err(HistoryError::Planning {
-            message: "the revision range holds a single commit; nothing to squash".into(),
-        });
+        return Err(HistoryError::Planning(
+            PlanningError::SquashSingleCommitInRange,
+        ));
     }
     let oldest_commit = load_commit(repo, oldest)?;
     if oldest_commit.parents.is_empty() {

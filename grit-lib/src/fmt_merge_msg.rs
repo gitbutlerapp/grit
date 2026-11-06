@@ -106,10 +106,20 @@ fn parse_fetch_head(input: &str) -> Vec<FetchEntry> {
 /// Categorize an entry description.
 #[derive(Debug, Clone)]
 enum MergeKind {
-    Branch { name: String, url: Option<String> },
-    Tag { name: String, url: Option<String> },
-    RemoteTracking { name: String, url: Option<String> },
-    Generic(String),
+    Branch {
+        name: String,
+        url: Option<String>,
+    },
+    Tag {
+        name: String,
+        url: Option<String>,
+    },
+    RemoteTracking {
+        name: String,
+        url: Option<String>,
+    },
+    /// FETCH_HEAD description did not match the branch/tag/remote-tracking patterns.
+    Unrecognized,
 }
 
 impl MergeKind {
@@ -121,7 +131,7 @@ impl MergeKind {
         } else if let Some(rest) = desc.strip_prefix("remote-tracking branch '") {
             parse_quoted_name_and_url(rest, KindTag::RemoteTracking)
         } else {
-            MergeKind::Generic(desc.to_owned())
+            MergeKind::Unrecognized
         }
     }
 }
@@ -135,7 +145,7 @@ enum KindTag {
 fn parse_quoted_name_and_url(rest: &str, tag: KindTag) -> MergeKind {
     let close = match rest.find('\'') {
         Some(p) => p,
-        None => return MergeKind::Generic(rest.to_owned()),
+        None => return MergeKind::Unrecognized,
     };
     let name = rest[..close].to_owned();
     let after = &rest[close + 1..];
@@ -177,7 +187,7 @@ fn build_title(entries: &[FetchEntry], into_name: Option<&str>) -> String {
             MergeKind::RemoteTracking { name, url } => {
                 (url.unwrap_or_else(|| ".".to_owned()), "remote", name)
             }
-            MergeKind::Generic(desc) => (".".to_owned(), "generic", desc),
+            MergeKind::Unrecognized => (".".to_owned(), "generic", entry.description.clone()),
         };
 
         if !src_map.contains_key(&src) {

@@ -96,10 +96,7 @@ fn commit_error_variants() {
         &NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Commit(CommitError::EmptyCommitMessage)
-    ));
+    assert!(matches!(err, CommitError::EmptyCommitMessage));
 
     let err = commit_with_scope(
         &repo,
@@ -109,10 +106,7 @@ fn commit_error_variants() {
         &NeverCancel,
     )
     .unwrap_err();
-    assert!(matches!(
-        err,
-        Error::Commit(CommitError::CommitPathsRequired)
-    ));
+    assert!(matches!(err, CommitError::CommitPathsRequired));
 }
 
 #[test]
@@ -184,5 +178,13 @@ fn history_error_has_no_string_catch_all() {
     assert!(
         !src.contains("Message(String)"),
         "HistoryError must not define Message(String)"
+    );
+    assert!(
+        !src.contains("\n    Library("),
+        "HistoryError must not wrap the umbrella Error as Library(...)"
+    );
+    assert!(
+        !src.contains("Planning { message"),
+        "HistoryError must not use stringly Planning {{ message: ... }}"
     );
 }

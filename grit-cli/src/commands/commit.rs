@@ -362,8 +362,8 @@ pub fn run(
         allow_empty,
     )?;
     let interrupt = crate::interrupt::InterruptCancel::install();
-    let outcome =
-        commit_with_scope(&repo, &req, scope, progress, &interrupt).map_err(map_commit_error)?;
+    let outcome = commit_with_scope(&repo, &req, scope, progress, &interrupt)
+        .map_err(|e| map_commit_error(e.into()))?;
     finish_commit_outcome(req, outcome, scope_json, dry_run)
 }
 
