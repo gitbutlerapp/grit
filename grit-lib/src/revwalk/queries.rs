@@ -89,7 +89,7 @@ pub struct RevWalkCommitIterOptions {
 /// [`RevWalk::rev_list_result`], or [`RevWalk::count`] together with revision tokens
 /// (`main`, `^v1.0`, `A..B`, `A...B`). Ref selections ([`Self::refs`]) and path limits
 /// ([`Self::pathspec`]) live here rather than in the tokens. The low-level engine options are
-/// [`RevListOptions`], used by [`rev_list`] and [`RevWalk::walk`] (one spec string).
+/// [`RevListOptions`], used by [`crate::rev_list::rev_list`] and [`RevWalk::walk`] (one spec string).
 #[derive(Debug, Clone)]
 pub struct RevWalkListOptions {
     /// Maximum number of commits to return (matches `rev-list --max-count` / `-n`).
@@ -165,7 +165,7 @@ impl Default for RevWalkListOptions {
 
 /// Positive and negative revision specs produced by [`parse_rev_walk_tokens`].
 ///
-/// Feed `positive` / `negative` to [`rev_list`] and copy `symmetric_left` / `symmetric_right`
+/// Feed `positive` / `negative` to [`crate::rev_list::rev_list`] and copy `symmetric_left` / `symmetric_right`
 /// into the matching [`RevListOptions`] fields. [`RevWalk::commits`] and [`RevWalk::walk`] do
 /// this for you.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -180,7 +180,7 @@ pub struct RevWalkParsedSpecs {
     pub symmetric_right: Option<ObjectId>,
 }
 
-/// Parse user revision tokens into positive/negative specs for [`rev_list`].
+/// Parse user revision tokens into positive/negative specs for [`crate::rev_list::rev_list`].
 ///
 /// Supports plain tips, `A..B`, `A...B`, and `^X` exclusions across multiple tokens. An empty
 /// side of a range defaults to `HEAD`. `A...B` expands to both tips as positive specs and all

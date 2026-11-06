@@ -2801,16 +2801,6 @@ impl Repository {
     pub(crate) fn read_commit_with_replace(&self, oid: &ObjectId) -> Result<CommitData> {
         parse_commit(&self.read_commit_bytes_with_replace(oid)?)
     }
-
-    /// Like [`Odb::read_into`], but follows replace refs for commit reads.
-    pub(crate) fn read_commit_into_with_replace(
-        &self,
-        oid: &ObjectId,
-        buf: &mut Vec<u8>,
-    ) -> Result<ObjectKind> {
-        let effective = self.object_id_after_replace(oid);
-        self.odb().read_into(&effective, buf)
-    }
 }
 
 fn load_replace_redirect_map(repo: &Repository) -> crate::objects::OidHashMap<ObjectId> {
