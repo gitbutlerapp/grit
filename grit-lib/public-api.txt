@@ -5685,8 +5685,6 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::h
 pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
-impl core::convert::From<grit_lib::error::Error> for grit_lib::error::ObjectReadFailure
-pub fn grit_lib::error::ObjectReadFailure::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError
@@ -6004,8 +6002,6 @@ pub grit_lib::error::ObjectReadFailure::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::ObjectReadFailure::Zlib(alloc::string::String)
 impl core::convert::From<core::io::error::Error> for grit_lib::error::ObjectReadFailure
 pub fn grit_lib::error::ObjectReadFailure::from(core::io::error::Error) -> Self
-impl core::convert::From<grit_lib::error::Error> for grit_lib::error::ObjectReadFailure
-pub fn grit_lib::error::ObjectReadFailure::from(grit_lib::error::Error) -> Self
 impl core::error::Error for grit_lib::error::ObjectReadFailure
 pub fn grit_lib::error::ObjectReadFailure::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::ObjectReadFailure
@@ -15132,8 +15128,6 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::command_runner::h
 pub fn grit_lib::command_runner::hooks::HookError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
-impl core::convert::From<grit_lib::error::Error> for grit_lib::error::ObjectReadFailure
-pub fn grit_lib::error::ObjectReadFailure::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::objects::bitmap::BitmapWalkError

@@ -1321,20 +1321,25 @@ pub enum ObjectReadFailure {
     },
 }
 
-impl From<Error> for ObjectReadFailure {
-    fn from(err: Error) -> Self {
+impl ObjectReadFailure {
+    /// Maps the umbrella [`enum@Error`] variants that may appear while decoding stored object bytes.
+    ///
+    /// Returns `Err(err)` when `err` is not one of those variants (callers must not wrap unrelated
+    /// failures as object corruption). Used only by [`Error::wrap_loose_read_failure`] and
+    /// [`Error::wrap_packed_read_failure`].
+    pub(crate) fn try_from_object_read_error(err: Error) -> std::result::Result<Self, Error> {
         match err {
-            Error::Io(e) => Self::Io(e),
-            Error::Zlib(s) => Self::Zlib(s),
-            Error::CorruptObject(s) => Self::CorruptObject(s),
+            Error::Io(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(Self::Io(e)),
+            Error::Zlib(s) => Ok(Self::Zlib(s)),
+            Error::CorruptObject(s) => Ok(Self::CorruptObject(s)),
             Error::ObjectStreamTruncated { expected, actual } => {
-                Self::ObjectStreamTruncated { expected, actual }
+                Ok(Self::ObjectStreamTruncated { expected, actual })
             }
-            Error::UnknownObjectType(s) => Self::UnknownObjectType(s),
-            Error::ObjectHeaderTooLong { oid } => Self::ObjectHeaderTooLong { oid },
-            Error::DeltaChainTooDeep { limit } => Self::DeltaChainTooDeep { limit },
-            Error::InvalidObject { kind, check } => Self::InvalidObject { kind, check },
-            other => Self::CorruptObject(other.to_string()),
+            Error::UnknownObjectType(s) => Ok(Self::UnknownObjectType(s)),
+            Error::ObjectHeaderTooLong { oid } => Ok(Self::ObjectHeaderTooLong { oid }),
+            Error::DeltaChainTooDeep { limit } => Ok(Self::DeltaChainTooDeep { limit }),
+            Error::InvalidObject { kind, check } => Ok(Self::InvalidObject { kind, check }),
+            other => Err(other),
         }
     }
 }
@@ -2621,6 +2626,11 @@ impl Error {
         match self {
             Self::Zlib(_) | Self::CorruptObject(_) => true,
             Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
+            Self::ObjectStreamTruncated { .. }
+            | Self::UnknownObjectType(_)
+            | Self::ObjectHeaderTooLong { .. }
+            | Self::DeltaChainTooDeep { .. }
+            | Self::InvalidObject { .. } => true,
             _ => false,
         }
     }
@@ -2636,10 +2646,13 @@ impl Error {
             return err;
         }
         if err.is_object_read_wrap_source() {
-            Self::CorruptLooseObject {
-                oid,
-                path,
-                source: Box::new(ObjectReadFailure::from(err)),
+            match ObjectReadFailure::try_from_object_read_error(err) {
+                Ok(source) => Self::CorruptLooseObject {
+                    oid,
+                    path,
+                    source: Box::new(source),
+                },
+                Err(err) => err,
             }
         } else {
             err
@@ -2658,11 +2671,14 @@ impl Error {
             return err;
         }
         if err.is_object_read_wrap_source() {
-            Self::CorruptPackedObject {
-                oid,
-                pack,
-                offset,
-                source: Box::new(ObjectReadFailure::from(err)),
+            match ObjectReadFailure::try_from_object_read_error(err) {
+                Ok(source) => Self::CorruptPackedObject {
+                    oid,
+                    pack,
+                    offset,
+                    source: Box::new(source),
+                },
+                Err(err) => err,
             }
         } else {
             err
@@ -2871,6 +2887,27 @@ impl From<crate::fetch_request::FetchRefspecError> for Error {
 impl From<Box<crate::resumable::ResumableError>> for Error {
     fn from(e: Box<crate::resumable::ResumableError>) -> Self {
         Self::Remote(crate::remote::RemoteError::Resumable(e))
+    }
+}
+
+#[cfg(test)]
+mod object_read_failure_tests {
+    use super::{Error, ObjectReadFailure};
+
+    #[test]
+    fn try_from_object_read_error_rejects_unrelated_umbrella_variants() {
+        assert!(matches!(
+            ObjectReadFailure::try_from_object_read_error(Error::Cancelled),
+            Err(Error::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn try_from_object_read_error_maps_decode_variants() {
+        assert!(matches!(
+            ObjectReadFailure::try_from_object_read_error(Error::Zlib("bad".into())),
+            Ok(ObjectReadFailure::Zlib(_))
+        ));
     }
 }
 
