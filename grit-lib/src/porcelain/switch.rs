@@ -1947,7 +1947,13 @@ mod tests {
         let tip = commit_on_branch(&repo, "main", "f", "1\n", None);
         refs::write_ref(repo.git_dir(), "refs/remotes/origin/main", &tip).expect("remote");
         repo.config()
-            .set_local("branch.autoSetupMerge", "false")
+            .set(
+                crate::config::ConfigScope::Local,
+                "branch.autoSetupMerge",
+                "false",
+                &crate::config::ConfigWriteOptions::new(),
+            )
+            .map(|_| ())
             .expect("config");
 
         let mode = resolve_create_branch(&repo, "work", Some("origin/main"), TrackMode::Auto)

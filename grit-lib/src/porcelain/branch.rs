@@ -345,7 +345,13 @@ pub fn delete_branch(
 
     repo.references().delete_verified(&branch_ref, &existing)?;
     let section = branch_config_section(name);
-    repo.config().remove_local_section(&section)?;
+    let path = crate::repo::local_config_write_path(repo.git_dir());
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut file =
+        crate::config::ConfigFile::parse(&path, &content, crate::config::ConfigScope::Local)?;
+    let _ = file.remove_section(&section)?;
+    file.write()?;
+    repo.reload_config()?;
     Ok(DeletedBranch {
         name: name.to_owned(),
         oid,
@@ -720,8 +726,9 @@ pub fn unset_upstream(repo: &Repository, branch: &str) -> Result<()> {
     let remote_key = format!("branch.{branch}.remote");
     let merge_key = format!("branch.{branch}.merge");
     let handle = repo.config();
-    handle.unset_local(&remote_key)?;
-    handle.unset_local(&merge_key)?;
+    let options = crate::config::ConfigWriteOptions::new();
+    handle.unset(crate::config::ConfigScope::Local, &remote_key, &options)?;
+    handle.unset(crate::config::ConfigScope::Local, &merge_key, &options)?;
     Ok(())
 }
 

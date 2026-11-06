@@ -124,7 +124,12 @@ fn config_handle_get_set_matches_git_config() {
     let wt = test.worktree();
 
     repo.config()
-        .set_local("user.name", "Handle Tester")
+        .set(
+            grit_lib::config::ConfigScope::Local,
+            "user.name",
+            "Handle Tester",
+            &grit_lib::config::ConfigWriteOptions::new(),
+        )
         .expect("set local");
     assert_eq!(git(wt, &["config", "user.name"]).trim(), "Handle Tester");
     assert_eq!(
@@ -313,7 +318,12 @@ fn config_handle_set_local_linked_worktree_matches_git() {
     let linked_repo = open_grit_repo(&linked);
     linked_repo
         .config()
-        .set_local("grit.handle.probe", "linked-value")
+        .set(
+            grit_lib::config::ConfigScope::Local,
+            "grit.handle.probe",
+            "linked-value",
+            &grit_lib::config::ConfigWriteOptions::new(),
+        )
         .expect("set local from linked wt");
 
     assert_eq!(

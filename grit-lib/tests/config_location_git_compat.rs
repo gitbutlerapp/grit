@@ -6,8 +6,8 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::{
-    global_config_write_path, set_config_value, unset_config_value, ConfigLocation, ConfigScope,
-    ConfigSet,
+    global_config_write_path, ConfigEditor, ConfigLocation, ConfigScope, ConfigSet,
+    ConfigWriteOptions,
 };
 use grit_lib::error::{ConfigError, Error};
 use grit_lib::repo::Repository;
@@ -203,15 +203,9 @@ fn config_set_file_location_then_git_reads_it() {
     let cfg_path = tmp.path().join("standalone.cfg");
     let env = Environment::empty();
 
-    set_config_value(
-        ConfigLocation::File(cfg_path.clone()),
-        &env,
-        None,
-        "grit.testKey",
-        "hello",
-        false,
-    )
-    .expect("set");
+    ConfigEditor::open(&env, cfg_path.clone(), ConfigScope::Local)
+        .set("grit.testKey", "hello", &ConfigWriteOptions::new())
+        .expect("set");
 
     let out = Command::new("git")
         .args([
@@ -234,14 +228,9 @@ fn config_unset_missing_key_is_typed_error() {
     fs::write(&cfg_path, "[section]\n").expect("write");
     let env = Environment::empty();
 
-    let err = unset_config_value(
-        ConfigLocation::File(cfg_path),
-        &env,
-        None,
-        "missing.key",
-        false,
-    )
-    .expect_err("missing key");
+    let err = ConfigEditor::open(&env, cfg_path, ConfigScope::Local)
+        .unset("missing.key", &ConfigWriteOptions::new())
+        .expect_err("missing key");
     match err {
         Error::Config(ConfigError::KeyNotSet { key }) => assert_eq!(key, "missing.key"),
         other => panic!("expected KeyNotSet, got {other:?}"),

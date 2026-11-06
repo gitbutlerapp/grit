@@ -104,8 +104,19 @@ pub(crate) fn write_branch_upstream_config(
     merge_ref: &str,
 ) -> Result<()> {
     let handle = repo.config();
-    handle.set_local(&format!("branch.{branch_short}.remote"), remote)?;
-    handle.set_local(&format!("branch.{branch_short}.merge"), merge_ref)?;
+    let options = crate::config::ConfigWriteOptions::new();
+    handle.set(
+        crate::config::ConfigScope::Local,
+        &format!("branch.{branch_short}.remote"),
+        remote,
+        &options,
+    )?;
+    handle.set(
+        crate::config::ConfigScope::Local,
+        &format!("branch.{branch_short}.merge"),
+        merge_ref,
+        &options,
+    )?;
     Ok(())
 }
 

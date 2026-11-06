@@ -2439,6 +2439,13 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::TypedConfigVa
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::TypedConfigValue
 pub struct grit_lib::config::Config<'repo>
 impl<'repo> grit_lib::config::Config<'repo>
+pub fn grit_lib::config::Config<'repo>::add_value(&self, grit_lib::config::ConfigScope, &str, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::Config<'repo>::remove_section(&self, grit_lib::config::ConfigScope, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::Config<'repo>::rename_section(&self, grit_lib::config::ConfigScope, &str, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::Config<'repo>::set(&self, grit_lib::config::ConfigScope, &str, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::Config<'repo>::unset(&self, grit_lib::config::ConfigScope, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::Config<'repo>::unset_all(&self, grit_lib::config::ConfigScope, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<(usize, core::option::Option<grit_lib::config::ConfigWritePreview>)>
+impl<'repo> grit_lib::config::Config<'repo>
 pub fn grit_lib::config::Config<'repo>::entries_with_prefix(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::config::ConfigEntry>>
 pub fn grit_lib::config::Config<'repo>::get(&self, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::config::Config<'repo>::get_all(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
@@ -2447,11 +2454,8 @@ pub fn grit_lib::config::Config<'repo>::get_color(&self, &str) -> grit_lib::erro
 pub fn grit_lib::config::Config<'repo>::get_i64(&self, &str) -> grit_lib::error::Result<core::option::Option<i64>>
 pub fn grit_lib::config::Config<'repo>::get_path(&self, &str) -> grit_lib::error::Result<core::option::Option<std::path::PathBuf>>
 pub fn grit_lib::config::Config<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
-pub fn grit_lib::config::Config<'repo>::remove_local_section(&self, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::Config<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::config::Config<'repo>::set_local(&self, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::config::Config<'repo>::snapshot(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
-pub fn grit_lib::config::Config<'repo>::unset_local(&self, &str) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::config::Config<'repo>
 pub fn grit_lib::config::Config<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::config::Config<'repo>
@@ -2464,6 +2468,29 @@ impl<'repo> core::marker::Unpin for grit_lib::config::Config<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::config::Config<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::Config<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::config::Config<'repo>
+pub struct grit_lib::config::ConfigEditor
+impl grit_lib::config::ConfigEditor
+pub fn grit_lib::config::ConfigEditor::add_value(&self, &str, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::ConfigEditor::global(&grit_lib::config::environment::Environment) -> grit_lib::error::Result<Self>
+pub fn grit_lib::config::ConfigEditor::open(&grit_lib::config::environment::Environment, std::path::PathBuf, grit_lib::config::ConfigScope) -> Self
+pub fn grit_lib::config::ConfigEditor::path(&self) -> &std::path::Path
+pub fn grit_lib::config::ConfigEditor::remove_section(&self, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::ConfigEditor::rename_section(&self, &str, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::ConfigEditor::set(&self, &str, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::ConfigEditor::system(&grit_lib::config::environment::Environment) -> Self
+pub fn grit_lib::config::ConfigEditor::unset(&self, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
+pub fn grit_lib::config::ConfigEditor::unset_all(&self, &str, &grit_lib::config::ConfigWriteOptions) -> grit_lib::error::Result<(usize, core::option::Option<grit_lib::config::ConfigWritePreview>)>
+impl core::clone::Clone for grit_lib::config::ConfigEditor
+pub fn grit_lib::config::ConfigEditor::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::config::ConfigEditor
+pub fn grit_lib::config::ConfigEditor::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::config::ConfigEditor
+impl core::marker::Send for grit_lib::config::ConfigEditor
+impl core::marker::Sync for grit_lib::config::ConfigEditor
+impl core::marker::Unpin for grit_lib::config::ConfigEditor
+impl core::marker::UnsafeUnpin for grit_lib::config::ConfigEditor
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::ConfigEditor
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::ConfigEditor
 pub struct grit_lib::config::ConfigEntry
 pub grit_lib::config::ConfigEntry::file: core::option::Option<std::path::PathBuf>
 pub grit_lib::config::ConfigEntry::key: alloc::string::String
@@ -2603,6 +2630,28 @@ impl core::marker::Unpin for grit_lib::config::ConfigValueOrigin
 impl core::marker::UnsafeUnpin for grit_lib::config::ConfigValueOrigin
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::ConfigValueOrigin
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::ConfigValueOrigin
+#[non_exhaustive] pub struct grit_lib::config::ConfigWriteOptions
+impl grit_lib::config::ConfigWriteOptions
+pub fn grit_lib::config::ConfigWriteOptions::dry_run(self, bool) -> Self
+pub fn grit_lib::config::ConfigWriteOptions::is_dry_run(&self) -> bool
+pub fn grit_lib::config::ConfigWriteOptions::new() -> Self
+pub fn grit_lib::config::ConfigWriteOptions::replace_all(self, bool) -> Self
+pub fn grit_lib::config::ConfigWriteOptions::replace_value_pattern(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::config::ConfigWriteOptions::unset_value_pattern(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::config::ConfigWriteOptions::value_type(self, grit_lib::config::ConfigValueType) -> Self
+impl core::clone::Clone for grit_lib::config::ConfigWriteOptions
+pub fn grit_lib::config::ConfigWriteOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::config::ConfigWriteOptions
+pub fn grit_lib::config::ConfigWriteOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::config::ConfigWriteOptions
+pub fn grit_lib::config::ConfigWriteOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::config::ConfigWriteOptions
+impl core::marker::Send for grit_lib::config::ConfigWriteOptions
+impl core::marker::Sync for grit_lib::config::ConfigWriteOptions
+impl core::marker::Unpin for grit_lib::config::ConfigWriteOptions
+impl core::marker::UnsafeUnpin for grit_lib::config::ConfigWriteOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::ConfigWriteOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::ConfigWriteOptions
 pub struct grit_lib::config::ConfigWritePreview
 pub grit_lib::config::ConfigWritePreview::path: std::path::PathBuf
 pub grit_lib::config::ConfigWritePreview::summary: alloc::string::String
@@ -2666,7 +2715,6 @@ impl core::marker::Unpin for grit_lib::config::LoadConfigOptions
 impl core::marker::UnsafeUnpin for grit_lib::config::LoadConfigOptions
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::LoadConfigOptions
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::config::LoadConfigOptions
-pub fn grit_lib::config::add_config_value(grit_lib::config::ConfigLocation, &grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str, &str, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
 pub fn grit_lib::config::canonical_key(&str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::config::canonicalize_config_write_value(&str, grit_lib::config::ConfigValueType, &str, &grit_lib::config::environment::Environment) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::config::config_entry_origin_file(&grit_lib::config::ConfigEntry) -> core::option::Option<&std::path::Path>
@@ -2689,13 +2737,8 @@ pub fn grit_lib::config::parse_i64(&str) -> core::result::Result<i64, grit_lib::
 pub fn grit_lib::config::parse_path(&grit_lib::config::environment::Environment, &str) -> alloc::string::String
 pub fn grit_lib::config::parse_path_optional(&grit_lib::config::environment::Environment, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::parse_typed_value(&str, grit_lib::config::ConfigValueType, &str, &grit_lib::config::environment::Environment) -> grit_lib::error::Result<grit_lib::config::TypedConfigValue>
-pub fn grit_lib::config::remove_config_section(grit_lib::config::ConfigLocation, &grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
-pub fn grit_lib::config::rename_config_section(grit_lib::config::ConfigLocation, &grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str, &str, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
 pub fn grit_lib::config::resolve_diff_context_lines(&grit_lib::config::ConfigSet) -> grit_lib::error::Result<core::option::Option<usize>>
-pub fn grit_lib::config::set_config_value(grit_lib::config::ConfigLocation, &grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str, &str, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
 pub fn grit_lib::config::system_config_path(&grit_lib::config::environment::Environment) -> std::path::PathBuf
-pub fn grit_lib::config::unset_all_config_values(grit_lib::config::ConfigLocation, &grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str, bool) -> grit_lib::error::Result<(usize, core::option::Option<grit_lib::config::ConfigWritePreview>)>
-pub fn grit_lib::config::unset_config_value(grit_lib::config::ConfigLocation, &grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str, bool) -> grit_lib::error::Result<core::option::Option<grit_lib::config::ConfigWritePreview>>
 pub fn grit_lib::config::url_matches(&str, &str) -> bool
 pub mod grit_lib::diagnostics
 #[non_exhaustive] pub enum grit_lib::diagnostics::Trace

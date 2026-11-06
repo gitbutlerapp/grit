@@ -628,7 +628,15 @@ mod tests {
     fn config_set_local_visible_on_next_config_without_extra_reload() {
         let tmp = TempDir::new().unwrap();
         let repo = init_repo(tmp.path());
-        repo.config().set_local("grit.sessionKey", "one").unwrap();
+        repo.config()
+            .set(
+                crate::config::ConfigScope::Local,
+                "grit.sessionKey",
+                "one",
+                &crate::config::ConfigWriteOptions::new(),
+            )
+            .map(|_| ())
+            .unwrap();
         assert_eq!(
             repo.config()
                 .snapshot()

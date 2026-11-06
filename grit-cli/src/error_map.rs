@@ -8,7 +8,7 @@ use grit_lib::command_runner::hooks::HookError;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ident_resolve::IdentityError;
 use grit_lib::config::ConfigSet;
-use grit_lib::error::Error as LibError;
+use grit_lib::error::{ConfigError, Error as LibError};
 use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
@@ -17,6 +17,7 @@ use grit_lib::porcelain::pull::PullError;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 use time::OffsetDateTime;
@@ -1335,6 +1336,19 @@ fn shell_words(paths: &[String]) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Open the current repository for config writes.
+///
+/// When discovery finds no repository, this returns [`ConfigError::RepositoryRequired`] (the
+/// config command's typed "need a repo" error). Other [`LibError`] variants from
+/// [`Repository::discover`](grit_lib::repo::Repository::discover) pass through unchanged.
+pub(crate) fn discover_for_config_write() -> Result<Repository, LibError> {
+    match crate::context::discover_lib_error() {
+        Ok(repo) => Ok(repo),
+        Err(LibError::NotARepository(_)) => Err(LibError::Config(ConfigError::RepositoryRequired)),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]

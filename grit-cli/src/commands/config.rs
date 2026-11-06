@@ -7,11 +7,11 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::environment::Environment;
 use grit_lib::config::git_path::user_display_path;
 use grit_lib::config::{
-    add_config_value, canonical_key, canonicalize_config_write_value, remove_config_section,
-    rename_config_section, set_config_value, unset_all_config_values, unset_config_value,
-    ConfigEntry as LibConfigEntry, ConfigLocation, ConfigScope, ConfigSet, ConfigValueType,
+    canonical_key, canonicalize_config_write_value, ConfigEditor, ConfigEntry as LibConfigEntry,
+    ConfigLocation, ConfigScope, ConfigSet, ConfigValueType, ConfigWriteOptions,
     ConfigWritePreview,
 };
+use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -524,17 +524,12 @@ fn hot_get_in_repo(
 }
 
 fn hot_set_in_repo(key: &str, value: &str, dry_run: bool) -> Result<ConfigOutcome> {
-    let location = context::locate_repository()?;
-    let env = context::environment();
-    let preview = set_config_value(
-        ConfigLocation::Local,
-        &env,
-        Some(location.git_dir()),
-        key,
-        value,
-        dry_run,
-    )
-    .with_context(|| format!("could not set {key}"))?;
+    let repo = context::discover()?;
+    let options = ConfigWriteOptions::new().dry_run(dry_run);
+    let preview = repo
+        .config()
+        .set(ConfigScope::Local, key, value, &options)
+        .with_context(|| format!("could not set {key}"))?;
     Ok(ConfigOutcome::Set {
         key: key.to_owned(),
         value: value.to_owned(),
@@ -544,15 +539,9 @@ fn hot_set_in_repo(key: &str, value: &str, dry_run: bool) -> Result<ConfigOutcom
 }
 
 fn hot_unset_in_repo(key: &str, dry_run: bool) -> Result<ConfigOutcome> {
-    let location = context::locate_repository()?;
-    let env = context::environment();
-    match unset_config_value(
-        ConfigLocation::Local,
-        &env,
-        Some(location.git_dir()),
-        key,
-        dry_run,
-    ) {
+    let repo = context::discover()?;
+    let options = ConfigWriteOptions::new().dry_run(dry_run);
+    match repo.config().unset(ConfigScope::Local, key, &options) {
         Ok(preview) => Ok(ConfigOutcome::Unset {
             key: key.to_owned(),
             dry_run,
@@ -585,6 +574,50 @@ pub fn set_global(key: &str, value: &str) -> Result<()> {
         false,
     )
     .map(|_| ())
+}
+
+fn write_options(dry_run: bool) -> ConfigWriteOptions {
+    ConfigWriteOptions::new().dry_run(dry_run)
+}
+
+fn with_write_target<R>(
+    location: ConfigLocation,
+    env: &Environment,
+    repo_op: impl FnOnce(&Repository, ConfigScope) -> grit_lib::error::Result<R>,
+    editor_op: impl FnOnce(&ConfigEditor) -> grit_lib::error::Result<R>,
+) -> grit_lib::error::Result<R> {
+    match location {
+        ConfigLocation::File(path) => {
+            let editor = ConfigEditor::open(env, path, ConfigScope::Local);
+            editor_op(&editor)
+        }
+        ConfigLocation::Local | ConfigLocation::Worktree => {
+            let repo = crate::error_map::discover_for_config_write()?;
+            let scope = match location {
+                ConfigLocation::Local => ConfigScope::Local,
+                ConfigLocation::Worktree => ConfigScope::Worktree,
+                _ => unreachable!(),
+            };
+            repo_op(&repo, scope)
+        }
+        ConfigLocation::Global | ConfigLocation::System => {
+            if let Ok(repo) = context::discover() {
+                let scope = match location {
+                    ConfigLocation::Global => ConfigScope::Global,
+                    ConfigLocation::System => ConfigScope::System,
+                    _ => unreachable!(),
+                };
+                repo_op(&repo, scope)
+            } else {
+                let editor = match location {
+                    ConfigLocation::Global => ConfigEditor::global(env)?,
+                    ConfigLocation::System => ConfigEditor::system(env),
+                    _ => unreachable!(),
+                };
+                editor_op(&editor)
+            }
+        }
+    }
 }
 
 fn map_origin(o: grit_lib::config::ConfigValueOrigin) -> ConfigValueWithOrigin {
@@ -790,9 +823,15 @@ fn set_value(
     let Some(location) = write_location else {
         bail!("internal error: write location missing");
     };
-    let git_dir = git_dir_for_location(&location)?;
-    let preview = set_config_value(location, env, git_dir.as_deref(), key, value, dry_run)
-        .with_context(|| format!("could not set {key}"))?;
+    let options = write_options(dry_run);
+    let preview = with_write_target(
+        location,
+        env,
+        |repo, scope| repo.config().set(scope, key, value, &options),
+        |editor| editor.set(key, value, &options),
+    )
+    .map_err(anyhow::Error::from)
+    .with_context(|| format!("could not set {key}"))?;
     Ok(ConfigOutcome::Set {
         key: key.to_owned(),
         value: value.to_owned(),
@@ -811,9 +850,15 @@ fn add_value(
     let Some(location) = write_location else {
         bail!("internal error: write location missing");
     };
-    let git_dir = git_dir_for_location(&location)?;
-    let preview = add_config_value(location, env, git_dir.as_deref(), key, value, dry_run)
-        .with_context(|| format!("could not add {key}"))?;
+    let options = write_options(dry_run);
+    let preview = with_write_target(
+        location,
+        env,
+        |repo, scope| repo.config().add_value(scope, key, value, &options),
+        |editor| editor.add_value(key, value, &options),
+    )
+    .map_err(anyhow::Error::from)
+    .with_context(|| format!("could not add {key}"))?;
     Ok(ConfigOutcome::Add {
         key: key.to_owned(),
         value: value.to_owned(),
@@ -831,8 +876,13 @@ fn unset_value(
     let Some(location) = write_location else {
         bail!("internal error: write location missing");
     };
-    let git_dir = git_dir_for_location(&location)?;
-    match unset_config_value(location, env, git_dir.as_deref(), key, dry_run) {
+    let options = write_options(dry_run);
+    match with_write_target(
+        location,
+        env,
+        |repo, scope| repo.config().unset(scope, key, &options),
+        |editor| editor.unset(key, &options),
+    ) {
         Ok(preview) => Ok(ConfigOutcome::Unset {
             key: key.to_owned(),
             dry_run,
@@ -851,8 +901,13 @@ fn unset_all_cmd(
     let Some(location) = write_location else {
         bail!("internal error: write location missing");
     };
-    let git_dir = git_dir_for_location(&location)?;
-    match unset_all_config_values(location, env, git_dir.as_deref(), key, dry_run) {
+    let options = write_options(dry_run);
+    match with_write_target(
+        location,
+        env,
+        |repo, scope| repo.config().unset_all(scope, key, &options),
+        |editor| editor.unset_all(key, &options),
+    ) {
         Ok((removed, preview)) => Ok(ConfigOutcome::UnsetAll {
             key: key.to_owned(),
             removed: removed as u64,
@@ -873,8 +928,14 @@ fn rename_section_cmd(
     let Some(location) = write_location else {
         bail!("internal error: write location missing");
     };
-    let git_dir = git_dir_for_location(&location)?;
-    let preview = rename_config_section(location, env, git_dir.as_deref(), old, new, dry_run)?;
+    let options = write_options(dry_run);
+    let preview = with_write_target(
+        location,
+        env,
+        |repo, scope| repo.config().rename_section(scope, old, new, &options),
+        |editor| editor.rename_section(old, new, &options),
+    )
+    .map_err(anyhow::Error::from)?;
     Ok(ConfigOutcome::RenameSection {
         old_name: old.to_owned(),
         new_name: new.to_owned(),
@@ -892,8 +953,14 @@ fn remove_section_cmd(
     let Some(location) = write_location else {
         bail!("internal error: write location missing");
     };
-    let git_dir = git_dir_for_location(&location)?;
-    let preview = remove_config_section(location, env, git_dir.as_deref(), section, dry_run)?;
+    let options = write_options(dry_run);
+    let preview = with_write_target(
+        location,
+        env,
+        |repo, scope| repo.config().remove_section(scope, section, &options),
+        |editor| editor.remove_section(section, &options),
+    )
+    .map_err(anyhow::Error::from)?;
     Ok(ConfigOutcome::RemoveSection {
         section: section.to_owned(),
         dry_run,

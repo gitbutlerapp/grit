@@ -16,17 +16,15 @@ mod core;
 pub(crate) mod handle;
 mod location;
 mod typed;
+mod write;
 
 pub use core::*;
 pub use handle::Config;
-pub use location::{
-    add_config_value, global_config_write_path, remove_config_section, rename_config_section,
-    set_config_value, unset_all_config_values, unset_config_value, ConfigLocation,
-    ConfigWritePreview,
-};
+pub use location::{global_config_write_path, ConfigLocation, ConfigWritePreview};
 pub use typed::{
     canonicalize_config_write_value, parse_typed_value, ConfigValueType, TypedConfigValue,
 };
+pub use write::{ConfigEditor, ConfigWriteOptions};
 
 pub mod dotfile {
     //! dotfile API (re-exported at this path).

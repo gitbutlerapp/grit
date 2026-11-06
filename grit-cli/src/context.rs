@@ -101,6 +101,12 @@ pub fn discover() -> Result<Repository> {
     Repository::discover(None, &options).context("not in a repository")
 }
 
+/// Like [`discover`], but returns [`grit_lib::error::Error`] so callers can classify failures.
+pub fn discover_lib_error() -> grit_lib::error::Result<Repository> {
+    let (options, _sink) = diagnostics::repository_options(false);
+    Repository::discover(None, &options)
+}
+
 /// Locate the repository from the current directory without opening it.
 pub fn locate_repository() -> Result<RepositoryLocation> {
     let repo = Repository::discover(None, &location_options()).context("not in a repository")?;

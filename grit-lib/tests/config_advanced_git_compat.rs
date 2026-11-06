@@ -6,9 +6,8 @@ use std::path::Path;
 use grit_lib::config::environment::Environment;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::{
-    add_config_value, canonicalize_config_write_value, remove_config_section,
-    rename_config_section, system_config_path, unset_all_config_values, unset_config_value,
-    ConfigFile, ConfigLocation, ConfigScope, ConfigSet, ConfigValueType,
+    canonicalize_config_write_value, system_config_path, ConfigEditor, ConfigFile, ConfigLocation,
+    ConfigScope, ConfigSet, ConfigValueType, ConfigWriteOptions,
 };
 use grit_lib::error::{ConfigError, Error};
 use grit_lib::repo::{InitOptions, Repository};
@@ -199,21 +198,14 @@ fn config_add_and_unset_all_round_trip_git_get_all() {
     let mut env = Environment::empty();
     env.cwd = dir.path().to_path_buf();
 
-    add_config_value(
-        ConfigLocation::File(path.clone()),
-        &env,
-        None,
-        "s.k",
-        "two",
-        false,
-    )
-    .expect("add");
+    let editor = ConfigEditor::open(&env, path.clone(), ConfigScope::Local);
+    let opts = ConfigWriteOptions::new();
+    editor.add_value("s.k", "two", &opts).expect("add");
 
     let git_vals = git_file_get_all(&path, "s.k");
     assert_eq!(git_vals, vec!["one".to_owned(), "two".to_owned()]);
 
-    unset_all_config_values(ConfigLocation::File(path.clone()), &env, None, "s.k", false)
-        .expect("unset all");
+    editor.unset_all("s.k", &opts).expect("unset all");
     assert!(git_file_get_all(&path, "s.k").is_empty());
 }
 
@@ -225,26 +217,15 @@ fn config_rename_and_remove_section_git_reads_back() {
     let mut env = Environment::empty();
     env.cwd = dir.path().to_path_buf();
 
-    rename_config_section(
-        ConfigLocation::File(path.clone()),
-        &env,
-        None,
-        "old.x",
-        "new.x",
-        false,
-    )
-    .expect("rename");
+    let editor = ConfigEditor::open(&env, path.clone(), ConfigScope::Local);
+    let opts = ConfigWriteOptions::new();
+    editor
+        .rename_section("old.x", "new.x", &opts)
+        .expect("rename");
     let content = fs::read_to_string(&path).unwrap();
     assert!(content.contains("[new \"x\"]"));
 
-    remove_config_section(
-        ConfigLocation::File(path.clone()),
-        &env,
-        None,
-        "stay",
-        false,
-    )
-    .expect("remove");
+    editor.remove_section("stay", &opts).expect("remove");
     let git_lines = git_file_list(&path);
     assert!(!git_lines.iter().any(|l| l.starts_with("stay.")));
 }
@@ -334,15 +315,15 @@ fn config_worktree_read_enabled_matches_git() {
 
     let mut env = Environment::empty();
     env.cwd = wt_path.clone();
-    add_config_value(
-        ConfigLocation::Worktree,
-        &env,
-        Some(&git_dir),
-        "wt.key",
-        "from-grit",
-        false,
-    )
-    .expect("set worktree key");
+    wt_repo
+        .config()
+        .add_value(
+            ConfigScope::Worktree,
+            "wt.key",
+            "from-grit",
+            &ConfigWriteOptions::new(),
+        )
+        .expect("set worktree key");
 
     let (git_ok, git_val) = git_worktree_get(&wt_path, "wt.key");
     assert!(git_ok);
@@ -383,15 +364,15 @@ fn config_worktree_scope_requires_extension() {
     let mut env = Environment::empty();
     env.cwd = wt_path.clone();
 
-    let err = add_config_value(
-        ConfigLocation::Worktree,
-        &env,
-        Some(&git_dir),
-        "x.y",
-        "z",
-        false,
-    )
-    .expect_err("worktree write blocked");
+    let err = wt_repo
+        .config()
+        .add_value(
+            ConfigScope::Worktree,
+            "x.y",
+            "z",
+            &ConfigWriteOptions::new(),
+        )
+        .expect_err("worktree write blocked");
     assert!(matches!(
         err,
         Error::Config(ConfigError::WorktreeConfigNotEnabled)
@@ -440,17 +421,10 @@ fn config_unset_last_only_removes_one_multi_value() {
     write_file(&path, "[s]\n\tk = one\n");
     let mut env = Environment::empty();
     env.cwd = dir.path().to_path_buf();
-    add_config_value(
-        ConfigLocation::File(path.clone()),
-        &env,
-        None,
-        "s.k",
-        "two",
-        false,
-    )
-    .expect("add");
-    unset_config_value(ConfigLocation::File(path.clone()), &env, None, "s.k", false)
-        .expect("unset one");
+    let editor = ConfigEditor::open(&env, path.clone(), ConfigScope::Local);
+    let opts = ConfigWriteOptions::new();
+    editor.add_value("s.k", "two", &opts).expect("add");
+    editor.unset("s.k", &opts).expect("unset one");
     let vals = git_file_get_all(&path, "s.k");
     assert_eq!(vals, vec!["one".to_owned()]);
 }

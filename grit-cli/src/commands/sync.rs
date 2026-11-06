@@ -22,7 +22,7 @@ use std::io::Write;
 
 use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::config::{add_config_value, set_config_value, unset_config_value, ConfigLocation};
+use grit_lib::config::{ConfigScope, ConfigWriteOptions};
 use grit_lib::objects::{short_hex, ObjectId};
 use grit_lib::remote::grit_server_auth::{ServerAuthError, ServerUrl};
 use grit_lib::remote::grit_server_share::SHARED_REFS;
@@ -434,44 +434,31 @@ pub(crate) fn configure_shared(
     if !branches.is_empty()
         && !crate::context::config_strings(&config, &fetch_key).contains(&refspec)
     {
-        add_config_value(
-            ConfigLocation::Local,
-            &env,
-            Some(repo.git_dir()),
-            &fetch_key,
-            &refspec,
-            false,
-        )
-        .with_context(|| format!("adding {refspec} to {fetch_key}"))?;
+        repo.config()
+            .add_value(
+                ConfigScope::Local,
+                &fetch_key,
+                &refspec,
+                &ConfigWriteOptions::new(),
+            )
+            .with_context(|| format!("adding {refspec} to {fetch_key}"))?;
         changed = true;
     }
     for branch in branches {
         if let Some(base) = base {
             let key = format!("branch.{branch}.sharedBase");
             if crate::context::config_string(&config, &key).as_deref() != Some(base) {
-                set_config_value(
-                    ConfigLocation::Local,
-                    &env,
-                    Some(repo.git_dir()),
-                    &key,
-                    base,
-                    false,
-                )
-                .with_context(|| format!("setting {key}"))?;
+                repo.config()
+                    .set(ConfigScope::Local, &key, base, &ConfigWriteOptions::new())
+                    .with_context(|| format!("setting {key}"))?;
                 changed = true;
             }
         }
         let key = format!("branch.{branch}.shared");
         if crate::context::config_string(&config, &key).as_deref() != Some("true") {
-            set_config_value(
-                ConfigLocation::Local,
-                &env,
-                Some(repo.git_dir()),
-                &key,
-                "true",
-                false,
-            )
-            .with_context(|| format!("setting {key}"))?;
+            repo.config()
+                .set(ConfigScope::Local, &key, "true", &ConfigWriteOptions::new())
+                .with_context(|| format!("setting {key}"))?;
             changed = true;
         }
     }
@@ -489,14 +476,9 @@ pub(crate) fn unmark_shared(repo: &Repository, branch: &str) -> Result<()> {
     .context("could not load config")?;
     let key = format!("branch.{branch}.shared");
     if crate::context::config_string(&config, &key).is_some() {
-        unset_config_value(
-            ConfigLocation::Local,
-            &env,
-            Some(repo.git_dir()),
-            &key,
-            false,
-        )
-        .with_context(|| format!("unsetting {key}"))?;
+        repo.config()
+            .unset(ConfigScope::Local, &key, &ConfigWriteOptions::new())
+            .with_context(|| format!("unsetting {key}"))?;
     }
     Ok(())
 }
@@ -541,7 +523,6 @@ fn fast_forward(repo: &Repository, name: &str, to: &str, oid: ObjectId) -> Resul
 }
 
 fn set_tracking(repo: &Repository, branch: &str, remote: &str) -> Result<()> {
-    let env = context::environment();
     for (key, value) in [
         (format!("branch.{branch}.remote"), remote.to_owned()),
         (
@@ -549,15 +530,9 @@ fn set_tracking(repo: &Repository, branch: &str, remote: &str) -> Result<()> {
             format!("refs/heads/{branch}"),
         ),
     ] {
-        set_config_value(
-            ConfigLocation::Local,
-            &env,
-            Some(repo.git_dir()),
-            &key,
-            &value,
-            false,
-        )
-        .with_context(|| format!("setting {key}"))?;
+        repo.config()
+            .set(ConfigScope::Local, &key, &value, &ConfigWriteOptions::new())
+            .with_context(|| format!("setting {key}"))?;
     }
     Ok(())
 }

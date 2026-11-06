@@ -1491,13 +1491,12 @@ fn add_local_config(repo: &Repository, entries: &[(String, String)]) -> Result<(
 }
 
 fn set_local_config(repo: &Repository, entries: &[(&str, String)]) -> Result<()> {
-    let path = repo.git_dir().join("config");
-    let content = fs::read_to_string(&path).unwrap_or_default();
-    let mut config = ConfigFile::parse(&path, &content, ConfigScope::Local)?;
+    let options = crate::config::ConfigWriteOptions::new();
     for (key, value) in entries {
-        config.set(key, value)?;
+        repo.config()
+            .set(crate::config::ConfigScope::Local, key, value, &options)
+            .map(|_| ())?;
     }
-    config.write()?;
     Ok(())
 }
 

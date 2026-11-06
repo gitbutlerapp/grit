@@ -454,10 +454,22 @@ fn reset_reflog_identity_includes_signature_timestamp_and_git_reads_it() {
     )
     .expect("init");
     repo.config()
-        .set_local("user.name", "Solo Dev")
+        .set(
+            grit_lib::config::ConfigScope::Local,
+            "user.name",
+            "Solo Dev",
+            &grit_lib::config::ConfigWriteOptions::new(),
+        )
+        .map(|_| ())
         .expect("name");
     repo.config()
-        .set_local("user.email", "solo@example.com")
+        .set(
+            grit_lib::config::ConfigScope::Local,
+            "user.email",
+            "solo@example.com",
+            &grit_lib::config::ConfigWriteOptions::new(),
+        )
+        .map(|_| ())
         .expect("email");
     let repo = Repository::open(
         repo.git_dir(),

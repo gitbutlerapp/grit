@@ -260,6 +260,7 @@ mod tests {
     use super::*;
     use crate::commit::resolve_core_abbrev_len;
     use crate::config::environment::RepositoryOptions;
+    use crate::hash::hash_object;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::repo::Repository;
     use std::path::Path;
@@ -475,15 +476,21 @@ PY"#;
 
         let upstream_repo =
             Repository::discover(Some(up), &RepositoryOptions::empty()).expect("open upstream");
+        let hash_algo = upstream_repo.odb().hash_algo();
         let mut wrote_colliding_loose = false;
-        for i in 0..200_000u32 {
+        // Hash cheap blobs first: expect ~one 4-nibble prefix match every 65,536 tries; only
+        // persist a matching blob (avoids flaky 200k caps from disk writes + duplicate hits).
+        const MAX_PROBE: u64 = 30_000_000;
+        for i in 0..MAX_PROBE {
             let data = format!("shared-clone abbrev collision probe {i}\n");
-            let blob_oid = upstream_repo
-                .odb()
-                .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
-                .expect("write loose blob");
+            let blob_oid =
+                hash_object(hash_algo, ObjectKind::Blob, data.as_bytes()).expect("hash loose blob");
             let blob_hex = blob_oid.to_hex();
             if blob_hex.starts_with(prefix4) && blob_hex != commit_hex {
+                upstream_repo
+                    .odb()
+                    .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
+                    .expect("write loose blob");
                 wrote_colliding_loose = true;
                 break;
             }

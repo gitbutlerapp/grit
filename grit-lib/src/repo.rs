@@ -2825,13 +2825,13 @@ fn resolve_common_dir(git_dir: &Path) -> Option<PathBuf> {
 
 /// Directory holding `config` for early-config reads (`commondir` when present).
 #[must_use]
-pub fn common_git_dir_for_config(git_dir: &Path) -> PathBuf {
-    resolve_common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf())
+pub fn common_git_dir_for_config(git_directory: &Path) -> PathBuf {
+    resolve_common_dir(git_directory).unwrap_or_else(|| git_directory.to_path_buf())
 }
 
 /// True when `extensions.worktreeConfig` is enabled in the common `config`.
-pub fn worktree_config_enabled(common_dir: &Path) -> bool {
-    let path = common_dir.join("config");
+pub fn worktree_config_enabled(git_directory: &Path) -> bool {
+    let path = git_directory.join("config");
     let Ok(content) = crate::repo_caches::read_local_config_file(&path) else {
         return false;
     };
@@ -2912,10 +2912,10 @@ fn config_file_bool_true(cfg: &ConfigFile, key: &str) -> bool {
 /// # Errors
 ///
 /// Returns [`Error::Io`] or [`Error::Config`] if config files cannot be read or written.
-pub fn init_worktree_config(git_dir: &Path) -> Result<()> {
-    let common_dir = common_git_dir_for_config(git_dir);
+pub fn init_worktree_config(git_directory: &Path) -> Result<()> {
+    let common_dir = common_git_dir_for_config(git_directory);
     let common_config_path = common_dir.join("config");
-    let worktree_config_path = git_dir.join("config.worktree");
+    let worktree_config_path = git_directory.join("config.worktree");
 
     if worktree_config_enabled(&common_dir) {
         if !worktree_config_path.exists() {
@@ -2949,8 +2949,8 @@ pub fn init_worktree_config(git_dir: &Path) -> Result<()> {
 /// If the common `config` declares a repository format newer than Git's
 /// `GIT_REPO_VERSION_READ`, return the human message Git prints for
 /// `discover_git_directory_reason` / t1309.
-pub fn early_config_ignore_repo_reason(common_dir: &Path) -> Option<String> {
-    let path = common_dir.join("config");
+pub fn early_config_ignore_repo_reason(git_directory: &Path) -> Option<String> {
+    let path = git_directory.join("config");
     let content = crate::repo_caches::read_local_config_file(&path).ok()?;
     early_config_ignore_repo_reason_for_text(Some(content.as_str()))
 }
@@ -3057,14 +3057,14 @@ fn longest_ancestor_length(path: &str, ceilings: &[String]) -> Option<usize> {
 /// worktree admin directory that has no separate `config` file).
 ///
 /// Used when writing `git config --local` semantics from library code.
-pub fn local_config_write_path(git_dir: &Path) -> PathBuf {
-    if let Some(path) = repository_config_path(git_dir) {
+pub fn local_config_write_path(git_directory: &Path) -> PathBuf {
+    if let Some(path) = repository_config_path(git_directory) {
         return path;
     }
-    if let Some(common) = resolve_common_dir(git_dir) {
+    if let Some(common) = resolve_common_dir(git_directory) {
         return common.join("config");
     }
-    git_dir.join("config")
+    git_directory.join("config")
 }
 
 /// Determine the config file path for a repository or linked worktree.
@@ -3096,8 +3096,8 @@ pub(crate) fn repository_config_path_for_caches(git_dir: &Path) -> Option<PathBu
 /// Supports repository format versions 0 and 1, with extension handling that
 /// matches Git's compatibility expectations in upstream repo-version tests.
 /// Public wrapper for validate_repository_format.
-pub fn validate_repo_format(git_dir: &Path) -> Result<()> {
-    validate_repository_format(git_dir)
+pub fn validate_repo_format(git_directory: &Path) -> Result<()> {
+    validate_repository_format(git_directory)
 }
 
 /// Validate parsed repository format (version and extensions) before using the repo.
@@ -3337,9 +3337,9 @@ pub(crate) fn parse_repository_format(
 ///
 /// Returns [`Error::Io`] if the config file exists but cannot be read, or
 /// [`Error::Config`] if a section header is malformed.
-pub fn repository_format_warning(git_dir: &Path) -> Result<Option<String>> {
+pub fn repository_format_warning(git_directory: &Path) -> Result<Option<String>> {
     const GIT_REPO_VERSION_READ: u32 = 1;
-    let Some(config_path) = repository_config_path(git_dir) else {
+    let Some(config_path) = repository_config_path(git_directory) else {
         return Ok(None);
     };
     let content = fs::read_to_string(&config_path).map_err(Error::Io)?;
@@ -3882,8 +3882,8 @@ fn resolve_git_dir_env_path(git_dir: &Path) -> Result<PathBuf> {
 /// # Errors
 ///
 /// Returns [`Error::NotARepository`] for invalid gitfile content.
-pub fn resolve_git_directory_arg(git_dir: &Path) -> Result<PathBuf> {
-    resolve_git_dir_env_path(git_dir)
+pub fn resolve_git_directory_arg(git_directory: &Path) -> Result<PathBuf> {
+    resolve_git_dir_env_path(git_directory)
 }
 
 /// Resolves a work tree's `.git` path (directory or gitfile) to the real git directory.
@@ -4296,8 +4296,8 @@ pub(crate) fn init_repository_separate_git_dir(
 ///
 /// Returns [`Error::Io`] on filesystem failures.
 /// Ensure `core.bare = true` in the repository `config` (used after `git clone --bare`).
-pub fn ensure_core_bare(git_dir: &Path) -> Result<()> {
-    let path = git_dir.join("config");
+pub fn ensure_core_bare(git_directory: &Path) -> Result<()> {
+    let path = git_directory.join("config");
     let text = fs::read_to_string(&path).unwrap_or_default();
     if text.lines().any(|l| {
         let t = l.trim();
