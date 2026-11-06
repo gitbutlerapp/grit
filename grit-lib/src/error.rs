@@ -1463,16 +1463,6 @@ pub enum Error {
         actual: crate::objects::ObjectKind,
     },
 
-    /// Two commits that were asked to be merged share no merge base, and the caller did not
-    /// allow merging unrelated histories.
-    #[error("commits {ours} and {theirs} have no common ancestor")]
-    UnrelatedHistories {
-        /// The commit being merged into.
-        ours: crate::objects::ObjectId,
-        /// The commit being merged in.
-        theirs: crate::objects::ObjectId,
-    },
-
     /// A commit-graph write was given a commit whose parent is neither among the commits
     /// being written nor in the base graph layers, so its parent edge cannot be encoded.
     #[error("commit-graph cannot encode parent {parent} of commit {commit}: parent not in graph")]
@@ -1711,6 +1701,14 @@ pub enum Error {
     #[error(transparent)]
     Branch(#[from] crate::porcelain::branch_error::BranchError),
 
+    /// Commit, identity, signing, and patch-scoped commit failures.
+    #[error(transparent)]
+    Commit(#[from] crate::porcelain::commit_error::CommitError),
+
+    /// Merge, cherry-pick, revert, and in-progress operation failures.
+    #[error(transparent)]
+    Merge(#[from] crate::porcelain::merge_error::MergeError),
+
     /// Reference lock failure while updating refs.
     #[error(transparent)]
     RefLock(#[from] RefLockError),
@@ -1802,22 +1800,6 @@ pub enum Error {
         spec: String,
     },
 
-    /// [`crate::porcelain::commit::CommitScope::Paths`] was used while a merge is in progress.
-    #[error("cannot do a partial commit during a merge")]
-    PartialCommitDuringMerge,
-
-    /// Partial commit, amend, or patch commit while a cherry-pick or revert is in progress.
-    #[error("cannot do a partial commit during a cherry-pick or revert")]
-    PartialCommitDuringReplay,
-
-    /// [`continue_replay_sequence`](crate::porcelain::replay_sequence::continue_replay_sequence) with a dirty index after the step was already committed.
-    #[error("cannot continue replay: index differs from HEAD after the step was committed")]
-    ReplayContinueDirtyIndex,
-
-    /// [`skip_replay_step`](crate::porcelain::replay_sequence::skip_replay_step) when the current step was already committed on a moved branch tip.
-    #[error("nothing to skip: current step already committed; run continue instead")]
-    ReplaySkipAlreadyCommitted,
-
     /// An embedded git repository (nested `.git` checkout) has no commit checked out on its
     /// current branch, so it cannot be recorded as a gitlink or as regular files.
     #[error("embedded git repository '{path}' has no commit checked out")]
@@ -1855,11 +1837,6 @@ pub enum Error {
     /// [`crate::porcelain::paths::remove_paths`] was called with no pathspecs.
     #[error("you must specify path(s) to remove")]
     RemovePathsRequired,
-
-    /// [`crate::porcelain::commit::commit_with_scope`] was called with an empty
-    /// [`CommitScope::Paths`](crate::porcelain::commit::CommitScope::Paths) pathspec list.
-    #[error("you must specify path(s)")]
-    CommitPathsRequired,
 
     /// [`crate::porcelain::paths::move_path`] / [`crate::porcelain::paths::move_paths`] source is not tracked.
     #[error("'{src}' is not under version control")]
@@ -1953,10 +1930,6 @@ pub enum Error {
         paths: Vec<String>,
     },
 
-    /// Author or committer on [`crate::porcelain::commit::CommitRequest`] is invalid.
-    #[error(transparent)]
-    InvalidIdentity(#[from] crate::ident::CommitIdentityError),
-
     /// A long-running library operation stopped at a cancellation checkpoint.
     ///
     /// Use [`Error::is_cancelled`] to test for it through wrapper errors
@@ -1993,24 +1966,6 @@ pub enum Error {
     #[error("{0}")]
     Message(String),
 
-    /// A merge was requested with fast-forward only, but the histories diverged.
-    #[error("not possible to fast-forward; refusing to merge")]
-    NotFastForward,
-
-    /// The index tree matches the parent commit tree and [`allow_empty`](crate::porcelain::commit::CommitRequest::allow_empty) is false.
-    #[error("nothing to commit")]
-    NothingToCommit,
-
-    /// No staged changes are available for a [`CommitScope::Staged`](crate::porcelain::commit::CommitScope::Staged)
-    /// commit, but the work tree has unstaged or untracked paths.
-    #[error("nothing staged to commit")]
-    NothingStagedToCommit {
-        /// Tracked paths that differ between the index and the work tree.
-        unstaged: usize,
-        /// Untracked paths under the work tree.
-        untracked: usize,
-    },
-
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]
     DetachedHead,
@@ -2024,42 +1979,6 @@ pub enum Error {
     /// `HEAD` could not be resolved to a branch, detached commit, or unborn branch.
     #[error("HEAD is in an unknown state")]
     InvalidHead,
-
-    /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits
-    /// until callers can select a mainline parent explicitly.
-    #[error("merge commit {oid}")]
-    MergeCommit {
-        /// Object id of the merge commit that cannot be replayed yet.
-        oid: crate::objects::ObjectId,
-    },
-
-    /// Cherry-pick source is already checked out as `HEAD`.
-    #[error("commit already at HEAD")]
-    ReplaySourceAtHead,
-
-    /// Sequencer todo lists a command grit does not implement yet.
-    #[error("unknown sequencer command '{command}'")]
-    SequencerUnknownCommand {
-        /// Verb read from `.git/sequencer/todo`.
-        command: String,
-    },
-
-    /// [`continue_replay_sequence`](crate::porcelain::replay_sequence::continue_replay_sequence) refuses while unmerged index entries remain.
-    #[error("cannot continue replay: unmerged index entries remain")]
-    ReplayContinueUnmerged,
-
-    /// No cherry-pick or revert sequence is in progress.
-    #[error("no cherry-pick or revert in progress")]
-    NoReplayInProgress,
-
-    /// [`crate::porcelain::merge::abort_branch_merge`] was called with no merge in progress.
-    #[error("there is no merge in progress")]
-    NoMergeInProgress,
-
-    /// The command would move `HEAD` while a paused operation still depends on it
-    /// (see [`operation_blocking_switch`](crate::state::operation_blocking_switch)).
-    #[error("{} in progress", .0.description())]
-    OperationInProgress(crate::state::InProgressOperation),
 
     /// A local branch is checked out as `HEAD` in a linked or main worktree.
     #[error("branch '{branch}' is already checked out in '{worktree_path}'")]
@@ -2291,6 +2210,18 @@ pub enum Error {
     },
 }
 
+impl From<crate::config::ident_resolve::IdentityError> for Error {
+    fn from(err: crate::config::ident_resolve::IdentityError) -> Self {
+        crate::porcelain::commit_error::CommitError::from(err).into()
+    }
+}
+
+impl From<crate::ident::CommitIdentityError> for Error {
+    fn from(err: crate::ident::CommitIdentityError) -> Self {
+        crate::porcelain::commit_error::CommitError::from(err).into()
+    }
+}
+
 impl Error {
     /// Stable snake_case name of this error's variant (for example `"not_a_repository"`),
     /// for scripts and serialized output that must branch on the failure kind.
@@ -2303,7 +2234,11 @@ impl Error {
     /// ```
     /// use grit_lib::error::Error;
     ///
-    /// assert_eq!(Error::NothingToCommit.kind_name(), "nothing_to_commit");
+    /// use grit_lib::porcelain::CommitError;
+    /// assert_eq!(
+    ///     Error::Commit(CommitError::NothingToCommit).kind_name(),
+    ///     "nothing_to_commit"
+    /// );
     /// assert_eq!(Error::Cancelled.kind_name(), "cancelled");
     /// ```
     #[must_use]
@@ -2375,6 +2310,8 @@ impl Error {
             Self::Config(..) => "config",
             Self::Submodule(..) => "submodule",
             Self::Branch(..) => "branch",
+            Self::Commit(e) => e.kind_name(),
+            Self::Merge(e) => e.kind_name(),
             Self::RefLock(..) => "ref_lock",
             Self::RefStore(..) => "ref_store",
             Self::Reftable(..) => "reftable",
@@ -2392,10 +2329,6 @@ impl Error {
             Self::RestoreConflictNotUnmerged { .. } => "restore_conflict_not_unmerged",
             Self::RestorePathUnmerged { .. } => "restore_path_unmerged",
             Self::PathspecBeyondSymlink { .. } => "pathspec_beyond_symlink",
-            Self::PartialCommitDuringMerge => "partial_commit_during_merge",
-            Self::PartialCommitDuringReplay => "partial_commit_during_replay",
-            Self::ReplayContinueDirtyIndex => "replay_continue_dirty_index",
-            Self::ReplaySkipAlreadyCommitted => "replay_skip_already_committed",
             Self::EmbeddedRepoWithoutCommit { .. } => "embedded_repo_without_commit",
             Self::PathspecIgnored { .. } => "pathspec_ignored",
             Self::RemoveBlocked { .. } => "remove_blocked",
@@ -2403,7 +2336,6 @@ impl Error {
             Self::Repository(RepositoryError::RequiresWorkTree) => "requires_work_tree",
             Self::EmptyCommitMessage => "empty_commit_message",
             Self::RemovePathsRequired => "remove_paths_required",
-            Self::CommitPathsRequired => "commit_paths_required",
             Self::MoveSourceNotTracked { .. } => "move_source_not_tracked",
             Self::MoveDestinationExists { .. } => "move_destination_exists",
             Self::MoveDestinationNotDirectory { .. } => "move_destination_not_directory",
@@ -2415,7 +2347,6 @@ impl Error {
             Self::MoveMissingIndexEntry { .. } => "move_missing_index_entry",
             Self::WouldOverwrite { .. } => "would_overwrite",
             Self::DirtyWorktree { .. } => "dirty_worktree",
-            Self::InvalidIdentity(..) => "invalid_identity",
             Self::Cancelled => "cancelled",
             Self::Identity(..) => "identity",
             Self::Message(..)
@@ -2429,17 +2360,9 @@ impl Error {
                 "object_format_mismatch"
             }
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
-            Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
             Self::DetachedHead => "detached_head",
             Self::UnbornHead => "unborn_head",
             Self::InvalidHead => "invalid_head",
-            Self::MergeCommit { .. } => "merge_commit",
-            Self::ReplaySourceAtHead => "replay_source_at_head",
-            Self::SequencerUnknownCommand { .. } => "sequencer_unknown_command",
-            Self::ReplayContinueUnmerged => "replay_continue_unmerged",
-            Self::NoReplayInProgress => "no_replay_in_progress",
-            Self::NoMergeInProgress => "no_merge_in_progress",
-            Self::OperationInProgress(..) => "operation_in_progress",
             Self::BranchCheckedOutInWorktree { .. } => "branch_checked_out_in_worktree",
             Self::BranchNotFound { .. } => "branch_not_found",
             Self::BranchListNamesDateSort => "branch_list_names_date_sort",
@@ -2600,6 +2523,10 @@ impl Error {
             Self::Cancelled => true,
             Self::Remote(e) => e.is_cancelled(),
             Self::History(e) => e.is_cancelled(),
+            Self::Commit(crate::porcelain::commit_error::CommitError::Library(e))
+            | Self::Merge(crate::porcelain::merge_error::MergeError::Library(e)) => {
+                e.is_cancelled()
+            }
             Self::CheckoutRollbackIncomplete { source, .. } => source.is_cancelled(),
             Self::Io(err)
                 if err.to_string() == crate::transport::stateless_http::TRANSPORT_IO_CANCELLED =>

@@ -404,35 +404,46 @@ fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
 
 fn map_replay_error(repo: &grit_lib::repo::Repository, err: Error) -> anyhow::Error {
     match err {
-        Error::OperationInProgress(kind) => {
-            crate::json_error::operation_in_progress_for_repo(repo, "revert", kind)
+        Error::Merge(merge_err) => map_merge_replay_error(repo, merge_err),
+        Error::Commit(grit_lib::porcelain::CommitError::NothingToCommit) => {
+            anyhow::anyhow!("nothing to commit — the revert would not change the tree")
         }
         Error::UnbornHead => anyhow::anyhow!("no commits yet on this branch to revert onto"),
-        Error::MergeCommit { oid } => {
+        Error::Message(msg) => anyhow::anyhow!(msg),
+        other => anyhow::Error::new(other),
+    }
+}
+
+fn map_merge_replay_error(
+    repo: &grit_lib::repo::Repository,
+    err: grit_lib::porcelain::MergeError,
+) -> anyhow::Error {
+    use grit_lib::porcelain::MergeError;
+    match err {
+        MergeError::OperationInProgress(kind) => {
+            crate::json_error::operation_in_progress_for_repo(repo, "revert", kind)
+        }
+        MergeError::MergeCommit { oid } => {
             let s = oid.to_short_hex();
             anyhow::anyhow!(
                 "{s} is a merge commit — pass `--mainline 1` (or another parent number) to revert it"
             )
         }
-        Error::ReplaySourceAtHead => {
+        MergeError::ReplaySourceAtHead => {
             anyhow::anyhow!("nothing to revert — that commit is already the current HEAD")
         }
-        Error::ReplayContinueUnmerged => anyhow::anyhow!(
+        MergeError::ReplayContinueUnmerged => anyhow::anyhow!(
             "cannot continue revert: resolve conflicts and stage the result first (`grit add`)"
         ),
-        Error::NothingToCommit => {
-            anyhow::anyhow!("nothing to commit — the revert would not change the tree")
-        }
-        Error::NoReplayInProgress => {
+        MergeError::NoReplayInProgress => {
             crate::json_error::no_operation_in_progress("no revert in progress")
         }
-        Error::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
+        MergeError::ReplaySkipAlreadyCommitted => anyhow::anyhow!(
             "nothing to skip: current step already committed; run `grit revert --continue` instead"
         ),
-        Error::ReplayContinueDirtyIndex => anyhow::anyhow!(
+        MergeError::ReplayContinueDirtyIndex => anyhow::anyhow!(
             "cannot continue revert: index differs from HEAD after the step was committed"
         ),
-        Error::Message(msg) => anyhow::anyhow!(msg),
         other => anyhow::Error::new(other),
     }
 }

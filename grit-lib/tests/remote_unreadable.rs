@@ -447,7 +447,7 @@ fn wrapper_helpers_classify_only_remote_unreadable() {
         )
     };
     assert!(unreadable().is_remote_unreadable());
-    assert!(!Error::NothingToCommit.is_remote_unreadable());
+    assert!(!CommitError::NothingToCommit.is_remote_unreadable());
 
     assert!(RemoteError::from(unreadable()).is_remote_unreadable());
     assert!(!RemoteError::NoUrl { remote: None }.is_remote_unreadable());

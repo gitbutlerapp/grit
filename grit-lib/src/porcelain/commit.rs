@@ -19,7 +19,6 @@ use crate::diff::{
     diff_index_to_tree, diff_tree_path_change_count, diff_trees_with_renames, zero_oid, DiffEntry,
     DiffStatus,
 };
-use crate::error::ApplyError;
 use crate::error::{Error, Result};
 use crate::history::{
     ensure_rewrite_apply_ready, persist_rebase_stopped_head_if_missing, HistoryError,
@@ -43,7 +42,7 @@ use crate::porcelain::add::{
     stage_on_index, validate_commit_staging_pathspecs, StageMode, StageOptions,
 };
 use crate::porcelain::hunk_select::{
-    diff_options_for_hunk_select, resolve_selection, HunkSelectError, HunkSelection,
+    diff_options_for_hunk_select, resolve_selection, HunkSelection,
 };
 use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stats;
 use crate::porcelain::merge::squash_conflict_merge_in_progress;
@@ -74,7 +73,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
-use thiserror::Error;
 
 /// Whether the verifying hooks run before a commit object is written.
 ///
@@ -112,7 +110,7 @@ pub(crate) enum MessageSource {
 /// # Errors
 ///
 /// [`Error::Hook`] when a hook fails or cannot start, [`Error::Io`] when the file cannot be
-/// read back, and [`Error::EmptyCommitMessage`] when a hook left it empty.
+/// read back, and [`CommitError::EmptyCommitMessage`] when a hook left it empty.
 pub(crate) fn run_commit_message_hooks(
     repo: &Repository,
     msg_path: &Path,
@@ -161,7 +159,7 @@ pub(crate) fn run_commit_message_hooks(
     }
     let mut message = fs::read_to_string(msg_path).map_err(Error::Io)?;
     if message.trim().is_empty() {
-        return Err(Error::EmptyCommitMessage);
+        return Err(CommitError::EmptyCommitMessage.into());
     }
     if !message.ends_with('\n') {
         message.push('\n');
@@ -206,7 +204,7 @@ impl serde::Serialize for CommitAuthorInfo {
 fn guard_incomplete_rewrite_apply(repo: &Repository) -> Result<()> {
     ensure_rewrite_apply_ready(repo).map_err(|err| match err {
         HistoryError::RewriteApplyIncomplete => {
-            Error::OperationInProgress(InProgressOperation::RewriteApply)
+            MergeError::OperationInProgress(InProgressOperation::RewriteApply).into()
         }
         other => Error::History(other),
     })
@@ -269,7 +267,7 @@ pub struct CommitRequest {
     /// parent tree, by object id and mode) without writing objects, the index or refs, or running
     /// hooks.
     pub dry_run: bool,
-    /// When true, a [`Error::NothingToCommit`] is upgraded to [`Error::NothingStagedToCommit`] if the
+    /// When true, a [`CommitError::NothingToCommit`] is upgraded to [`CommitError::NothingStagedToCommit`] if the
     /// work tree still has unstaged or untracked paths (index-only commit).
     pub(crate) index_only: bool,
     /// Whether an amend runs `post-rewrite amend` ([`PostOperationHooks::Skip`] is Git's
@@ -378,19 +376,8 @@ pub enum CommitPatchInput {
     Patches(Vec<FilePatch>),
 }
 
-/// Failure while resolving or applying a patch-scoped commit.
-#[derive(Debug, Error)]
-pub enum CommitPatchError {
-    /// Hunk id resolution failed (unknown, stale, wrong side, binary).
-    #[error(transparent)]
-    Select(#[from] HunkSelectError),
-    /// Index apply failed after resolution.
-    #[error(transparent)]
-    Apply(#[from] ApplyError),
-    /// Commit, index, or repository error.
-    #[error(transparent)]
-    Commit(#[from] Error),
-}
+/// Deprecated alias — use [`CommitError`] for [`commit_with_patch`] failures.
+pub type CommitPatchError = CommitError;
 
 impl From<crate::index::IndexError> for CommitPatchError {
     fn from(err: crate::index::IndexError) -> Self {
@@ -467,7 +454,8 @@ pub fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
             return Ok(None);
         };
         let processed = process(raw.as_bytes(), &Mode::StripComments("#".to_owned()));
-        let message = String::from_utf8(processed).map_err(|_| Error::EmptyCommitMessage)?;
+        let message = String::from_utf8(processed)
+            .map_err(|_| Error::from(CommitError::EmptyCommitMessage))?;
         if message.trim().is_empty() {
             return Ok(None);
         }
@@ -478,7 +466,8 @@ pub fn pending_commit_message(repo: &Repository) -> Result<Option<String>> {
             return Ok(None);
         };
         let processed = process(raw.as_bytes(), &Mode::StripComments("#".to_owned()));
-        let message = String::from_utf8(processed).map_err(|_| Error::EmptyCommitMessage)?;
+        let message = String::from_utf8(processed)
+            .map_err(|_| Error::from(CommitError::EmptyCommitMessage))?;
         if message.trim().is_empty() {
             return Ok(None);
         }
@@ -501,13 +490,13 @@ fn replay_blocks_partial_commit(git_dir: &std::path::Path) -> Result<bool> {
 ///
 /// Same as [`create_commit`] and [`commit_worktree`], plus:
 ///
-/// - [`Error::CommitPathsRequired`] for an empty [`CommitScope::Paths`] list.
-/// - [`Error::PartialCommitDuringMerge`] for [`CommitScope::Paths`] or [`CommitScope::Patch`]
+/// - [`CommitError::CommitPathsRequired`] for an empty [`CommitScope::Paths`] list.
+/// - [`CommitError::PartialCommitDuringMerge`] for [`CommitScope::Paths`] or [`CommitScope::Patch`]
 ///   during an in-progress merge, and pathspec validation errors.
 /// - [`Error::HunkSelection`] when a [`CommitScope::Patch`] hunk id is unknown, stale, binary, or
 ///   for the wrong side, and [`Error::Apply`] when the selected patch does not apply to the
-///   index. These carry the same values as [`CommitPatchError::Select`] and
-///   [`CommitPatchError::Apply`] from [`commit_with_patch`].
+///   index. These carry the same values as [`CommitError::HunkSelect`] and
+///   [`CommitError::PatchApply`] from [`commit_with_patch`].
 pub fn commit_with_scope(
     repo: &Repository,
     req: &CommitRequest,
@@ -527,11 +516,7 @@ pub fn commit_with_scope(
         }
         CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress, cancel),
         CommitScope::Patch { input, pathspecs } => {
-            commit_with_patch(repo, req, input, &pathspecs, progress, cancel).map_err(|e| match e {
-                CommitPatchError::Select(err) => Error::HunkSelection(err),
-                CommitPatchError::Apply(err) => Error::Apply(err),
-                CommitPatchError::Commit(err) => err,
-            })
+            commit_with_patch(repo, req, input, &pathspecs, progress, cancel).map_err(Into::into)
         }
     }
 }
@@ -543,7 +528,7 @@ pub fn commit_with_scope(
 ///
 /// # Errors
 ///
-/// [`CommitPatchError::Select`] for hunk id failures; [`CommitPatchError::Apply`] for patch apply;
+/// [`CommitError::HunkSelect`] for hunk id failures; [`CommitError::PatchApply`] for patch apply;
 /// same commit errors as [`create_commit`].
 pub fn commit_with_patch(
     repo: &Repository,
@@ -566,10 +551,10 @@ fn commit_patch_scope(
     cancel: &CancelToken,
 ) -> std::result::Result<CommitOutcome, CommitPatchError> {
     if !read_merge_heads(repo.git_dir())?.is_empty() {
-        return Err(Error::PartialCommitDuringMerge.into());
+        return Err(CommitError::PartialCommitDuringMerge);
     }
     if replay_blocks_partial_commit(repo.git_dir())? {
-        return Err(Error::PartialCommitDuringReplay.into());
+        return Err(CommitError::PartialCommitDuringReplay);
     }
     let index_lock = (!req.dry_run)
         .then(|| repo.begin_index_update())
@@ -578,19 +563,19 @@ fn commit_patch_scope(
     let patches = match input {
         CommitPatchInput::Hunks(selection) => {
             if selection.ids.is_empty() && selection.ranges.is_empty() {
-                return Err(Error::NothingToCommit.into());
+                return Err(CommitError::NothingToCommit);
             }
             resolve_selection(
                 repo,
                 crate::diff::DiffSide::Unstaged,
                 &selection,
                 pathspecs,
-                diff_options_for_hunk_select(repo).map_err(CommitPatchError::Commit)?,
+                diff_options_for_hunk_select(repo).map_err(CommitError::from)?,
             )?
         }
         CommitPatchInput::Patches(patches) => {
             if patches.is_empty() {
-                return Err(Error::NothingToCommit.into());
+                return Err(CommitError::NothingToCommit);
             }
             patches
         }
@@ -626,7 +611,7 @@ fn commit_patch_scope(
     req.assume_worktree_synced = true;
     let persist = index_lock.map(|lock| LockedIndex { index: None, lock });
     create_commit_with_index(repo, head, &mut index, &req, progress, cancel, persist)
-        .map_err(CommitPatchError::Commit)
+        .map_err(CommitError::from)
 }
 
 /// Preview a commit for `scope` without mutating the repository (objects, index on disk, refs, hooks).
@@ -707,10 +692,10 @@ fn commit_paths_scope(
         return Err(Error::CommitPathsRequired);
     }
     if !read_merge_heads(repo.git_dir())?.is_empty() {
-        return Err(Error::PartialCommitDuringMerge);
+        return Err(CommitError::PartialCommitDuringMerge.into());
     }
     if replay_blocks_partial_commit(repo.git_dir())? {
-        return Err(Error::PartialCommitDuringReplay);
+        return Err(CommitError::PartialCommitDuringReplay.into());
     }
     validate_commit_pathspecs(repo, paths)?;
 
@@ -819,14 +804,14 @@ fn validate_commit_pathspecs(repo: &Repository, paths: &Pathspec) -> Result<()> 
 ///
 /// # Errors
 ///
-/// Returns [`Error::EmptyCommitMessage`] when the cleaned body would be empty.
+/// Returns [`CommitError::EmptyCommitMessage`] when the cleaned body would be empty.
 pub fn normalize_commit_message(raw: &str) -> Result<String> {
     let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
     let processed = process(normalized.as_bytes(), &Mode::Default);
     let message = String::from_utf8(processed)
         .map_err(|_| Error::Message("invalid commit message".into()))?;
     if message.is_empty() {
-        return Err(Error::EmptyCommitMessage);
+        return Err(CommitError::EmptyCommitMessage.into());
     }
     let mut message = message;
     while message.ends_with("\n\n") {
@@ -1024,7 +1009,7 @@ pub fn create_commit(
 ///
 /// When staging changed the index but the result matches the parent tree (for example a new
 /// file that was staged and then deleted from the work tree), the staged index is still written
-/// before [`Error::NothingToCommit`] is returned, so the on-disk index matches `HEAD` afterwards.
+/// before [`CommitError::NothingToCommit`] is returned, so the on-disk index matches `HEAD` afterwards.
 /// [`CommitRequest::dry_run`] never writes the index, refs, or stored objects. Symlinks are
 /// compared and previewed as link-target bytes, including directory and dangling links.
 ///
@@ -1076,13 +1061,13 @@ pub fn commit_worktree(
         outcome.embedded_gitlinks = embedded_gitlinks;
         outcome
     });
-    if matches!(result, Err(Error::NothingToCommit))
+    if matches!(result, Err(Error::Commit(CommitError::NothingToCommit)))
         && !req.dry_run
         && (staged_count > 0 || stat_refreshed)
     {
         repo.write_index(&mut index)?;
     }
-    if matches!(result, Err(Error::NothingToCommit)) && staged_count == 0 {
+    if matches!(result, Err(Error::Commit(CommitError::NothingToCommit))) && staged_count == 0 {
         let mut worktree_index = match repo.load_index() {
             Ok(real) => real,
             Err(_) => index.clone(),
@@ -1091,10 +1076,11 @@ pub fn commit_worktree(
             crate::porcelain::status::count_unstaged_and_untracked_paths(repo, &mut worktree_index)
         {
             if unstaged + untracked > 0 {
-                return Err(Error::NothingStagedToCommit {
+                return Err(CommitError::NothingStagedToCommit {
                     unstaged,
                     untracked,
-                });
+                }
+                .into());
             }
         }
     }
@@ -1300,10 +1286,10 @@ fn finish_commit_dry_run(
     } else if let Some(pending) = pending_commit_message(repo)? {
         normalize_commit_message(&pending)?
     } else {
-        return Err(Error::EmptyCommitMessage);
+        return Err(CommitError::EmptyCommitMessage.into());
     };
     if message.trim().is_empty() {
-        return Err(Error::EmptyCommitMessage);
+        return Err(CommitError::EmptyCommitMessage.into());
     }
     if !message.ends_with('\n') {
         message.push('\n');
@@ -1616,10 +1602,10 @@ fn create_commit_with_index(
     }
     if req.amend {
         if replay_blocks_partial_commit(repo.git_dir())? {
-            return Err(Error::PartialCommitDuringReplay);
+            return Err(CommitError::PartialCommitDuringReplay.into());
         }
         let Some(tip) = parent.take() else {
-            return Err(Error::AmendUnborn);
+            return Err(CommitError::AmendUnborn.into());
         };
         let old = repo.odb().read_commit(&tip)?;
         amend_parents = old.parents.clone();
@@ -1732,10 +1718,10 @@ fn create_commit_with_index(
     } else if let Some(pending) = pending_commit_message(repo)? {
         normalize_commit_message(&pending)?
     } else {
-        return Err(Error::EmptyCommitMessage);
+        return Err(CommitError::EmptyCommitMessage.into());
     };
     if message.trim().is_empty() {
-        return Err(Error::EmptyCommitMessage);
+        return Err(CommitError::EmptyCommitMessage.into());
     }
     if !message.ends_with('\n') {
         message.push('\n');
@@ -2113,14 +2099,15 @@ fn empty_commit_error(repo: &Repository, index: &mut Index, req: &CommitRequest)
             crate::porcelain::status::count_unstaged_and_untracked_paths(repo, &mut worktree_index)
         {
             if unstaged + untracked > 0 {
-                return Error::NothingStagedToCommit {
+                return CommitError::NothingStagedToCommit {
                     unstaged,
                     untracked,
-                };
+                }
+                .into();
             }
         }
     }
-    Error::NothingToCommit
+    CommitError::NothingToCommit.into()
 }
 
 /// True when stage-0 index entries describe `tree_oid`, using a valid cache-tree when present.
@@ -2437,7 +2424,10 @@ mod tests {
                 &crate::progress::CancelToken::never(),
             )
             .unwrap_err();
-            assert!(matches!(err, Error::NothingToCommit), "{err:?}");
+            assert!(
+                matches!(err, Error::Commit(CommitError::NothingToCommit)),
+                "{err:?}"
+            );
             assert_eq!(repo_snapshot(&repo), before);
             assert_eq!(
                 resolve_ref(repo.git_dir(), "refs/heads/main").unwrap(),
@@ -2530,7 +2520,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::Commit(CommitError::NothingToCommit)));
         assert!(resolve_ref(&repo.git_dir(), "refs/heads/main").is_err());
     }
 
@@ -2602,7 +2592,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::Commit(CommitError::NothingToCommit)));
     }
 
     #[test]
@@ -2634,9 +2624,9 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            Error::Identity(
+            Error::Commit(CommitError::Identity(
                 crate::config::ident_resolve::IdentityError::MissingConfiguredEmail { .. }
-            )
+            ))
         ));
         let objects_after = fs::read_dir(repo.git_dir().join("objects"))
             .unwrap()
@@ -2688,7 +2678,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::Commit(CommitError::NothingToCommit)));
         assert!(repo.load_index().unwrap().get(b"n.txt", 0).is_some());
 
         let err = commit_worktree(
@@ -2698,7 +2688,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::Commit(CommitError::NothingToCommit)));
         let index = repo.load_index().unwrap();
         assert!(index.get(b"n.txt", 0).is_none());
         assert!(index.get(b"a.txt", 0).is_some());
@@ -2804,7 +2794,7 @@ mod tests {
         )
         .unwrap_err();
         set_test_inject_index_write_fail(false);
-        assert!(!matches!(err, Error::NothingToCommit));
+        assert!(!matches!(err, Error::Commit(CommitError::NothingToCommit)));
 
         assert!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").is_err(),
@@ -2835,7 +2825,7 @@ mod tests {
         )
         .unwrap_err();
         set_test_inject_reflog_fail(None);
-        assert!(!matches!(err, Error::NothingToCommit));
+        assert!(!matches!(err, Error::Commit(CommitError::NothingToCommit)));
 
         assert!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").is_err(),
@@ -3007,7 +2997,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::AmendUnborn));
+        assert!(matches!(err, Error::Commit(CommitError::AmendUnborn)));
     }
 
     #[test]
@@ -3364,7 +3354,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::PartialCommitDuringMerge));
+        assert!(matches!(err, Error::Commit(CommitError::PartialCommitDuringMerge)));
     }
 
     fn system_git(root: &Path, args: &[&str]) -> String {
@@ -5348,7 +5338,7 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, CommitPatchError::Select(_)));
+        assert!(matches!(err, CommitError::HunkSelect(_)));
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
             before_tip
@@ -5393,7 +5383,9 @@ mod tests {
         )
         .unwrap_err();
         match &err {
-            Error::HunkSelection(HunkSelectError::StaleId { id, .. }) => assert_eq!(id, &stale),
+            Error::Commit(CommitError::HunkSelect(HunkSelectError::StaleId { id, .. })) => {
+                assert_eq!(id, &stale)
+            }
             other => panic!("expected stale hunk id error, got {other:?}"),
         }
         assert_eq!(err.to_string(), "stale hunk id 000000000000");
@@ -5420,7 +5412,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             plan_err,
-            Error::HunkSelection(HunkSelectError::StaleId { .. })
+            Error::Commit(CommitError::HunkSelect(HunkSelectError::StaleId { .. }))
         ));
     }
 
@@ -5493,7 +5485,10 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::Apply(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Commit(CommitError::PatchApply(_))),
+            "got {err:?}"
+        );
         assert_eq!(err.kind_name(), "apply");
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
@@ -5526,7 +5521,10 @@ mod tests {
             &crate::progress::CancelToken::never(),
         )
         .unwrap_err();
-        assert!(matches!(err, Error::CommitPathsRequired), "got {err:?}");
+        assert!(
+            matches!(err, Error::Commit(CommitError::CommitPathsRequired)),
+            "got {err:?}"
+        );
         assert_eq!(err.to_string(), "you must specify path(s)");
         assert_eq!(err.kind_name(), "commit_paths_required");
         assert_eq!(

@@ -21,7 +21,7 @@ fn cancelled() -> Error {
 #[test]
 fn wrapper_helpers_classify_only_cancelled() {
     assert!(cancelled().is_cancelled());
-    assert!(!Error::NothingToCommit.is_cancelled());
+    assert!(!CommitError::NothingToCommit.is_cancelled());
 
     assert!(RemoteError::Cancelled.is_cancelled());
     assert!(!RemoteError::NoUrl { remote: None }.is_cancelled());

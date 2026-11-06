@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
+use grit_lib::porcelain::MergeError;
 use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::maintenance::{
     drop_promised_blobs, gc, gc_auto, offload_blobs, AutoGcOutcome, DropPromisedBlobsOptions,
@@ -578,7 +579,9 @@ fn refusals_are_typed() {
     .unwrap();
     assert!(matches!(
         drop_promised_blobs(&fx.offline(), &opts(LIMIT, None)),
-        Err(Error::OperationInProgress(InProgressOperation::Merge))
+        Err(Error::Merge(MergeError::OperationInProgress(
+            InProgressOperation::Merge,
+        )))
     ));
     std::fs::remove_file(fx.git_dir.join("MERGE_HEAD")).unwrap();
 

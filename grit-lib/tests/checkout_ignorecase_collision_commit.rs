@@ -320,7 +320,7 @@ fn collision_loser_path_commit_leaves_index_and_head_unchanged() {
     assert!(
         matches!(
             err,
-            Error::NothingToCommit | Error::NothingStagedToCommit { .. }
+            CommitError::NothingToCommit | CommitError::NothingStagedToCommit { .. }
         ),
         "{err:?}"
     );
@@ -352,7 +352,7 @@ fn collision_loser_auto_stage_commit_is_noop() {
     )
     .expect_err("auto-stage must not commit phantom loser changes");
     assert!(
-        matches!(err, Error::NothingStagedToCommit { .. }),
+        matches!(err, grit_lib::error::Error::Commit(CommitError::NothingStagedToCommit { .. }),
         "collision drift must not read as a clean worktree: {err:?}"
     );
 

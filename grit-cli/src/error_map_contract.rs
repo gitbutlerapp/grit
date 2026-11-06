@@ -13,7 +13,7 @@ use grit_lib::error::{
 use grit_lib::error::{RemoteUnreadableReason, WorktreeOperation};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
-use grit_lib::porcelain::merge::ContinueMergeError;
+use grit_lib::porcelain::{CommitError, MergeError};
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::push_plan::PushPlanError;
 use grit_lib::remote::RemoteError;
@@ -127,10 +127,10 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "no_operation_in_progress",
-        build: || Error::new(LibError::NoMergeInProgress),
+        build: || Error::new(LibError::Merge(MergeError::NoMergeInProgress)),
         kind: Some(ErrorKind::NoOperationInProgress),
         exit: ExitStatus::Failure,
-        human: || LibError::NoMergeInProgress.to_string(),
+        human: || MergeError::NoMergeInProgress.to_string(),
         hint: None,
     },
     ContractRow {
@@ -248,7 +248,7 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "unmerged_paths",
         build: || {
-            Error::new(ContinueMergeError::UnmergedPaths {
+            Error::new(MergeError::ContinueUnmergedPaths {
                 paths: vec!["f.txt".into()],
             })
         },
@@ -567,10 +567,16 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "empty_commit_message",
-        build: || Error::new(LibError::EmptyCommitMessage),
+        build: || {
+            Error::new(LibError::Commit(
+                grit_lib::porcelain::CommitError::EmptyCommitMessage,
+            ))
+        },
         kind: Some(ErrorKind::EmptyCommitMessage),
         exit: ExitStatus::Failure,
-        human: || LibError::EmptyCommitMessage.to_string(),
+        human: || {
+            LibError::Commit(grit_lib::porcelain::CommitError::EmptyCommitMessage).to_string()
+        },
         hint: None,
     },
     ContractRow {
@@ -645,9 +651,11 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "identity_missing_author_email",
         build: || {
-            Error::new(LibError::Identity(IdentityError::MissingConfiguredEmail {
-                role: IdentRole::Author,
-            }))
+            Error::new(LibError::Commit(
+                grit_lib::porcelain::CommitError::Identity(IdentityError::MissingConfiguredEmail {
+                    role: IdentRole::Author,
+                }),
+            ))
         },
         kind: Some(ErrorKind::IdentityUnknown),
         exit: ExitStatus::Failure,

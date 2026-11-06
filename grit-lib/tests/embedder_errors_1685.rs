@@ -5,6 +5,7 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest};
+use grit_lib::porcelain::CommitError;
 use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::CancelToken;

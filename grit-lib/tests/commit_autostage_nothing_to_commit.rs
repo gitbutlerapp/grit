@@ -72,7 +72,7 @@ fn assert_nothing_to_commit(root: &Path, req: &CommitRequest) {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("nothing to commit");
-    assert!(matches!(err, Error::NothingToCommit), "got {err:?}");
+    assert!(matches!(err, grit_lib::error::Error::Commit(CommitError::NothingToCommit)), "got {err:?}"));
     assert_eq!(git_out(root, &["rev-parse", "HEAD"]), head_before);
 }
 

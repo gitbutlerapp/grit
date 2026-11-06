@@ -91,8 +91,8 @@ pub enum ReplayOutcome {
 /// # Errors
 ///
 /// - [`Error::UnbornHead`] when `HEAD` has no commits yet.
-/// - [`Error::MergeCommit`] when the source commit has more than one parent (pick or revert).
-/// - [`Error::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
+/// - [`MergeError::MergeCommit`] when the source commit has more than one parent (pick or revert).
+/// - [`MergeError::ReplaySourceAtHead`] when picking a commit that is already `HEAD`.
 /// - I/O, ODB, merge, checkout, or ref update failures.
 /// - [`Error::Cancelled`] when `cancel` fires before the
 ///   branch moved; a checkout already under way is rolled back to `HEAD` first.
@@ -125,13 +125,13 @@ pub fn replay_commit(
     };
 
     if req.direction == ReplayDirection::Pick && req.commit == head_oid {
-        return Err(Error::ReplaySourceAtHead);
+        return Err(MergeError::ReplaySourceAtHead.into());
     }
 
     let source_obj = repo.odb().read(&req.commit)?;
     let source = parse_commit(&source_obj.data)?;
     if source.parents.len() > 1 {
-        return Err(Error::MergeCommit { oid: req.commit });
+        return Err(MergeError::MergeCommit { oid: req.commit }.into());
     }
 
     let head_tree = repo.odb().commit_tree(&head_oid)?;

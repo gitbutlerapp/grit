@@ -164,7 +164,7 @@ fn repository_identity_reports_missing_configuration() {
     assert!(
         matches!(
             err,
-            Error::Identity(IdentityError::MissingConfiguredEmail {
+            CommitError::Identity(IdentityError::MissingConfiguredEmail {
                 role: IdentRole::Author
             })
         ),
@@ -183,7 +183,10 @@ fn repository_identity_reports_missing_configuration() {
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("no identity");
-    assert!(matches!(err, Error::Identity(_)), "unexpected error: {err}");
+    assert!(
+        matches!(err, grit_lib::error::Error::Commit(CommitError::Identity(_)),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]

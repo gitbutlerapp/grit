@@ -112,7 +112,7 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
     )
     .expect_err("clean tree");
     assert!(
-        matches!(err, grit_lib::error::Error::NothingToCommit),
+        matches!(err, grit_lib::error::CommitError::NothingToCommit),
         "expected NothingToCommit, got {err:?}"
     );
 }

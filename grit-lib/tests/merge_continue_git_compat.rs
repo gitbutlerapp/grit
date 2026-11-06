@@ -9,6 +9,7 @@ use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::merge::{
     continue_merge, integrate_branch, ContinueMergeError, ContinueOptions, IntegrateBranchOutcome,
 };
+use grit_lib::porcelain::MergeError;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -287,7 +288,7 @@ fn continue_refuses_unmerged_paths() {
     .unwrap_err();
     assert!(matches!(
         err,
-        ContinueMergeError::UnmergedPaths { ref paths } if paths == &["f"]
+        MergeError::ContinueUnmergedPaths { ref paths } if paths == &["f"]
     ));
     assert!(repo.git_dir().join("MERGE_HEAD").exists());
 }
@@ -311,7 +312,7 @@ fn continue_without_merge_errors() {
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap_err();
-    assert!(matches!(err, ContinueMergeError::NoMergeInProgress));
+    assert!(matches!(err, grit_lib::error::Error::Merge(MergeError::NoMergeInProgress)));
 }
 
 #[test]

@@ -858,7 +858,7 @@ fn integrate_with_options(
         cancel,
     ) {
         Ok(outcome) => Ok(map_integrate_outcome(outcome, label, head_short)),
-        Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label)),
+        Err(Error::Merge(MergeError::NotFastForward)) => Ok(MergeOutcome::refused_not_ff(label)),
         Err(err @ Error::Hook(_)) => Err(json_error::hook_failed_with_hint(
             err,
             "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel",
@@ -886,7 +886,9 @@ fn integrate_detached_with_options(
         cancel,
     ) {
         Ok(outcome) => Ok(map_integrate_outcome(outcome, label, "HEAD").for_detached_head()),
-        Err(Error::NotFastForward) => Ok(MergeOutcome::refused_not_ff(label).for_detached_head()),
+        Err(Error::Merge(MergeError::NotFastForward)) => {
+            Ok(MergeOutcome::refused_not_ff(label).for_detached_head())
+        }
         Err(err @ Error::Hook(_)) => Err(json_error::hook_failed_with_hint(
             err,
             "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel",

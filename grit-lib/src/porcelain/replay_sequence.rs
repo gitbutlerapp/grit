@@ -239,7 +239,7 @@ pub enum SequenceOutcome {
 /// # Errors
 ///
 /// Propagates rev-parse and rev-list errors. Merge commits are not rejected here; replay stops
-/// with [`Error::MergeCommit`] when a step is applied without `mainline`.
+/// with [`MergeError::MergeCommit`] when a step is applied without `mainline`.
 pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     for spec in specs {
@@ -275,8 +275,8 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
 ///
 /// # Errors
 ///
-/// - [`Error::UnbornHead`], [`Error::MergeCommit`] (without `mainline`).
-/// - [`Error::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
+/// - [`Error::UnbornHead`], [`MergeError::MergeCommit`] (without `mainline`).
+/// - [`MergeError::ReplaySourceAtHead`] when picking a commit already at `HEAD`.
 /// - Worktree cleanliness, merge, checkout, and ref update failures.
 pub fn start_replay_sequence(
     repo: &Repository,
@@ -290,7 +290,7 @@ pub fn start_replay_sequence(
         ));
     }
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
-        return Err(Error::OperationInProgress(op));
+        return Err(MergeError::OperationInProgress(op).into());
     }
     let worktree = prepare_worktree_for_pick(repo)?;
     let (branch_ref, head_oid) = branch_head(repo)?;
@@ -335,8 +335,8 @@ pub fn start_replay_sequence(
 ///
 /// # Errors
 ///
-/// - [`Error::NoReplayInProgress`] when no sequence is active.
-/// - [`Error::ReplayContinueUnmerged`] when the index still has unmerged entries.
+/// - [`MergeError::NoReplayInProgress`] when no sequence is active.
+/// - [`MergeError::ReplayContinueUnmerged`] when the index still has unmerged entries.
 pub fn continue_replay_sequence(
     repo: &Repository,
     identity: &crate::ident::Signature,
@@ -348,7 +348,7 @@ pub fn continue_replay_sequence(
     let active = load_active_replay(repo)?;
     let mut index = repo.load_index()?;
     if index.has_unmerged_entries() {
-        return Err(Error::ReplayContinueUnmerged);
+        return Err(MergeError::ReplayContinueUnmerged.into());
     }
     let rerere = crate::rerere::finish_merge_rerere(repo)?;
     let (branch_ref, head_oid) = branch_head(repo)?;
@@ -364,7 +364,7 @@ pub fn continue_replay_sequence(
             crate::write_tree::WriteTreeFlags::silent(),
         )?;
         if index_tree != head_tree {
-            return Err(Error::ReplayContinueDirtyIndex);
+            return Err(MergeError::ReplayContinueDirtyIndex.into());
         }
         let mut todo = active.todo;
         let mut created_records = read_created_records(repo)?;
@@ -412,7 +412,9 @@ pub fn continue_replay_sequence(
             rerere,
         );
     }
-    let source = active.current_source()?.ok_or(Error::NoReplayInProgress)?;
+    let source = active
+        .current_source()?
+        .ok_or(MergeError::NoReplayInProgress)?;
     let message = resolve_continue_replay_message(repo.git_dir())?;
     let new_tree = write_tree_update_index(
         repo.odb(),
@@ -424,7 +426,7 @@ pub fn continue_replay_sequence(
     if !allow_empty {
         let head_tree = repo.odb().commit_tree(&head_oid)?;
         if new_tree == head_tree {
-            return Err(Error::NothingToCommit);
+            return Err(CommitError::NothingToCommit.into());
         }
     }
     let mut todo = active.todo;
@@ -531,7 +533,7 @@ fn attach_continue_rerere(
 ///
 /// # Errors
 ///
-/// - [`Error::NoReplayInProgress`] when no sequence is active.
+/// - [`MergeError::NoReplayInProgress`] when no sequence is active.
 pub fn skip_replay_step(
     repo: &Repository,
     identity: &crate::ident::Signature,
@@ -546,7 +548,7 @@ pub fn skip_replay_step(
     let step_head_present =
         read_cherry_pick_head(git_dir)?.is_some() || read_revert_head(git_dir)?.is_some();
     if !step_head_present && head_oid != active.abort_safety {
-        return Err(Error::ReplaySkipAlreadyCommitted);
+        return Err(MergeError::ReplaySkipAlreadyCommitted.into());
     }
     reset_index_worktree_to_head(repo, &head_oid)?;
     clear_step_heads(repo.git_dir(), active.direction)?;
@@ -662,7 +664,7 @@ pub(crate) fn finish_replay_commit_state(repo: &Repository, new_oid: ObjectId) -
 ///
 /// # Errors
 ///
-/// - [`Error::NoReplayInProgress`] when nothing is in progress.
+/// - [`MergeError::NoReplayInProgress`] when nothing is in progress.
 pub fn abort_replay_sequence(repo: &Repository) -> Result<ReplayAbortOutcome> {
     let active = load_active_replay(repo)?;
     let (branch_ref, head_oid) = branch_head(repo)?;
@@ -1093,7 +1095,7 @@ fn predict_one_step(
 ) -> Result<PredictStepResult> {
     let source_oid = entry.oid;
     if direction == ReplayDirection::Pick && source_oid == *head_commit {
-        return Err(Error::ReplaySourceAtHead);
+        return Err(MergeError::ReplaySourceAtHead.into());
     }
     let source_obj = repo.odb().read(&source_oid)?;
     let source = parse_commit(&source_obj.data)?;
@@ -1186,7 +1188,7 @@ fn apply_one_step(
 ) -> Result<StepResult> {
     let source_oid = entry.oid;
     if direction == ReplayDirection::Pick && source_oid == *head {
-        return Err(Error::ReplaySourceAtHead);
+        return Err(MergeError::ReplaySourceAtHead.into());
     }
     let source_obj = repo.odb().read(&source_oid)?;
     let source = parse_commit(&source_obj.data)?;
@@ -1373,12 +1375,12 @@ fn merge_trees_for_replay(
             } else if source.parents.len() == 1 {
                 parent_tree(&source.parents[0])?
             } else {
-                let m = mainline.ok_or(Error::MergeCommit { oid: source_oid })?;
+                let m = mainline.ok_or(MergeError::MergeCommit { oid: source_oid })?;
                 let idx = m.get() as usize - 1;
                 let parent = source
                     .parents
                     .get(idx)
-                    .ok_or(Error::MergeCommit { oid: source_oid })?;
+                    .ok_or(MergeError::MergeCommit { oid: source_oid })?;
                 parent_tree(parent)?
             };
             Ok((base, head_tree, source.tree))
@@ -1391,13 +1393,13 @@ fn merge_trees_for_replay(
                 let ptree = parent_tree(&source.parents[0])?;
                 return Ok((source.tree, head_tree, ptree));
             }
-            let m = mainline.ok_or(Error::MergeCommit { oid: source_oid })?;
+            let m = mainline.ok_or(MergeError::MergeCommit { oid: source_oid })?;
             let idx = m.get() as usize - 1;
             let parent = source
                 .parents
                 .get(idx)
                 .copied()
-                .ok_or(Error::MergeCommit { oid: source_oid })?;
+                .ok_or(MergeError::MergeCommit { oid: source_oid })?;
             let base = parent_tree(&parent)?;
             Ok((source.tree, head_tree, base))
         }
@@ -1524,7 +1526,7 @@ fn write_replay_commit_with_head_tree(
     change_id_policy: &ChangeIdPolicy,
 ) -> Result<ObjectId> {
     if !allow_empty && tree == head_tree {
-        return Err(Error::NothingToCommit);
+        return Err(CommitError::NothingToCommit.into());
     }
     let author = match direction {
         ReplayDirection::Pick => source.author.clone(),
@@ -1716,7 +1718,7 @@ fn load_active_replay(repo: &Repository) -> Result<ActiveReplay> {
             subject: commit_subject(repo, oid)?,
         }]
     } else {
-        return Err(Error::NoReplayInProgress);
+        return Err(MergeError::NoReplayInProgress.into());
     };
     let abort_safety = read_sequencer_abort_safety(git_dir)
         .or_else(|| {
@@ -1724,7 +1726,7 @@ fn load_active_replay(repo: &Repository) -> Result<ActiveReplay> {
                 .ok()
                 .and_then(|h| h.oid().copied())
         })
-        .ok_or(Error::NoReplayInProgress)?;
+        .ok_or(MergeError::NoReplayInProgress)?;
     let (direction, opts) = load_persisted_options(git_dir, &todo)?;
     Ok(ActiveReplay {
         direction,
@@ -1763,20 +1765,30 @@ fn parse_sequencer_todo(repo: &Repository, path: &Path) -> Result<Vec<TodoEntry>
             continue;
         }
         let mut parts = t.split_whitespace();
-        let cmd = parts.next().ok_or_else(|| Error::SequencerUnknownCommand {
-            command: String::new(),
-        })?;
+        let cmd = parts
+            .next()
+            .ok_or_else(|| MergeError::SequencerUnknownCommand {
+                command: String::new(),
+            })?;
         let (verb, direction_hint) = match cmd {
             "pick" | "p" => (TodoVerb::Pick, ReplayDirection::Pick),
             "revert" | "r" => (TodoVerb::Revert, ReplayDirection::Revert),
             other => {
-                return Err(Error::SequencerUnknownCommand {
+                return Err(MergeError::SequencerUnknownCommand {
                     command: other.to_owned(),
-                });
+                }
+                .into());
             }
         };
-        let oid_token = parts.next().ok_or_else(|| Error::SequencerUnknownCommand {
-            command: cmd.to_owned(),
+        let oid_token = parts
+            .next()
+            .ok_or_else(|| MergeError::SequencerUnknownCommand {
+                command: cmd.to_owned(),
+            })?;
+        let oid = repo.rev_walk().resolve(oid_token).map_err(|_| {
+            MergeError::SequencerUnknownCommand {
+                command: cmd.to_owned(),
+            }
         })?;
         let oid =
             repo.revwalk()
@@ -1794,7 +1806,7 @@ fn parse_sequencer_todo(repo: &Repository, path: &Path) -> Result<Vec<TodoEntry>
         out.push(TodoEntry { verb, oid, subject });
     }
     if out.is_empty() {
-        return Err(Error::NoReplayInProgress);
+        return Err(MergeError::NoReplayInProgress.into());
     }
     Ok(out)
 }
@@ -1894,15 +1906,15 @@ fn clear_step_heads(git_dir: &Path, direction: ReplayDirection) -> Result<()> {
 
 fn resolve_continue_replay_message(git_dir: &Path) -> Result<String> {
     let Some(raw) = read_merge_msg(git_dir)? else {
-        return Err(Error::NoReplayInProgress);
+        return Err(MergeError::NoReplayInProgress.into());
     };
     let processed = stripspace_process(
         raw.as_bytes(),
         &StripspaceMode::StripComments("#".to_owned()),
     );
-    let message = String::from_utf8(processed).map_err(|_| Error::NothingToCommit)?;
+    let message = String::from_utf8(processed).map_err(|_| CommitError::NothingToCommit)?;
     if message.trim().is_empty() {
-        return Err(Error::NothingToCommit);
+        return Err(CommitError::NothingToCommit.into());
     }
     let mut message = message;
     if !message.ends_with('\n') {
@@ -1956,12 +1968,12 @@ fn validate_replay_step(
     opts: &ReplayOptions,
 ) -> Result<()> {
     if direction == ReplayDirection::Pick && entry.oid == head {
-        return Err(Error::ReplaySourceAtHead);
+        return Err(MergeError::ReplaySourceAtHead.into());
     }
     let source_obj = repo.odb().read(&entry.oid)?;
     let source = parse_commit(&source_obj.data)?;
     if source.parents.len() > 1 && opts.mainline.is_none() {
-        return Err(Error::MergeCommit { oid: entry.oid });
+        return Err(MergeError::MergeCommit { oid: entry.oid }.into());
     }
     Ok(())
 }
