@@ -449,6 +449,15 @@ pub fn move_paths(
     }
 
     repo.flush_index_update(&mut lock, &mut index)?;
+    if let Err(err) = poll_cancel(&mut NullProgress, cancel) {
+        return Err(abort_failed_move_worktree(
+            work_tree,
+            &completed_worktree_renames,
+            &cleared_backup,
+            ignorecase,
+            err,
+        ));
+    }
     repo.finish_index_update(&mut lock, true)
         .map_err(Error::from)?;
 

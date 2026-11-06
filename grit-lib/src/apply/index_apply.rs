@@ -148,6 +148,8 @@ pub fn apply_patch_to_index_and_write(
     if opts.dry_run {
         return Ok(outcome);
     }
+    crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+        .map_err(|e| library_err_path("", e))?;
     handle
         .commit_update(&mut lock, &mut index, false)
         .map_err(|e| library_err_path("", Error::from(e)))?;

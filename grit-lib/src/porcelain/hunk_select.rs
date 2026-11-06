@@ -1574,6 +1574,8 @@ pub fn stage_hunks(
     crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
         .map_err(|_| HunkSelectError::Cancelled)?;
     if let Some(lock) = lock.as_mut() {
+        crate::progress::poll_cancel(&mut crate::progress::NullProgress, cancel)
+            .map_err(|_| HunkSelectError::Cancelled)?;
         handle.commit_update(lock, &mut index, false)?;
     }
     Ok(StageHunksOutcome::from_apply(
