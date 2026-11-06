@@ -224,7 +224,7 @@ mod tests {
                 .map(|e| (e.key.clone(), e.value.clone()))
                 .collect()
         };
-        assert_eq!(keyed(&config), keyed(&expected));
+        assert_eq!(keyed(config.as_ref()), keyed(&expected));
         assert_eq!(config.get("user.name").unwrap().as_deref(), Some("Global"));
         assert_eq!(
             config.get("review.cmdline").unwrap().as_deref(),

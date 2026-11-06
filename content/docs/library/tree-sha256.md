@@ -59,7 +59,7 @@ use grit_lib::tree_sha256::TagVerifyOptions;
 # fn main() -> grit_lib::error::Result<()> {
 # let repo: Repository = todo!();
 # let tag_oid = todo!();
-let gpg = GpgConfig::from_config(repo.config()?.as_ref())?
+let gpg = GpgConfig::from_config(repo.config().snapshot()?.as_ref())?
     .with_command_runner(repo.command_runner());
 let report = repo.verify_tag(tag_oid, &TagVerifyOptions {
     check_signature: true,

@@ -33,18 +33,22 @@ fn index_path_io(path: &Path, source: io::Error) -> IndexError {
 }
 
 fn corrupt_at_ctx(
+    source_path: Option<&Path>,
     ctx: &IndexParseContext,
     offset: Option<usize>,
     reason: IndexCorruptReason,
 ) -> IndexError {
-    IndexError::corrupt_at(ctx.source_path.as_deref(), offset, reason)
+    let _ = ctx;
+    IndexError::corrupt_at(source_path, offset, reason)
 }
 
-fn index_parse_err(err: Error, ctx: &IndexParseContext) -> IndexError {
+fn index_parse_err(err: Error, source_path: Option<&Path>, _ctx: &IndexParseContext) -> IndexError {
     match err {
         Error::Index(IndexError::Corrupt { corrupt, detail }) => IndexError::Corrupt {
             corrupt: IndexCorrupt {
-                path: corrupt.path.or_else(|| ctx.source_path.clone()),
+                path: corrupt
+                    .path
+                    .or_else(|| source_path.map(std::borrow::ToOwned::to_owned)),
                 offset: corrupt.offset,
                 reason: corrupt.reason,
             },
@@ -52,6 +56,20 @@ fn index_parse_err(err: Error, ctx: &IndexParseContext) -> IndexError {
         },
         Error::Index(other) => other,
         other => IndexError::from(other),
+    }
+}
+
+fn attach_corrupt_path(path: &Path, err: IndexError) -> IndexError {
+    match err {
+        IndexError::Corrupt { corrupt, detail } if corrupt.path.is_none() => IndexError::Corrupt {
+            corrupt: IndexCorrupt {
+                path: Some(path.to_path_buf()),
+                offset: corrupt.offset,
+                reason: corrupt.reason,
+            },
+            detail,
+        },
+        other => other,
     }
 }
 
@@ -570,7 +588,7 @@ impl CacheTreeNode {
 pub use crate::index_eoie_ieot::IndexParseContext;
 
 /// Options for loading an index from disk.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct IndexLoadOptions {
     /// If the index contains sparse directory placeholders, expand them to full file entries.
     pub expand_sparse_directories: bool,
@@ -974,13 +992,14 @@ impl Index {
     pub fn load(path: &Path) -> IndexResult<Self> {
         match read_index_file(path) {
             Ok((data, mtime)) => {
-                let ctx = IndexParseContext::default().with_source_path(path);
+                let ctx = IndexParseContext::default();
                 let mut idx = Self::parse_with_algo_and_config(
                     &data,
                     detect_index_hash_algo(&data),
                     None,
                     ctx,
-                )?;
+                )
+                .map_err(|e| attach_corrupt_path(path, e))?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 Ok(idx)
             }
@@ -997,10 +1016,11 @@ impl Index {
     /// After a successful return, [`Index::sparse_directories`] is cleared and every
     /// placeholder is replaced by the blob entries from the referenced tree.
     pub fn load_expand_sparse(path: &Path, odb: &Odb) -> IndexResult<Self> {
-        let ctx = IndexParseContext::default().with_source_path(path);
+        let ctx = IndexParseContext::default();
         let mut idx = match read_index_file(path) {
             Ok((data, mtime)) => {
-                let mut idx = Self::parse_with_algo_and_config(&data, odb.hash_algo(), None, ctx)?;
+                let mut idx = Self::parse_with_algo_and_config(&data, odb.hash_algo(), None, ctx)
+                    .map_err(|e| attach_corrupt_path(path, e))?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 idx
             }
@@ -1028,7 +1048,7 @@ impl Index {
             path,
             odb,
             Some(config),
-            IndexParseContext::default().with_source_path(path),
+            IndexParseContext::default(),
         )
     }
 
@@ -1040,7 +1060,7 @@ impl Index {
             path,
             odb,
             None,
-            IndexParseContext::default().with_source_path(path),
+            IndexParseContext::default(),
         )
     }
 
@@ -1049,11 +1069,8 @@ impl Index {
         path: &Path,
         odb: &Odb,
         config: Option<&ConfigSet>,
-        mut parse_context: IndexParseContext,
+        parse_context: IndexParseContext,
     ) -> IndexResult<Self> {
-        if parse_context.source_path.is_none() {
-            parse_context = parse_context.with_source_path(path);
-        }
         let mut idx =
             Self::load_preserving_sparse_optional_with_context(path, odb, config, parse_context)?;
         let protect = config
@@ -1069,15 +1086,13 @@ impl Index {
         path: &Path,
         odb: &Odb,
         config: Option<&ConfigSet>,
-        mut parse_context: IndexParseContext,
+        parse_context: IndexParseContext,
     ) -> IndexResult<Self> {
-        if parse_context.source_path.is_none() {
-            parse_context = parse_context.with_source_path(path);
-        }
         let algo = odb.hash_algo();
         let idx = match read_index_file(path) {
             Ok((data, mtime)) => {
-                let mut idx = Self::parse_with_algo_and_config(&data, algo, config, parse_context)?;
+                let mut idx = Self::parse_with_algo_and_config(&data, algo, config, parse_context)
+                    .map_err(|e| attach_corrupt_path(path, e))?;
                 record_loaded_index_identity(&mut idx, &data, mtime);
                 idx
             }
@@ -1316,11 +1331,23 @@ impl Index {
         config: Option<&ConfigSet>,
         parse_context: IndexParseContext,
     ) -> IndexResult<Self> {
+        Self::parse_with_algo_and_config_at(data, hash_algo, config, None, parse_context)
+    }
+
+    /// Like [`Self::parse_with_algo_and_config`], but attaches `source_path` to structured corrupt-index errors.
+    pub fn parse_with_algo_and_config_at(
+        data: &[u8],
+        hash_algo: HashAlgo,
+        config: Option<&ConfigSet>,
+        source_path: Option<&Path>,
+        parse_context: IndexParseContext,
+    ) -> IndexResult<Self> {
         const INDEX_HEADER_LEN: usize = 12;
 
         let hash_len = hash_algo.len();
         if data.len() < INDEX_HEADER_LEN + hash_len {
             return Err(corrupt_at_ctx(
+                source_path,
                 &parse_context,
                 None,
                 IndexCorruptReason::FileTooShortForHeader,
@@ -1329,33 +1356,35 @@ impl Index {
         let (body, checksum) = data.split_at(data.len() - hash_len);
         if body.len() < INDEX_HEADER_LEN {
             return Err(corrupt_at_ctx(
+                source_path,
                 &parse_context,
                 None,
                 IndexCorruptReason::FileTooShortForHeader,
             ));
         }
-        let ctx = parse_context.clone();
+        let ctx = parse_context;
         let trailer_error = |_e: crate::hash::TrailerMismatch| {
             corrupt_at_ctx(
+                source_path,
                 &ctx,
                 Some(data.len() - hash_len),
                 IndexCorruptReason::ChecksumMismatch { algo: hash_algo },
             )
         };
         if checksum.iter().all(|&b| b == 0) {
-            return Self::parse_body(body, hash_algo, config, parse_context);
+            return Self::parse_body(body, hash_algo, config, source_path, parse_context);
         }
         let verify_in_parallel = data.len() >= PARALLEL_TRAILER_VERIFY_MIN_BYTES
             && ctx.thread_policy.threads_override != Some(1);
         if !verify_in_parallel {
             verify_trailer(hash_algo, data).map_err(trailer_error)?;
-            return Self::parse_body(body, hash_algo, config, parse_context);
+            return Self::parse_body(body, hash_algo, config, source_path, parse_context);
         }
         // Hashing a large index costs about as much as parsing it; overlap the two and
         // report a checksum mismatch ahead of any structural error, as the serial path does.
         std::thread::scope(|scope| {
             let verifier = scope.spawn(|| verify_trailer(hash_algo, data));
-            let parsed = Self::parse_body(body, hash_algo, config, parse_context);
+            let parsed = Self::parse_body(body, hash_algo, config, source_path, parse_context);
             verifier
                 .join()
                 .map_err(|_| {
@@ -1373,6 +1402,7 @@ impl Index {
         body: &[u8],
         hash_algo: HashAlgo,
         config: Option<&ConfigSet>,
+        source_path: Option<&Path>,
         parse_context: IndexParseContext,
     ) -> IndexResult<Self> {
         use crate::index_eoie_ieot::{
@@ -1385,6 +1415,7 @@ impl Index {
         let magic = &body[..4];
         if magic != b"DIRC" {
             return Err(corrupt_at_ctx(
+                source_path,
                 &parse_context,
                 Some(0),
                 IndexCorruptReason::BadSignature,
@@ -1392,6 +1423,7 @@ impl Index {
         }
         let version = u32::from_be_bytes(body[4..8].try_into().map_err(|_| {
             corrupt_at_ctx(
+                source_path,
                 &parse_context,
                 Some(4),
                 IndexCorruptReason::CannotReadVersion,
@@ -1399,6 +1431,7 @@ impl Index {
         })?);
         if version != 2 && version != 3 && version != 4 {
             return Err(corrupt_at_ctx(
+                source_path,
                 &parse_context,
                 Some(4),
                 IndexCorruptReason::UnsupportedVersion { version },
@@ -1406,6 +1439,7 @@ impl Index {
         }
         let count = u32::from_be_bytes(body[8..12].try_into().map_err(|_| {
             corrupt_at_ctx(
+                source_path,
                 &parse_context,
                 Some(8),
                 IndexCorruptReason::CannotReadEntryCount,
@@ -1434,6 +1468,7 @@ impl Index {
         let (entries, ext_fields): (Vec<IndexEntry>, ParsedIndexExtensions) = if try_parallel {
             let Some(ext_off) = extension_offset else {
                 return Err(corrupt_at_ctx(
+                    source_path,
                     &parse_context,
                     None,
                     IndexCorruptReason::ParallelLoadMissingEoie,
@@ -1442,24 +1477,24 @@ impl Index {
             let ieot = read_ieot_extension(body, ext_off, extensions_end);
             let mut loaded_entries = if let Some(ref ieot) = ieot {
                 parse_entries_parallel(body, version, count, hash_len, ieot, workers)
-                    .map_err(|e| index_parse_err(e, &parse_context))?
+                    .map_err(|e| index_parse_err(e, source_path, &parse_context))?
             } else {
                 parse_entries_serial(body, version, count, hash_len, 12)
-                    .map_err(|e| index_parse_err(e, &parse_context))?
+                    .map_err(|e| index_parse_err(e, source_path, &parse_context))?
                     .0
             };
             let ext_fields = parse_index_extensions(body, ext_off, extensions_end, hash_algo, None)
-                .map_err(|e| index_parse_err(e, &parse_context))?;
+                .map_err(|e| index_parse_err(e, source_path, &parse_context))?;
             if let Some(dirty) = ext_fields.fsmonitor_dirty.as_ref() {
                 apply_fsmonitor_dirty_to_entries(&mut loaded_entries, dirty);
             }
             (loaded_entries, ext_fields)
         } else {
             let (mut entries, pos) = parse_entries_serial(body, version, count, hash_len, 12)
-                .map_err(|e| index_parse_err(e, &parse_context))?;
+                .map_err(|e| index_parse_err(e, source_path, &parse_context))?;
             let ext_fields =
                 parse_index_extensions(body, pos, body.len(), hash_algo, Some(&mut entries))
-                    .map_err(|e| index_parse_err(e, &parse_context))?;
+                    .map_err(|e| index_parse_err(e, source_path, &parse_context))?;
             (entries, ext_fields)
         };
 
@@ -6691,9 +6726,14 @@ mod tests {
                 assert!(!path.with_extension("lock").exists());
 
                 let ctx = crate::index::IndexParseContext::from_policy(policy);
-                let loaded =
-                    Index::parse_with_algo_and_config(&written, idx.hash_algo, Some(&cfg), ctx)
-                        .unwrap();
+                let loaded = Index::parse_with_algo_and_config_at(
+                    &written,
+                    idx.hash_algo,
+                    Some(&cfg),
+                    Some(path.as_path()),
+                    ctx,
+                )
+                .unwrap();
                 assert_eq!(loaded.entries.len(), idx.entries.len());
                 assert!(loaded
                     .entries

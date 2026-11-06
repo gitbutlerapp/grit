@@ -59,12 +59,10 @@ pub(crate) struct ParsedIndexExtensions {
 }
 
 /// Context for index parse/load threading and config.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct IndexParseContext {
     /// `thread_policy` field.
     pub thread_policy: ThreadPolicy,
-    /// Index file path for structured [`IndexError::Corrupt`] reporting.
-    pub(crate) source_path: Option<std::path::PathBuf>,
 }
 
 impl IndexParseContext {
@@ -73,15 +71,7 @@ impl IndexParseContext {
     pub fn from_policy(policy: ThreadPolicy) -> Self {
         Self {
             thread_policy: policy,
-            source_path: None,
         }
-    }
-
-    /// Attach the on-disk index path to corruption errors raised while parsing.
-    #[must_use]
-    pub fn with_source_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
-        self.source_path = Some(path.into());
-        self
     }
 }
 

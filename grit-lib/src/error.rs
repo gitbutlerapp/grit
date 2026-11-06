@@ -1531,6 +1531,52 @@ pub enum Error {
         path: String,
     },
 
+    /// Legacy index failure (unstructured message). Prefer [`Self::Index`].
+    #[deprecated(
+        note = "use Error::Index(IndexError::corrupt(...)) or another IndexError variant"
+    )]
+    #[error("index error: {0}")]
+    IndexError(String),
+
+    /// Legacy unmerged-index error. Prefer [`Self::Index`](Error::Index).
+    #[deprecated(note = "use Error::Index(IndexError::unmerged())")]
+    #[error("index contains unmerged entries")]
+    IndexUnmerged,
+
+    /// Legacy path-prefix conflict. Prefer [`Self::Index`](Error::Index).
+    #[deprecated(note = "use Error::Index(IndexError::PathPrefixConflict { ... })")]
+    #[error(
+        "index path prefix conflict between '{}' and '{}'",
+        directory.display(),
+        file.display()
+    )]
+    IndexPathPrefixConflict {
+        /// Shorter path (treated as the ambiguous directory prefix).
+        directory: std::path::PathBuf,
+        /// Longer path that extends the prefix with an additional component.
+        file: std::path::PathBuf,
+    },
+
+    /// Legacy fsmonitor extension error. Prefer [`Self::Index`](Error::Index).
+    #[deprecated(note = "use Error::Index(IndexError::FsmonitorExtensionTruncated)")]
+    #[error("index fsmonitor extension payload is truncated")]
+    IndexFsmonitorExtensionTruncated,
+
+    /// Legacy fsmonitor extension error. Prefer [`Self::Index`](Error::Index).
+    #[deprecated(note = "use Error::Index(IndexError::FsmonitorExtensionBadVersion(...))")]
+    #[error("index fsmonitor extension has unsupported header version {0}")]
+    IndexFsmonitorExtensionBadVersion(u32),
+
+    /// Legacy fsmonitor extension error. Prefer [`Self::Index`](Error::Index).
+    #[deprecated(note = "use Error::Index(IndexError::FsmonitorExtensionEwahInvalid)")]
+    #[error("index fsmonitor extension EWAH bitmap is invalid")]
+    IndexFsmonitorExtensionEwahInvalid,
+
+    /// Legacy cache-tree error. Prefer [`Self::Index`](Error::Index).
+    #[deprecated(note = "use Error::Index(IndexError::CacheTreeCorrupt)")]
+    #[error("corrupted cache-tree has entries not present in index")]
+    CacheTreeCorrupt,
+
     /// Index read, write, extension, or write-tree failure.
     #[error(transparent)]
     Index(crate::index::IndexError),
@@ -2251,6 +2297,7 @@ impl Error {
     /// assert_eq!(Error::Cancelled.kind_name(), "cancelled");
     /// ```
     #[must_use]
+    #[allow(deprecated)]
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::NotARepository(..) => "not_a_repository",
@@ -2289,6 +2336,13 @@ impl Error {
             Self::GitDirPathIo { .. } => "git_dir_path_io",
             Self::ObjectStreamTruncated { .. } => "object_stream_truncated",
             Self::WorktreeFileChanged { .. } => "worktree_file_changed",
+            Self::IndexError(..) => "index_error",
+            Self::IndexUnmerged => "index_unmerged",
+            Self::IndexPathPrefixConflict { .. } => "index_path_prefix_conflict",
+            Self::IndexFsmonitorExtensionTruncated => "index_fsmonitor_extension_truncated",
+            Self::IndexFsmonitorExtensionBadVersion(_) => "index_fsmonitor_extension_bad_version",
+            Self::IndexFsmonitorExtensionEwahInvalid => "index_fsmonitor_extension_ewah_invalid",
+            Self::CacheTreeCorrupt => "cache_tree_corrupt",
             Self::Index(index) => index.kind_name(),
             Self::MaintenanceRunning { .. } => "maintenance_running",
             Self::UnmergedConflictMarkers { .. } => "unmerged_conflict_markers",

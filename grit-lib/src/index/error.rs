@@ -530,8 +530,27 @@ impl From<std::io::Error> for IndexError {
 }
 
 impl From<crate::error::Error> for IndexError {
+    #[allow(deprecated)]
     fn from(err: crate::error::Error) -> Self {
         match err {
+            crate::error::Error::IndexError(detail) => Self::Corrupt {
+                corrupt: IndexCorrupt::new(IndexCorruptReason::Truncated),
+                detail,
+            },
+            crate::error::Error::IndexUnmerged => Self::unmerged(),
+            crate::error::Error::IndexPathPrefixConflict { directory, file } => {
+                Self::PathPrefixConflict { directory, file }
+            }
+            crate::error::Error::IndexFsmonitorExtensionTruncated => {
+                Self::FsmonitorExtensionTruncated
+            }
+            crate::error::Error::IndexFsmonitorExtensionBadVersion(v) => {
+                Self::FsmonitorExtensionBadVersion(v)
+            }
+            crate::error::Error::IndexFsmonitorExtensionEwahInvalid => {
+                Self::FsmonitorExtensionEwahInvalid
+            }
+            crate::error::Error::CacheTreeCorrupt => Self::CacheTreeCorrupt,
             crate::error::Error::Index(index) => index,
             crate::error::Error::LockHeld(h) => Self::LockHeld(h),
             crate::error::Error::Io(source) => Self::PathIo(PathIoError {

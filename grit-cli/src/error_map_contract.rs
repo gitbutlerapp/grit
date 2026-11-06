@@ -1,5 +1,7 @@
 //! Pinned [`super::classify`] expectations (kind, exit, human, hint).
 
+#![allow(deprecated)]
+
 use std::path::Path;
 
 use anyhow::Error;

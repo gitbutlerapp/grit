@@ -942,6 +942,7 @@ fn guide_rebase_session(err: &RebaseSessionError) -> Option<Error> {
     }
 }
 
+#[allow(deprecated)]
 fn guide_lib(err: &LibError) -> Option<Error> {
     match err {
         LibError::Remote(remote) => guide_remote(remote),
@@ -981,7 +982,7 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             None,
             None,
         )),
-        LibError::Index(IndexError::Unmerged { .. }) => Some(guided(
+        LibError::Index(IndexError::Unmerged { .. }) | LibError::IndexUnmerged => Some(guided(
             ErrorKind::UnmergedPaths,
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again".to_owned(),
             Some(

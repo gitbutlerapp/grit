@@ -5435,6 +5435,14 @@ pub grit_lib::error::Error::Hook(grit_lib::command_runner::hooks::HookError)
 pub grit_lib::error::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
 pub grit_lib::error::Error::Identity(grit_lib::config::ident_resolve::IdentityError)
 pub grit_lib::error::Error::Index(grit_lib::index::error::IndexError)
+pub grit_lib::error::Error::IndexError(alloc::string::String)
+pub grit_lib::error::Error::IndexFsmonitorExtensionBadVersion(u32)
+pub grit_lib::error::Error::IndexFsmonitorExtensionEwahInvalid
+pub grit_lib::error::Error::IndexFsmonitorExtensionTruncated
+pub grit_lib::error::Error::IndexPathPrefixConflict
+pub grit_lib::error::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
+pub grit_lib::error::Error::IndexPathPrefixConflict::file: std::path::PathBuf
+pub grit_lib::error::Error::IndexUnmerged
 pub grit_lib::error::Error::InitBareWithSeparateGitDir
 pub grit_lib::error::Error::InitObjectFormatChange
 pub grit_lib::error::Error::InvalidAttrPathspec
@@ -6362,10 +6370,10 @@ pub fn grit_lib::error::PathIoError::message(&self) -> alloc::string::String
 pub fn grit_lib::error::PathIoError::worktree(impl core::convert::Into<alloc::string::String>, grit_lib::error::WorktreePathOperation, core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::PathIoError) -> Self
-impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::worktree::WorktreeError
-pub fn grit_lib::worktree::WorktreeError::from(grit_lib::error::PathIoError) -> Self
 impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::index::error::IndexError
 pub fn grit_lib::index::error::IndexError::from(grit_lib::error::PathIoError) -> Self
+impl core::convert::From<grit_lib::error::PathIoError> for grit_lib::worktree::WorktreeError
+pub fn grit_lib::worktree::WorktreeError::from(grit_lib::error::PathIoError) -> Self
 impl core::error::Error for grit_lib::error::PathIoError
 pub fn grit_lib::error::PathIoError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::PathIoError
@@ -7360,6 +7368,7 @@ pub fn grit_lib::index::Index::overlay_tree_on_index(&mut self, &grit_lib::repo:
 pub fn grit_lib::index::Index::parse(&[u8]) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::parse_with_algo(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::parse_with_algo_and_config(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::parse_with_algo_and_config_at(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&std::path::Path>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::remove(&mut self, &[u8]) -> bool
 pub fn grit_lib::index::Index::remove_descendants_under_path(&mut self, &str)
 pub fn grit_lib::index::Index::remove_path_all_stages(&mut self, &[u8]) -> bool
@@ -7494,6 +7503,7 @@ impl core::default::Default for grit_lib::index::IndexLoadOptions
 pub fn grit_lib::index::IndexLoadOptions::default() -> Self
 impl core::fmt::Debug for grit_lib::index::IndexLoadOptions
 pub fn grit_lib::index::IndexLoadOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::index::IndexLoadOptions
 impl core::marker::Freeze for grit_lib::index::IndexLoadOptions
 impl core::marker::Send for grit_lib::index::IndexLoadOptions
 impl core::marker::Sync for grit_lib::index::IndexLoadOptions
@@ -7517,13 +7527,13 @@ pub struct grit_lib::index::IndexParseContext
 pub grit_lib::index::IndexParseContext::thread_policy: grit_lib::parallel::ThreadPolicy
 impl grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::from_policy(grit_lib::parallel::ThreadPolicy) -> Self
-pub fn grit_lib::index::IndexParseContext::with_source_path(self, impl core::convert::Into<std::path::PathBuf>) -> Self
 impl core::clone::Clone for grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::clone(&self) -> Self
 impl core::default::Default for grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::default() -> Self
 impl core::fmt::Debug for grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::index::IndexParseContext
 impl core::marker::Freeze for grit_lib::index::IndexParseContext
 impl core::marker::Send for grit_lib::index::IndexParseContext
 impl core::marker::Sync for grit_lib::index::IndexParseContext
@@ -14811,6 +14821,14 @@ pub grit_lib::prelude::Error::Hook(grit_lib::command_runner::hooks::HookError)
 pub grit_lib::prelude::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
 pub grit_lib::prelude::Error::Identity(grit_lib::config::ident_resolve::IdentityError)
 pub grit_lib::prelude::Error::Index(grit_lib::index::error::IndexError)
+pub grit_lib::prelude::Error::IndexError(alloc::string::String)
+pub grit_lib::prelude::Error::IndexFsmonitorExtensionBadVersion(u32)
+pub grit_lib::prelude::Error::IndexFsmonitorExtensionEwahInvalid
+pub grit_lib::prelude::Error::IndexFsmonitorExtensionTruncated
+pub grit_lib::prelude::Error::IndexPathPrefixConflict
+pub grit_lib::prelude::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
+pub grit_lib::prelude::Error::IndexPathPrefixConflict::file: std::path::PathBuf
+pub grit_lib::prelude::Error::IndexUnmerged
 pub grit_lib::prelude::Error::InitBareWithSeparateGitDir
 pub grit_lib::prelude::Error::InitObjectFormatChange
 pub grit_lib::prelude::Error::InvalidAttrPathspec
@@ -15604,6 +15622,7 @@ pub fn grit_lib::index::Index::overlay_tree_on_index(&mut self, &grit_lib::repo:
 pub fn grit_lib::index::Index::parse(&[u8]) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::parse_with_algo(&[u8], grit_lib::objects::HashAlgo) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::parse_with_algo_and_config(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
+pub fn grit_lib::index::Index::parse_with_algo_and_config_at(&[u8], grit_lib::objects::HashAlgo, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<&std::path::Path>, grit_lib::index::IndexParseContext) -> grit_lib::index::error::IndexResult<Self>
 pub fn grit_lib::index::Index::remove(&mut self, &[u8]) -> bool
 pub fn grit_lib::index::Index::remove_descendants_under_path(&mut self, &str)
 pub fn grit_lib::index::Index::remove_path_all_stages(&mut self, &[u8]) -> bool

@@ -2163,10 +2163,6 @@ impl Repository {
         cfg.as_ref()
             .get_bool("index.sparse")
             .map_err(crate::index::IndexError::from)?;
-        let mut parse_ctx = parse_ctx;
-        if parse_ctx.source_path.is_none() {
-            parse_ctx = parse_ctx.with_source_path(path);
-        }
         let mut idx = Index::load_preserving_sparse_optional_with_context(
             path,
             &self.odb,

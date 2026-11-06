@@ -46,7 +46,7 @@ use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions, DiffStat, Rename
 use grit_lib::parallel::ThreadPolicy;
 
 let entries = repo.diff().tree_to_tree(Some(&old_tree), Some(&new_tree))?;
-let config = repo.config()?;
+let config = repo.config().snapshot()?;
 // `DiffOptions::default()` pairs renames at Git's -M50 before counting lines.
 let files = build_file_diffs(
     repo.odb(),

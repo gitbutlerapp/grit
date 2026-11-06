@@ -179,7 +179,7 @@ mod resolve_core_abbrev_tests {
         let dir = tempfile::TempDir::new().expect("tempdir");
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         let config = repo.config().snapshot()?;
-        let len = resolve_core_abbrev_len(&config, repo.odb())?;
+        let len = resolve_core_abbrev_len(config.as_ref(), repo.odb())?;
         assert_eq!(len, auto_abbrev_len_for_object_count(0));
         Ok(())
     }

@@ -95,10 +95,11 @@ fn large_index_reports_checksum_mismatch_before_structural_errors() {
     assert_checksum_mismatch(Index::load(&index_path));
     for threads in [None, Some(1), Some(4)] {
         let context = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(threads));
-        assert_checksum_mismatch(Index::parse_with_algo_and_config(
+        assert_checksum_mismatch(Index::parse_with_algo_and_config_at(
             &bytes,
             HashAlgo::Sha1,
             None,
+            Some(index_path.as_path()),
             context,
         ));
     }
