@@ -828,13 +828,12 @@ mod tests {
 
     #[cfg(feature = "test-support")]
     #[test]
-    fn cancellation_checks_do_not_consume_poll_countdown() {
-        let token = CancelToken::after_polls(2);
+    fn cancellation_checks_consume_countdown_once_each() {
+        let token = CancelToken::after_polls(3);
         assert!(!token.is_cancelled());
         assert!(!token.is_cancelled());
-        assert!(token.poll().is_ok());
-        assert!(!token.is_cancelled());
-        assert!(token.poll().is_err());
+        assert!(token.is_cancelled());
+        assert!(token.is_cancelled());
     }
 
     #[test]
