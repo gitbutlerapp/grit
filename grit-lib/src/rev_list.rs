@@ -4,7 +4,6 @@
 //! ordering (`--topo-order`, `--date-order`, `--reverse`), path simplification,
 //! object walks with `--filter`, and counting (`--count`).
 
-use std::cell::RefCell;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::path::Path;
@@ -21,6 +20,7 @@ use crate::error::{Error, Result};
 use crate::ident::committer_unix_seconds_for_ordering;
 use crate::ignore::{parse_sparse_patterns_from_blob, ParsedSparsePatterns};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
+use crate::log_walk::WalkedCommits;
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_with_graph, RangeWalkHide,
     ReachableWalkCommitterCutoffs,
@@ -55,7 +55,8 @@ impl WalkExclude {
 }
 use crate::objects::{
     commit_through_subject_len, oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree,
-    CommitData, CommitRef, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    read_commit_subject_line, CommitRef, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry,
+    TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -73,35 +74,21 @@ use crate::rev_list_error::RevListError;
 use crate::rev_parse::{resolve_revision_for_range_end, resolve_treeish_path, split_treeish_spec};
 use crate::revwalk::filter::CommitFilter;
 
-thread_local! {
-    /// [`RevWalkListOptions::retained_commit_extent`] for the innermost `rev_list` call started from
-    /// [`crate::revwalk::queries::RevWalk`], without widening public [`RevListOptions`].
-    static REV_WALK_RETAINED_COMMIT_EXTENT_STACK: RefCell<Vec<CommitExtent>> = RefCell::new(Vec::new());
+/// Private per-invocation state threaded through [`rev_list_with_context`] (not part of public
+/// [`RevListOptions`]). Carries [`crate::revwalk::RevWalkListOptions::retained_commit_extent`]
+/// from high-level rev-walk entry points.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RevListWalkContext {
+    /// How much of each listed commit to retain as raw object bytes in [`RevListResult::commit_data`].
+    pub retained_commit_extent: CommitExtent,
 }
 
-/// Guard: [`RevWalkListOptions::retained_commit_extent`] for the duration of a [`rev_list`] call from
-/// [`crate::revwalk::queries::RevWalk`] helpers.
-pub(crate) struct RevWalkRetainedCommitExtentGuard;
-
-impl RevWalkRetainedCommitExtentGuard {
-    pub fn push(extent: CommitExtent) -> Self {
-        REV_WALK_RETAINED_COMMIT_EXTENT_STACK.with(|s| s.borrow_mut().push(extent));
-        Self
+impl Default for RevListWalkContext {
+    fn default() -> Self {
+        Self {
+            retained_commit_extent: CommitExtent::Whole,
+        }
     }
-}
-
-impl Drop for RevWalkRetainedCommitExtentGuard {
-    fn drop(&mut self) {
-        REV_WALK_RETAINED_COMMIT_EXTENT_STACK.with(|s| {
-            s.borrow_mut().pop();
-        });
-    }
-}
-
-fn effective_rev_walk_retained_commit_extent() -> CommitExtent {
-    REV_WALK_RETAINED_COMMIT_EXTENT_STACK
-        .with(|s| s.borrow().last().copied())
-        .unwrap_or(CommitExtent::Whole)
 }
 
 /// Behavior when reachable objects are missing.
@@ -783,12 +770,13 @@ pub struct RevListResult {
     pub tip_annotated_tag_by_commit: HashMap<ObjectId, Vec<ObjectId>>,
     /// Populated by bounded topological walks for `log --graph` (avoids a second linkage pass).
     pub log_graph_linkage: Option<LogGraphLinkage>,
-    /// Parsed listed commits, keyed by id, when [`RevListOptions::retain_commit_data`] is set.
+    /// Listed commits kept as raw object bytes when [`RevListOptions::retain_commit_data`] is set.
     ///
-    /// Only walks that parse commit objects fill this, and only for commits they parsed, so
-    /// it may cover some, all, or none of [`Self::commits`]. Bounded identity/message filters
-    /// retain selected matches even with a commit-graph, since filtering reads their objects.
-    pub commit_data: OidHashMap<CommitData>,
+    /// Payloads are stored contiguously (see [`WalkedCommits`]) and parsed on demand via
+    /// [`crate::porcelain::log::CommitReuse`]. Extent is controlled by the private
+    /// [`RevListWalkContext::retained_commit_extent`] threaded from high-level rev-walk APIs
+    /// (typically [`CommitExtent::ThroughSubject`] for one-line log output).
+    pub commit_data: WalkedCommits,
 }
 
 impl RevListResult {
@@ -1050,6 +1038,22 @@ pub fn rev_list(
     negative_specs: &[String],
     options: &RevListOptions,
 ) -> Result<RevListResult> {
+    rev_list_with_context(
+        repo,
+        positive_specs,
+        negative_specs,
+        options,
+        RevListWalkContext::default(),
+    )
+}
+
+pub(crate) fn rev_list_with_context(
+    repo: &Repository,
+    positive_specs: &[String],
+    negative_specs: &[String],
+    options: &RevListOptions,
+    context: RevListWalkContext,
+) -> Result<RevListResult> {
     crate::trace::trace_span!("grit.revwalk.setup");
     if let Some(spec) = positive_specs
         .iter()
@@ -1156,7 +1160,7 @@ pub fn rev_list(
                 reachable_non_commit_object_count: None,
                 tip_annotated_tag_by_commit: HashMap::new(),
                 log_graph_linkage: None,
-                commit_data: OidHashMap::default(),
+                commit_data: WalkedCommits::default(),
             });
         }
         return Err(Error::InvalidRef("no revisions specified".to_owned()));
@@ -1197,17 +1201,24 @@ pub fn rev_list(
         HashSet::new()
     };
 
+    if let Some(result) = try_bounded_commit_filter_limit_list(
+        repo,
+        &include,
+        &exclude,
+        options,
+        &repo_config,
+        context,
+    )? {
+        return Ok(result);
+    }
+
     if let Some(result) =
-        try_bounded_commit_filter_limit_list(repo, &include, &exclude, options, &repo_config)?
+        try_bounded_parent_filter_limit_list(repo, &include, &exclude, options, context)?
     {
         return Ok(result);
     }
 
-    if let Some(result) = try_bounded_parent_filter_limit_list(repo, &include, &exclude, options)? {
-        return Ok(result);
-    }
-
-    if let Some(result) = try_bounded_limit_list(repo, &include, &exclude, options)? {
+    if let Some(result) = try_bounded_limit_list(repo, &include, &exclude, options, context)? {
         return Ok(result);
     }
 
@@ -1543,7 +1554,7 @@ pub fn rev_list(
             reachable_non_commit_object_count: None,
             tip_annotated_tag_by_commit: HashMap::new(),
             log_graph_linkage: None,
-            commit_data: OidHashMap::default(),
+            commit_data: WalkedCommits::default(),
         });
     }
 
@@ -1676,7 +1687,8 @@ pub fn rev_list(
             let mut dense_opts = options.clone();
             dense_opts.sparse = false;
             dense_opts.path_graph_reorder = false;
-            let dense_result = rev_list(repo, positive_specs, negative_specs, &dense_opts)?;
+            let dense_result =
+                rev_list_with_context(repo, positive_specs, negative_specs, &dense_opts, context)?;
             let dense_ordered = reorder_path_limited_graph_commits(
                 repo,
                 &dense_result.commits,
@@ -2111,7 +2123,7 @@ pub fn rev_list(
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit,
         log_graph_linkage,
-        commit_data: OidHashMap::default(),
+        commit_data: WalkedCommits::default(),
     })
 }
 
@@ -5572,23 +5584,6 @@ fn load_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::Commi
     repo.read_commit_with_replace(&oid)
 }
 
-/// Like [`load_commit`], inflating into the reusable `buf` instead of a fresh object.
-///
-/// For walks that keep the parsed commit and never read the object again, so it skips the
-/// ODB's per-session object copy.
-fn load_commit_into(
-    repo: &Repository,
-    oid: ObjectId,
-    buf: &mut Vec<u8>,
-) -> Result<crate::objects::CommitData> {
-    if repo.read_commit_into_with_replace(&oid, buf)? != ObjectKind::Commit {
-        return Err(rev_list_unexpected_kind(oid, "commit"));
-    }
-    #[cfg(test)]
-    repo.odb().hot_path_metrics().record_commit_parse();
-    parse_commit(buf)
-}
-
 fn rev_list_result_from_commits(commits: Vec<ObjectId>) -> RevListResult {
     rev_list_result_from_commits_with_linkage(commits, None)
 }
@@ -5615,7 +5610,7 @@ fn rev_list_result_from_commits_with_linkage(
         reachable_non_commit_object_count: None,
         tip_annotated_tag_by_commit: HashMap::new(),
         log_graph_linkage,
-        commit_data: OidHashMap::default(),
+        commit_data: WalkedCommits::default(),
     }
 }
 
@@ -6042,7 +6037,7 @@ fn try_rev_list_accelerated(
             .then_some(non_commit_count),
         tip_annotated_tag_by_commit: HashMap::new(),
         log_graph_linkage: None,
-        commit_data: OidHashMap::default(),
+        commit_data: WalkedCommits::default(),
     }))
 }
 
@@ -6269,6 +6264,62 @@ fn date_heap_past_since_frontier(heap: &BinaryHeap<CommitDateKey>, since: i64) -
 /// When `since_cutoff` is set and the heap uses committer dates (`author_dates` is false),
 /// the walk stops once every queued commit is older than the cutoff, matching Git's
 /// `--since` frontier after parents of the last in-window commit are enqueued.
+///
+/// Bytes to retain for `grit log` / `--format` reuse: one contiguous copy per listed commit.
+fn retain_commit_payload_for_list(
+    repo: &Repository,
+    graph: &mut CommitGraph<'_>,
+    oid: ObjectId,
+    retain_extent: CommitExtent,
+) -> Result<Vec<u8>> {
+    match retain_extent {
+        CommitExtent::Whole => read_commit_bytes(repo, oid),
+        CommitExtent::ThroughSubject => {
+            if let Some(bytes) = graph.drain_unreleased_commit_bytes(oid) {
+                if commit_through_subject_len(&bytes).is_some() {
+                    return Ok(bytes);
+                }
+                let effective = repo.object_id_after_replace(&oid);
+                let mut b = repo.odb().read_commit_through_subject(&effective)?;
+                if commit_through_subject_len(&b).is_none() {
+                    b = read_commit_bytes(repo, oid)?;
+                }
+                return Ok(b);
+            }
+            let bytes = graph.commit_bytes(oid)?;
+            if commit_through_subject_len(bytes).is_some() {
+                Ok(bytes.to_vec())
+            } else {
+                let effective = repo.object_id_after_replace(&oid);
+                let mut b = repo.odb().read_commit_through_subject(&effective)?;
+                if commit_through_subject_len(&b).is_none() {
+                    b = read_commit_bytes(repo, oid)?;
+                }
+                Ok(b)
+            }
+        }
+    }
+}
+
+/// Payload bytes for [`RevListResult::commit_data`] when no [`CommitGraph`] is available.
+fn retain_commit_payload_standalone(
+    repo: &Repository,
+    oid: ObjectId,
+    retain_extent: CommitExtent,
+) -> Result<Vec<u8>> {
+    match retain_extent {
+        CommitExtent::Whole => read_commit_bytes(repo, oid),
+        CommitExtent::ThroughSubject => {
+            let effective = repo.object_id_after_replace(&oid);
+            let mut b = repo.odb().read_commit_through_subject(&effective)?;
+            if commit_through_subject_len(&b).is_none() {
+                b = read_commit_bytes(repo, oid)?;
+            }
+            Ok(b)
+        }
+    }
+}
+
 fn streaming_date_walk<'r>(
     graph: &mut CommitGraph<'r>,
     include: &[ObjectId],
@@ -6539,6 +6590,7 @@ fn try_bounded_commit_filter_limit_list(
     exclude: &[ObjectId],
     options: &RevListOptions,
     repo_config: &ConfigSet,
+    context: RevListWalkContext,
 ) -> Result<Option<RevListResult>> {
     let filter = options.commit_filter.as_ref().filter(|f| f.is_active());
     let pickaxe = options.pickaxe.as_ref();
@@ -6560,9 +6612,9 @@ fn try_bounded_commit_filter_limit_list(
     }
 
     let mut commit_data = if options.retain_commit_data {
-        crate::objects::oid_hash_map_with_capacity(max_count.unwrap_or(64).min(64))
+        WalkedCommits::with_capacity(max_count.unwrap_or(64).min(64))
     } else {
-        oid_hash_map()
+        WalkedCommits::default()
     };
     let (mut ordered, filtered_count) =
         repo.odb()
@@ -6581,14 +6633,13 @@ fn try_bounded_commit_filter_limit_list(
                 )?;
                 // Reuse traversal bytes for filters and output, without keeping every
                 // nonmatching commit when a selective filter scans a long history.
-                let walk_extent = effective_rev_walk_retained_commit_extent();
-                let traverse_extent = if pickaxe.is_some() {
-                    CommitExtent::Whole
-                } else if filter.is_some_and(|f| f.needs_full_commit_bytes()) {
-                    CommitExtent::Whole
-                } else {
-                    walk_extent
-                };
+                let walk_extent = context.retained_commit_extent;
+                let traverse_extent =
+                    if pickaxe.is_some() || filter.is_some_and(|f| f.needs_full_commit_bytes()) {
+                        CommitExtent::Whole
+                    } else {
+                        walk_extent
+                    };
                 graph.keep_unreleased_commit_bytes(traverse_extent);
 
                 let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
@@ -6640,17 +6691,13 @@ fn try_bounded_commit_filter_limit_list(
                                     } else if max_count.is_none_or(|m| ordered.len() < m) {
                                         ordered.push(oid);
                                         if options.retain_commit_data {
-                                            let retain_extent = walk_extent;
-                                            let bytes = graph.commit_bytes(oid)?;
-                                            let data = if retain_extent
-                                                == CommitExtent::ThroughSubject
-                                                && commit_through_subject_len(bytes).is_none()
-                                            {
-                                                load_commit(repo, oid)?
-                                            } else {
-                                                parse_commit(bytes)?
-                                            };
-                                            commit_data.insert(oid, data);
+                                            let payload = retain_commit_payload_for_list(
+                                                repo,
+                                                graph,
+                                                oid,
+                                                walk_extent,
+                                            )?;
+                                            commit_data.insert(oid, &payload);
                                         }
                                     }
                                 }
@@ -6720,6 +6767,7 @@ fn try_bounded_parent_filter_limit_list(
     include: &[ObjectId],
     exclude: &[ObjectId],
     options: &RevListOptions,
+    context: RevListWalkContext,
 ) -> Result<Option<RevListResult>> {
     if include.is_empty() || !can_use_bounded_parent_filter_limit_list(options) {
         return Ok(None);
@@ -6736,7 +6784,7 @@ fn try_bounded_parent_filter_limit_list(
     let max_p = options.max_parents.unwrap_or(usize::MAX);
 
     let mut ordered = Vec::with_capacity(max_count.unwrap_or(64).min(64));
-    let mut commit_data = oid_hash_map();
+    let mut commit_data = WalkedCommits::default();
     repo.odb().with_pack_read_context(|| -> Result<()> {
         let mut graph =
             CommitGraph::with_commit_graph(repo, options.first_parent, options.use_commit_graph);
@@ -6747,7 +6795,7 @@ fn try_bounded_parent_filter_limit_list(
             options.use_commit_graph,
             options.first_parent,
         )?;
-        let walk_extent = effective_rev_walk_retained_commit_extent();
+        let walk_extent = context.retained_commit_extent;
         graph.keep_unreleased_commit_bytes(walk_extent);
         let mut matched_seen = 0usize;
         streaming_date_walk(&mut graph, include, &excluded, false, None, |graph, oid| {
@@ -6757,15 +6805,9 @@ fn try_bounded_parent_filter_limit_list(
                 if matched_seen > options.skip && max_count.is_none_or(|m| ordered.len() < m) {
                     ordered.push(oid);
                     if options.retain_commit_data {
-                        let bytes = graph.commit_bytes(oid)?;
-                        let data = if walk_extent == CommitExtent::ThroughSubject
-                            && commit_through_subject_len(bytes).is_none()
-                        {
-                            load_commit(repo, oid)?
-                        } else {
-                            parse_commit(bytes)?
-                        };
-                        commit_data.insert(oid, data);
+                        let payload =
+                            retain_commit_payload_for_list(repo, graph, oid, walk_extent)?;
+                        commit_data.insert(oid, &payload);
                     }
                 }
             }
@@ -6988,22 +7030,15 @@ fn try_bounded_topo_limit_list(
     Ok(Some((out, linkage)))
 }
 
-/// One commit from a single positive tip with `-n 1` (matches `git rev-list -n 1 <tip>`).
-pub(crate) fn single_tip_bounded_page(
-    repo: &Repository,
-    tip: ObjectId,
-    retain_commit_data: bool,
-) -> Result<RevListResult> {
-    single_tip_bounded_page_with_parent_probe(repo, tip, 1, retain_commit_data)
-}
-
-/// Like [`single_tip_bounded_page`], optionally including the first parent when `max_fetch >= 2`
-/// so callers can detect truncation without a full date-order walk.
+/// One commit from a single positive tip with `-n 1` (matches `git rev-list -n 1 <tip>`), with an
+/// optional extra parent when `max_fetch >= 2` so callers can detect truncation without a full
+/// date-order walk.
 pub(crate) fn single_tip_bounded_page_with_parent_probe(
     repo: &Repository,
     tip: ObjectId,
     max_fetch: usize,
     retain_commit_data: bool,
+    context: RevListWalkContext,
 ) -> Result<RevListResult> {
     let mut commits = vec![tip];
     if max_fetch >= 2 {
@@ -7017,8 +7052,8 @@ pub(crate) fn single_tip_bounded_page_with_parent_probe(
     commits.truncate(max_fetch);
     let mut result = rev_list_result_from_commits(commits);
     if retain_commit_data {
-        let commit = load_commit(repo, tip)?;
-        result.commit_data.insert(tip, commit);
+        let payload = retain_commit_payload_standalone(repo, tip, context.retained_commit_extent)?;
+        result.commit_data.insert(tip, &payload);
     }
     Ok(result)
 }
@@ -7028,6 +7063,7 @@ fn try_bounded_limit_list(
     include: &[ObjectId],
     exclude: &[ObjectId],
     options: &RevListOptions,
+    context: RevListWalkContext,
 ) -> Result<Option<RevListResult>> {
     // Excluded tips bound the walk on their own: painting the hide side stops at the merge-base
     // frontier, so even an unlimited `A..B` only visits the range instead of both closures.
@@ -7043,17 +7079,19 @@ fn try_bounded_limit_list(
         && options.max_count == Some(1)
         && can_stream_default_order(exclude, options)
     {
-        return Ok(Some(single_tip_bounded_page(
+        return Ok(Some(single_tip_bounded_page_with_parent_probe(
             repo,
             include[0],
+            1,
             options.retain_commit_data,
+            context,
         )?));
     }
     if can_stream_default_order(exclude, options) {
-        return streaming_default_order_list(repo, include, options).map(Some);
+        return streaming_default_order_list(repo, include, options, context).map(Some);
     }
     if can_stream_since_cutoff_order(exclude, options) {
-        return streaming_since_cutoff_bounded_list(repo, include, options).map(Some);
+        return streaming_since_cutoff_bounded_list(repo, include, options, context).map(Some);
     }
     let need = options
         .skip
@@ -7117,33 +7155,22 @@ fn try_bounded_limit_list(
     Ok(Some(result))
 }
 
-/// How many commits a date walk listing `listed` commits is likely to parse.
-///
-/// Besides the listed commits, the walk parses the queued frontier (parents of merges not yet
-/// emitted), about a quarter more on merge-heavy histories. Overshooting costs memory, since the
-/// tables round up to the next power of two; a larger frontier just grows the maps once. The cap
-/// keeps an unbounded `--max-count` from reserving a huge table up front.
-fn expected_parsed_commits(listed: usize) -> usize {
-    const CAP: usize = 1 << 16;
-    listed.saturating_add(listed / 4).min(CAP)
-}
-
 /// `--max-count` / `--skip` list in Git's default order, stopping as soon as the page is full.
 fn streaming_default_order_list(
     repo: &Repository,
     include: &[ObjectId],
     options: &RevListOptions,
+    context: RevListWalkContext,
 ) -> Result<RevListResult> {
     let max_count = options.max_count.unwrap_or(usize::MAX);
     let mut ordered = Vec::with_capacity(max_count.min(4096));
-    let mut commit_data = OidHashMap::default();
+    let mut commit_data = WalkedCommits::default();
     if max_count > 0 {
         repo.odb().with_pack_read_context(|| -> Result<()> {
             let mut graph = CommitGraph::with_commit_graph(repo, false, options.use_commit_graph);
+            let retain_extent = context.retained_commit_extent;
             if options.retain_commit_data {
-                graph.retain_parsed_commits(expected_parsed_commits(
-                    options.skip.saturating_add(max_count),
-                ));
+                graph.keep_unreleased_commit_bytes(retain_extent);
             }
             let mut seen = 0usize;
             streaming_date_walk(
@@ -7152,11 +7179,17 @@ fn streaming_default_order_list(
                 &RangeWalkHide::empty(),
                 false,
                 None,
-                |_, oid| {
+                |g, oid| {
                     seen += 1;
                     if seen > options.skip {
                         ordered.push(oid);
+                        if options.retain_commit_data {
+                            let payload =
+                                retain_commit_payload_for_list(repo, g, oid, retain_extent)?;
+                            commit_data.insert(oid, &payload);
+                        }
                     }
+                    g.release_commit_bytes(oid);
                     Ok(if ordered.len() >= max_count {
                         WalkControl::Stop
                     } else {
@@ -7164,7 +7197,6 @@ fn streaming_default_order_list(
                     })
                 },
             )?;
-            commit_data = graph.take_retained_commits(&ordered);
             Ok(())
         })?;
     }
@@ -7181,19 +7213,20 @@ fn streaming_since_cutoff_bounded_list(
     repo: &Repository,
     include: &[ObjectId],
     options: &RevListOptions,
+    context: RevListWalkContext,
 ) -> Result<RevListResult> {
     let max_count = options.max_count;
     let mut ordered = Vec::with_capacity(max_count.unwrap_or(64).min(4096));
     let (match_count, commit_data) =
         repo.odb()
-            .with_pack_read_context(|| -> Result<(usize, OidHashMap<CommitData>)> {
+            .with_pack_read_context(|| -> Result<(usize, WalkedCommits)> {
                 let mut graph =
                     CommitGraph::with_commit_graph(repo, false, options.use_commit_graph);
+                let retain_extent = context.retained_commit_extent;
                 if options.retain_commit_data && !options.count {
-                    graph.retain_parsed_commits(expected_parsed_commits(
-                        options.skip.saturating_add(max_count.unwrap_or(4096)),
-                    ));
+                    graph.keep_unreleased_commit_bytes(retain_extent);
                 }
+                let mut commit_data = WalkedCommits::default();
                 let since = options.since_cutoff;
                 let until = options.until_cutoff;
                 let mut matched_seen = 0usize;
@@ -7204,8 +7237,8 @@ fn streaming_since_cutoff_bounded_list(
                     &RangeWalkHide::empty(),
                     false,
                     since,
-                    |graph, oid| {
-                        let ts = graph.committer_time(oid);
+                    |g, oid| {
+                        let ts = g.committer_time(oid);
                         let in_window =
                             !until.is_some_and(|u| ts > u) && !since.is_some_and(|s| ts < s);
                         if in_window {
@@ -7215,9 +7248,19 @@ fn streaming_since_cutoff_bounded_list(
                                     match_count += 1;
                                 } else if max_count.is_none_or(|m| ordered.len() < m) {
                                     ordered.push(oid);
+                                    if options.retain_commit_data {
+                                        let payload = retain_commit_payload_for_list(
+                                            repo,
+                                            g,
+                                            oid,
+                                            retain_extent,
+                                        )?;
+                                        commit_data.insert(oid, &payload);
+                                    }
                                 }
                             }
                         }
+                        g.release_commit_bytes(oid);
                         Ok(if options.count {
                             if max_count.is_some_and(|m| match_count >= m) {
                                 WalkControl::Stop
@@ -7231,11 +7274,6 @@ fn streaming_since_cutoff_bounded_list(
                         })
                     },
                 )?;
-                let commit_data = if options.retain_commit_data && !options.count {
-                    graph.take_retained_commits(&ordered)
-                } else {
-                    oid_hash_map()
-                };
                 Ok((match_count, commit_data))
             })?;
     if options.reverse {
@@ -7724,12 +7762,7 @@ pub(crate) struct CommitGraph<'r> {
     subjects: HashMap<ObjectId, String>,
     /// Full parent count before [`Self::first_parent_only`] truncation, when that mode is on.
     full_parent_counts: OidHashMap<usize>,
-    /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
-    ///
-    /// Retained commits are the only record of their tree and author time; those side maps
-    /// stay empty for them.
-    retained: Option<OidHashMap<CommitData>>,
-    /// Scratch buffer for retained commit loads and [`Self::commit_bytes`] reads.
+    /// Scratch buffer for [`Self::commit_bytes`] reads.
     read_buf: Vec<u8>,
     /// Raw commits traversal read but that are not yet released, once
     /// [`Self::keep_unreleased_commit_bytes`] is called.
@@ -7791,41 +7824,11 @@ impl<'r> CommitGraph<'r> {
             graft_parents,
             subjects: HashMap::new(),
             full_parent_counts: oid_hash_map(),
-            retained: None,
             read_buf: Vec::new(),
             unreleased_bytes: None,
             unreleased_extent: CommitExtent::Whole,
             read_buf_oid: None,
         }
-    }
-
-    /// Keep every commit object parsed from here on, for [`Self::take_retained_commits`].
-    ///
-    /// `expected` is how many commits the caller expects to parse; the per-commit maps are
-    /// sized for it up front so a bounded walk does not rehash while it runs.
-    ///
-    /// Retained commits stand in for the per-commit subject cache, so [`Self::subject_of`] is
-    /// `None` for them.
-    pub(crate) fn retain_parsed_commits(&mut self, expected: usize) {
-        self.parents.reserve(expected);
-        self.committer_time.reserve(expected);
-        self.retained
-            .get_or_insert_with(oid_hash_map)
-            .reserve(expected);
-    }
-
-    fn retained_commit(&self, oid: &ObjectId) -> Option<&CommitData> {
-        self.retained.as_ref()?.get(oid)
-    }
-
-    /// Parsed commits among `listed`, moved out of the retained set.
-    pub(crate) fn take_retained_commits(&mut self, listed: &[ObjectId]) -> OidHashMap<CommitData> {
-        let Some(mut retained) = self.retained.take() else {
-            return OidHashMap::default();
-        };
-        let listed: OidHashSet = listed.iter().copied().collect();
-        retained.retain(|oid, _| listed.contains(oid));
-        retained
     }
 
     pub(crate) fn subject_of(&self, oid: ObjectId) -> Option<&str> {
@@ -7845,9 +7848,6 @@ impl<'r> CommitGraph<'r> {
         self.populate(oid)?;
         if let Some(tree) = self.commit_trees.get(&oid).copied() {
             return Ok(tree);
-        }
-        if let Some(commit) = self.retained_commit(&oid) {
-            return Ok(commit.tree);
         }
         let commit = load_commit(self.repo, oid)?;
         self.commit_trees.insert(oid, commit.tree);
@@ -7904,9 +7904,6 @@ impl<'r> CommitGraph<'r> {
     fn author_time(&mut self, oid: ObjectId) -> i64 {
         if self.populate(oid).is_err() {
             return 0;
-        }
-        if let Some(commit) = self.retained_commit(&oid) {
-            return committer_unix_seconds_for_ordering(&commit.author);
         }
         if !self.author_time.contains_key(&oid) {
             self.fill_author_time_from_object(oid);
@@ -8024,6 +8021,11 @@ impl<'r> CommitGraph<'r> {
         }
     }
 
+    /// Move traversal-kept bytes for `oid` out of the unreleased map, if present.
+    fn drain_unreleased_commit_bytes(&mut self, oid: ObjectId) -> Option<Vec<u8>> {
+        self.unreleased_bytes.as_mut()?.remove(&oid)
+    }
+
     fn populate(&mut self, oid: ObjectId) -> Result<()> {
         if self.parents.contains_key(&oid) {
             return Ok(());
@@ -8049,32 +8051,6 @@ impl<'r> CommitGraph<'r> {
                 }
             }
         }
-        if self.retained.is_some() {
-            self.read_buf_oid = None;
-            let commit = load_commit_into(self.repo, oid, &mut self.read_buf)?;
-            let mut parents = if self.shallow_boundaries.contains(&oid) {
-                Vec::new()
-            } else {
-                commit.parents.clone()
-            };
-            if let Some(graft_parents) = self.graft_parents.get(&oid) {
-                parents = graft_parents.clone();
-            }
-            if self.first_parent_only {
-                self.full_parent_counts.insert(oid, parents.len());
-                if parents.len() > 1 {
-                    parents.truncate(1);
-                }
-            }
-            self.committer_time
-                .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
-            self.parents.insert(oid, parents);
-            if let Some(retained) = self.retained.as_mut() {
-                retained.insert(oid, commit);
-            }
-            return Ok(());
-        }
-
         let (mut parents, ctime, atime, tree, subject) = if self.unreleased_bytes.is_some() {
             let commit = CommitRef::parse(self.read_and_keep_commit_bytes(oid)?)?;
             (
@@ -8085,13 +8061,15 @@ impl<'r> CommitGraph<'r> {
                 None,
             )
         } else {
-            let mut commit = load_commit(self.repo, oid)?;
+            let bytes = read_commit_bytes(self.repo, oid)?;
+            let commit = CommitRef::parse(&bytes)?;
+            let subject = read_commit_subject_line(&bytes).ok();
             (
-                std::mem::take(&mut commit.parents),
-                committer_unix_seconds_for_ordering(&commit.committer),
-                committer_unix_seconds_for_ordering(&commit.author),
-                commit.tree,
-                Some(subject_line_from_commit_message(&commit.message)),
+                commit.parents().to_vec(),
+                commit.committer_unix_seconds_for_ordering(),
+                commit.author_unix_seconds_for_ordering(),
+                commit.tree(),
+                subject,
             )
         };
         if self.shallow_boundaries.contains(&oid) {
@@ -8115,15 +8093,6 @@ impl<'r> CommitGraph<'r> {
         }
         Ok(())
     }
-}
-
-fn subject_line_from_commit_message(message: &str) -> String {
-    message
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or("(no subject)")
-        .to_owned()
 }
 
 fn peel_ref_oids_to_unique_commits(repo: &Repository, raw: Vec<ObjectId>) -> Result<Vec<ObjectId>> {
@@ -12597,56 +12566,6 @@ mod line_coverage_tests {
             0,
             "commit-graph count path must not parse commit objects"
         );
-        Ok(())
-    }
-
-    #[test]
-    fn expected_parsed_commits_adds_frontier_and_caps() {
-        assert_eq!(expected_parsed_commits(0), 0);
-        assert_eq!(expected_parsed_commits(101), 126);
-        assert_eq!(expected_parsed_commits(1 << 20), 1 << 16);
-        assert_eq!(expected_parsed_commits(usize::MAX), 1 << 16);
-    }
-
-    #[test]
-    fn retained_commits_answer_tree_and_author_time_without_reparsing() -> Result<()> {
-        use crate::hot_path_test_metrics::HotPathMetricsScope;
-
-        let (_dir, repo, tip) = seed_repo(6, true);
-        let metrics = repo.odb().hot_path_metrics_arc();
-        metrics.reset_commit_parse_calls();
-        metrics.set_commit_parse_counting(true);
-        let _scope = HotPathMetricsScope::install(metrics);
-
-        let mut graph = CommitGraph::new(&repo, false);
-        graph.retain_parsed_commits(4);
-        let parents = graph.parents_of(tip)?;
-        assert_eq!(parents.len(), 2, "seeded tip is a merge");
-        for &parent in &parents {
-            graph.parents_of(parent)?;
-        }
-        let parsed = repo.odb().hot_path_metrics().commit_parse_calls();
-        assert_eq!(parsed, 3, "tip and both parents are parsed once each");
-
-        let expected = load_commit(&repo, tip)?;
-        assert_eq!(graph.commit_tree(tip)?, expected.tree);
-        assert_eq!(
-            graph.author_time(tip),
-            committer_unix_seconds_for_ordering(&expected.author)
-        );
-        assert_eq!(
-            graph.committer_time(tip),
-            committer_unix_seconds_for_ordering(&expected.committer)
-        );
-        assert_eq!(
-            repo.odb().hot_path_metrics().commit_parse_calls(),
-            parsed + 1,
-            "only the reference load above parses again"
-        );
-
-        let retained = graph.take_retained_commits(&[tip]);
-        assert_eq!(retained.len(), 1);
-        assert_eq!(retained.get(&tip), Some(&expected));
         Ok(())
     }
 

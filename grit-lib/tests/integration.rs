@@ -15,6 +15,9 @@ mod pack_delta_scenarios;
 mod support;
 mod switch_overwrite_git_helpers;
 
+// Integration modules refer to `crate::config` for load options and types.
+pub use grit_lib::config;
+
 #[cfg(feature = "full-tests")]
 #[path = "abbreviate_default_lookup_prefix_issue_1736.rs"]
 mod abbreviate_default_lookup_prefix_issue_1736;
@@ -1533,6 +1536,9 @@ mod refs_query_reachability_git_compat;
 #[path = "refs_refname_git_roundtrip.rs"]
 mod refs_refname_git_roundtrip;
 #[cfg(feature = "full-tests")]
+#[path = "refs_refname_git_roundtrip.rs"]
+mod refs_refname_git_roundtrip;
+#[cfg(feature = "full-tests")]
 #[path = "refs_transactions.rs"]
 mod refs_transactions;
 #[path = "refs_verify_batch_coverage.rs"]
@@ -1591,6 +1597,9 @@ mod release_unused_heap;
 #[cfg(feature = "full-tests")]
 #[path = "remote_config_git_compat.rs"]
 mod remote_config_git_compat;
+#[path = "remote_error_variants.rs"]
+mod remote_error_variants;
+#[cfg(feature = "full-tests")]
 #[path = "remote_error_variants.rs"]
 mod remote_error_variants;
 #[cfg(feature = "full-tests")]
