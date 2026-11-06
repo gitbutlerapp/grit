@@ -2,7 +2,7 @@
 //! `git merge-tree --write-tree` for every `merge.directoryRenames` value, and round-tripped
 //! through the index and work tree with the system `git`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

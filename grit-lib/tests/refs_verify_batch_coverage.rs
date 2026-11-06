@@ -1,6 +1,6 @@
 //! `verify_ref_transaction_batch` and refname availability edge paths.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

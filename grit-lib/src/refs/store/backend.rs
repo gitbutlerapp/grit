@@ -20,6 +20,7 @@
 //! `MemoryRefStore` is implemented exactly this way. Run the
 //! `grit_test_support::refstore_conformance` suite to check a backend against the built-ins.
 
+use crate::objects::ObjectError;
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
 use crate::objects::{ObjectId, ObjectKind};
@@ -326,6 +327,8 @@ pub fn resolve_symbolic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::Error;
+    use crate::objects::ObjectError;
     use crate::refs::store::{Expected, RefUpdateFlags, ReflogUpdate};
     use crate::refs::RefnameUnavailable;
 
@@ -667,7 +670,10 @@ mod tests {
             seen.push(*id);
             match id.as_bytes()[19] {
                 1 => Ok(Some(ObjectKind::Commit)),
-                _ => Err(crate::error::Error::CorruptObject("bad header".to_owned())),
+                _ => Err(crate::error::Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "not a commit",
+                ))),
             }
         })
         .expect_err("lookup failure");
@@ -682,7 +688,7 @@ mod tests {
         assert_eq!((name.as_str(), id), ("refs/heads/b", oid(2)));
         assert!(matches!(
             source.downcast_ref::<crate::error::Error>(),
-            Some(crate::error::Error::CorruptObject(_))
+            Some(Error::Object(ObjectError::CorruptObject { .. }))
         ));
         assert_eq!(seen, vec![oid(1), oid(2)]);
     }

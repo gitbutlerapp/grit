@@ -1,5 +1,6 @@
 //! In-memory history rewrite planning.
 
+use crate::objects::ObjectError;
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -928,7 +929,10 @@ fn library_err(err: Error) -> HistoryError {
     if let Error::History(inner) = err {
         return inner;
     }
-    if matches!(err, Error::ObjectNotFound(_)) {
+    if matches!(
+        err,
+        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+    ) {
         return HistoryError::Library(Box::new(err));
     }
     HistoryError::Planning {

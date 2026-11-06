@@ -1,5 +1,6 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
+use grit_lib::objects::ObjectError;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -268,7 +269,7 @@ pub fn run(
 fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
     match err {
         Error::InvalidRef(msg) => anyhow::anyhow!(msg),
-        Error::ObjectNotFound(msg) => crate::json_error::structured_revision_not_found(format!(
+        Error::Object(ObjectError::ObjectNotFound { spec: msg, .. }) => crate::json_error::structured_revision_not_found(format!(
             "invalid revision '{spec}': {msg}"
         )),
         other => anyhow::Error::new(other),

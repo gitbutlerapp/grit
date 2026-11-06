@@ -1,6 +1,6 @@
 //! Reftable stack interop with system git (t0610 / t0614 / t1460 scenarios).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

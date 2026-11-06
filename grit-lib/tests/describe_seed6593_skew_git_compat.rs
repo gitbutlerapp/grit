@@ -1,7 +1,7 @@
 //! Skewed merge DAG without commit-graph: `RevWalk::describe` matches system
 //! `git rev-list --count` for nearest-tag distance (seed-6593 regression).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::objects::{serialize_tag, ObjectId, ObjectKind, TagData};
 use grit_lib::refs::store::RefName;

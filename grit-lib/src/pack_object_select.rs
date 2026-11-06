@@ -1,5 +1,6 @@
 //! Object selection for pack-objects (walk or pack bitmap reachability).
 
+use crate::objects::ObjectError;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::Arc;
@@ -529,7 +530,10 @@ pub(crate) fn included_tag_chains(
             }
             let tag = odb.read(&current)?;
             current = tag_object_line_oid(&tag.data).ok_or_else(|| {
-                Error::CorruptObject(format!("tag {current} has no valid object header"))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("tag {current} has no valid object header"),
+                ))
             })?;
         }
     }
@@ -1797,7 +1801,7 @@ impl<'a> EnumerationWalk<'a> {
         }
         let info = if self.missing.is_some() {
             match self.odb.read_info_without_fetch(oid) {
-                Err(Error::ObjectNotFound(_)) => return Ok(None),
+                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => return Ok(None),
                 other => other,
             }
         } else {

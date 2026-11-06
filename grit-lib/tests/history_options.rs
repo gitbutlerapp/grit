@@ -1,6 +1,6 @@
 //! Shared [`RewriteOptions`] behavior across history entry points.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

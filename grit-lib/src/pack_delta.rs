@@ -5,6 +5,7 @@
 //! OFS vs REF selection, trailer), so only one batch of encoded output is in memory.
 //! New deltas are chosen by [`crate::delta_search`].
 
+use crate::objects::ObjectError;
 use std::io::Write;
 
 use flate2::write::ZlibEncoder;
@@ -193,8 +194,12 @@ fn write_pack_in_batches(
     let par_opts = pack_write_parallel_options(odb, write_threads)?;
     let compression = pack_zlib_compression(odb)?;
     let algo = odb.hash_algo();
-    let count = u32::try_from(entries.len())
-        .map_err(|_| Error::CorruptObject("pack object count exceeds u32".to_owned()))?;
+    let count = u32::try_from(entries.len()).map_err(|_| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack object count exceeds u32".to_owned(),
+        ))
+    })?;
     let delta_count = entries.iter().filter(|e| e.base.is_some()).count() as u32;
     let mut verbatim_reuse_objects = 0u32;
     let mut verbatim_reuse_bytes = 0u64;
@@ -222,21 +227,22 @@ fn write_pack_in_batches(
                 let in_pack_offset = oid_to_offset.get(&base_oid).copied();
                 if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
                     let dist = offset.checked_sub(base_off).ok_or_else(|| {
-                        Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                        Error::Object(ObjectError::corrupt_object(None, "ofs-delta distance underflow".to_owned()))
                     })?;
                     encode_pack_object_header(&mut header, 6, prep.payload_len);
                     encode_ofs_delta_distance(&mut header, dist);
                 } else {
                     if !opts.thin && in_pack_offset.is_none() {
-                        return Err(Error::PackDeltaBaseNotWritten {
+                        return Err(Error::Object(ObjectError::PackDeltaBaseNotWritten {
                             target: entry.oid,
                             base: base_oid,
-                        });
+                        }));
                     }
                     if base_oid.as_bytes().len() != algo.len() {
-                        return Err(Error::CorruptObject(
-                            "ref-delta base oid width mismatch".to_owned(),
-                        ));
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            "ref-delta base oid width mismatch",
+                        )));
                     }
                     encode_pack_object_header(&mut header, 7, prep.payload_len);
                     header.extend_from_slice(base_oid.as_bytes());
@@ -258,9 +264,9 @@ fn write_pack_in_batches(
                 (n, crc_out.finalize())
             }
             body => {
-                let bytes = body
-                    .as_slice()
-                    .ok_or_else(|| Error::CorruptObject("missing prepared pack body".to_owned()))?;
+                let bytes = body.as_slice().ok_or_else(|| {
+                    Error::Object(ObjectError::corrupt_object(None, "missing prepared pack body".to_owned()))
+                })?;
                 crate::pack_objects::write_all_chunked(&mut out, bytes)?;
                 let mut crc = crc32fast::Hasher::new();
                 crc.update(&header);
@@ -383,7 +389,10 @@ fn prepare_whole(
         && info.size >= STREAM_WHOLE_FROM.min(odb.big_file_threshold()?)
     {
         let payload_len = usize::try_from(info.size).map_err(|_| {
-            Error::CorruptObject(format!("object size overflow for {}", entry.oid.to_hex()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("object size overflow for {}", entry.oid.to_hex()),
+            ))
         })?;
         return Ok(PreparedEntry {
             body: PreparedBody::StreamWhole {
@@ -413,8 +422,12 @@ fn prepare_delta(
     compression: Compression,
 ) -> Result<PreparedEntry> {
     if let Some((delta_size, pack_bytes, zlib_start, zlib_end)) = &entry.reused_delta_zlib {
-        let delta_len = usize::try_from(*delta_size)
-            .map_err(|_| Error::CorruptObject("reused delta size exceeds usize".to_owned()))?;
+        let delta_len = usize::try_from(*delta_size).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "reused delta size exceeds usize".to_owned(),
+            ))
+        })?;
         return Ok(PreparedEntry {
             body: PreparedBody::ReusedZlib(PackSlice {
                 bytes: std::sync::Arc::clone(pack_bytes),
@@ -467,7 +480,12 @@ fn compute_delta(
     base.index
         .get_or_insert_with(|| DeltaIndex::new(data))
         .encode(&target, 0)
-        .ok_or_else(|| Error::CorruptObject("failed to encode pack delta for object".into()))
+        .ok_or_else(|| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "failed to encode pack delta for object",
+            ))
+        })
 }
 
 fn zlib_compress(data: &[u8], compression: Compression) -> Result<Vec<u8>> {
@@ -564,7 +582,7 @@ mod tests {
         target.base = Some(absent.oid);
         let entries = [target];
         match write_plan(&odb, &entries, false) {
-            Err(Error::PackDeltaBaseNotWritten { target, base }) => {
+            Err(Error::Object(ObjectError::PackDeltaBaseNotWritten { target, base })) => {
                 assert_eq!((target, base), (entries[0].oid, absent.oid));
             }
             other => panic!("expected PackDeltaBaseNotWritten, got {other:?}"),
@@ -583,7 +601,7 @@ mod tests {
         b.base = Some(a.oid);
         let (a_oid, b_oid) = (a.oid, b.oid);
         match write_plan(&odb, &[a, b], false) {
-            Err(Error::PackDeltaBaseNotWritten { target, base }) => {
+            Err(Error::Object(ObjectError::PackDeltaBaseNotWritten { target, base })) => {
                 assert_eq!((target, base), (a_oid, b_oid));
             }
             other => panic!("expected PackDeltaBaseNotWritten, got {other:?}"),

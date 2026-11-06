@@ -59,6 +59,8 @@
 //! The server keeps each checkout's record, the work-branch names it has
 //! given out, and the graft log in a [`CheckoutStore`].
 
+use crate::error::Error;
+use crate::objects::ObjectError;
 mod branch_refresh;
 mod checkin;
 mod graft;
@@ -1129,7 +1131,7 @@ fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize>
     };
     let promised = crate::serve::promised_objects::PromisorObjects::new(repo)?;
     if !promised.is_promised(&first, Some(&referrer))? {
-        return Err(crate::error::Error::ObjectNotFound(first.to_hex()).into());
+        return Err(ObjectError::object_not_found(first.to_hex()).into());
     }
     let count = missing.len();
     if repo.caches().promisor_fetcher().is_none() {
@@ -1153,7 +1155,7 @@ fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize>
     if let Some(&still) = odb.missing_stored_oids(wanted.iter().copied())?.first() {
         return Err(not_fetched(
             still,
-            crate::error::Error::PromisedObjectMissing(still),
+            Error::Object(ObjectError::PromisedObjectMissing(still)),
         ));
     }
     Ok(count)

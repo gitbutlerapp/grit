@@ -1,5 +1,6 @@
 //! Concurrent [`Odb::read`] from worker threads (pack store context and byte identity).
 
+use grit_lib::objects::ObjectError;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -255,7 +256,7 @@ fn stale_read_after_invalidation() {
             ready_tx.send(()).expect("ready");
             done_rx.recv().expect("wait for invalidation");
             match odb_reader.read(&oid) {
-                Err(Error::ObjectNotFound(_)) => false,
+                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => false,
                 Ok(_) => true,
                 Err(other) => panic!("unexpected read error: {other}"),
             }
@@ -278,7 +279,7 @@ fn stale_read_after_invalidation() {
         "read after cross-thread invalidation must not return removed pack objects"
     );
     assert!(
-        matches!(odb.read(&oid), Err(Error::ObjectNotFound(_))),
+        matches!(odb.read(&oid), Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))),
         "serial read after pack removal must miss"
     );
 }

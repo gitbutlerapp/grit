@@ -2,7 +2,8 @@
 //! served in-process by grit: a blob-limit clone of a local repository, lazy fetches
 //! of old versions of a large file, then the drop and a lazy fetch back.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+use grit_lib::objects::ObjectError;
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -565,7 +566,7 @@ fn refusals_are_typed() {
     let plain = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     assert!(matches!(
         drop_promised_blobs(&plain, &opts(LIMIT, None)),
-        Err(Error::NoPromisorRemote { .. })
+        Err(Error::Object(ObjectError::NoPromisorRemote { .. }))
     ));
 
     let fx = Fixture::new().with_old_versions_fetched();
@@ -589,14 +590,14 @@ fn refusals_are_typed() {
     .unwrap();
     assert!(matches!(
         drop_promised_blobs(&fx.offline(), &opts(LIMIT, None)),
-        Err(Error::MaintenanceRunning { .. })
+        Err(Error::Object(ObjectError::MaintenanceRunning { .. }))
     ));
     std::fs::remove_file(fx.git_dir.join("gc.pid")).unwrap();
 
     append_config(&fx.git_dir, "[extensions]\n\tpreciousObjects = true\n");
     assert!(matches!(
         drop_promised_blobs(&fx.offline(), &opts(LIMIT, None)),
-        Err(Error::PreciousObjectsRepository { .. })
+        Err(Error::Object(ObjectError::PreciousObjectsRepository { .. }))
     ));
     assert!(fx.offline().odb().exists_stored(&fx.big[0]));
 }

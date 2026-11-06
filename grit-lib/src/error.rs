@@ -13,6 +13,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 use std::path::PathBuf;
 
 use thiserror::Error;
@@ -1253,107 +1254,10 @@ pub enum Error {
     #[error(transparent)]
     Object(crate::objects::ObjectError),
 
-    /// A supplied object ID string was not valid hex or the wrong length.
-    #[error("invalid object id '{0}'")]
-    InvalidObjectId(String),
-
-    /// SHA-1 object hashing detected a chosen-prefix collision (sha1dc).
-    #[error("SHA-1 hash collision detected for object {oid}")]
-    HashCollision {
-        /// Plain SHA-1 digest for the colliding input (not safe to use as an object id).
-        oid: crate::objects::ObjectId,
-    },
-
-    /// The requested object does not exist in the object store.
-    #[error("object not found: {0}")]
-    ObjectNotFound(String),
-
     /// A revision expression (branch, tag, object id, `x~n`, `ORIG_HEAD`, …) names nothing in
     /// the repository. Holds the expression as the caller wrote it.
     #[error("unknown revision '{0}'")]
     RevisionNotFound(String),
-
-    /// A partial-clone promisor object is not present locally and no fetcher ran.
-    #[error("promised object not available locally: {0}")]
-    PromisedObjectMissing(crate::objects::ObjectId),
-
-    /// Promised objects could not be fetched: every promisor remote was asked, and some
-    /// failed. [`Self::PromisedObjectMissing`] is used instead when every remote answered
-    /// but none had the object.
-    #[error("{}", promisor_fetch_failed_message(missing, failures))]
-    PromisorFetchFailed {
-        /// The first object still missing after every remote was tried.
-        missing: crate::objects::ObjectId,
-        /// One entry per remote that failed, in the order they were tried: the remote's
-        /// name and its first error.
-        failures: Vec<(String, Error)>,
-    },
-
-    /// An object's stored data is corrupt or malformed.
-    #[error("corrupt object: {0}")]
-    CorruptObject(String),
-
-    /// A pack index (`.idx`) file's trailing checksum does not match its contents.
-    ///
-    /// Only reported by reads that verify the index trailer, such as
-    /// [`crate::pack::read_pack_index`]; the checksum of the `.pack` the index
-    /// describes is checked separately.
-    #[error("corrupt object: index checksum mismatch for {}: {mismatch}", crate::git_path::user_display_path(.path))]
-    PackIndexChecksumMismatch {
-        /// The `.idx` file that failed verification.
-        path: std::path::PathBuf,
-        /// Expected and stored trailer digests.
-        mismatch: crate::hash::TrailerMismatch,
-    },
-
-    /// Indexing or unpacking a pack left deltas whose bases are neither in the pack nor
-    /// in the object database: a thin pack without its bases, or a ref-delta cycle.
-    #[error("corrupt object: {count} delta(s) could not be resolved")]
-    UnresolvedDeltas {
-        /// Number of deltas left unresolved.
-        count: u64,
-    },
-
-    /// A pack being written that is not thin reached a delta before its base: the base
-    /// is missing from the pack, or the planned deltas form a cycle. The receiver could
-    /// not resolve that delta, so the pack was abandoned.
-    #[error("pack delta for {target} comes before its base {base}")]
-    PackDeltaBaseNotWritten {
-        /// The object that would have been stored as a delta.
-        target: crate::objects::ObjectId,
-        /// Its delta base, not written ahead of it.
-        base: crate::objects::ObjectId,
-    },
-
-    /// [`crate::objects::Objects::write`] refused a payload that `git fsck` would reject;
-    /// nothing was written.
-    #[error("refusing to write invalid {kind} object: {}", .check.report_line())]
-    InvalidObject {
-        /// Kind the payload was meant to be stored as.
-        kind: crate::objects::ObjectKind,
-        /// The first fsck rule the payload breaks (`check.id` is Git's fsck message id).
-        check: crate::fsck_standalone::FsckError,
-    },
-
-    /// [`crate::objects::Objects::write_tree`] refused an entry.
-    #[error(transparent)]
-    InvalidTreeEntry(#[from] crate::objects::TreeEntryError),
-
-    /// A [`crate::ident::Signature`] cannot be written as an author, committer or tagger line.
-    #[error(transparent)]
-    InvalidSignature(#[from] crate::ident::SignatureError),
-
-    /// An object exists but has a different kind than the operation requires, such as a
-    /// tree or blob where a commit was expected.
-    #[error("object {oid} is a {actual}, not a {expected}")]
-    UnexpectedObjectKind {
-        /// The object that was read.
-        oid: crate::objects::ObjectId,
-        /// The kind the operation required.
-        expected: crate::objects::ObjectKind,
-        /// The kind the object actually has.
-        actual: crate::objects::ObjectKind,
-    },
 
     /// Two commits that were asked to be merged share no merge base, and the caller did not
     /// allow merging unrelated histories.
@@ -1363,35 +1267,6 @@ pub enum Error {
         ours: crate::objects::ObjectId,
         /// The commit being merged in.
         theirs: crate::objects::ObjectId,
-    },
-
-    /// A commit-graph write was given a commit whose parent is neither among the commits
-    /// being written nor in the base graph layers, so its parent edge cannot be encoded.
-    #[error("commit-graph cannot encode parent {parent} of commit {commit}: parent not in graph")]
-    CommitGraphParentMissing {
-        /// Commit whose parent list was being encoded.
-        commit: crate::objects::ObjectId,
-        /// Parent that is missing from the graph.
-        parent: crate::objects::ObjectId,
-    },
-
-    /// In-pack delta resolution exceeded the read-side chain depth limit (guards
-    /// against cyclic ref-delta chains and unbounded recursion; Git has no read limit).
-    #[error("delta chain too deep (limit {limit})")]
-    DeltaChainTooDeep {
-        /// Maximum delta chain depth allowed while reading packed objects.
-        limit: usize,
-    },
-
-    /// An unsupported or unknown object type was encountered.
-    #[error("unknown object type '{0}'")]
-    UnknownObjectType(String),
-
-    /// Loose object header type field exceeds Git's 32-byte limit.
-    #[error("header for {oid} too long, exceeds 32 bytes")]
-    ObjectHeaderTooLong {
-        /// Object id (hex) of the loose object with an oversized header.
-        oid: String,
     },
 
     /// An I/O error from the underlying filesystem.
@@ -1407,59 +1282,6 @@ pub enum Error {
     /// `running: false` means the lock is stale).
     #[error(transparent)]
     LockHeld(#[from] LockHeldError),
-
-    /// A zlib compression or decompression failure.
-    #[error("zlib error: {0}")]
-    Zlib(String),
-
-    /// A loose object file is present but its stored bytes could not be decoded.
-    #[error("loose object {oid} at {} is unreadable: {source}", crate::git_path::user_display_path(.path))]
-    #[non_exhaustive]
-    CorruptLooseObject {
-        /// Object id implied by the loose object path.
-        oid: crate::objects::ObjectId,
-        /// Path to the loose object file (often under `.git/objects/`).
-        path: std::path::PathBuf,
-        /// Underlying zlib, header, or I/O failure.
-        #[source]
-        source: Box<Error>,
-    },
-
-    /// A pack entry names the object but its stored bytes could not be decoded.
-    #[error(
-        "packed object {oid} in {} (offset {offset}) is unreadable: {source}",
-        pack.display()
-    )]
-    #[non_exhaustive]
-    CorruptPackedObject {
-        /// Object id from the pack index.
-        oid: crate::objects::ObjectId,
-        /// Path to the `.pack` file.
-        pack: std::path::PathBuf,
-        /// Byte offset of the object record in the pack.
-        offset: u64,
-        /// Underlying zlib, header, or I/O failure.
-        #[source]
-        source: Box<Error>,
-    },
-
-    /// Loose object bytes hash to a different OID than the file path implies (`git fsck` / `read_loose_object`).
-    #[error("{real_oid}: hash-path mismatch, found at: {path}")]
-    LooseHashMismatch {
-        /// Repository-relative or filesystem path to the loose object file.
-        path: String,
-        /// Hex object id of the unpacked contents.
-        real_oid: String,
-    },
-
-    /// A prepared loose object could not be written during parallel index staging.
-    #[error("could not store {path}: {source}")]
-    LooseObjectWrite {
-        /// Index-relative path of the blob being stored.
-        path: String,
-        /// Underlying filesystem error from the object store.
-        source: std::io::Error,
-    },
 
     /// Filesystem I/O failed on a repository-relative worktree path (checkout, staging, diff).
     #[error("{}", crate::worktree::io_error::format_worktree_path_io_message(.path, *operation, .source))]
@@ -1483,15 +1305,6 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    /// A streamed object write or hash ended before the declared size was read.
-    #[error("object stream ended after {actual} of {expected} bytes")]
-    ObjectStreamTruncated {
-        /// Payload size the caller declared.
-        expected: u64,
-        /// Bytes the stream delivered before end of file.
-        actual: u64,
-    },
-
     /// A worktree file hashed earlier in an operation had different content when stored.
     #[error("{path} changed while it was being added")]
     WorktreeFileChanged {
@@ -1506,14 +1319,6 @@ pub enum Error {
     /// Stage-1/2/3 entries are present; a stage-0 tree cannot be built.
     #[error("index contains unmerged entries")]
     IndexUnmerged,
-
-    /// Another maintenance run holds the repository's `gc.pid` lock
-    /// ([`crate::maintenance::GcLock`]); nothing was changed.
-    #[error("{}", maintenance_running_message(holder))]
-    MaintenanceRunning {
-        /// Process recorded in `gc.pid`.
-        holder: crate::maintenance::GcLockHolder,
-    },
 
     /// Staging ([`crate::porcelain::add::stage`] with explicit paths, or the auto-stage pass of
     /// [`crate::porcelain::commit::commit_worktree`]) refused paths that still contain conflict
@@ -2271,15 +2076,6 @@ pub enum Error {
         path: std::path::PathBuf,
     },
 
-    /// Multi-pack-index load or write failure.
-    #[error(transparent)]
-    Midx(#[from] MidxError),
-
-    /// Offloading blobs to a large-object promisor was refused
-    /// ([`crate::maintenance::offload_blobs`]).
-    #[error(transparent)]
-    Offload(#[from] crate::offload::OffloadError),
-
     /// Revision parsing failed ([`crate::rev_parse_error::RevParseError`]).
     #[error(transparent)]
     RevParse(#[from] crate::rev_parse_error::RevParseError),
@@ -2295,106 +2091,6 @@ pub enum Error {
     /// History rewrite planning failed ([`crate::history::HistoryError`]).
     #[error(transparent)]
     History(#[from] crate::history::HistoryError),
-
-    /// The operation needs the files-backed `objects/` directory, but the repository's
-    /// [`Odb`](crate::odb::Odb) uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
-    /// store. Nothing was written; use a files-backed repository for this operation.
-    #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
-    UnsupportedObjectStore {
-        /// Operation that was refused (for example `"fetch"`, `"push"`, `"gc"`).
-        operation: &'static str,
-    },
-
-    /// The operation fetches objects back from a promisor remote, and the repository
-    /// has none: no `remote.<name>.promisor = true` and no `extensions.partialClone`.
-    /// Nothing was changed.
-    #[error("{operation} needs a promisor remote to fetch objects back from")]
-    NoPromisorRemote {
-        /// Operation that was refused (for example `"drop-large-blobs"`).
-        operation: &'static str,
-    },
-
-    /// The operation would delete objects, and `extensions.preciousObjects` says this
-    /// repository never loses any (it may be shared as an alternate). Nothing was
-    /// changed.
-    #[error("{operation} deletes objects, which extensions.preciousObjects forbids here")]
-    PreciousObjectsRepository {
-        /// Operation that was refused (for example `"drop-large-blobs"`).
-        operation: &'static str,
-    },
-
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) rooted somewhere other than the repository's
-    /// `objects/` directory.
-    #[error(
-        "object database {} is not the repository's objects directory {}",
-        builder.display(),
-        repository.display()
-    )]
-    OdbObjectsDirMismatch {
-        /// The builder's objects directory, canonicalized when it exists.
-        builder: std::path::PathBuf,
-        /// The repository's canonical objects directory.
-        repository: std::path::PathBuf,
-    },
-
-    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
-    /// [`OdbBuilder`](crate::odb::OdbBuilder) whose custom primary or read source hashes
-    /// objects with a different algorithm than the repository's `extensions.objectformat`
-    /// (SHA-1 when unset).
-    #[error(
-        "object store hashes with {} but the repository's object format is {}",
-        store.name(),
-        repository.name()
-    )]
-    #[non_exhaustive]
-    ObjectFormatMismatch {
-        /// The repository's object format from its config.
-        repository: crate::objects::HashAlgo,
-        /// The first injected store's [`hash_algo`](crate::odb::store::ObjectStore::hash_algo)
-        /// that differs from `repository`.
-        store: crate::objects::HashAlgo,
-    },
-
-    /// Parsing a [`crate::tree_sha256::TreeSha256`] from hex failed (expected 64 hex digits).
-    #[error("invalid tree-sha256 hex")]
-    TreeSha256InvalidHex,
-
-    /// A revision passed to [`crate::tree_sha256::tree_sha256`] did not peel to a commit or tree.
-    #[error("tree-sha256: revision resolves to {found:?}, not a commit or tree")]
-    TreeSha256InvalidRevision {
-        /// Object kind after peeling annotated tags.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// One or more submodules required for [`crate::tree_sha256::tree_sha256`] are missing.
-    #[error("tree-sha256: missing submodules")]
-    TreeSha256MissingSubmodules(Vec<crate::tree_sha256::MissingSubmodule>),
-
-    /// `--tree-sha256` was requested with signing explicitly disabled.
-    #[error("tree-sha256 requires a signed tag")]
-    TreeSha256RequiresSigning,
-
-    /// [`crate::tree_sha256::verify_tag`] was given an object that is not an annotated tag.
-    #[error("verify-tag: object {oid} is a {found:?}, not an annotated tag")]
-    TagVerifyNotTag {
-        /// Object id passed to verification.
-        oid: crate::objects::ObjectId,
-        /// Kind stored in the ODB.
-        found: crate::objects::ObjectKind,
-    },
-
-    /// Annotated tag header block has no `object` line.
-    #[error("verify-tag: tag has no object header")]
-    TagVerifyMissingObjectHeader,
-
-    /// Annotated tag carries more than one `tree-sha256` header line.
-    #[error("verify-tag: tag has more than one tree-sha256 header")]
-    TagVerifyDuplicateTreeSha256Header,
-
-    /// Annotated tag tree-sha256 header parsing failed.
-    #[error(transparent)]
-    TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
 
     /// `grit blame --ignore-rev` did not resolve to a commit.
     #[error("cannot find revision {rev} to ignore")]
@@ -2427,13 +2123,10 @@ impl Error {
     /// Whether this is a missing-object failure from object lookup (legacy or [`ObjectError`]).
     #[must_use]
     pub fn is_object_not_found(&self) -> bool {
-        match self {
-            Self::ObjectNotFound(_) => true,
-            Self::Object(e) => {
-                matches!(e, crate::objects::ObjectError::ObjectNotFound { .. })
-            }
-            _ => false,
-        }
+        matches!(
+            self,
+            Self::Object(crate::objects::ObjectError::ObjectNotFound { .. })
+        )
     }
 
     /// Stable snake_case name of this error's variant (for example `"not_a_repository"`),
@@ -2461,38 +2154,14 @@ impl Error {
             Self::InitObjectFormatChange => "init_object_format_change",
             Self::InitBareWithSeparateGitDir => "init_bare_with_separate_git_dir",
             Self::Object(e) => e.kind_name(),
-            Self::InvalidObjectId(..) => "invalid_object_id",
-            Self::HashCollision { .. } => "hash_collision",
-            Self::ObjectNotFound(..) => "object_not_found",
             Self::RevisionNotFound(..) => "revision_not_found",
-            Self::PromisedObjectMissing(..) => "promised_object_missing",
-            Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
-            Self::CorruptObject(..) => "corrupt_object",
-            Self::PackIndexChecksumMismatch { .. } => "pack_index_checksum_mismatch",
-            Self::UnresolvedDeltas { .. } => "unresolved_deltas",
-            Self::PackDeltaBaseNotWritten { .. } => "pack_delta_base_not_written",
-            Self::InvalidObject { .. } => "invalid_object",
-            Self::InvalidTreeEntry(..) => "invalid_tree_entry",
-            Self::InvalidSignature(..) => "invalid_signature",
-            Self::UnexpectedObjectKind { .. } => "unexpected_object_kind",
-            Self::CommitGraphParentMissing { .. } => "commit_graph_parent_missing",
-            Self::DeltaChainTooDeep { .. } => "delta_chain_too_deep",
-            Self::UnknownObjectType(..) => "unknown_object_type",
-            Self::ObjectHeaderTooLong { .. } => "object_header_too_long",
             Self::Io(..) => "io",
             Self::LockHeld(..) => "lock_held",
-            Self::Zlib(..) => "zlib",
-            Self::CorruptLooseObject { .. } => "corrupt_loose_object",
-            Self::CorruptPackedObject { .. } => "corrupt_packed_object",
-            Self::LooseHashMismatch { .. } => "loose_hash_mismatch",
-            Self::LooseObjectWrite { .. } => "loose_object_write",
             Self::WorktreePathIo { .. } => "worktree_path_io",
             Self::GitDirPathIo { .. } => "git_dir_path_io",
-            Self::ObjectStreamTruncated { .. } => "object_stream_truncated",
             Self::WorktreeFileChanged { .. } => "worktree_file_changed",
             Self::IndexError(..) => "index_error",
             Self::IndexUnmerged => "index_unmerged",
-            Self::MaintenanceRunning { .. } => "maintenance_running",
             Self::UnmergedConflictMarkers { .. } => "unmerged_conflict_markers",
             Self::IndexPathPrefixConflict { .. } => "index_path_prefix_conflict",
             Self::IndexFsmonitorExtensionTruncated => "index_fsmonitor_extension_truncated",
@@ -2570,7 +2239,6 @@ impl Error {
             Self::NotFastForward => "not_fast_forward",
             Self::NothingToCommit => "nothing_to_commit",
             Self::UnrelatedHistories { .. } => "unrelated_histories",
-            Self::ObjectFormatMismatch { .. } => "object_format_mismatch",
             Self::CheckoutRollbackIncomplete { .. } => "checkout_rollback_incomplete",
             Self::NothingStagedToCommit { .. } => "nothing_staged_to_commit",
             Self::DetachedHead => "detached_head",
@@ -2614,24 +2282,10 @@ impl Error {
             Self::NotesObjectKind { .. } => "notes_object_kind",
             Self::NotesMergeBothEmpty { .. } => "notes_merge_both_empty",
             Self::NotesMergeInProgress { .. } => "notes_merge_in_progress",
-            Self::Midx(..) => "midx",
-            Self::Offload(..) => "offload",
             Self::RevParse(..) => "rev_parse",
             Self::RevList(..) => "rev_list",
             Self::Hook(..) => "hook",
             Self::History(..) => "history",
-            Self::UnsupportedObjectStore { .. } => "unsupported_object_store",
-            Self::NoPromisorRemote { .. } => "no_promisor_remote",
-            Self::PreciousObjectsRepository { .. } => "precious_objects_repository",
-            Self::OdbObjectsDirMismatch { .. } => "odb_objects_dir_mismatch",
-            Self::TreeSha256InvalidHex => "tree_sha256_invalid_hex",
-            Self::TreeSha256InvalidRevision { .. } => "tree_sha256_invalid_revision",
-            Self::TreeSha256MissingSubmodules(..) => "tree_sha256_missing_submodules",
-            Self::TreeSha256RequiresSigning => "tree_sha256_requires_signing",
-            Self::TagVerifyNotTag { .. } => "tag_verify_not_tag",
-            Self::TagVerifyMissingObjectHeader => "tag_verify_missing_object_header",
-            Self::TagVerifyDuplicateTreeSha256Header => "tag_verify_duplicate_tree_sha256_header",
-            Self::TreeSha256Claim(..) => "tree_sha256_claim",
             Self::BlameIgnoreRevUnknown { .. } => "blame_ignore_rev_unknown",
             Self::BlameIgnoreRevsFileOpen { .. } => "blame_ignore_revs_file_open",
             Self::BlameIgnoreRevsFileInvalidRev { .. } => "blame_ignore_revs_file_invalid_rev",
@@ -2761,62 +2415,19 @@ impl Error {
     #[must_use]
     pub fn is_damaged_object(&self) -> bool {
         match self {
-            Self::Zlib(_) | Self::CorruptObject(_) => true,
-            Self::CorruptLooseObject { .. } | Self::CorruptPackedObject { .. } => true,
+            Self::Object(e) => e.is_damaged_object(),
             Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
             _ => false,
         }
     }
 
-    pub(crate) fn is_object_read_wrap_source(&self) -> bool {
+    /// Whether a pack/loose read failure is a damaged stored copy (retry other packs/backends).
+    #[must_use]
+    pub fn is_object_read_wrap_source(&self) -> bool {
         match self {
-            Self::Zlib(_) | Self::CorruptObject(_) => true,
+            Self::Object(e) => e.is_object_read_wrap_source(),
             Self::Io(err) if err.kind() == std::io::ErrorKind::UnexpectedEof => true,
             _ => false,
-        }
-    }
-
-    /// Attach loose-object path context to low-level read failures at the ODB boundary.
-    #[must_use]
-    pub(crate) fn wrap_loose_read_failure(
-        oid: crate::objects::ObjectId,
-        path: std::path::PathBuf,
-        err: Error,
-    ) -> Error {
-        if matches!(err, Self::CorruptLooseObject { .. }) {
-            return err;
-        }
-        if err.is_object_read_wrap_source() {
-            Self::CorruptLooseObject {
-                oid,
-                path,
-                source: Box::new(err),
-            }
-        } else {
-            err
-        }
-    }
-
-    /// Attach pack location context to low-level read failures at the ODB boundary.
-    #[must_use]
-    pub(crate) fn wrap_packed_read_failure(
-        oid: crate::objects::ObjectId,
-        pack: std::path::PathBuf,
-        offset: u64,
-        err: Error,
-    ) -> Error {
-        if matches!(err, Self::CorruptPackedObject { .. }) {
-            return err;
-        }
-        if err.is_object_read_wrap_source() {
-            Self::CorruptPackedObject {
-                oid,
-                pack,
-                offset,
-                source: Box::new(err),
-            }
-        } else {
-            err
         }
     }
 
@@ -2931,20 +2542,14 @@ impl From<crate::lockfile::LockError> for Error {
     }
 }
 
+impl From<crate::pack_bitmap::BitmapError> for Error {
+    fn from(err: crate::pack_bitmap::BitmapError) -> Self {
+        Self::Message(err.to_string())
+    }
+}
+
 /// Convenience alias for `Result<T, Error>`.
 pub type Result<T> = std::result::Result<T, Error>;
-
-fn promisor_fetch_failed_message(
-    missing: &crate::objects::ObjectId,
-    failures: &[(String, Error)],
-) -> String {
-    let causes = failures
-        .iter()
-        .map(|(remote, err)| format!("{remote}: {err}"))
-        .collect::<Vec<_>>()
-        .join("; ");
-    format!("could not fetch promised object {missing} ({causes})")
-}
 
 /// Serializes as `{"kind": <Error::kind_name>, "message": <Display text>}`.
 #[cfg(feature = "serde-models")]

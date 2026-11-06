@@ -1,5 +1,6 @@
 //! Public custom [`Odb`](grit_lib::objects::odb::Odb) backends via [`OdbBuilder`](grit_lib::objects::odb::OdbBuilder).
 
+use grit_lib::objects::ObjectError;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -216,7 +217,7 @@ fn custom_primary_rejects_a_different_objects_dir() {
     .err()
     .expect("different objects dir must be rejected");
     match err {
-        Error::OdbObjectsDirMismatch {
+        Error::Object(ObjectError::OdbObjectsDirMismatch {
             builder,
             repository,
         } => {
@@ -240,7 +241,11 @@ fn custom_primary_rejects_a_different_objects_dir() {
     .err()
     .expect("missing objects dir must be rejected");
     assert!(
-        matches!(err, Error::OdbObjectsDirMismatch { ref builder, .. } if builder == &missing),
+        matches!(
+            err,
+            Error::Object(ObjectError::OdbObjectsDirMismatch { ref builder, .. })
+                if builder == &missing
+        ),
         "unexpected error: {err:?}"
     );
 }
@@ -503,11 +508,11 @@ fn memory_primary_rejects_filesystem_gc_and_commit_graph() {
     let (_dir, repo, _store) = memory_repo();
     assert!(matches!(
         repo.odb().gc(),
-        Err(Error::UnsupportedObjectStore { operation: "gc" })
+        Err(Error::Object(ObjectError::UnsupportedObjectStore { operation: "gc" })
     ));
     assert!(matches!(
         repo.odb().write_commit_graph(),
-        Err(Error::UnsupportedObjectStore {
+        Err(Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "commit-graph write"
         })
     ));

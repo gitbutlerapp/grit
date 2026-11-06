@@ -1,7 +1,7 @@
 //! Cancellation is [`Error::Cancelled`] at every layer; use [`Error::is_cancelled`] and the
 //! matching helper on operation error types instead of walking nested wrappers.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::bundle::BundleError;
 use grit_lib::error::Error;

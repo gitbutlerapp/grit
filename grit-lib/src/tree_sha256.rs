@@ -9,6 +9,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 /// Tag header name for the tree-sha256 digest (reference tool: [`HEADER`](https://github.com/schacon/tree-sha256)).
 pub const TREE_SHA256_HEADER: &str = "tree-sha256";
 
@@ -83,7 +84,7 @@ impl FromStr for TreeSha256 {
     fn from_str(s: &str) -> Result<Self> {
         let s = s.trim();
         if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(Error::TreeSha256InvalidHex);
+            return Err(ObjectError::TreeSha256InvalidHex.into());
         }
         let mut out = [0_u8; 32];
         for (i, chunk) in s.as_bytes().chunks(2).enumerate() {
@@ -100,7 +101,7 @@ fn hex_nibble(b: u8) -> Result<u8> {
         b'0'..=b'9' => Ok(b - b'0'),
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
-        _ => Err(Error::TreeSha256InvalidHex),
+        _ => Err(Error::Object(ObjectError::TreeSha256InvalidHex)),
     }
 }
 
@@ -193,7 +194,9 @@ fn tree_sha256_with_chain(
     ctx.walk_tree(tree_oid, b"")?;
     ctx.finish_blob_jobs()?;
     if !ctx.missing.is_empty() {
-        return Err(Error::TreeSha256MissingSubmodules(ctx.missing));
+        return Err(Error::Object(ObjectError::TreeSha256MissingSubmodules(
+            ctx.missing,
+        )));
     }
     ctx.records
         .sort_by(|a, b| record_sort_key(a).cmp(record_sort_key(b)));
@@ -224,7 +227,9 @@ fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
             let obj = repo.odb().read(&peeled)?;
             Ok(parse_commit(&obj.data)?.tree)
         }
-        other => Err(Error::TreeSha256InvalidRevision { found: other }),
+        other => Err(Error::Object(ObjectError::TreeSha256InvalidRevision {
+            found: other,
+        })),
     }
 }
 
@@ -265,12 +270,18 @@ impl ComputeCtx<'_> {
     fn walk_tree(&mut self, tree_oid: ObjectId, prefix: &[u8]) -> Result<()> {
         let obj = self.repo.odb().read(&tree_oid)?;
         if obj.kind != ObjectKind::Tree {
-            return Err(Error::CorruptObject(format!("expected tree {tree_oid}")));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("expected tree {tree_oid}"),
+            )));
         }
         let entries = parse_tree(&obj.data)?;
         for TreeEntry { mode, name, oid } in entries {
             if name.contains(&b'/') || name.contains(&0) {
-                return Err(Error::CorruptObject("invalid tree entry name".into()));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "invalid tree entry name",
+                )));
             }
             let path = join_path_bytes(prefix, &name);
             const S_IFMT: u32 = 0o170000;
@@ -341,7 +352,7 @@ impl ComputeCtx<'_> {
                 self.excluded.extend(sub_report.excluded);
                 self.cycles.extend(sub_report.cycles);
             }
-            Err(Error::TreeSha256MissingSubmodules(mut miss)) => {
+            Err(Error::Object(ObjectError::TreeSha256MissingSubmodules(mut miss))) => {
                 self.commit_chain.pop();
                 // Child missing paths are already qualified to the top repository.
                 self.missing.append(&mut miss);
@@ -424,7 +435,10 @@ impl ComputeCtx<'_> {
         let hash_one = |job: &BlobJob| {
             let obj = odb.read(&job.oid)?;
             if !matches!(obj.kind, ObjectKind::Blob) {
-                return Err(Error::CorruptObject(format!("expected blob {}", job.oid)));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("expected blob {}", job.oid),
+                )));
             }
             Ok(hex_sha256_content(&obj.data))
         };
@@ -623,7 +637,7 @@ impl TreeSha256Claim {
     /// # Errors
     ///
     /// Returns [`TreeSha256ClaimError::DuplicateDigestHeader`] or
-    /// [`TreeSha256ClaimError::InvalidExcludedPath`], or [`Error::TreeSha256InvalidHex`] when the
+    /// [`TreeSha256ClaimError::InvalidExcludedPath`], or [`Error::Object(ObjectError::TreeSha256InvalidHex)`] when the
     /// digest value is not exactly 64 ASCII hex digits (no trimming; surrounding or trailing
     /// whitespace is rejected).
     pub fn from_tag(tag: &TagData) -> Result<Option<Self>> {
@@ -697,9 +711,10 @@ impl TreeSha256Claim {
 /// Parse a `tree-sha256` tag header value: exactly 64 ASCII hex digits, no surrounding whitespace.
 fn tree_sha256_digest_from_tag_header_value(value: &[u8]) -> Result<TreeSha256> {
     if value.len() != 64 || !value.iter().all(|b| b.is_ascii_hexdigit()) {
-        return Err(Error::TreeSha256InvalidHex);
+        return Err(ObjectError::TreeSha256InvalidHex.into());
     }
-    let text = std::str::from_utf8(value).map_err(|_| Error::TreeSha256InvalidHex)?;
+    let text =
+        std::str::from_utf8(value).map_err(|_| Error::Object(ObjectError::TreeSha256InvalidHex))?;
     TreeSha256::from_str(text)
 }
 
@@ -809,7 +824,7 @@ mod claim_tests {
         TREE_SHA256_HEADER,
     };
     use crate::error::Error;
-    use crate::objects::{parse_tag, serialize_tag, TagData};
+    use crate::objects::{parse_tag, serialize_tag, ObjectError, TagData};
     use std::str::FromStr;
 
     fn sample_tag(extra: &[u8]) -> TagData {
@@ -906,9 +921,9 @@ tree-sha256 c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a\n";
         let tag = sample_tag(extra);
         assert!(matches!(
             TreeSha256Claim::from_tag(&tag),
-            Err(Error::TreeSha256Claim(
+            Err(Error::Object(ObjectError::TreeSha256Claim(
                 TreeSha256ClaimError::DuplicateDigestHeader
-            ))
+            )))
         ));
     }
 
@@ -918,7 +933,7 @@ tree-sha256 c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a\n";
         let tag = sample_tag(extra);
         assert!(matches!(
             TreeSha256Claim::from_tag(&tag),
-            Err(Error::TreeSha256InvalidHex)
+            Err(Error::Object(ObjectError::TreeSha256InvalidHex))
         ));
     }
 
@@ -934,7 +949,7 @@ tree-sha256 c29d81cdc535c4804153b7026e6b276b2dbab25d636341f6cab4179e2b1fd47a\n";
             assert!(
                 matches!(
                     TreeSha256Claim::from_tag(&tag),
-                    Err(Error::TreeSha256InvalidHex)
+                    Err(Error::Object(ObjectError::TreeSha256InvalidHex))
                 ),
                 "must reject {extra:?}"
             );
@@ -995,9 +1010,9 @@ other existing\n";
             let tag = sample_tag(&blob);
             assert!(matches!(
                 TreeSha256Claim::from_tag(&tag),
-                Err(Error::TreeSha256Claim(
+                Err(Error::Object(ObjectError::TreeSha256Claim(
                     TreeSha256ClaimError::InvalidExcludedPath
-                ))
+                )))
             ));
         }
     }

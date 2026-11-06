@@ -1,6 +1,6 @@
 //! Streamed tracked staging interoperates with Git for both object formats.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
 

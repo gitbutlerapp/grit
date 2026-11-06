@@ -53,8 +53,9 @@ pub fn ref_points_at(
     let mut seen = HashSet::new();
     loop {
         if !seen.insert(current) {
-            return Err(Error::CorruptObject(format!(
-                "annotated tag peel cycle at {current}"
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("annotated tag peel cycle at {current}"),
             )));
         }
         let obj = match odb.read(&current) {

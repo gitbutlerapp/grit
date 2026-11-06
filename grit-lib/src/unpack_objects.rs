@@ -276,9 +276,9 @@ trait UnpackSink {
         dry_run: bool,
     ) -> Result<ObjectId> {
         let _ = (kind, size, rd, dry_run);
-        Err(Error::UnsupportedObjectStore {
+        Err(Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "write_inflated_from_pack",
-        })
+        }))
     }
 
     /// Read an object stored before or during this unpack (thin-pack bases, large blobs).
@@ -329,7 +329,7 @@ impl UnpackSink for Odb {
         dry_run: bool,
     ) -> Result<ObjectId> {
         let size_u64 = u64::try_from(size).map_err(|_| {
-            Error::CorruptObject(format!("object size {size} exceeds address space"))
+            Error::Object(ObjectError::corrupt_object(None, format!("object size {size} exceeds address space")))
         })?;
         if dry_run {
             let mut hasher = ObjectPayloadHasher::new(self.hash_algo(), kind, size_u64);
@@ -608,14 +608,16 @@ fn unpack_into<S: UnpackSink + ?Sized>(
     // Validate magic and version.
     let sig = rd.read_exact_n(4)?;
     if sig != b"PACK" {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "not a pack stream: invalid signature".to_owned(),
-        ));
+        )));
     }
     let version = rd.read_u32_be()?;
     if version != 2 && version != 3 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack version {version}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported pack version {version}"),
         )));
     }
     let nr_objects = rd.read_u32_be()? as usize;
@@ -668,7 +670,7 @@ fn unpack_into<S: UnpackSink + ?Sized>(
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
                 let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
+                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
                 })?;
                 let delta_data = rd.decompress(size)?;
                 let delta = PendingDelta {
@@ -742,8 +744,9 @@ fn unpack_into<S: UnpackSink + ?Sized>(
                 }
             }
             other => {
-                return Err(Error::CorruptObject(format!(
-                    "unknown packed-object type {other}"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("unknown packed-object type {other}"),
                 )))
             }
         }
@@ -758,9 +761,10 @@ fn unpack_into<S: UnpackSink + ?Sized>(
     let digest = rd.finalize_hasher();
     let trailing = rd.read_trailer()?;
     if digest != trailing {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "pack trailing checksum mismatch".to_owned(),
-        ));
+        )));
     }
     let pack_bytes = rd.stream_pos() as u64;
 
@@ -811,9 +815,9 @@ fn unpack_into<S: UnpackSink + ?Sized>(
 
         remaining = still_pending;
         if remaining.len() == before {
-            return Err(Error::UnresolvedDeltas {
+            return Err(Error::Object(ObjectError::UnresolvedDeltas {
                 count: u64::try_from(remaining.len()).unwrap_or(u64::MAX),
-            });
+            }));
         }
     }
     if let (Some(p), true) = (progress.as_mut(), resolving) {
@@ -949,13 +953,19 @@ fn verify_packed_dot_special_entries<S: UnpackSink + ?Sized>(
         if kind == ObjectKind::Tree {
             for di in tracker.on_tree(&oid, &data)? {
                 if di.is_error_severity() {
-                    return Err(Error::CorruptObject(di.format_line()));
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        di.format_line(),
+                    )));
                 }
             }
         }
         for di in tracker.on_object(&oid, kind, &data) {
             if di.is_error_severity() {
-                return Err(Error::CorruptObject(di.format_line()));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    di.format_line(),
+                )));
             }
         }
     }
@@ -983,7 +993,10 @@ fn verify_packed_dot_special_entries<S: UnpackSink + ?Sized>(
             &tracker.gitattributes_found,
         ) {
             if di.is_error_severity() {
-                return Err(Error::CorruptObject(di.format_line()));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    di.format_line(),
+                )));
             }
         }
     }
@@ -1004,7 +1017,10 @@ fn verify_packed_dot_special_entries<S: UnpackSink + ?Sized>(
             &tracker.gitattributes_found,
         ) {
             if di.is_error_severity() {
-                return Err(Error::CorruptObject(di.format_line()));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    di.format_line(),
+                )));
             }
         }
     }
@@ -1029,7 +1045,10 @@ fn entry_payload_for_strict<S: UnpackSink + ?Sized>(
         PackedObjectEntry::Stored { kind, oid } => {
             debug_assert_eq!(oid, id);
             let Some(obj) = sink.read_stored(id)? else {
-                return Err(Error::CorruptObject(format!("missing object {id}")));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("missing object {id}"),
+                )));
             };
             Ok((*kind, obj.data))
         }
@@ -1068,7 +1087,7 @@ fn entry_object_bytes<'a, S: UnpackSink + ?Sized>(
             }
             let obj = sink
                 .read_stored(oid)?
-                .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+                .ok_or_else(|| Error::Object(ObjectError::object_not_found(oid.to_hex())))?;
             if let Some(off) = pack_offset {
                 cache.put(off, *kind, obj.data.clone());
             }
@@ -1114,9 +1133,12 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
                         continue;
                     }
                     if !resolves(&e.oid, oid)? {
-                        return Err(Error::CorruptObject(format!(
-                            "strict: missing object {} referenced by tree",
-                            e.oid.to_hex()
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!(
+                                "strict: missing object {} referenced by tree",
+                                e.oid.to_hex()
+                            ),
                         )));
                     }
                 }
@@ -1124,9 +1146,12 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
             ObjectKind::Commit => {
                 let c = parse_commit(&data)?;
                 if !resolves(&c.tree, oid)? {
-                    return Err(Error::CorruptObject(format!(
-                        "strict: missing tree {} referenced by commit",
-                        c.tree.to_hex()
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "strict: missing tree {} referenced by commit",
+                            c.tree.to_hex()
+                        ),
                     )));
                 }
                 // A commit recorded as a shallow boundary (graft) has its parents intentionally
@@ -1137,9 +1162,9 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
                 }
                 for p in &c.parents {
                     if !resolves(p, oid)? {
-                        return Err(Error::CorruptObject(format!(
-                            "strict: missing parent {} referenced by commit",
-                            p.to_hex()
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!("strict: missing parent {} referenced by commit", p.to_hex()),
                         )));
                     }
                 }
@@ -1147,9 +1172,12 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
             ObjectKind::Tag => {
                 let t = parse_tag(&data)?;
                 if !resolves(&t.object, oid)? {
-                    return Err(Error::CorruptObject(format!(
-                        "strict: missing object {} referenced by tag",
-                        t.object.to_hex()
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "strict: missing object {} referenced by tag",
+                            t.object.to_hex()
+                        ),
                     )));
                 }
             }
@@ -1210,9 +1238,12 @@ pub fn strict_verify_packed_references(
                         continue;
                     }
                     if !strict_ref_resolves(&e.oid, pack, odb)? {
-                        return Err(Error::CorruptObject(format!(
-                            "strict: missing object {} referenced by tree",
-                            e.oid.to_hex()
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!(
+                                "strict: missing object {} referenced by tree",
+                                e.oid.to_hex()
+                            ),
                         )));
                     }
                 }
@@ -1220,16 +1251,19 @@ pub fn strict_verify_packed_references(
             ObjectKind::Commit => {
                 let c = parse_commit(data)?;
                 if !strict_ref_resolves(&c.tree, pack, odb)? {
-                    return Err(Error::CorruptObject(format!(
-                        "strict: missing tree {} referenced by commit",
-                        c.tree.to_hex()
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "strict: missing tree {} referenced by commit",
+                            c.tree.to_hex()
+                        ),
                     )));
                 }
                 for p in &c.parents {
                     if !strict_ref_resolves(p, pack, odb)? {
-                        return Err(Error::CorruptObject(format!(
-                            "strict: missing parent {} referenced by commit",
-                            p.to_hex()
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!("strict: missing parent {} referenced by commit", p.to_hex()),
                         )));
                     }
                 }
@@ -1237,9 +1271,12 @@ pub fn strict_verify_packed_references(
             ObjectKind::Tag => {
                 let t = parse_tag(data)?;
                 if !strict_ref_resolves(&t.object, pack, odb)? {
-                    return Err(Error::CorruptObject(format!(
-                        "strict: missing object {} referenced by tag",
-                        t.object.to_hex()
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "strict: missing object {} referenced by tag",
+                            t.object.to_hex()
+                        ),
                     )));
                 }
             }
@@ -1285,7 +1322,7 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
                 let _base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
+                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
                 })?;
                 let zlib_offset = rd.pos;
                 let consumed = skip_zlib_at(data, zlib_offset, size)?;
@@ -1338,7 +1375,7 @@ fn pack_is_thin_with_ofs_deltas(
             let in_pack: HashSet<ObjectId> = records.into_iter().map(|r| r.oid).collect();
             Ok(ref_delta_bases.iter().any(|b| !in_pack.contains(b)))
         }
-        Err(Error::UnresolvedDeltas { .. }) => Ok(true),
+        Err(Error::Object(ObjectError::UnresolvedDeltas { .. })) => Ok(true),
         Err(e) => Err(e),
     }
 }
@@ -1426,14 +1463,16 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
     let algo = odb.hash_algo();
     let sig = rd.read_exact(4)?;
     if sig != b"PACK" {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "not a pack stream: invalid signature".to_owned(),
-        ));
+        )));
     }
     let version = rd.read_u32_be()?;
     if version != 2 && version != 3 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack version {version}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported pack version {version}"),
         )));
     }
     let nr_objects = rd.read_u32_be()? as usize;
@@ -1468,7 +1507,7 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
                 let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
+                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
                 })?;
                 let delta_data = rd.decompress(size)?;
                 pending.push(PendingDelta {
@@ -1490,8 +1529,9 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
                 });
             }
             other => {
-                return Err(Error::CorruptObject(format!(
-                    "unknown packed-object type {other}"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("unknown packed-object type {other}"),
                 )))
             }
         }
@@ -1504,9 +1544,10 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
         let digest = hasher.finalize();
         let trailing = rd.read_exact(algo.len())?;
         if digest.as_slice() != trailing {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "pack trailing checksum mismatch".to_owned(),
-            ));
+            )));
         }
     }
 
@@ -1539,9 +1580,9 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 
         remaining = still_pending;
         if remaining.len() == before {
-            return Err(Error::UnresolvedDeltas {
+            return Err(Error::Object(ObjectError::UnresolvedDeltas {
                 count: u64::try_from(remaining.len()).unwrap_or(u64::MAX),
-            });
+            }));
         }
     }
 
@@ -1558,9 +1599,11 @@ pub(crate) fn type_code_to_kind(code: u8) -> Result<ObjectKind> {
         2 => Ok(ObjectKind::Tree),
         3 => Ok(ObjectKind::Blob),
         4 => Ok(ObjectKind::Tag),
-        _ => Err(Error::CorruptObject(format!(
-            "type code {code} is not a regular object type"
-        ))),
+        _ => Err(ObjectError::corrupt_object(
+            None,
+            format!("type code {code} is not a regular object type"),
+        )
+        .into()),
     }
 }
 
@@ -1579,9 +1622,12 @@ impl<'a> PackReader<'a> {
     /// the internal buffer.
     pub(crate) fn read_exact(&mut self, n: usize) -> Result<&[u8]> {
         if self.pos + n > self.data.len() {
-            return Err(Error::CorruptObject(format!(
-                "pack stream truncated: need {n} bytes at offset {}",
-                self.pos
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!(
+                    "pack stream truncated: need {n} bytes at offset {}",
+                    self.pos
+                ),
             )));
         }
         let slice = &self.data[self.pos..self.pos + n];
@@ -1592,9 +1638,10 @@ impl<'a> PackReader<'a> {
     /// Read a single byte and advance the cursor.
     pub(crate) fn read_byte(&mut self) -> Result<u8> {
         if self.pos >= self.data.len() {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "unexpected end of pack stream".to_owned(),
-            ));
+            )));
         }
         let b = self.data[self.pos];
         self.pos += 1;
@@ -1605,7 +1652,7 @@ impl<'a> PackReader<'a> {
     pub(crate) fn read_u32_be(&mut self) -> Result<u32> {
         let bytes = self.read_exact(4)?;
         Ok(u32::from_be_bytes(bytes.try_into().map_err(|_| {
-            Error::CorruptObject("u32 read failed".to_owned())
+            Error::Object(ObjectError::corrupt_object(None, "u32 read failed".to_owned()))
         })?))
     }
 
@@ -1617,8 +1664,12 @@ impl<'a> PackReader<'a> {
         let c = self.read_byte()?;
         let type_code = (c >> 4) & 0x7;
         let size_u64 = decode_pack_object_size_varint(c, self.data, &mut self.pos)?;
-        let size = usize::try_from(size_u64)
-            .map_err(|_| Error::CorruptObject(format!("pack object size overflow: {size_u64}")))?;
+        let size = usize::try_from(size_u64).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {size_u64}"),
+            ))
+        })?;
         Ok((type_code, size))
     }
 
@@ -1655,8 +1706,9 @@ pub(crate) fn decompress_zlib_at_into(
     out: &mut Vec<u8>,
 ) -> Result<usize> {
     let slice = pack.get(offset..).ok_or_else(|| {
-        Error::CorruptObject(format!(
-            "pack stream truncated: need zlib at offset {offset}"
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack stream truncated: need zlib at offset {offset}"),
         ))
     })?;
     let mut pos = 0usize;
@@ -1664,7 +1716,7 @@ pub(crate) fn decompress_zlib_at_into(
         slice,
         &mut pos,
         u64::try_from(expected_size).map_err(|_| {
-            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+            Error::Object(ObjectError::corrupt_object(None, format!("pack object size overflow: {expected_size}")))
         })?,
         out,
     )?;
@@ -1684,8 +1736,9 @@ pub(crate) fn decompress_zlib_at(
 
 fn io_to_corrupt_eof(e: io::Error, stream_pos: usize, context: &str) -> Error {
     if e.kind() == io::ErrorKind::UnexpectedEof {
-        Error::CorruptObject(format!(
-            "pack stream truncated ({context}) at offset {stream_pos}"
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack stream truncated ({context}) at offset {stream_pos}"),
         ))
     } else {
         Error::Io(e)
@@ -1724,12 +1777,17 @@ impl<'a> StreamingPackReader<'a> {
 
     fn enforce_max_input(&self) -> Result<()> {
         if let Some(limit) = self.max_input_bytes {
-            let pos = u64::try_from(self.stream_pos)
-                .map_err(|_| Error::CorruptObject("pack stream position overflow".to_owned()))?;
+            let pos = u64::try_from(self.stream_pos).map_err(|_| {
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack stream position overflow".to_owned(),
+                ))
+            })?;
             if pos > limit {
-                return Err(Error::CorruptObject(
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
                     "pack exceeds maximum allowed size".to_owned(),
-                ));
+                )));
             }
         }
         Ok(())
@@ -1757,9 +1815,12 @@ impl<'a> StreamingPackReader<'a> {
         let mut b = [0u8; 1];
         let n = self.read_from_source(&mut b)?;
         if n == 0 {
-            return Err(Error::CorruptObject(format!(
-                "pack stream truncated (read byte) at offset {}",
-                self.stream_pos
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!(
+                    "pack stream truncated (read byte) at offset {}",
+                    self.stream_pos
+                ),
             )));
         }
         Ok(b[0])
@@ -1771,9 +1832,12 @@ impl<'a> StreamingPackReader<'a> {
         while got < n {
             let m = self.read_from_source(&mut v[got..n])?;
             if m == 0 {
-                return Err(Error::CorruptObject(format!(
-                    "pack stream truncated (read exact) at offset {}",
-                    self.stream_pos
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "pack stream truncated (read exact) at offset {}",
+                        self.stream_pos
+                    ),
                 )));
             }
             got += m;
@@ -1787,9 +1851,12 @@ impl<'a> StreamingPackReader<'a> {
         while got < 4 {
             let m = self.read_from_source(&mut b[got..4])?;
             if m == 0 {
-                return Err(Error::CorruptObject(format!(
-                    "pack stream truncated (read u32) at offset {}",
-                    self.stream_pos
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "pack stream truncated (read u32) at offset {}",
+                        self.stream_pos
+                    ),
                 )));
             }
             got += m;
@@ -1801,8 +1868,12 @@ impl<'a> StreamingPackReader<'a> {
         let c = self.read_byte()?;
         let type_code = (c >> 4) & 0x7;
         let size_u64 = decode_pack_object_size_varint_from_first(c, || self.read_byte())?;
-        let size = usize::try_from(size_u64)
-            .map_err(|_| Error::CorruptObject(format!("pack object size overflow: {size_u64}")))?;
+        let size = usize::try_from(size_u64).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {size_u64}"),
+            ))
+        })?;
         Ok((type_code, size))
     }
 
@@ -1842,16 +1913,20 @@ impl<'a> StreamingPackReader<'a> {
                     Ok(0) => {
                         let consumed = z.total_in() as usize;
                         if consumed > self.pending.len() {
-                            return Err(Error::CorruptObject(
+                            return Err(Error::Object(ObjectError::corrupt_object(
+                                None,
                                 "zlib total_in exceeds pending buffer".to_owned(),
-                            ));
+                            )));
                         }
                         if consumed == 0 {
                             let n = self.inner.read(&mut scratch).map_err(Error::Io)?;
                             if n == 0 {
-                                return Err(Error::CorruptObject(format!(
-                                    "pack stream truncated (zlib) at offset {}",
-                                    self.stream_pos
+                                return Err(Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    format!(
+                                        "pack stream truncated (zlib) at offset {}",
+                                        self.stream_pos
+                                    ),
                                 )));
                             }
                             self.pending.extend_from_slice(&scratch[..n]);
@@ -1864,21 +1939,29 @@ impl<'a> StreamingPackReader<'a> {
                         return Ok(());
                     }
                     Ok(_) => {
-                        return Err(Error::CorruptObject(
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
                             "0-byte packed object inflated to non-empty output".to_owned(),
-                        ));
+                        )));
                     }
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
                         let n = self.inner.read(&mut scratch).map_err(Error::Io)?;
                         if n == 0 {
-                            return Err(Error::CorruptObject(format!(
-                                "pack stream truncated (zlib) at offset {}",
-                                self.stream_pos
+                            return Err(Error::Object(ObjectError::corrupt_object(
+                                None,
+                                format!(
+                                    "pack stream truncated (zlib) at offset {}",
+                                    self.stream_pos
+                                ),
                             )));
                         }
                         self.pending.extend_from_slice(&scratch[..n]);
                     }
-                    Err(e) => return Err(Error::Zlib(e.to_string())),
+                    Err(e) => {
+                        return Err(Error::Object(ObjectError::Zlib {
+                            detail: e.to_string(),
+                        }))
+                    }
                 }
             }
         }
@@ -1910,12 +1993,17 @@ impl<'a> StreamingPackReader<'a> {
             let before_out = z.total_out();
             let status = z
                 .decompress(self.pending.as_slice(), &mut scratch_out, flush)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
+                .map_err(|e| {
+                    Error::Object(ObjectError::Zlib {
+                        detail: e.to_string(),
+                    })
+                })?;
             let consumed = (z.total_in() - before_in) as usize;
             if consumed > self.pending.len() {
-                return Err(Error::CorruptObject(
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
                     "zlib consumed more than pending buffer".to_owned(),
-                ));
+                )));
             }
             self.pack_hasher.update(&self.pending[..consumed]);
             self.stream_pos += consumed;
@@ -1928,9 +2016,12 @@ impl<'a> StreamingPackReader<'a> {
                 chunk_sink(&chunk[..take])?;
                 produced += take;
                 if take < chunk.len() {
-                    return Err(Error::CorruptObject(format!(
-                        "decompressed size mismatch: got {}, want {expected_size}",
-                        produced + (chunk.len() - take)
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "decompressed size mismatch: got {}, want {expected_size}",
+                            produced + (chunk.len() - take)
+                        ),
                     )));
                 }
             }
@@ -1938,8 +2029,11 @@ impl<'a> StreamingPackReader<'a> {
             match status {
                 Status::StreamEnd => {
                     if produced != expected_size {
-                        return Err(Error::CorruptObject(format!(
-                            "decompressed size mismatch: got {produced}, want {expected_size}"
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!(
+                                "decompressed size mismatch: got {produced}, want {expected_size}"
+                            ),
                         )));
                     }
                     return Ok(());
@@ -1953,9 +2047,9 @@ impl<'a> StreamingPackReader<'a> {
                             self.pending.extend_from_slice(&scratch[..n]);
                         }
                     } else if eof && self.pending.is_empty() && consumed == 0 {
-                        return Err(Error::CorruptObject(format!(
-                            "pack stream truncated (zlib) at offset {}",
-                            self.stream_pos
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!("pack stream truncated (zlib) at offset {}", self.stream_pos),
                         )));
                     }
                 }
@@ -2031,9 +2125,9 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
 
     let src_size = read_delta_varint(delta, &mut pos)?;
     if src_size != base.len() {
-        return Err(Error::CorruptObject(format!(
-            "delta source size {src_size} != base size {}",
-            base.len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("delta source size {src_size} != base size {}", base.len()),
         )));
     }
     let dest_size = read_delta_varint(delta, &mut pos)?;
@@ -2046,9 +2140,10 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
         let cmd = delta[pos];
         pos += 1;
         if cmd == 0 {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "reserved opcode 0 in delta stream".to_owned(),
-            ));
+            )));
         }
         if cmd & 0x80 != 0 {
             // COPY instruction: up to 4 offset bytes (bits 0-3) and up to 3
@@ -2060,7 +2155,10 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
                 ($flag:expr, $shift:expr, $target:expr) => {
                     if cmd & $flag != 0 {
                         let b = *delta.get(pos).ok_or_else(|| {
-                            Error::CorruptObject("truncated delta COPY operand".to_owned())
+                            Error::Object(ObjectError::corrupt_object(
+                                None,
+                                "truncated delta COPY operand".to_owned(),
+                            ))
                         })?;
                         pos += 1;
                         $target |= (b as usize) << $shift;
@@ -2081,30 +2179,36 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
             }
 
             let end = offset.checked_add(size).ok_or_else(|| {
-                Error::CorruptObject("delta COPY range overflows usize".to_owned())
+                Error::Object(ObjectError::corrupt_object(None, "delta COPY range overflows usize".to_owned()))
             })?;
             let chunk = base.get(offset..end).ok_or_else(|| {
-                Error::CorruptObject(format!(
-                    "delta COPY [{offset},{end}) out of range (base is {} bytes)",
-                    base.len()
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "delta COPY [{offset},{end}) out of range (base is {} bytes)",
+                        base.len()
+                    ),
                 ))
             })?;
             out.extend_from_slice(chunk);
         } else {
             // INSERT instruction: copy the next `cmd` literal bytes verbatim.
             let n = cmd as usize;
-            let chunk = delta
-                .get(pos..pos + n)
-                .ok_or_else(|| Error::CorruptObject("truncated delta INSERT data".to_owned()))?;
+            let chunk = delta.get(pos..pos + n).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "truncated delta INSERT data".to_owned()))
+            })?;
             out.extend_from_slice(chunk);
             pos += n;
         }
     }
 
     if out.len() != dest_size {
-        return Err(Error::CorruptObject(format!(
-            "delta produced {} bytes but expected {dest_size}",
-            out.len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "delta produced {} bytes but expected {dest_size}",
+                out.len()
+            ),
         )));
     }
 
@@ -2131,9 +2235,9 @@ pub(crate) fn apply_delta_prefix_into(
 
     let src_size = read_delta_varint(delta, &mut pos)?;
     if src_size != base.len() {
-        return Err(Error::CorruptObject(format!(
-            "delta source size {src_size} != base size {}",
-            base.len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("delta source size {src_size} != base size {}", base.len()),
         )));
     }
     let dest_size = read_delta_varint(delta, &mut pos)?;
@@ -2149,9 +2253,10 @@ pub(crate) fn apply_delta_prefix_into(
         let cmd = delta[pos];
         pos += 1;
         if cmd == 0 {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "reserved opcode 0 in delta stream".to_owned(),
-            ));
+            )));
         }
         if cmd & 0x80 != 0 {
             let mut offset = 0usize;
@@ -2161,7 +2266,10 @@ pub(crate) fn apply_delta_prefix_into(
                 ($flag:expr, $shift:expr, $target:expr) => {
                     if cmd & $flag != 0 {
                         let b = *delta.get(pos).ok_or_else(|| {
-                            Error::CorruptObject("truncated delta COPY operand".to_owned())
+                            Error::Object(ObjectError::corrupt_object(
+                                None,
+                                "truncated delta COPY operand".to_owned(),
+                            ))
                         })?;
                         pos += 1;
                         $target |= (b as usize) << $shift;
@@ -2182,17 +2290,20 @@ pub(crate) fn apply_delta_prefix_into(
             }
 
             let end = offset.checked_add(size).ok_or_else(|| {
-                Error::CorruptObject("delta COPY range overflows usize".to_owned())
+                Error::Object(ObjectError::corrupt_object(None, "delta COPY range overflows usize".to_owned()))
             })?;
             let chunk = base.get(offset..end).ok_or_else(|| {
-                Error::CorruptObject(format!(
-                    "delta COPY [{offset},{end}) out of range (base is {} bytes)",
-                    base.len()
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "delta COPY [{offset},{end}) out of range (base is {} bytes)",
+                        base.len()
+                    ),
                 ))
             })?;
-            result_len = result_len
-                .checked_add(size)
-                .ok_or_else(|| Error::CorruptObject("delta result length overflow".to_owned()))?;
+            result_len = result_len.checked_add(size).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "delta result length overflow".to_owned()))
+            })?;
             if !done {
                 let room = max_out.saturating_sub(out.len());
                 if room == 0 {
@@ -2214,13 +2325,13 @@ pub(crate) fn apply_delta_prefix_into(
             }
         } else {
             let n = cmd as usize;
-            let chunk = delta
-                .get(pos..pos + n)
-                .ok_or_else(|| Error::CorruptObject("truncated delta INSERT data".to_owned()))?;
+            let chunk = delta.get(pos..pos + n).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "truncated delta INSERT data".to_owned()))
+            })?;
             pos += n;
-            result_len = result_len
-                .checked_add(n)
-                .ok_or_else(|| Error::CorruptObject("delta result length overflow".to_owned()))?;
+            result_len = result_len.checked_add(n).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "delta result length overflow".to_owned()))
+            })?;
             if !done {
                 let room = max_out.saturating_sub(out.len());
                 if room == 0 {
@@ -2244,8 +2355,9 @@ pub(crate) fn apply_delta_prefix_into(
     }
 
     if result_len != dest_size {
-        return Err(Error::CorruptObject(format!(
-            "delta produced {result_len} bytes but expected {dest_size}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("delta produced {result_len} bytes but expected {dest_size}"),
         )));
     }
 
@@ -2278,9 +2390,10 @@ fn read_delta_varint_if_complete(data: &[u8], pos: &mut usize) -> Result<Option<
             return Ok(Some(value));
         }
         if shift > 35 {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "delta varint exceeds supported width".to_owned(),
-            ));
+            )));
         }
     }
     *pos = start;
@@ -2294,9 +2407,9 @@ fn read_delta_varint(data: &[u8], pos: &mut usize) -> Result<usize> {
     let mut value = 0usize;
     let mut shift = 0u32;
     loop {
-        let b = *data
-            .get(*pos)
-            .ok_or_else(|| Error::CorruptObject("truncated delta varint".to_owned()))?;
+        let b = *data.get(*pos).ok_or_else(|| {
+            Error::Object(ObjectError::corrupt_object(None, "truncated delta varint".to_owned()))
+        })?;
         *pos += 1;
         value |= ((b & 0x7f) as usize) << shift;
         shift += 7;
@@ -2563,7 +2676,7 @@ mod tests {
         bad_pack.insert(bad_oid, (ObjectKind::Tree, bad_tree));
         assert!(matches!(
             strict_verify_packed_references(None, &bad_pack),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 
@@ -3057,17 +3170,26 @@ mod tests {
 
         let unpacked = unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default());
         assert!(
-            matches!(unpacked, Err(Error::UnresolvedDeltas { count: 2 })),
+            matches!(
+                unpacked,
+                Err(Error::Object(ObjectError::UnresolvedDeltas { count: 2 }))
+            ),
             "{unpacked:?}"
         );
         let mapped = pack_bytes_to_object_map(&pack, &odb);
         assert!(
-            matches!(mapped, Err(Error::UnresolvedDeltas { count: 2 })),
+            matches!(
+                mapped,
+                Err(Error::Object(ObjectError::UnresolvedDeltas { count: 2 }))
+            ),
             "{mapped:?}"
         );
         let indexed = pack_index_records_from_bytes(&pack, &odb);
         assert!(
-            matches!(indexed, Err(Error::UnresolvedDeltas { count: 2 })),
+            matches!(
+                indexed,
+                Err(Error::Object(ObjectError::UnresolvedDeltas { count: 2 }))
+            ),
             "{indexed:?}"
         );
         assert!(pack_is_thin(&pack, HashAlgo::Sha1));
@@ -3412,7 +3534,7 @@ mod tests {
                 &HashSet::new(),
                 None,
             ),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
         assert_eq!(sink2.reads.get(), 0);
     }

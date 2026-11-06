@@ -1,6 +1,6 @@
 //! Coverage for branch inventory public API.
 
-#![allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used)]
 
 use grit_lib::error::Error;
 use grit_lib::refs::branch_tracking::{

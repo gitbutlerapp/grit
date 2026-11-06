@@ -205,7 +205,8 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+                Error::Object(ObjectError::ObjectNotFound { .. })
+                    | Error::Object(ObjectError::ObjectNotFound { .. })
             ),
             "{err:?}"
         );
@@ -213,8 +214,11 @@ mod tests {
         assert!(
             matches!(
                 err,
-                Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: ObjectKind::Blob }
-                    if oid == blob
+                Error::Object(ObjectError::UnexpectedObjectKind {
+                    oid,
+                    expected: ObjectKind::Commit,
+                    actual: ObjectKind::Blob,
+                }) if oid == blob
             ),
             "{err:?}"
         );
@@ -226,7 +230,11 @@ mod tests {
         let history = || -> Result<ObjectId, HistoryError> { Ok(commit_tree(&repo, blob)?) };
         let err = history().unwrap_err();
         assert!(
-            matches!(&err, HistoryError::Library(inner) if matches!(**inner, Error::UnexpectedObjectKind { .. })),
+            matches!(
+                &err,
+                HistoryError::Library(inner)
+                    if matches!(**inner, Error::Object(ObjectError::UnexpectedObjectKind { .. }))
+            ),
             "{err:?}"
         );
         let session = || -> Result<ObjectId, RebaseSessionError> { Ok(commit_tree(&repo, blob)?) };
@@ -234,7 +242,9 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                RebaseSessionError::Library(Error::UnexpectedObjectKind { .. })
+                RebaseSessionError::Library(Error::Object(
+                    ObjectError::UnexpectedObjectKind { .. }
+                ))
             ),
             "{err:?}"
         );
@@ -247,7 +257,8 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                HistoryError::Library(inner) if matches!(**inner, Error::UnexpectedObjectKind { .. })
+                HistoryError::Library(inner)
+                    if matches!(**inner, Error::Object(ObjectError::UnexpectedObjectKind { .. }))
             ),
             "{err:?}"
         );

@@ -1,6 +1,6 @@
 //! `resolve_push` force-with-lease / force vs system `git push` on the same bare remote.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

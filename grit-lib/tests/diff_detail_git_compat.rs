@@ -1,5 +1,6 @@
 //! `--stat` / `--name-only` / `--name-status` compatibility with system `git`.
 
+use grit_lib::objects::ObjectError;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -353,7 +354,7 @@ fn tree_metadata_matrix_matches_git_without_reading_blobs() {
             .expect("malformed tree");
         assert!(matches!(
             repo.diff().tree_to_tree(None, Some(&malformed)),
-            Err(grit_lib::error::Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
         // Identical-tree pruning does not attempt to parse even an unreadable tree.
         assert!(repo

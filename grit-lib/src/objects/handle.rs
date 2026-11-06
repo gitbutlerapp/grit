@@ -5,6 +5,7 @@ use crate::fsck_standalone::{fsck_object, FsckObjectOptions};
 use crate::objects::write::{
     canonical_tree_entries, validate_tree_entry_stored_kinds, WriteTreeOptions,
 };
+use crate::objects::ObjectError;
 use crate::objects::{
     serialize_commit, serialize_tree, CommitData, NewCommit, Object, ObjectId, ObjectInfo,
     ObjectKind, TreeEntry,
@@ -167,7 +168,7 @@ impl<'repo> Objects<'repo> {
             data,
             FsckObjectOptions::new(self.repo.odb().hash_algo()),
         )
-        .map_err(|check| Error::InvalidObject { kind, check })?;
+        .map_err(|check| Error::Object(ObjectError::InvalidObject { kind, check }))?;
         self.repo.odb().write(kind, data)
     }
 
@@ -296,11 +297,11 @@ impl<'repo> Objects<'repo> {
     fn expect_kind(&self, oid: &ObjectId, expected: ObjectKind) -> Result<()> {
         let actual = self.read_info(oid)?.kind;
         if actual != expected {
-            return Err(Error::UnexpectedObjectKind {
+            return Err(Error::Object(ObjectError::UnexpectedObjectKind {
                 oid: *oid,
                 expected,
                 actual,
-            });
+            }));
         }
         Ok(())
     }

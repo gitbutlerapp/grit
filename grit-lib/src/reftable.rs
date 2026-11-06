@@ -28,6 +28,7 @@
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::fs_publish::publish_no_clobber;
+use crate::objects::ObjectError;
 use crate::objects::ObjectId;
 use crate::refs::store::{RefStore as _, RefStoreError};
 use memmap2::Mmap;
@@ -835,9 +836,16 @@ impl BlockWriter {
             use flate2::Compression;
             let skip = 4 + self.header_off;
             let mut enc = ZlibEncoder::new(Vec::new(), Compression::new(9));
-            enc.write_all(&self.buf[skip..])
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            let compressed = enc.finish().map_err(|e| Error::Zlib(e.to_string()))?;
+            enc.write_all(&self.buf[skip..]).map_err(|e| {
+                Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
+            let compressed = enc.finish().map_err(|e| {
+                Error::Object(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
             self.buf.truncate(skip);
             self.buf.extend_from_slice(&compressed);
         }
@@ -4076,15 +4084,19 @@ fn decompress_log_payload(compressed: &[u8], inflated_size: usize) -> Result<(Ve
     let mut inflated = vec![0u8; inflated_size];
     if compressed.len() >= 2 && compressed[0] == 0x78 {
         let mut decoder = ZlibDecoder::new(compressed);
-        decoder
-            .read_exact(&mut inflated)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+        decoder.read_exact(&mut inflated).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
         Ok((inflated, decoder.total_in() as usize))
     } else {
         let mut decoder = DeflateDecoder::new(compressed);
-        decoder
-            .read_exact(&mut inflated)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+        decoder.read_exact(&mut inflated).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
         Ok((inflated, decoder.total_in() as usize))
     }
 }

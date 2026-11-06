@@ -6,7 +6,7 @@
 //! permission-only change stays [`DiffStatus::Modified`]. Each case is checked
 //! against the system `git diff --raw`.
 #![cfg(unix)]
-#![allow(clippy::expect_used)]
+#[allow(clippy::expect_used)]
 
 use grit_lib::objects::FileMode;
 use std::os::unix::fs::{symlink, PermissionsExt};

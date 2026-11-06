@@ -2,7 +2,7 @@
 //! bitmaps: the client's shallow commits bound its haves, so the bitmap closure
 //! of a have (which runs to the root) must not decide what the client holds.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashSet;
 use std::path::Path;

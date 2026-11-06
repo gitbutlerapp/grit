@@ -1,6 +1,6 @@
 //! Pick, revert, and rebase on detached HEAD match system `git` (issue #2530).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 use std::process::Command;

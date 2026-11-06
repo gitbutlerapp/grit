@@ -1,6 +1,6 @@
 //! `push -u`, `--atomic`, `--push-option`, and `--follow-tags` vs system `git`.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;

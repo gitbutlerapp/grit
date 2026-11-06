@@ -2,6 +2,7 @@
 //!
 //! [tree-sha256]: https://github.com/schacon/tree-sha256
 
+use crate::objects::ObjectError;
 use std::thread;
 
 use crate::commit::signing::{self, GpgConfig, SignatureCheck, TrustLevel};
@@ -112,7 +113,7 @@ pub struct TreeSha256TagHeaders {
 ///
 /// # Errors
 ///
-/// Returns [`Error::TagVerifyDuplicateTreeSha256Header`] or parse failures for malformed headers.
+/// Returns [`Error::Object(ObjectError::TagVerifyDuplicateTreeSha256Header)`] or parse failures for malformed headers.
 pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders> {
     let mut object = None;
     let mut claimed = None;
@@ -121,8 +122,12 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
         if line.is_empty() {
             break;
         }
-        let line_str = std::str::from_utf8(line)
-            .map_err(|_| Error::CorruptObject("tag header is not valid UTF-8".to_owned()))?;
+        let line_str = std::str::from_utf8(line).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "tag header is not valid UTF-8".to_owned(),
+            ))
+        })?;
         let Some((key, value)) = line_str.split_once(' ') else {
             continue;
         };
@@ -132,7 +137,7 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
             }
             TREE_SHA256_HEADER => {
                 if claimed.is_some() {
-                    return Err(Error::TagVerifyDuplicateTreeSha256Header);
+                    return Err(ObjectError::TagVerifyDuplicateTreeSha256Header.into());
                 }
                 claimed = Some(value.parse()?);
             }
@@ -140,7 +145,7 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
             _ => {}
         }
     }
-    let target = object.ok_or(Error::TagVerifyMissingObjectHeader)?;
+    let target = object.ok_or(ObjectError::TagVerifyMissingObjectHeader)?;
     Ok(TreeSha256TagHeaders {
         target,
         claimed,
@@ -166,10 +171,10 @@ pub fn verify_tag(
 ) -> Result<TagVerification> {
     let obj = repo.odb().read(&oid)?;
     if obj.kind != ObjectKind::Tag {
-        return Err(Error::TagVerifyNotTag {
+        return Err(Error::Object(ObjectError::TagVerifyNotTag {
             oid,
             found: obj.kind,
-        });
+        }));
     }
     let headers = parse_tree_sha256_tag_headers(&obj.data)?;
     verify_tag_data(repo, &obj.data, &headers, options)
@@ -224,11 +229,13 @@ pub(crate) fn verify_tag_data(
                 tree_sha256,
                 missing_submodules: Vec::new(),
             }),
-            Err(Error::TreeSha256MissingSubmodules(missing)) => Ok(TagVerification {
-                signature,
-                tree_sha256: None,
-                missing_submodules: missing,
-            }),
+            Err(Error::Object(ObjectError::TreeSha256MissingSubmodules(missing))) => {
+                Ok(TagVerification {
+                    signature,
+                    tree_sha256: None,
+                    missing_submodules: missing,
+                })
+            }
             Err(err) => Err(err),
         }
     })

@@ -1,6 +1,6 @@
 //! Index-only commit with a dirty work tree must not report a clean tree (issue #1969).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -4,6 +4,7 @@
 //! instead of reading and parsing each tree on the way by hand.
 
 use crate::error::Result;
+use crate::objects::ObjectError;
 use crate::objects::{ObjectId, TreeEntry, TreeRefIter};
 
 use super::{Odb, SessionTree};
@@ -215,7 +216,7 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"not a tree").unwrap();
         assert!(matches!(
             odb.tree_entry_at_path(&blob, b"x"),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
 
         let missing = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();

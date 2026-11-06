@@ -3,7 +3,7 @@
 //! accepted the LOP, fetched first when lazy fetch is on, and otherwise refused
 //! with a clear error before any pack data is sent.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashSet;
 use std::io::Cursor;

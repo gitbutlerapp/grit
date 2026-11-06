@@ -1,7 +1,7 @@
 //! Loading large Git-written indexes: memory-mapped reads, trailer verification that runs
 //! alongside entry parsing, and corruption reporting on that path.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

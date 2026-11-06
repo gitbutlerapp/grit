@@ -2,7 +2,7 @@
 //! rename/add), both versions must stay unmerged at the destination, as in Git, instead of one
 //! silently replacing the other.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

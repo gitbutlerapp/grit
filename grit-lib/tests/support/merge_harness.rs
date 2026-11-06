@@ -1,6 +1,6 @@
 //! Oracle helpers: compare [`merge_trees_three_way`] with `git merge-tree --write-tree`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
+#[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
 use std::collections::BTreeMap;
 use std::path::Path;

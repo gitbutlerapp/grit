@@ -1,6 +1,7 @@
 //! `Odb::peel_tags` / `Odb::peel_to_commit` agree with `git rev-parse <tag>^{}` on tags written
 //! by system `git`, both as loose objects and after `git gc` packs them.
 
+use grit_lib::objects::ObjectError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
@@ -103,7 +104,7 @@ fn peel_reports_missing_tag_target() {
         Repository::discover(Some(root), &RepositoryOptions::empty()).expect("discover repo");
     assert!(matches!(
         repo.odb().peel_to_commit(tag),
-        Err(grit_lib::error::Error::ObjectNotFound(_))
+        Err(grit_lib::error::Error::Object(ObjectError::object_not_found(_)))
     ));
 }
 

@@ -1,5 +1,6 @@
 //! Parallel read, filter, hash, and compress of worktree file blobs (`add` and tracked-file restage).
 
+use crate::objects::ObjectError;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -224,10 +225,10 @@ impl PrepareBlobContext {
 /// Name the index path in I/O errors from storing a blob.
 fn with_path_context(index_relpath: &str, err: Error) -> Error {
     match err {
-        Error::Io(source) => Error::LooseObjectWrite {
+        Error::Io(source) => Error::Object(ObjectError::LooseObjectWrite {
             path: index_relpath.to_owned(),
             source,
-        },
+        }),
         Error::WorktreePathIo { .. } | Error::GitDirPathIo { .. } => err,
         other => other,
     }

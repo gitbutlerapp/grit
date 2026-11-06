@@ -27,6 +27,7 @@
 //! ```
 
 use crate::git_path::CanonicalizeExt;
+use crate::objects::ObjectError;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -1881,10 +1882,10 @@ impl Repository {
         let objects_dir = canonicalize_existing_prefix(&objects_dir)?;
         let builder_objects = canonicalize_existing_prefix(&cwd.join(builder.objects_dir()))?;
         if builder_objects != objects_dir {
-            return Err(Error::OdbObjectsDirMismatch {
+            return Err(Error::Object(ObjectError::OdbObjectsDirMismatch {
                 builder: builder_objects,
                 repository: objects_dir,
-            });
+            }));
         }
         builder.set_objects_dir(objects_dir);
         let injected_algos: Vec<HashAlgo> = builder.injected_hash_algos().collect();
@@ -1977,7 +1978,10 @@ impl Repository {
             .and_then(|name| HashAlgo::from_name(&name))
             .unwrap_or(HashAlgo::Sha1);
         match injected.iter().find(|algo| **algo != repository) {
-            Some(&store) => Err(Error::ObjectFormatMismatch { repository, store }),
+            Some(&store) => Err(Error::Object(ObjectError::ObjectFormatMismatch {
+                repository,
+                store,
+            })),
             None => Ok(()),
         }
     }
@@ -2844,11 +2848,11 @@ impl Repository {
         let effective = self.object_id_after_replace(oid);
         let object = self.odb.read(&effective)?;
         if object.kind != ObjectKind::Commit {
-            return Err(Error::UnexpectedObjectKind {
+            return Err(Error::Object(ObjectError::UnexpectedObjectKind {
                 oid: effective,
                 expected: ObjectKind::Commit,
                 actual: object.kind,
-            });
+            }));
         }
         Ok(object.data)
     }

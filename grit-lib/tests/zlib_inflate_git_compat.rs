@@ -1,6 +1,7 @@
 //! Zlib inflate compatibility: grit-written objects must pass system `git`, and
 //! grit must read git-written objects identically.
 
+use grit_lib::objects::ObjectError;
 use std::process::Command;
 
 use grit_lib::objects::odb::Odb;
@@ -172,7 +173,7 @@ fn corrupt_zlib_loose_object_returns_typed_error() {
 
     let err = odb.read(&oid).unwrap_err();
     assert!(
-        matches!(err, grit_lib::error::Error::Zlib(_)),
+        matches!(err, grit_lib::error::Error::Object(ObjectError::Zlib { .. })),
         "expected Zlib error, got {err:?}"
     );
 }

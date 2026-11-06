@@ -7,7 +7,8 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::objects::{
-    commit_through_subject_len, parse_commit, CommitData, CommitRef, ObjectId, ObjectKind,
+    commit_through_subject_len, parse_commit, CommitData, CommitRef, ObjectError, ObjectId,
+    ObjectKind,
 };
 
 use super::Odb;
@@ -173,11 +174,11 @@ fn expect_commit(oid: &ObjectId, actual: ObjectKind) -> Result<()> {
     if actual == ObjectKind::Commit {
         return Ok(());
     }
-    Err(Error::UnexpectedObjectKind {
+    Err(Error::Object(ObjectError::UnexpectedObjectKind {
         oid: *oid,
         expected: ObjectKind::Commit,
         actual,
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -426,10 +427,10 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
         assert!(matches!(
             odb.read_commit_through_subject(&blob),
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedObjectKind {
                 actual: ObjectKind::Blob,
                 ..
-            })
+            }))
         ));
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         assert!(matches!(
@@ -464,11 +465,11 @@ mod tests {
                 assert!(
                     matches!(
                         err,
-                        Error::UnexpectedObjectKind {
+                        Error::Object(ObjectError::UnexpectedObjectKind {
                             oid: o,
                             expected: ObjectKind::Commit,
                             actual,
-                        } if o == oid && actual == kind
+                        }) if o == oid && actual == kind
                     ),
                     "{err:?}"
                 );
@@ -502,11 +503,11 @@ mod tests {
             .unwrap();
         assert!(matches!(
             odb.read_commit(&no_tree),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
         assert!(matches!(
             odb.commit_tree(&no_tree),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 }

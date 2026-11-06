@@ -2,7 +2,7 @@
 //!
 //! Several test binaries include this module and each uses only part of it.
 
-#![allow(dead_code)]
+#[allow(dead_code)]
 
 use std::collections::HashMap;
 use std::fs;

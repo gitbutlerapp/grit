@@ -1,5 +1,6 @@
 //! Local branches: create one without switching `HEAD`, list them, delete one, rename one, and configure upstream.
 
+use crate::objects::ObjectError;
 use std::fs;
 use std::path::Path;
 
@@ -751,14 +752,20 @@ fn resolve_create_start(
 
 fn validate_start_commit(repo: &Repository, oid: ObjectId, label: &str) -> Result<ObjectId> {
     peel_to_commit_for_merge_base(repo, oid).map_err(|err| match err {
-        Error::ObjectNotFound(_) => Error::Branch(BranchError::InvalidStartPoint {
-            label: label.to_owned(),
-            reason: "object not found".into(),
-        }),
-        Error::InvalidRef(msg) | Error::CorruptObject(msg) => {
+        Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) => {
             Error::Branch(BranchError::InvalidStartPoint {
                 label: label.to_owned(),
-                reason: msg,
+                reason: "object not found".into(),
+            })
+        }
+        Error::InvalidRef(msg) => Error::Branch(BranchError::InvalidStartPoint {
+            label: label.to_owned(),
+            reason: msg,
+        }),
+        Error::Object(ObjectError::CorruptObject { .. }) => {
+            Error::Branch(BranchError::InvalidStartPoint {
+                label: label.to_owned(),
+                reason: "corrupt object".into(),
             })
         }
         other => other,

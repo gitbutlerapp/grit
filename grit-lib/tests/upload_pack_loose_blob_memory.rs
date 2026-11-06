@@ -1,7 +1,7 @@
 //! Streaming a large loose blob into a pack must not retain the payload in anon RSS.
 
 #![cfg(all(target_os = "linux", feature = "full-tests"))]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod upload_pack_blob_memory_support;
 

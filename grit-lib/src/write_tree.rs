@@ -1,5 +1,6 @@
 //! Build tree objects from index entries (`git write-tree` core logic).
 
+use crate::objects::ObjectError;
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
@@ -499,10 +500,13 @@ fn rebuild_directory_node(
 }
 
 fn missing_member_error(mode: u32, oid: &ObjectId, path: &[u8]) -> Error {
-    Error::ObjectNotFound(format!(
-        "{mode:o} {} at {}",
-        oid.to_hex(),
-        String::from_utf8_lossy(path)
+    Error::Object(ObjectError::corrupt_object(
+        None,
+        format!(
+            "{mode:o} {} at {}",
+            oid.to_hex(),
+            String::from_utf8_lossy(path)
+        ),
     ))
 }
 
@@ -1315,7 +1319,7 @@ mod tests {
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(matches!(
             err,
-            Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+            Error::Object(ObjectError::CorruptObject { .. })
         ));
     }
 
@@ -1339,7 +1343,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+            Error::Object(ObjectError::CorruptObject { .. })
         ));
     }
 
@@ -1730,7 +1734,8 @@ mod tests {
         index.add_or_replace(entry("beta/three", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(
-            matches!(&err, Error::ObjectNotFound(msg) if msg.contains("beta/three")),
+            matches!(&err, Error::Object(ObjectError::CorruptObject { .. })
+                if err.to_string().contains("beta/three")),
             "{err:?}"
         );
     }

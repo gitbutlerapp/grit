@@ -1,5 +1,6 @@
 //! Ensures [`ObjectStore`] and [`WritableObjectStore`] are object-safe for embedders.
 
+use grit_lib::objects::ObjectError;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 

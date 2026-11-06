@@ -1,5 +1,6 @@
 //! Skipping fetch negotiator — implements Git's "skipping" negotiation strategy.
 
+use crate::objects::ObjectError;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
@@ -17,13 +18,14 @@ const POPPED: u8 = 1 << 5;
 fn committer_unix_seconds(committer: &str) -> Result<i64> {
     let parts: Vec<&str> = committer.rsplitn(3, ' ').collect();
     if parts.len() < 2 {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "committer line missing date".to_owned(),
-        ));
+        )));
     }
-    parts[1]
-        .parse::<i64>()
-        .map_err(|_| Error::CorruptObject("invalid committer timestamp".to_owned()))
+    parts[1].parse::<i64>().map_err(|_| {
+        Error::Object(ObjectError::corrupt_object(None, "invalid committer timestamp".to_owned()))
+    })
 }
 
 fn commit_date(repo: &Repository, graph: Option<&CommitGraphChain>, oid: ObjectId) -> Result<i64> {
@@ -214,10 +216,9 @@ impl<'r> SkippingNegotiator<'r> {
 
     fn push_parent(&mut self, entry_oid: ObjectId, to_push: ObjectId) -> Result<bool> {
         let (entry_ttl, entry_orig) = {
-            let e = self
-                .entries
-                .get(&entry_oid)
-                .ok_or_else(|| Error::CorruptObject("missing queue entry".to_owned()))?;
+            let e = self.entries.get(&entry_oid).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "missing queue entry".to_owned()))
+            })?;
             (e.ttl, e.original_ttl)
         };
 
@@ -231,10 +232,9 @@ impl<'r> SkippingNegotiator<'r> {
             self.rev_list_push(to_push, 0)?;
         }
 
-        let parent_entry = self
-            .entries
-            .get_mut(&to_push)
-            .ok_or_else(|| Error::CorruptObject("missing parent entry".to_owned()))?;
+        let parent_entry = self.entries.get_mut(&to_push).ok_or_else(|| {
+            Error::Object(ObjectError::corrupt_object(None, "missing parent entry".to_owned()))
+        })?;
 
         if entry_common_or_adv {
             self.mark_common(to_push)?;
@@ -267,16 +267,17 @@ impl<'r> SkippingNegotiator<'r> {
 
             let HeapItem {
                 oid: commit_oid, ..
-            } = self
-                .heap
-                .pop()
-                .ok_or_else(|| Error::CorruptObject("negotiator heap inconsistency".to_owned()))?;
+            } = self.heap.pop().ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "negotiator heap inconsistency".to_owned()))
+            })?;
 
             let entry_ttl = self
                 .entries
                 .get(&commit_oid)
                 .map(|e| e.ttl)
-                .ok_or_else(|| Error::CorruptObject("popped missing entry".to_owned()))?;
+                .ok_or_else(|| {
+                    Error::Object(ObjectError::corrupt_object(None, "popped missing entry".to_owned()))
+                })?;
 
             self.set_f(commit_oid, POPPED);
             if self.f(commit_oid) & COMMON == 0 {
@@ -311,9 +312,9 @@ impl<'r> SkippingNegotiator<'r> {
     /// Returns `true` if that commit was already `COMMON` before this call.
     pub fn ack(&mut self, oid: ObjectId) -> Result<bool> {
         if self.f(oid) & SEEN == 0 {
-            return Err(Error::CorruptObject(format!(
-                "ack for commit {} not sent as have",
-                oid.to_hex()
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("ack for commit {} not sent as have", oid.to_hex()),
             )));
         }
         let known = self.f(oid) & COMMON != 0;

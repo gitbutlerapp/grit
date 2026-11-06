@@ -17,6 +17,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::fmt;
@@ -268,7 +269,9 @@ impl ChangeIdPolicy {
                 strip_change_id_headers(&mut stripped.extra_headers);
                 let bytes = serialize_commit(&stripped);
                 let digest = algo.digest(&bytes).map_err(|e| match e {
-                    crate::error::Error::HashCollision { .. } => ChangeIdError::HashCollision,
+                    crate::error::Error::Object(ObjectError::HashCollision { .. }) => {
+                        ChangeIdError::HashCollision
+                    }
                     other => {
                         panic!("unexpected error deriving content-hash change id: {other}")
                     }
@@ -820,7 +823,7 @@ fn change_id_from_commit_object_header(data: &[u8]) -> Option<ChangeId> {
 pub fn resolve_commit_by_change_id_prefix(repo: &Repository, prefix: &str) -> Result<ObjectId> {
     let matches = find_commits_by_change_id_prefix(repo, prefix)?;
     match matches.len() {
-        0 => Err(Error::ObjectNotFound(prefix.to_owned())),
+        0 => Err(Error::Object(ObjectError::object_not_found(prefix.to_owned()))),
         1 => Ok(matches[0].oid),
         _ => Err(RevParseError::AmbiguousChangeId {
             prefix: prefix.to_owned(),

@@ -1,6 +1,7 @@
 //! [`RepositoryBuilder::open`] checks injected object stores against the repository's
 //! `extensions.objectformat` and fails with [`Error::ObjectFormatMismatch`].
 
+use grit_lib::objects::ObjectError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -44,9 +45,9 @@ fn expect_format_mismatch(
     store_format: HashAlgo,
 ) {
     match result {
-        Err(Error::ObjectFormatMismatch {
+        Err(Error::Object(ObjectError::ObjectFormatMismatch {
             repository, store, ..
-        }) => {
+        })) => {
             assert_eq!(repository, repository_format);
             assert_eq!(store, store_format);
         }

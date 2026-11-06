@@ -1,6 +1,6 @@
 //! Helpers for split-index and untracked-cache git compatibility tests.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
+#[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

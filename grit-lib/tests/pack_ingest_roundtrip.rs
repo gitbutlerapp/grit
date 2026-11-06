@@ -5,6 +5,7 @@
 //! under every [`grit_lib::objects::index_pack::IngestPackOptions`] variant, and cross-checks installed
 //! packs with `git verify-pack -v` and `git fsck --strict`.
 
+use grit_lib::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1184,7 +1185,7 @@ fn unpack_strict_rejects_missing_tree_reference() {
     )
     .expect_err("strict unpack must fail");
     assert!(
-        matches!(err, grit_lib::error::Error::CorruptObject(_)),
+        matches!(err, grit_lib::error::Error::Object(ObjectError::CorruptObject { .. })),
         "expected corrupt object, got {err:?}"
     );
 

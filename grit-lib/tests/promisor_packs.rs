@@ -1,5 +1,6 @@
 //! Promisor packs and partial-clone object visibility — t5616 / t5330 object-level scenarios.
 
+use grit_lib::objects::ObjectError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -167,7 +168,7 @@ fn promisor_partial_clone_pack_markers_and_config() {
     }
     let err = repo.odb().read(&missing_blob).unwrap_err();
     assert!(
-        matches!(err, Error::PromisedObjectMissing(_)),
+        matches!(err, Error::Object(ObjectError::PromisedObjectMissing(_))),
         "missing filtered blob without fetcher must be PromisedObjectMissing: {err:?}"
     );
 }

@@ -14,6 +14,7 @@
 //! visitor sees each object's bytes once and must not keep them.
 
 use crate::error::{Error, Result};
+use crate::objects::ObjectError;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::unpack_objects::{apply_delta_into, type_code_to_kind, PackReader};
@@ -68,8 +69,12 @@ impl PendingDelta {
         pack_end: usize,
         uncompressed_size: usize,
     ) -> Result<Self> {
-        let header_len = u8::try_from(zlib_offset.saturating_sub(offset))
-            .map_err(|_| Error::CorruptObject("pack object header too long".to_owned()))?;
+        let header_len = u8::try_from(zlib_offset.saturating_sub(offset)).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "pack object header too long".to_owned(),
+            ))
+        })?;
         Ok(Self {
             offset,
             pack_end,
@@ -96,9 +101,9 @@ impl PackBytes<'_> {
     /// Bytes `start..end` of the pack, borrowed or read into `buf`.
     fn read<'s>(&'s self, start: usize, end: usize, buf: &'s mut Vec<u8>) -> Result<&'s [u8]> {
         match self {
-            Self::Slice(pack) => pack
-                .get(start..end)
-                .ok_or_else(|| Error::CorruptObject("pack object out of range".to_owned())),
+            Self::Slice(pack) => pack.get(start..end).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "pack object out of range".to_owned()))
+            }),
             Self::File(file) => {
                 buf.clear();
                 buf.resize(end.saturating_sub(start), 0);
@@ -433,7 +438,7 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
                 if handle.join().is_err() {
                     record_first_error(
                         &first_error,
-                        Error::CorruptObject("delta worker stopped".to_owned()),
+                        Error::Object(ObjectError::corrupt_object(None, "delta worker stopped".to_owned())),
                     );
                 }
             }
@@ -603,7 +608,10 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
             Anchor::Root => match self.load_root(root, &mut scratch.zlib, &mut scratch.packed)? {
                 Some((_, data)) => Cow::Owned(data),
                 None => {
-                    return Err(Error::CorruptObject("delta base not available".to_owned()));
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "delta base not available".to_owned(),
+                    )));
                 }
             },
             Anchor::Frame(parent) => match stack[parent].data.as_deref() {

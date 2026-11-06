@@ -9,7 +9,6 @@
 pub(crate) use crate::pack_index::parse_pack_index_bytes;
 pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
 
-#[cfg(test)]
 use crate::objects::ObjectError;
 #[cfg(test)]
 use crate::pack_index::compute_fanout_from_oid_slices;
@@ -95,8 +94,13 @@ struct PackReadDamage {
 
 fn finish_pack_object_lookup(oid: &ObjectId, last: Option<PackReadDamage>) -> Error {
     match last {
-        Some(d) => Error::wrap_packed_read_failure(*oid, d.pack, d.offset, d.err),
-        None => Error::ObjectNotFound(oid.to_hex()),
+        Some(d) => Error::Object(ObjectError::wrap_packed_read_failure(
+            *oid,
+            d.pack,
+            d.offset,
+            ObjectError::from_umbrella(d.err),
+        )),
+        None => Error::Object(ObjectError::object_not_found(oid.to_hex())),
     }
 }
 
@@ -110,11 +114,16 @@ fn wrap_pack_cache_read_err(
         .ok()
         .flatten()
         .unwrap_or(0);
-    Error::wrap_packed_read_failure(*oid, idx.pack_path.clone(), offset, err)
+    Error::Object(ObjectError::wrap_packed_read_failure(
+        *oid,
+        idx.pack_path.clone(),
+        offset,
+        ObjectError::from_umbrella(err),
+    ))
 }
 
 pub(crate) mod pack_cache {
-    use super::{read_pack_index_no_verify, Error, ObjectKind, PackIndex, Result};
+    use super::{read_pack_index_no_verify, Error, ObjectError, ObjectKind, PackIndex, Result};
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::fs;
@@ -580,7 +589,7 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object(oid) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(super::wrap_pack_cache_read_err(
                 objects_dir,
                 reader.idx.as_ref(),
@@ -607,7 +616,7 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object_unless_whole_larger(oid, limit) {
             Ok(read) => Ok(Some(read)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(super::wrap_pack_cache_read_err(
                 objects_dir,
                 reader.idx.as_ref(),
@@ -649,7 +658,7 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object_into_with_delta_policy(oid, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(super::wrap_pack_cache_read_err(
                 objects_dir,
                 reader.idx.as_ref(),
@@ -830,7 +839,7 @@ pub(crate) mod pack_cache {
         };
         match super::read_object_from_pack_at_offset(&idx, offset) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
@@ -850,7 +859,7 @@ pub(crate) mod pack_cache {
         };
         match super::read_object_at_depth_into(&idx, offset, 0, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
@@ -868,7 +877,7 @@ pub(crate) mod pack_cache {
         };
         match super::read_object_info_from_pack_at_offset(&idx, offset) {
             Ok(info) => Ok(Some(info)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -2451,9 +2460,10 @@ pub fn write_v2_pack_index(
 ) -> Result<()> {
     let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
     if pack_bytes.len() < hash_bytes {
-        return Err(Error::CorruptObject(
-            "pack too small for idx trailer".into(),
-        ));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack too small for idx trailer",
+        )));
     }
     let trailer = &pack_bytes[pack_bytes.len() - hash_bytes..];
     write_v2_pack_index_with_trailer(idx_path, entries, trailer, hash_bytes, None)
@@ -2545,23 +2555,30 @@ pub(crate) fn write_v2_pack_index_sorting(
     use std::io::Write;
 
     let Some(algo) = HashAlgo::from_len(hash_bytes) else {
-        return Err(Error::CorruptObject(format!(
-            "unsupported index hash width {hash_bytes}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported index hash width {hash_bytes}"),
         )));
     };
     if pack_trailer.len() != hash_bytes {
-        return Err(Error::CorruptObject(format!(
-            "pack trailer length {} does not match hash width {hash_bytes}",
-            pack_trailer.len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "pack trailer length {} does not match hash width {hash_bytes}",
+                pack_trailer.len()
+            ),
         )));
     }
     if let Some((oid, _, _)) = entries
         .iter()
         .find(|(oid, _, _)| oid.as_bytes().len() != hash_bytes)
     {
-        return Err(Error::CorruptObject(format!(
-            "OID width {} does not match index hash width {hash_bytes}",
-            oid.as_bytes().len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "OID width {} does not match index hash width {hash_bytes}",
+                oid.as_bytes().len()
+            ),
         )));
     }
     let fanout = sort_index_entries(entries, sort_threads);
@@ -2590,9 +2607,10 @@ pub(crate) fn write_v2_pack_index_sorting(
             Ok(small) if small < 0x8000_0000 => put(&small.to_be_bytes())?,
             _ => {
                 if large >= 0x8000_0000 {
-                    return Err(Error::CorruptObject(
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
                         "pack index large-offset table overflow".to_owned(),
-                    ));
+                    )));
                 }
                 put(&(0x8000_0000u32 | large).to_be_bytes())?;
                 large += 1;
@@ -2620,8 +2638,9 @@ pub fn oid_bytes_to_hex(oid: &[u8]) -> String {
 /// Hash canonical loose object bytes (`kind SP size NUL data`) with the repo hash width.
 pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Result<Vec<u8>> {
     let Some(algo) = HashAlgo::from_len(hash_bytes) else {
-        return Err(Error::CorruptObject(format!(
-            "unsupported object hash width: {hash_bytes}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported object hash width: {hash_bytes}"),
         )));
     };
     Ok(crate::hash::hash_object(algo, kind, data)?
@@ -3061,10 +3080,13 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
         let obj = read_object_from_pack_bytes(&pack_bytes, &idx, entry.oid())?;
         let computed = hash_object_bytes(obj.kind, &obj.data, hb)?;
         if computed.as_slice() != entry.oid() {
-            return Err(Error::CorruptObject(format!(
-                "pack object hash mismatch at offset {} (index says {})",
-                entry.offset()?,
-                oid_bytes_to_hex(entry.oid())
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!(
+                    "pack object hash mismatch at offset {} (index says {})",
+                    entry.offset()?,
+                    oid_bytes_to_hex(entry.oid())
+                ),
             )));
         }
     }
@@ -3080,23 +3102,29 @@ fn verify_pack_structure_and_records(
     let pack_bytes = PackData::open_with_min_len(&idx.pack_path, 0)?;
     let hb = idx.hash_bytes();
     if pack_bytes.len() < 12 + hb {
-        return Err(Error::CorruptObject(format!(
-            "pack file {} is too small",
-            idx.pack_path.display()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack file {} is too small", idx.pack_path.display()),
         )));
     }
     let pack_end = pack_bytes.len() - hb;
     let Some(algo) = HashAlgo::from_len(hb) else {
-        return Err(Error::CorruptObject(format!(
-            "unsupported OID width {hb} for pack {}",
-            idx.pack_path.display()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "unsupported OID width {hb} for pack {}",
+                idx.pack_path.display()
+            ),
         )));
     };
     if verify_pack_trailer {
         verify_trailer(algo, &pack_bytes).map_err(|e| {
-            Error::CorruptObject(format!(
-                "pack trailing checksum mismatch for {}: {e}",
-                idx.pack_path.display()
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!(
+                    "pack trailing checksum mismatch for {}: {e}",
+                    idx.pack_path.display()
+                ),
             ))
         })?;
         // The `.idx` ends with the pack checksum followed by its own checksum, both
@@ -3105,32 +3133,44 @@ fn verify_pack_structure_and_records(
             let n = idx_file_bytes.len();
             let embedded = &idx_file_bytes[n - 2 * hb..n - hb];
             if embedded != &pack_bytes[pack_end..] {
-                return Err(Error::CorruptObject(format!(
-                    "pack checksum in index does not match {}",
-                    idx.pack_path.display()
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "pack checksum in index does not match {}",
+                        idx.pack_path.display()
+                    ),
                 )));
             }
         }
     }
     if &pack_bytes[0..4] != b"PACK" {
-        return Err(Error::CorruptObject(format!(
-            "pack file {} has invalid signature",
-            idx.pack_path.display()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "pack file {} has invalid signature",
+                idx.pack_path.display()
+            ),
         )));
     }
     let version = u32::from_be_bytes(pack_bytes[4..8].try_into().unwrap_or([0, 0, 0, 0]));
     if version != 2 && version != 3 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack version {} in {}",
-            version,
-            idx.pack_path.display()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "unsupported pack version {} in {}",
+                version,
+                idx.pack_path.display()
+            ),
         )));
     }
     let count = u32::from_be_bytes(pack_bytes[8..12].try_into().unwrap_or([0, 0, 0, 0])) as usize;
     if count != idx.len() {
-        return Err(Error::CorruptObject(format!(
-            "pack/index object count mismatch for {}",
-            idx.pack_path.display()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "pack/index object count mismatch for {}",
+                idx.pack_path.display()
+            ),
         )));
     }
 
@@ -3152,17 +3192,20 @@ fn verify_pack_structure_and_records(
     let mut base_links: Vec<Option<DeltaBaseLink>> = Vec::with_capacity(offsets.len());
     for (i, offset) in offsets.iter().copied().enumerate() {
         let oid = by_offset.get(&offset).cloned().ok_or_else(|| {
-            Error::CorruptObject(format!("missing object id for offset {}", offset))
+            Error::Object(ObjectError::corrupt_object(None, format!("missing object id for offset {}", offset)))
         })?;
         let next_off = offsets
             .get(i + 1)
             .copied()
             .unwrap_or((pack_bytes.len() - hb) as u64);
         if next_off <= offset || next_off > (pack_bytes.len() - hb) as u64 {
-            return Err(Error::CorruptObject(format!(
-                "invalid object boundaries at offset {} in {}",
-                offset,
-                idx.pack_path.display()
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!(
+                    "invalid object boundaries at offset {} in {}",
+                    offset,
+                    idx.pack_path.display()
+                ),
             )));
         }
         let mut p = offset as usize;
@@ -3173,9 +3216,9 @@ fn verify_pack_structure_and_records(
         match packed_type {
             PackedType::RefDelta => {
                 if p + hb > pack_bytes.len() {
-                    return Err(Error::CorruptObject(format!(
-                        "truncated ref-delta base at offset {}",
-                        offset
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!("truncated ref-delta base at offset {}", offset),
                     )));
                 }
                 let raw = pack_bytes[p..p + hb].to_vec();
@@ -3351,9 +3394,11 @@ fn packed_type_to_kind(pt: PackedType) -> Result<ObjectKind> {
         PackedType::Tree => Ok(ObjectKind::Tree),
         PackedType::Blob => Ok(ObjectKind::Blob),
         PackedType::Tag => Ok(ObjectKind::Tag),
-        PackedType::OfsDelta | PackedType::RefDelta => Err(Error::CorruptObject(
+        PackedType::OfsDelta | PackedType::RefDelta => Err(ObjectError::corrupt_object(
+            None,
             "cannot convert delta type to object kind directly".to_owned(),
-        )),
+        )
+        .into()),
     }
 }
 
@@ -3486,14 +3531,14 @@ fn with_pack_read_delta_state<R>(
 impl DeltaChainState {
     fn visit(&mut self, pack_id: u32, offset: u64) -> Result<()> {
         if self.depth > MAX_DELTA_CHAIN_READ_DEPTH {
-            return Err(Error::DeltaChainTooDeep {
+            return Err(Error::Object(ObjectError::DeltaChainTooDeep {
                 limit: MAX_DELTA_CHAIN_READ_DEPTH,
-            });
+            }));
         }
         if !self.visited.insert((pack_id, offset)) {
-            return Err(Error::DeltaChainTooDeep {
+            return Err(Error::Object(ObjectError::DeltaChainTooDeep {
                 limit: MAX_DELTA_CHAIN_READ_DEPTH,
-            });
+            }));
         }
         Ok(())
     }
@@ -3501,9 +3546,9 @@ impl DeltaChainState {
     fn next_hop(&mut self) -> Result<()> {
         self.depth += 1;
         if self.depth > MAX_DELTA_CHAIN_READ_DEPTH {
-            return Err(Error::DeltaChainTooDeep {
+            return Err(Error::Object(ObjectError::DeltaChainTooDeep {
                 limit: MAX_DELTA_CHAIN_READ_DEPTH,
-            });
+            }));
         }
         Ok(())
     }
@@ -3548,7 +3593,7 @@ fn apply_delta_chain_forward_into(
     let mut rev: Vec<&PendingDeltaFrame> = pending.iter().rev().collect();
     let last = rev
         .pop()
-        .ok_or_else(|| Error::CorruptObject("empty delta chain".to_owned()))?;
+        .ok_or_else(|| Error::Object(ObjectError::corrupt_object(None, "empty delta chain".to_owned())))?;
     if rev.is_empty() {
         apply_delta_into(out, base_data, &last.delta)?;
         if caching && (last.pack_id != result_pack_id || last.offset != result_offset) {
@@ -3561,9 +3606,10 @@ fn apply_delta_chain_forward_into(
     }
 
     let Some(first) = rev.first().copied() else {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "delta chain missing base-adjacent frame".to_owned(),
-        ));
+        )));
     };
     apply_delta_into(chain_a, base_data, &first.delta)?;
     if caching && (first.pack_id != result_pack_id || first.offset != result_offset) {
@@ -3660,7 +3706,7 @@ fn apply_delta_chain_forward_prefix_into(
     let mut rev: Vec<&PendingDeltaFrame> = pending.iter().rev().collect();
     let last = rev
         .pop()
-        .ok_or_else(|| Error::CorruptObject("empty delta chain".to_owned()))?;
+        .ok_or_else(|| Error::Object(ObjectError::corrupt_object(None, "empty delta chain".to_owned())))?;
     let prefix_ok = |buf: &[u8]| commit_prefix_has_author(buf);
     if rev.is_empty() {
         apply_delta_prefix_into(out, base_data, &last.delta, max_out, prefix_ok)?;
@@ -3674,9 +3720,10 @@ fn apply_delta_chain_forward_prefix_into(
     }
 
     let Some(first) = rev.first().copied() else {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "delta chain missing base-adjacent frame".to_owned(),
-        ));
+        )));
     };
     apply_delta_into(chain_a, base_data, &first.delta)?;
     if caching && (first.pack_id != result_pack_id || first.offset != result_offset) {
@@ -3852,7 +3899,10 @@ fn rescue_in_pack_base(
 
 /// True when a pack parse failure might be stale cached bytes rather than on-disk corruption.
 fn pack_bytes_parse_may_be_stale(err: &Error) -> bool {
-    matches!(err, Error::CorruptObject(_) | Error::Zlib(_))
+    matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. }) | Error::Object(ObjectError::Zlib { .. })
+    )
 }
 
 /// Resolve one pack object, walking delta chains iteratively across packs with shared
@@ -4118,9 +4168,10 @@ fn resolve_pack_object_at_body(
                 state.next_hop()?;
                 let hb = idx_ref.hash_bytes();
                 if pos + hb > bytes.len() {
-                    return Err(Error::CorruptObject(
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
                         "truncated ref-delta base OID".to_owned(),
-                    ));
+                    )));
                 }
                 let base_raw = bytes[pos..pos + hb].to_vec();
                 pos += hb;
@@ -4184,7 +4235,9 @@ fn resolve_pack_object_at_body(
                         }
                         if let Some(other_idx) = find_other_pack_index(dir, idx_ref, &base_oid)? {
                             let Some(off) = other_idx.find_offset(&base_oid)? else {
-                                return Err(Error::ObjectNotFound(base_oid.to_hex()));
+                                return Err(Error::Object(ObjectError::object_not_found(
+                                    base_oid.to_hex(),
+                                )));
                             };
                             cur_idx = PackIndexHandle::Shared(other_idx);
                             cur_offset = off;
@@ -4192,9 +4245,12 @@ fn resolve_pack_object_at_body(
                         }
                     }
                 }
-                return Err(Error::CorruptObject(format!(
-                    "ref-delta base {} not found in pack",
-                    oid_bytes_to_hex(&base_raw)
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "ref-delta base {} not found in pack",
+                        oid_bytes_to_hex(&base_raw)
+                    ),
                 )));
             }
         }
@@ -4272,9 +4328,10 @@ fn resolve_pack_object_info_at_body(
                 state.next_hop()?;
                 let hb = idx_ref.hash_bytes();
                 if pos + hb > cur_bytes.len() {
-                    return Err(Error::CorruptObject(
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
                         "truncated ref-delta base OID".to_owned(),
-                    ));
+                    )));
                 }
                 let base_raw = &cur_bytes[pos..pos + hb];
                 pos += hb;
@@ -4302,7 +4359,9 @@ fn resolve_pack_object_info_at_body(
                     }
                     if let Some(other_idx) = find_other_pack_index(dir, idx_ref, &base_oid)? {
                         let Some(off) = other_idx.find_offset(&base_oid)? else {
-                            return Err(Error::ObjectNotFound(base_oid.to_hex()));
+                            return Err(Error::Object(ObjectError::object_not_found(
+                                base_oid.to_hex(),
+                            )));
                         };
                         let base_info = resolve_pack_object_info_at(
                             PackIndexHandle::Shared(other_idx),
@@ -4317,9 +4376,12 @@ fn resolve_pack_object_info_at_body(
                         });
                     }
                 }
-                return Err(Error::CorruptObject(format!(
-                    "ref-delta base {} not found in pack",
-                    oid_bytes_to_hex(base_raw)
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "ref-delta base {} not found in pack",
+                        oid_bytes_to_hex(base_raw)
+                    ),
                 )));
             }
         }
@@ -4376,7 +4438,7 @@ pub fn read_object_from_pack_into(
     buf: &mut Vec<u8>,
 ) -> Result<ObjectKind> {
     let Some(offset) = idx.find_offset(oid)? else {
-        return Err(Error::ObjectNotFound(oid.to_hex()));
+        return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
     };
     if crate::pack_store::PackStore::has_context() {
         return read_object_at_depth_into(idx, offset, 0, false, buf);
@@ -4394,7 +4456,7 @@ pub fn read_object_from_pack_into(
 /// Same as [`read_object_from_pack`], except no hash verification is performed on the payload.
 pub fn read_object_info_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<ObjectInfo> {
     let Some(offset) = idx.find_offset(oid)? else {
-        return Err(Error::ObjectNotFound(oid.to_hex()));
+        return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
     };
     read_object_info_from_pack_at_offset(idx, offset)
 }
@@ -4866,15 +4928,18 @@ fn pack_entry_bytes<'a>(
     pack: &'a PackData,
     buf: &'a mut Vec<u8>,
 ) -> Result<(&'a [u8], usize)> {
-    let start = usize::try_from(offset)
-        .map_err(|_| Error::CorruptObject("pack offset out of range".to_owned()))?;
+    let start = usize::try_from(offset).map_err(|_| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack offset out of range".to_owned(),
+        ))
+    })?;
     if !pack.uses_positioned_reads() {
         return Ok((pack, start));
     }
-    let pack_end = pack
-        .len()
-        .checked_sub(idx.hash_bytes())
-        .ok_or_else(|| Error::CorruptObject("truncated pack trailer".to_owned()))?;
+    let pack_end = pack.len().checked_sub(idx.hash_bytes()).ok_or_else(|| {
+        Error::Object(ObjectError::corrupt_object(None, "truncated pack trailer".to_owned()))
+    })?;
     let end = idx.next_pack_offset_after(offset, pack_end as u64)? as usize;
     Ok((pack.read_range(start, end, buf)?, 0))
 }
@@ -4955,7 +5020,7 @@ fn read_object_from_packs_in_context_into(
         buf,
     ) {
         Ok(kind) => Ok(kind),
-        Err(err @ Error::ObjectNotFound(_)) => {
+        Err(err @ Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
             if reprepare_pack_directory_on_miss(objects_dir)? {
                 try_read_object_from_packs_with_options_into(
                     objects_dir,
@@ -4979,7 +5044,7 @@ fn read_object_from_packs_in_context(objects_dir: &Path, oid: &ObjectId) -> Resu
         PackLookupOptions::ALL_LOCAL_PACKS,
     ) {
         Ok(obj) => Ok(obj),
-        Err(err @ Error::ObjectNotFound(_)) => {
+        Err(err @ Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
             if reprepare_pack_directory_on_miss_in_context(objects_dir)? {
                 try_read_object_from_packs_with_options(
                     objects_dir,
@@ -5013,7 +5078,7 @@ pub fn read_object_from_pack_at_offset(idx: &PackIndex, offset: u64) -> Result<O
 /// itself resolves a delta base from another pack (the chain budget must carry across packs).
 fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize) -> Result<Object> {
     let Some(offset) = idx.find_offset(oid)? else {
-        return Err(Error::ObjectNotFound(oid.to_hex()));
+        return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
     };
     read_object_at_depth(idx, offset, depth)
 }
@@ -5091,10 +5156,11 @@ pub fn read_object_from_pack_bytes(
     oid: &[u8],
 ) -> Result<Object> {
     validate_pack_index_object_count(pack_bytes, idx)?;
-    let id = ObjectId::from_bytes(oid).map_err(|_| Error::ObjectNotFound(oid_bytes_to_hex(oid)))?;
+    let id = ObjectId::from_bytes(oid)
+        .map_err(|_| Error::Object(ObjectError::object_not_found(oid_bytes_to_hex(oid))))?;
     let entry_offset = idx
         .find_offset(&id)?
-        .ok_or_else(|| Error::ObjectNotFound(oid_bytes_to_hex(oid)))?;
+        .ok_or_else(|| Error::Object(ObjectError::object_not_found(oid_bytes_to_hex(oid))))?;
     let store = crate::pack_store::PackStore::legacy_for_pack_path(&idx.pack_path);
     crate::pack_store::PackStore::with_context(store, || {
         let (kind, data) = read_pack_object_at(pack_bytes, entry_offset, idx, None, 0)?;
@@ -5105,14 +5171,20 @@ pub fn read_object_from_pack_bytes(
 
 fn validate_pack_index_object_count(pack_bytes: &[u8], idx: &PackIndex) -> Result<()> {
     if pack_bytes.len() < 12 || &pack_bytes[0..4] != b"PACK" {
-        return Err(Error::CorruptObject("bad pack header".to_owned()));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "bad pack header".to_owned(),
+        )));
     }
     let count =
         u32::from_be_bytes([pack_bytes[8], pack_bytes[9], pack_bytes[10], pack_bytes[11]]) as usize;
     if count != idx.len() {
-        return Err(Error::CorruptObject(format!(
-            "pack object count mismatch: pack has {count}, index has {}",
-            idx.len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "pack object count mismatch: pack has {count}, index has {}",
+                idx.len()
+            ),
         )));
     }
     Ok(())
@@ -5120,17 +5192,20 @@ fn validate_pack_index_object_count(pack_bytes: &[u8], idx: &PackIndex) -> Resul
 
 fn verify_packed_object_hash(kind: ObjectKind, data: &[u8], expected_oid: &[u8]) -> Result<()> {
     let algo = HashAlgo::from_len(expected_oid.len()).ok_or_else(|| {
-        Error::CorruptObject(format!(
-            "unsupported packed object id width: {}",
-            expected_oid.len()
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported packed object id width: {}", expected_oid.len()),
         ))
     })?;
     let actual = hash_object(algo, kind, data)?;
     if actual.as_bytes() != expected_oid {
-        return Err(Error::CorruptObject(format!(
-            "packed object {} hashes to {}",
-            oid_bytes_to_hex(expected_oid),
-            actual.to_hex()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!(
+                "packed object {} hashes to {}",
+                oid_bytes_to_hex(expected_oid),
+                actual.to_hex()
+            ),
         )));
     }
     Ok(())
@@ -5297,14 +5372,18 @@ impl SingleLocalPackReader {
         let hash_bytes = self.idx.hash_bytes();
         let mut kinds: Vec<Option<ObjectKind>> = Vec::with_capacity(offsets.len());
         for (rank, &offset) in offsets.iter().enumerate() {
-            let mut pos = usize::try_from(offset)
-                .map_err(|_| Error::CorruptObject("pack offset out of range".to_owned()))?;
+            let mut pos = usize::try_from(offset).map_err(|_| {
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack offset out of range".to_owned(),
+                ))
+            })?;
             let (packed_type, _) = parse_pack_object_header(pack_bytes, &mut pos)?;
             let base_offset = match packed_type {
                 PackedType::OfsDelta => Some(parse_ofs_delta_base(pack_bytes, &mut pos, offset)?),
                 PackedType::RefDelta => {
                     let raw = pack_bytes.get(pos..pos + hash_bytes).ok_or_else(|| {
-                        Error::CorruptObject("truncated ref-delta base OID".to_owned())
+                        Error::Object(ObjectError::corrupt_object(None, "truncated ref-delta base OID".to_owned()))
                     })?;
                     self.idx.find_offset(&ObjectId::from_bytes(raw)?)?
                 }
@@ -5666,9 +5745,10 @@ impl SingleLocalPackReader {
                     state.next_hop()?;
                     let hb = self.idx.hash_bytes();
                     if pos + hb > pack_bytes.len() {
-                        return Err(Error::CorruptObject(
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
                             "truncated ref-delta base OID".to_owned(),
-                        ));
+                        )));
                     }
                     let base_raw = &pack_bytes[pos..pos + hb];
                     pos += hb;
@@ -5681,7 +5761,9 @@ impl SingleLocalPackReader {
                     }
                     let base_oid = ObjectId::from_bytes(base_raw)?;
                     let Some(base_offset) = self.idx.find_offset(&base_oid)? else {
-                        return Err(Error::ObjectNotFound(base_oid.to_hex()));
+                        return Err(Error::Object(ObjectError::object_not_found(
+                            base_oid.to_hex(),
+                        )));
                     };
                     cur_offset = base_offset;
                 }
@@ -5696,7 +5778,7 @@ impl SingleLocalPackReader {
     /// Same as [`read_object_info_from_pack_at_offset`].
     pub fn read_info(&mut self, oid: &ObjectId) -> Result<ObjectInfo> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::ObjectNotFound(oid.to_hex()));
+            return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
         };
         if let Some(info) =
             read_whole_pack_entry_info_fast(&self.idx, offset, self.pack_bytes.as_ref())
@@ -5714,7 +5796,7 @@ impl SingleLocalPackReader {
     /// Same as [`read_object_from_pack_at_offset`].
     pub fn read_object(&mut self, oid: &ObjectId) -> Result<Object> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::ObjectNotFound(oid.to_hex()));
+            return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
         };
         if !self.pack_bytes.uses_positioned_reads() {
             if let Some(obj) =
@@ -5851,10 +5933,14 @@ impl SingleLocalPackReader {
         limit: u64,
     ) -> Result<BoundedRead> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::ObjectNotFound(oid.to_hex()));
+            return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
         };
-        let mut pos = usize::try_from(offset)
-            .map_err(|_| Error::CorruptObject(format!("pack offset {offset} overflows")))?;
+        let mut pos = usize::try_from(offset).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack offset {offset} overflows"),
+            ))
+        })?;
         if let Ok((packed_type, size)) = parse_pack_object_header(&self.pack_bytes, &mut pos) {
             let whole = !matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta);
             if whole && size > limit {
@@ -5885,7 +5971,7 @@ impl SingleLocalPackReader {
         out: &mut Vec<u8>,
     ) -> Result<ObjectKind> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::ObjectNotFound(oid.to_hex()));
+            return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
         };
         if !self.pack_bytes.uses_positioned_reads() {
             if let Some(kind) =
@@ -5992,7 +6078,7 @@ pub fn read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result
         PackLookupOptions::ALL_LOCAL_PACKS,
     ) {
         Ok(info) => Ok(info),
-        Err(err @ Error::ObjectNotFound(_)) => {
+        Err(err @ Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
             if reprepare_pack_directory_on_miss(objects_dir)? {
                 try_read_object_info_from_packs_with_options(
                     objects_dir,
@@ -6030,11 +6116,11 @@ pub(crate) fn try_read_object_info_from_packs_with_options(
                 pack_cache::remember_pack_hit(objects_dir, idx);
                 return Ok(info);
             }
-            Err(Error::ObjectNotFound(_)) => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
             Err(err) => last_err = Some(err),
         }
     }
-    Err(last_err.unwrap_or_else(|| Error::ObjectNotFound(oid.to_hex())))
+    Err(last_err.unwrap_or_else(|| Error::Object(ObjectError::object_not_found(oid.to_hex()))))
 }
 
 /// Search local packs for `oid` without re-preparing the pack directory listing.
@@ -6067,7 +6153,7 @@ pub(crate) fn try_read_object_from_packs_with_options(
             }
             // The object is missing from this particular pack despite the index
             // claim — keep looking in the others.
-            Err(Error::ObjectNotFound(_)) => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
             // The pack copy is unreadable (corrupt delta/zlib/header). A redundant
             // pack may still hold an intact copy, so remember the error and retry.
             Err(err) if err.is_object_read_wrap_source() => {
@@ -6126,7 +6212,7 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
                 pack_cache::remember_pack_hit(objects_dir, idx);
                 return Ok(kind);
             }
-            Err(Error::ObjectNotFound(_)) => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
             Err(err) if err.is_object_read_wrap_source() => {
                 last_damage = Some(PackReadDamage {
                     pack: idx.pack_path.clone(),
@@ -6202,9 +6288,10 @@ fn parse_in_pack_delta_reuse_candidate(
     let base = match packed_type {
         PackedType::RefDelta => {
             if p + hb > pack_bytes.len() {
-                return Err(Error::CorruptObject(
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
                     "truncated ref-delta base oid while scanning for reuse".to_owned(),
-                ));
+                )));
             }
             let bo = ObjectId::from_bytes(&pack_bytes[p..p + hb])?;
             p += hb;
@@ -6288,9 +6375,10 @@ fn parse_delta_reuse_zlib_at(
     let base = match packed_type {
         PackedType::RefDelta => {
             if p + hb > pack_bytes.len() {
-                return Err(Error::CorruptObject(
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
                     "truncated ref-delta base oid while scanning for reuse".to_owned(),
-                ));
+                )));
             }
             let bo = ObjectId::from_bytes(&pack_bytes[p..p + hb])?;
             p += hb;
@@ -6414,8 +6502,12 @@ pub(crate) fn locate_packed_objects(
             if slots.contains_key(&oid) {
                 continue;
             }
-            let mut pos = usize::try_from(offset)
-                .map_err(|_| Error::CorruptObject("pack offset exceeds memory".to_owned()))?;
+            let mut pos = usize::try_from(offset).map_err(|_| {
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack offset exceeds memory".to_owned(),
+                ))
+            })?;
             let (packed_type, _) = parse_pack_object_header(&bytes, &mut pos)?;
             let whole = !matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta);
             slots.insert(oid, PackedSlot { pack, whole });
@@ -6642,7 +6734,10 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
             PackedType::RefDelta => {
                 let hb = idx.hash_bytes();
                 if p + hb > pack_bytes.len() {
-                    return Err(Error::CorruptObject("truncated ref-delta base".to_owned()));
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "truncated ref-delta base".to_owned(),
+                    )));
                 }
                 return Ok(Some(ObjectId::from_bytes(&pack_bytes[p..p + hb])?));
             }
@@ -6796,8 +6891,12 @@ pub(crate) fn packed_entry_matches_index_crc(
     let Some(end) = pack_entry_raw_end(idx, pack, entry_offset)? else {
         return Ok(false);
     };
-    let start = usize::try_from(entry_offset)
-        .map_err(|_| Error::CorruptObject(format!("pack offset {entry_offset} overflows")))?;
+    let start = usize::try_from(entry_offset).map_err(|_| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack offset {entry_offset} overflows"),
+        ))
+    })?;
     if start >= end {
         return Ok(false);
     }
@@ -6876,19 +6975,20 @@ pub(crate) fn decode_pack_object_size_varint_from_first(
     let mut c = first;
     while (c & 0x80) != 0 {
         if shift >= 64 {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "pack object size varint overflow".to_owned(),
-            ));
+            )));
         }
         c = next()?;
         let digit = (c & 0x7f) as u64;
         size = size
-            .checked_add(
-                digit
-                    .checked_shl(shift)
-                    .ok_or_else(|| Error::CorruptObject("pack object size overflow".to_owned()))?,
-            )
-            .ok_or_else(|| Error::CorruptObject("pack object size overflow".to_owned()))?;
+            .checked_add(digit.checked_shl(shift).ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "pack object size overflow".to_owned()))
+            })?)
+            .ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "pack object size overflow".to_owned()))
+            })?;
         shift += 7;
     }
     Ok(size)
@@ -6902,7 +7002,7 @@ pub(crate) fn decode_pack_object_size_varint(
 ) -> Result<u64> {
     decode_pack_object_size_varint_from_first(first, || {
         let b = *bytes.get(*pos).ok_or_else(|| {
-            Error::CorruptObject("unexpected end of variable size header".to_owned())
+            Error::Object(ObjectError::corrupt_object(None, "unexpected end of variable size header".to_owned()))
         })?;
         *pos += 1;
         Ok(b)
@@ -6911,7 +7011,10 @@ pub(crate) fn decode_pack_object_size_varint(
 
 pub(crate) fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
     let first = *bytes.get(*pos).ok_or_else(|| {
-        Error::CorruptObject("unexpected end of pack header while decoding object".to_owned())
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "unexpected end of pack header while decoding object".to_owned(),
+        ))
     })?;
     *pos += 1;
 
@@ -6926,9 +7029,9 @@ pub(crate) fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<
         6 => PackedType::OfsDelta,
         7 => PackedType::RefDelta,
         _ => {
-            return Err(Error::CorruptObject(format!(
-                "unsupported packed object type {}",
-                type_code
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("unsupported packed object type {}", type_code),
             )))
         }
     };
@@ -6967,7 +7070,10 @@ pub fn read_packed_delta_dependency(
         }
         PackedType::RefDelta => {
             if pos + hash_bytes > pack_bytes.len() {
-                return Err(Error::CorruptObject("truncated ref-delta base oid".into()));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "truncated ref-delta base oid",
+                )));
             }
             let base_oid = ObjectId::from_bytes(&pack_bytes[pos..pos + hash_bytes])?;
             Ok(Some(PackedDeltaDependency::RefBase { base_oid }))
@@ -6977,21 +7083,21 @@ pub fn read_packed_delta_dependency(
 }
 
 pub(crate) fn parse_ofs_delta_base(bytes: &[u8], pos: &mut usize, this_offset: u64) -> Result<u64> {
-    let mut c = *bytes
-        .get(*pos)
-        .ok_or_else(|| Error::CorruptObject("truncated ofs-delta header".to_owned()))?;
+    let mut c = *bytes.get(*pos).ok_or_else(|| {
+        Error::Object(ObjectError::corrupt_object(None, "truncated ofs-delta header".to_owned()))
+    })?;
     *pos += 1;
     let mut value = (c & 0x7f) as u64;
     while (c & 0x80) != 0 {
-        c = *bytes
-            .get(*pos)
-            .ok_or_else(|| Error::CorruptObject("truncated ofs-delta header".to_owned()))?;
+        c = *bytes.get(*pos).ok_or_else(|| {
+            Error::Object(ObjectError::corrupt_object(None, "truncated ofs-delta header".to_owned()))
+        })?;
         *pos += 1;
         value = ((value + 1) << 7) | (c & 0x7f) as u64;
     }
-    this_offset
-        .checked_sub(value)
-        .ok_or_else(|| Error::CorruptObject("invalid ofs-delta base offset".to_owned()))
+    this_offset.checked_sub(value).ok_or_else(|| {
+        Error::Object(ObjectError::corrupt_object(None, "invalid ofs-delta base offset".to_owned()))
+    })
 }
 
 /// Advance `pos` past one packed object (including zlib payload).
@@ -7027,7 +7133,10 @@ pub fn skip_one_pack_object(
         }
         PackedType::RefDelta => {
             if *pos + hash_bytes > bytes.len() {
-                return Err(Error::CorruptObject("truncated ref-delta base oid".into()));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "truncated ref-delta base oid",
+                )));
             }
             *pos += hash_bytes;
             scratch.skip_zlib_stream(bytes, pos, size)?;
@@ -7317,8 +7426,12 @@ mod tests {
         for (oid, off) in entries {
             let start = *off as usize;
             let mut end = start;
-            skip_one_pack_object(&pack_bytes, &mut end, *off, 20)
-                .map_err(|e| Error::CorruptObject(format!("idx crc walk: {e}")))?;
+            skip_one_pack_object(&pack_bytes, &mut end, *off, 20).map_err(|e| {
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("idx crc walk: {e}"),
+                ))
+            })?;
             with_crc.push((*oid, *off, crc32fast::hash(&pack_bytes[start..end])));
         }
         write_v2_pack_index(idx_path, pack_path, &with_crc, 20)
@@ -7583,7 +7696,10 @@ mod tests {
         bytes.extend_from_slice(&zlib_pack(b"x"));
         let mut pos = 0usize;
         let err = skip_one_pack_object(&bytes, &mut pos, 0, 20).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "got {err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
+            "got {err:?}"
+        );
     }
 
     #[test]
@@ -7602,7 +7718,10 @@ mod tests {
         ];
         let mut pos = 0usize;
         let err = parse_pack_object_header(&header, &mut pos).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -7841,7 +7960,8 @@ mod tests {
 
         let err = read_object_from_pack_bytes(&pack, &idx, wrong_oid.as_bytes()).unwrap_err();
         match err {
-            Error::CorruptObject(msg) => {
+            Error::Object(ObjectError::CorruptObject { .. }) => {
+                let msg = err.to_string();
                 assert!(
                     msg.contains("hashes to"),
                     "expected hash mismatch message, got: {msg}"
@@ -7931,7 +8051,10 @@ mod tests {
                 .expect_err("read_object_from_pack_bytes"),
         ] {
             assert!(
-                matches!(err, Error::DeltaChainTooDeep { limit: 4096 }),
+                matches!(
+                    err,
+                    Error::Object(ObjectError::DeltaChainTooDeep { limit: 4096 })
+                ),
                 "expected typed delta chain limit, got {err:?}"
             );
         }
@@ -8230,7 +8353,10 @@ mod tests {
         };
         let err = read_object_from_pack(&idx, &tip).expect_err("4097-deep chain");
         assert!(
-            matches!(err, Error::DeltaChainTooDeep { limit: 4096 }),
+            matches!(
+                err,
+                Error::Object(ObjectError::DeltaChainTooDeep { limit: 4096 })
+            ),
             "got {err:?}"
         );
     }
@@ -8581,7 +8707,10 @@ mod tests {
 
         let err = read_object_from_pack(&idx_a, &oid_a).expect_err("cross-pack cycle");
         assert!(
-            matches!(err, Error::DeltaChainTooDeep { limit: 4096 }),
+            matches!(
+                err,
+                Error::Object(ObjectError::DeltaChainTooDeep { limit: 4096 })
+            ),
             "expected typed delta chain limit, got {err:?}"
         );
     }
@@ -8745,7 +8874,7 @@ mod tests {
         for _ in 0..128 {
             assert!(matches!(
                 read_object_from_packs(&objects, &missing),
-                Err(Error::ObjectNotFound(_))
+                Err(Error::Object(ObjectError::ObjectNotFound { .. }))
             ));
         }
         assert_eq!(
@@ -9003,11 +9132,11 @@ mod tests {
         let mut bad = vec![(ObjectId::from_bytes(&[1; 32]).expect("oid"), 12, 0)];
         assert!(matches!(
             write_v2_pack_index_sorting(&idx_path, &mut bad, &trailer, 20, None),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
         assert!(matches!(
             write_v2_pack_index_sorting(&idx_path, &mut entries, &trailer[..19], 20, None),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 
@@ -9029,7 +9158,12 @@ mod tests {
             left -= n as u64;
         }
         let digest = hasher.finalize();
-        ObjectId::from_bytes(&digest).map_err(|e| Error::InvalidObjectId(format!("{e}")))
+        ObjectId::from_bytes(&digest).map_err(|e| {
+            ObjectError::InvalidObjectId {
+                input: format!("{e}"),
+            }
+            .into()
+        })
     }
 
     #[test]
@@ -9608,7 +9742,7 @@ mod cached_lookup_tests {
         assert!(read_object_from_packs(&objects, &miss).is_err());
         assert!(
             try_read_object_from_local_packs_cached(&objects, &miss, || {
-                Err(Error::ObjectNotFound(miss.to_hex()))
+                Err(Error::Object(ObjectError::object_not_found(miss.to_hex())))
             })
             .unwrap()
             .is_none()
@@ -9647,7 +9781,7 @@ mod cached_lookup_tests {
         let oid = ObjectId::from_hex(String::from_utf8(out.stdout).unwrap().trim()).unwrap();
         let objects = dir.path().join(".git").join("objects");
         assert!(try_read_object_from_local_packs_cached(&objects, &oid, || {
-            Err(Error::ObjectNotFound(oid.to_hex()))
+            Err(Error::Object(ObjectError::object_not_found(oid.to_hex())))
         })
         .unwrap()
         .is_none());

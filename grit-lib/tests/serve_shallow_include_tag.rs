@@ -3,7 +3,7 @@
 //! protocol v2 request as system `git upload-pack --stateless-rpc` with the
 //! same `shallow` lines and the same pack objects.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{Cursor, Write};
 use std::path::Path;

@@ -12,6 +12,7 @@
 //! These functions compute and apply worktree changes from index/object data
 //! and make no presentation decisions — no colour, pager, tty, or stdout.
 
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
@@ -5430,7 +5431,7 @@ pub(crate) fn stream_checkout_entry(
                 oid,
             )
         })?
-        .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+        .ok_or_else(|| Error::Object(ObjectError::object_not_found(oid.to_hex())))
 }
 
 /// Write blob `oid` to `rel_path` with checkout conversion, replacing whatever is there.
@@ -5464,7 +5465,7 @@ pub(crate) fn write_blob_to_worktree(
                     has_symlinks,
                 )
             })?
-            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+            .ok_or_else(|| Error::Object(ObjectError::object_not_found(oid.to_hex())))
             .map(Some);
     };
     let Some(bytes) =

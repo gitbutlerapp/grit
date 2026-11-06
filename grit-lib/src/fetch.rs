@@ -6,6 +6,7 @@
 //! over streaming transports runs `ls-refs` before `fetch` when the connection
 //! advertises no refs on connect.
 
+use crate::objects::ObjectError;
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -1729,9 +1730,9 @@ pub fn fetch_remote_into(
     let local_git_dir = local.git_dir();
     let local_odb = local.odb();
     if opts.filter.is_some() && !local_odb.uses_files_primary() {
-        return Err(Error::UnsupportedObjectStore {
+        return Err(Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "partial fetch",
-        });
+        }));
     }
 
     let crate::transfer::FetchMatchSet {
@@ -2390,7 +2391,8 @@ pub(crate) fn fetch_operation_identity(
         .filter(|e| !e.trim().is_empty())
         .unwrap_or_else(|| "unknown".to_owned());
     let now = time::OffsetDateTime::now_utc();
-    crate::ident::Signature::new(name, email, now).map_err(crate::error::Error::InvalidSignature)
+    crate::ident::Signature::new(name, email, now)
+        .map_err(|e| crate::error::Error::Object(ObjectError::InvalidSignature(e)))
 }
 
 /// Ensure `refs/remotes/<remote>/HEAD` exists in `local`'s ref store when the remote default
@@ -2451,7 +2453,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
     let null = ObjectId::null(local.odb().hash_algo());
     log.identity
         .validate()
-        .map_err(crate::error::Error::InvalidSignature)?;
+        .map_err(|e| crate::error::Error::Object(ObjectError::InvalidSignature(e)))?;
     let identity = crate::refs::store::format_reflog_identity(
         &log.identity.reflog_name_email(),
         log.identity.time,

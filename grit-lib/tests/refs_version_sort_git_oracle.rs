@@ -1,6 +1,6 @@
 //! `compare_refname_versions` must match `git for-each-ref --sort=version:refname`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::process::Command;
 

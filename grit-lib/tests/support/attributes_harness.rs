@@ -1,6 +1,6 @@
 //! Helpers for attribute oracle tests against system `git check-attr`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
+#[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
 use std::collections::BTreeMap;
 use std::path::Path;

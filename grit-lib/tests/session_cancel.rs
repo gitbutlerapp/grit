@@ -2,7 +2,7 @@
 //! cancellation (issue #2142), through either the `&dyn Cancel` argument or
 //! [`ProgressSink::should_cancel`].
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::path::Path;

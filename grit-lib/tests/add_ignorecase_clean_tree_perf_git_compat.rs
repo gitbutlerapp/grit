@@ -6,7 +6,7 @@
 //! GRIT_ADD_PERF=1 cargo test -p grit-lib --test add_ignorecase_clean_tree_perf_git_compat --release -- --test-threads=1
 //! ```
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

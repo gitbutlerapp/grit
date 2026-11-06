@@ -1,6 +1,6 @@
 //! Gitattributes oracle tests (upstream `t/t0003-attributes.sh` scenarios).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

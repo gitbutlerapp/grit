@@ -1,5 +1,6 @@
 //! `grit tag` — list tags, or create / delete one.
 
+use grit_lib::objects::ObjectError;
 use crate::context;
 use crate::error_kind::ErrorKind;
 use crate::json_error::{StructuredCliError, StructuredJsonError};
@@ -952,7 +953,7 @@ fn render_verify_markdown(w: &mut dyn Write, entry: &TagVerifyEntry) -> Result<(
 
 fn map_tag_error(err: Error) -> anyhow::Error {
     match err {
-        Error::TagVerifyNotTag { .. } => {
+        Error::Object(ObjectError::TagVerifyNotTag { .. }) => {
             anyhow::anyhow!("tag is not an annotated tag object (use an annotated tag)")
         }
         Error::Tag(tag_err) => match tag_err {

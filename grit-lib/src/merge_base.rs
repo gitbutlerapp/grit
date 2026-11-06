@@ -532,10 +532,7 @@ pub(crate) fn is_ancestor_odb_walk_with_graph(
                 Some(&time) => time,
                 None => {
                     let linkage = match read_commit_linkage(odb, graph, &parent) {
-                        Err(
-                            Error::ObjectNotFound(_)
-                            | Error::Object(ObjectError::ObjectNotFound { .. }),
-                        ) => None,
+                        Err(e) if e.is_object_not_found() => None,
                         other => other?,
                     };
                     let Some((time, grandparents)) = linkage else {
@@ -1544,7 +1541,7 @@ fn try_count_diff_via_stored_commit_bitmaps(
     let Some(index) = repo
         .odb()
         .with_pack_read_context(|| BitmapIndex::open(repo))
-        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?
+        .map_err(|e| Error::Object(ObjectError::corrupt_object(None, format!("pack bitmap: {e}"))))?
     else {
         return Ok(None);
     };
@@ -1563,7 +1560,12 @@ fn try_count_diff_via_stored_commit_bitmaps(
     index
         .type_bitmap(ObjectKind::Commit)
         .expand_into_bitmap(&mut commit_type)
-        .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
+        .map_err(|e| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            ))
+        })?;
     commit_type.and_assign(&reachable);
     Ok(Some(commit_type.count_ones()))
 }
@@ -2234,8 +2236,9 @@ fn first_parent(repo: &Repository, oid: ObjectId) -> Result<Option<ObjectId>> {
 fn ensure_is_commit(repo: &Repository, oid: ObjectId) -> Result<()> {
     let object = repo.odb().read(&oid)?;
     if object.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "object {oid} is not a commit"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object {oid} is not a commit"),
         )));
     }
     Ok(())
@@ -2360,7 +2363,7 @@ fn first_parent_oid(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<O
     parents
         .first()
         .copied()
-        .ok_or_else(|| Error::ObjectNotFound(format!("{oid} has no parent")))
+        .ok_or_else(|| Error::Object(ObjectError::object_not_found(format!("{oid} has no parent"))))
 }
 
 /// Classify `first` and `second` along first-parent chains, using commit-graph generations
@@ -3081,8 +3084,10 @@ impl PaintWalk {
         let committed_at = match cache.commit_time(oid) {
             Ok(time) => time,
             // Hidden either way, and unpainted ancestors count as hidden too.
-            Err(Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. }))
-                if self.skip_missing_right && after & PAINT_RIGHT != 0 =>
+            Err(e)
+                if e.is_object_not_found()
+                    && self.skip_missing_right
+                    && after & PAINT_RIGHT != 0 =>
             {
                 return Ok(());
             }
@@ -3404,7 +3409,7 @@ impl<'r> CommitGraphCache<'r> {
         self.ensure_single_pack_reader();
         if let Some(reader) = self.single_pack.as_mut() {
             match reader.read_object_into_with_delta_policy(oid, true, buf) {
-                Err(Error::ObjectNotFound(_)) => {}
+                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
                 read => return read,
             }
         }
@@ -3504,13 +3509,16 @@ impl<'r> CommitGraphCache<'r> {
         if self.shallow_boundaries.contains(&oid) {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                    Error::InvalidRef(msg) => {
+                        Error::Object(ObjectError::corrupt_object(None, msg))
+                    }
                     other => other,
                 })?;
             let object = self.repo.odb().read(&commit_oid)?;
             if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("object {commit_oid} is not a commit"),
                 )));
             }
             let commit = CommitRef::parse(&object.data)?;
@@ -3563,14 +3571,17 @@ impl<'r> CommitGraphCache<'r> {
         } else {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                    Error::InvalidRef(msg) => {
+                        Error::Object(ObjectError::corrupt_object(None, msg))
+                    }
                     other => other,
                 })?;
             let kind =
                 self.read_object_into(&self.repo.object_id_after_replace(&commit_oid), buf)?;
             if kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("object {commit_oid} is not a commit"),
                 )));
             }
             commit_oid
@@ -4083,8 +4094,9 @@ impl<'repo> RefContainsMemo<'repo> {
             // without reading its ancestors; expensive probes can extend it on demand.
             for parent in graph.parents_of(targets[0])? {
                 if parent == targets[0] {
-                    return Err(Error::CorruptObject(format!(
-                        "commit ancestry cycle at {parent}"
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!("commit ancestry cycle at {parent}"),
                     )));
                 }
                 if known.insert(parent, false).is_none() {
@@ -4122,9 +4134,10 @@ impl<'repo> RefContainsMemo<'repo> {
             for parent in self.graph.parents_of(key.oid)? {
                 match self.known.get(&parent) {
                     Some(true) => {
-                        return Err(Error::CorruptObject(format!(
-                            "commit ancestry cycle at {parent}"
-                        )))
+                        return Err(Error::Object(ObjectError::corrupt_object(
+                            None,
+                            format!("commit ancestry cycle at {parent}"),
+                        )));
                     }
                     Some(false) => {}
                     None => {
@@ -4202,8 +4215,9 @@ impl<'repo> RefContainsMemo<'repo> {
                 None => {}
             }
             if active.insert(parent, stack.len()).is_some() {
-                return Err(Error::CorruptObject(format!(
-                    "commit ancestry cycle at {parent}"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("commit ancestry cycle at {parent}"),
                 )));
             }
             visited += 1;
@@ -5378,7 +5392,8 @@ mod tests {
         let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
         assert!(matches!(
             err,
-            Error::ObjectNotFound(_) | Error::Object(ObjectError::ObjectNotFound { .. })
+            Error::Object(ObjectError::ObjectNotFound { .. })
+                | Error::Object(ObjectError::ObjectNotFound { .. })
         ));
 
         Ok(())

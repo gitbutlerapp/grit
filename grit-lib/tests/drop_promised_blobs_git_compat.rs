@@ -3,7 +3,7 @@
 //! --missing=print`), the rewritten packs verify, a multi-pack-index verifies, and
 //! `git cat-file` fetches a dropped blob back. Needs Git 2.27 or newer.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -1,6 +1,7 @@
 //! Tests for [`grit_lib::revwalk::history::split`].
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+use grit_lib::objects::ObjectError;
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 
@@ -270,11 +271,11 @@ fn split_rejects_non_commit_with_typed_error() {
     };
     assert!(matches!(
         *inner,
-        grit_lib::error::Error::UnexpectedObjectKind {
+        grit_lib::error::Error::Object(ObjectError::UnexpectedObjectKind {
             oid,
             expected: ObjectKind::Commit,
             actual: ObjectKind::Tree,
-        } if oid == tree
+        }) if oid == tree
     ));
 }
 

@@ -4,6 +4,7 @@
 //! [`Objects::write_commit`](super::Objects::write_commit) take these types and
 //! produce objects that pass `git fsck --strict`, including checks on referenced oids.
 
+use crate::objects::ObjectError;
 use std::collections::HashSet;
 
 use crate::change_id::ChangeId;
@@ -163,11 +164,11 @@ fn validate_one_tree_entry_stored_kind(
     if entry.mode == MODE_GITLINK {
         if let Some(actual) = stored {
             if actual != ObjectKind::Commit {
-                return Err(Error::UnexpectedObjectKind {
+                return Err(Error::Object(ObjectError::UnexpectedObjectKind {
                     oid: entry.oid,
                     expected: ObjectKind::Commit,
                     actual,
-                });
+                }));
             }
         }
         return Ok(());
@@ -176,14 +177,16 @@ fn validate_one_tree_entry_stored_kind(
         if allow_missing {
             return Ok(());
         }
-        return Err(Error::ObjectNotFound(entry.oid.to_hex()));
+        return Err(Error::Object(ObjectError::object_not_found(
+            entry.oid.to_hex(),
+        )));
     };
     if actual != expected {
-        return Err(Error::UnexpectedObjectKind {
+        return Err(Error::Object(ObjectError::UnexpectedObjectKind {
             oid: entry.oid,
             expected,
             actual,
-        });
+        }));
     }
     Ok(())
 }

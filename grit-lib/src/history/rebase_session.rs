@@ -1,5 +1,6 @@
 //! Stop/resume rebase sessions with Git-compatible `.git/rebase-merge/` state.
 
+use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
@@ -884,9 +885,11 @@ pub fn abort_rebase(
     repo: &Repository,
     identity: &crate::ident::Signature,
 ) -> Result<RebaseAbort, RebaseSessionError> {
-    identity
-        .validate()
-        .map_err(|err| map_lib(crate::error::Error::InvalidSignature(err)))?;
+    identity.validate().map_err(|err| {
+        map_lib(crate::error::Error::Object(
+            crate::objects::ObjectError::InvalidSignature(err),
+        ))
+    })?;
     let had_journal = super::rewrite_apply_journal_active(repo.git_dir());
     if had_journal {
         super::abort_interrupted_rewrite_apply(repo)?;

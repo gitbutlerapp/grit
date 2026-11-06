@@ -1,6 +1,7 @@
 //! Clone a remote repository: initialize, configure `origin`, fetch, set up the default branch,
 //! and optionally check out the working tree.
 
+use crate::objects::ObjectError;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -148,8 +149,8 @@ impl CloneError {
             return None;
         };
         match promisor_cause(source)? {
-            Error::PromisorFetchFailed { missing, .. } => Some(*missing),
-            Error::PromisedObjectMissing(oid) => Some(*oid),
+            Error::Object(ObjectError::PromisorFetchFailed { missing, .. }) => Some(*missing),
+            Error::Object(ObjectError::PromisedObjectMissing(oid)) => Some(*oid),
             _ => None,
         }
     }
@@ -162,12 +163,12 @@ impl CloneError {
     /// Each failing remote's name with its first error, in the order they were tried;
     /// empty when the checkout did not fail on [`Error::PromisorFetchFailed`].
     #[must_use]
-    pub fn failed_promisor_remotes(&self) -> &[(String, Error)] {
+    pub fn failed_promisor_remotes(&self) -> &[(String, Box<ObjectError>)] {
         let Self::CheckoutFailed { source, .. } = self else {
             return &[];
         };
         match promisor_cause(source) {
-            Some(Error::PromisorFetchFailed { failures, .. }) => failures,
+            Some(Error::Object(ObjectError::PromisorFetchFailed { failures, .. })) => failures,
             _ => &[],
         }
     }
@@ -177,7 +178,8 @@ impl CloneError {
 /// rollback was also incomplete.
 fn promisor_cause(err: &Error) -> Option<&Error> {
     match err {
-        Error::PromisorFetchFailed { .. } | Error::PromisedObjectMissing(_) => Some(err),
+        Error::Object(ObjectError::PromisorFetchFailed { .. })
+        | Error::Object(ObjectError::PromisedObjectMissing(_)) => Some(err),
         Error::CheckoutRollbackIncomplete { source, .. } => promisor_cause(source),
         _ => None,
     }
@@ -823,10 +825,12 @@ fn ensure_clone_remote_object_format(
     };
     let local = repo.odb().hash_algo();
     if local != remote_algo {
-        return Err(CloneError::Library(Error::ObjectFormatMismatch {
-            repository: local,
-            store: remote_algo,
-        }));
+        return Err(CloneError::Library(Error::Object(
+            ObjectError::ObjectFormatMismatch {
+                repository: local,
+                store: remote_algo,
+            },
+        )));
     }
     Ok(())
 }
@@ -1280,7 +1284,9 @@ fn append_clone_reflog_on_store(
     identity: &crate::ident::Signature,
     message: &str,
 ) -> Result<()> {
-    identity.validate().map_err(Error::InvalidSignature)?;
+    identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let formatted =
         refs::store::format_reflog_identity(&identity.reflog_name_email(), identity.time);
     let config = repo.config()?;

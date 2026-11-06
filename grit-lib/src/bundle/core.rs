@@ -5,6 +5,7 @@
 //! verifies prerequisite connectivity against a local repository, and ingests the pack
 //! without updating refs (callers apply [`BundleHeader::refs`] themselves).
 
+use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::File;
 use std::io::{BufRead, Read, Seek, Write};
@@ -731,7 +732,9 @@ fn bundle_header_parts(
 fn map_pack_error(e: Error) -> BundleError {
     match e {
         Error::Cancelled => BundleError::Cancelled,
-        Error::ObjectNotFound(id) => BundleError::ObjectNotFound(id),
+        Error::Object(ObjectError::ObjectNotFound { spec, .. }) => {
+            BundleError::ObjectNotFound(spec)
+        }
         other => BundleError::Io(other.to_string()),
     }
 }
@@ -1081,8 +1084,9 @@ fn parse_oid_field(
 fn peel_to_commit(odb: &Odb, oid: ObjectId) -> Result<ObjectId> {
     match odb.peel_tags(oid)? {
         (commit, ObjectKind::Commit) => Ok(commit),
-        (other, _) => Err(Error::CorruptObject(format!(
-            "object {other} is not commit or tag"
+        (other, _) => Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object {other} is not commit or tag"),
         ))),
     }
 }

@@ -4,6 +4,7 @@
 
 use crate::error::{Error, Result};
 use crate::objects::HashAlgo;
+use crate::objects::ObjectError;
 use memmap2::{Mmap, MmapOptions};
 use std::collections::VecDeque;
 use std::fs::File;
@@ -176,13 +177,15 @@ impl PackData {
     ) -> Result<Arc<Self>> {
         let len = file.metadata().map_err(Error::Io)?.len();
         if len < min_len {
-            return Err(Error::CorruptObject(format!(
-                "file is too small ({len} bytes, need at least {min_len})"
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("file is too small ({len} bytes, need at least {min_len})"),
             )));
         }
         let len_usize = usize::try_from(len).map_err(|_| {
-            Error::CorruptObject(format!(
-                "pack file length {len} does not fit in address space"
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack file length {len} does not fit in address space"),
             ))
         })?;
         if len <= OWNED_READ_THRESHOLD {
@@ -294,7 +297,10 @@ impl PackData {
         buf: &'a mut Vec<u8>,
     ) -> Result<&'a [u8]> {
         if start > end || end > self.len() {
-            return Err(Error::CorruptObject("pack entry out of range".to_owned()));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                "pack entry out of range".to_owned(),
+            )));
         }
         if let Some(reader) = &self.random_file {
             buf.clear();
@@ -485,8 +491,9 @@ fn read_fingerprint_from_open_file(
     hash_bytes: usize,
 ) -> Result<PackFingerprint> {
     if hash_bytes != 20 && hash_bytes != 32 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack trailer width {hash_bytes}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported pack trailer width {hash_bytes}"),
         )));
     }
     let mut header = [0u8; HEADER_LEN];
@@ -494,9 +501,10 @@ fn read_fingerprint_from_open_file(
     file.read_exact(&mut header).map_err(Error::Io)?;
     validate_pack_header(&header)?;
     if file_len < u64::try_from(HEADER_LEN + hash_bytes).unwrap_or(u64::MAX) {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "pack too small for trailer".to_owned(),
-        ));
+        )));
     }
     let mut trailer = [0u8; 32];
     file.seek(SeekFrom::Start(file_len - hash_bytes as u64))
@@ -512,20 +520,25 @@ fn read_fingerprint_from_open_file(
 
 pub(crate) fn fingerprint_from_slice(bytes: &[u8], hash_bytes: usize) -> Result<PackFingerprint> {
     if hash_bytes != 20 && hash_bytes != 32 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack trailer width {hash_bytes}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported pack trailer width {hash_bytes}"),
         )));
     }
     if bytes.len() < HEADER_LEN {
-        return Err(Error::CorruptObject("pack too small".to_owned()));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack too small".to_owned(),
+        )));
     }
     let mut header = [0u8; HEADER_LEN];
     header.copy_from_slice(&bytes[..HEADER_LEN]);
     validate_pack_header(&header)?;
     if bytes.len() < HEADER_LEN + hash_bytes {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "pack too small for trailer".to_owned(),
-        ));
+        )));
     }
     let mut trailer = [0u8; 32];
     trailer[..hash_bytes].copy_from_slice(&bytes[bytes.len() - hash_bytes..]);
@@ -538,12 +551,16 @@ pub(crate) fn fingerprint_from_slice(bytes: &[u8], hash_bytes: usize) -> Result<
 
 fn validate_pack_header(header: &[u8; HEADER_LEN]) -> Result<()> {
     if header[..4] != *PACK_SIGNATURE {
-        return Err(Error::CorruptObject("bad pack signature".to_owned()));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "bad pack signature".to_owned(),
+        )));
     }
     let version = u32::from_be_bytes(header[4..8].try_into().unwrap_or([0; 4]));
     if version != 2 && version != 3 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack version {version}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported pack version {version}"),
         )));
     }
     Ok(())
@@ -661,23 +678,32 @@ mod tests {
         let path = dir.path().join("bad.pack");
         fs::write(&path, b"NOTPACK\x00\x00\x00\x02\x00\x00\x00\x00").expect("write");
         let err = fingerprint_from_file(&path, 20).expect_err("bad sig");
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
 
         fs::write(&path, b"PACK\x00\x00\x00\x09\x00\x00\x00\x00").expect("bad ver");
         let err = fingerprint_from_file(&path, 20).expect_err("bad ver");
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
 
         fs::write(&path, b"PACK\x00\x00\x00\x02").expect("trunc");
         assert!(matches!(
             PackData::open(&path),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
 
         let mut short_trailer = Vec::from(b"PACK\x00\x00\x00\x02\x00\x00\x00\x00" as &[u8]);
         short_trailer.push(0);
         fs::write(&path, &short_trailer).expect("short trailer");
         let err = fingerprint_from_file(&path, 20).expect_err("short trailer");
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
     }
 
     #[test]
@@ -701,7 +727,7 @@ mod tests {
         fs::write(&path, b"PAC").expect("write");
         assert!(matches!(
             PackData::open(&path),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 
@@ -731,7 +757,7 @@ mod tests {
         let bytes = b"NOPE\x00\x00\x00\x02\x00\x00\x00\x00";
         assert!(matches!(
             fingerprint_from_slice(bytes, 20),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 

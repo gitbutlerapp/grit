@@ -6,7 +6,7 @@
 //! with the exact object ids Git would pass.
 
 #![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

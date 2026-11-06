@@ -1,6 +1,6 @@
 //! Index/worktree diff when a gitlink path becomes a regular file (t4041-style).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::diff::{diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus};
 use grit_lib::index::{Index, IndexEntry, MODE_GITLINK, MODE_REGULAR};

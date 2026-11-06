@@ -1,7 +1,7 @@
 //! Auto-staging commits that end up with nothing to record must still persist the staged
 //! index, so system `git` sees index == HEAD afterwards (issue #1842).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 use std::process::Command;

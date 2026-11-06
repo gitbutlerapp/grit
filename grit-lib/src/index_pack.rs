@@ -4,6 +4,7 @@
 //! exploding every object into loose storage. Small receive-pack pushes may still
 //! use [`crate::unpack_objects`] via [`crate::receive_pack::should_use_unpack_objects`].
 
+use crate::objects::ObjectError;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -273,13 +274,15 @@ pub fn ingest_received_pack_with_progress(
         return Ok(IngestedPack::default());
     }
     if pack.len() < 12 || &pack[0..4] != b"PACK" {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "received data is not a pack stream".to_owned(),
-        ));
+        )));
     }
     verify_trailer(odb.hash_algo(), &pack).map_err(|e| {
-        Error::CorruptObject(format!(
-            "received pack checksum mismatch (download may be incomplete): {e}"
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("received pack checksum mismatch (download may be incomplete): {e}"),
         ))
     })?;
     if !odb.uses_files_primary() {
@@ -437,7 +440,10 @@ pub fn install_pack_path_with_progress(
     let meta = std::fs::metadata(&owned).map_err(Error::Io)?;
     let len = meta.len();
     if len < 12 + hb as u64 {
-        return Err(Error::CorruptObject("pack too small".to_owned()));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack too small".to_owned(),
+        )));
     }
     let mut header = [0u8; 12];
     {
@@ -446,9 +452,10 @@ pub fn install_pack_path_with_progress(
         f.read_exact(&mut header).map_err(Error::Io)?;
     }
     if &header[0..4] != b"PACK" {
-        return Err(Error::CorruptObject(
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
             "received data is not a pack stream".to_owned(),
-        ));
+        )));
     }
     let mut trailer = vec![0u8; hb];
     {
@@ -489,9 +496,10 @@ pub fn install_pack_path_with_progress(
             if rows.len()
                 != u32::from_be_bytes([header[8], header[9], header[10], header[11]]) as usize
             {
-                return Err(Error::CorruptObject(
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
                     "trusted index row count does not match pack header".to_owned(),
-                ));
+                )));
             }
             (rows.to_vec(), ObjectKindCounts::default())
         } else {
@@ -501,9 +509,10 @@ pub fn install_pack_path_with_progress(
             let body_len = pack_bytes.len() - hb;
             if resident.checksum(odb.hash_algo(), &pack_bytes[..body_len]) != pack_bytes[body_len..]
             {
-                return Err(Error::CorruptObject(
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
                     "received pack checksum mismatch (download may be incomplete)".to_owned(),
-                ));
+                )));
             }
             poll_ingest_cancel(&mut progress, cancel)?;
             trailer = pack_bytes[body_len..].to_vec();
@@ -516,9 +525,10 @@ pub fn install_pack_path_with_progress(
                         pack_bytes[11],
                     ]) as usize
                 {
-                    return Err(Error::CorruptObject(
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
                         "trusted index row count does not match pack header".to_owned(),
-                    ));
+                    )));
                 }
                 drop(indexed);
                 (rows.clone(), ObjectKindCounts::default())
@@ -711,7 +721,9 @@ fn append_thin_bases(
         .and_then(|added| {
             u32::from_be_bytes([header[8], header[9], header[10], header[11]]).checked_add(added)
         })
-        .ok_or_else(|| Error::CorruptObject("thin pack fix: object count overflow".to_owned()))?;
+        .ok_or_else(|| {
+            Error::Object(ObjectError::corrupt_object(None, "thin pack fix: object count overflow".to_owned()))
+        })?;
     header[8..12].copy_from_slice(&count.to_be_bytes());
 
     let len = file.metadata().map_err(Error::Io)?.len();
@@ -1281,7 +1293,7 @@ mod tests {
             )
             .expect_err("index-pack hashing");
             assert!(
-                matches!(err, Error::CorruptObject(_)),
+                matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
                 "threads={threads}: {err:?}"
             );
         }
@@ -1298,7 +1310,7 @@ mod tests {
             )
             .expect_err("install pack");
             assert!(
-                matches!(err, Error::CorruptObject(_)),
+                matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
                 "install threads={threads}: {err:?}"
             );
         }
@@ -1666,7 +1678,7 @@ mod tests {
         )
         .expect_err("truncated pack must fail");
         assert!(
-            matches!(err, Error::CorruptObject(_)),
+            matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
             "expected corrupt object, got {err:?}"
         );
         let pack_dir = tmp.path().join("pack");

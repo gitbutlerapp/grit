@@ -18,6 +18,7 @@
 //! - Tag message cleanup: [`strip_comments`] then [`crate::porcelain::commit::normalize_commit_message`]
 //!   via [`normalize_tag_message`].
 
+use crate::objects::ObjectError;
 use std::cell::OnceCell;
 use std::sync::Arc;
 
@@ -261,7 +262,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
     let config = repo.config()?;
     let tree_opts = req.tree_sha256.clone();
     if tree_opts.is_some() && req.sign == Some(false) {
-        return Err(Error::TreeSha256RequiresSigning);
+        return Err(ObjectError::TreeSha256RequiresSigning.into());
     }
     let mut sign = should_sign_tag(config.as_ref(), req.sign)?;
     if tree_opts.is_some() {

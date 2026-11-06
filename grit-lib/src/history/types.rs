@@ -1,5 +1,7 @@
 //! Data types for describing history edits and rewrite plans.
 
+use crate::error::Error;
+use crate::objects::ObjectError;
 use std::collections::BTreeMap;
 
 use crate::change_id::ChangeId;
@@ -126,7 +128,9 @@ impl RewriteOptions {
     /// The validated header line for [`Self::committer`], checked before any object is written.
     pub(crate) fn committer_line(&self) -> Result<String, super::HistoryError> {
         self.committer.validate().map_err(|err| {
-            super::HistoryError::Library(Box::new(crate::error::Error::InvalidSignature(err)))
+            super::HistoryError::Library(Box::new(Error::Object(ObjectError::InvalidSignature(
+                err,
+            ))))
         })?;
         Ok(self.committer.header_line())
     }

@@ -5,6 +5,7 @@
 //! `OdbBuilder::commit_graph` gives its walks the same answers as the files backend without
 //! reading commit objects. Graph bytes are cross-checked with the system `git`.
 
+use grit_lib::objects::ObjectError;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -248,7 +249,7 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
         .rev_walk()
         .count(&["main"], &RevWalkListOptions::default());
     assert!(
-        matches!(counted, Err(Error::ObjectNotFound(_))),
+        matches!(counted, Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))),
         "the walk must reach the store's missing parent, not take it from the graph file: {counted:?}"
     );
     let bounded = RevWalkListOptions {
@@ -474,7 +475,7 @@ fn graph_written_by_git_attaches_to_a_custom_store() {
     assert!(chain.lines().count() > 1, "{chain}");
     assert!(matches!(
         CommitGraphChain::from_bytes(layer),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
     ));
 }
 
@@ -496,11 +497,11 @@ fn attached_graph_of_another_object_format_is_refused_on_open() {
     let store = Arc::new(CountingStore::new(HashAlgo::Sha1));
     assert!(matches!(
         open_custom(sha1.path(), store, Some(graph)),
-        Err(Error::ObjectFormatMismatch {
+        Err(Error::Object(ObjectError::ObjectFormatMismatch {
             repository: HashAlgo::Sha1,
             store: HashAlgo::Sha256,
             ..
-        })
+        }))
     ));
 }
 
@@ -547,6 +548,6 @@ fn octopus_graph_without_its_edge_chunk_is_rejected_like_git() {
     assert!(verify.stderr.contains("extra-edges"), "{}", verify.stderr);
     assert!(matches!(
         CommitGraphChain::from_bytes(mutated),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
     ));
 }

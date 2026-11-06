@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
@@ -85,8 +86,12 @@ pub(crate) fn load_commit_graph_commit_info(
     oid: ObjectId,
 ) -> crate::error::Result<CommitGraphCommitInfo> {
     let c = odb.read_commit(&oid).map_err(|err| match err {
-        crate::error::Error::UnexpectedObjectKind { .. } => {
-            crate::error::Error::CorruptObject(format!("object {oid} is not a commit"))
+        crate::error::Error::Object(ObjectError::UnexpectedObjectKind { .. }) => {
+            crate::objects::ObjectError::corrupt_object(
+                None,
+                format!("object {oid} is not a commit"),
+            )
+            .into()
         }
         other => other,
     })?;
@@ -317,7 +322,9 @@ fn resolve_parent_edge(
     }
     chain
         .and_then(|c| c.global_position(&parent))
-        .ok_or(crate::error::Error::CommitGraphParentMissing { commit, parent })
+        .ok_or(crate::error::Error::Object(
+            ObjectError::CommitGraphParentMissing { commit, parent },
+        ))
 }
 
 /// Counters emitted as `GIT_TRACE2_EVENT` for Bloom generation (`commit-graph.c`).
@@ -983,7 +990,7 @@ mod tests {
 
     use crate::bloom::BloomFilterSettings;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
-    use crate::objects::{oid_hash_map, serialize_commit, CommitData, ObjectId, ObjectKind};
+    use crate::objects::{oid_hash_map, serialize_commit, CommitData, ObjectError, ObjectId, ObjectKind};
 
     fn commit_infos_std(
         infos: &crate::objects::OidHashMap<super::CommitGraphCommitInfo>,
@@ -1026,7 +1033,10 @@ mod tests {
         .expect("init");
         let blob = repo.odb().write(ObjectKind::Blob, b"x").expect("blob");
         let err = super::load_commit_graph_commit_info(&repo.odb(), blob).unwrap_err();
-        assert!(matches!(err, crate::error::Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            crate::error::Error::Object(ObjectError::CorruptObject { .. })
+        ));
     }
 
     #[test]
@@ -1113,8 +1123,10 @@ mod tests {
         .expect_err("first parent is not in the graph");
         assert!(matches!(
             err,
-            crate::error::Error::CommitGraphParentMissing { commit, parent }
-                if commit == merge && parent == root
+            crate::error::Error::Object(ObjectError::CommitGraphParentMissing {
+                commit,
+                parent,
+            }) if commit == merge && parent == root
         ));
     }
 

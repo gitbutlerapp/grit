@@ -2,7 +2,7 @@
 //! repository exactly as before the call, and the uncancelled operation still round-trips
 //! (issue #2142).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::path::Path;

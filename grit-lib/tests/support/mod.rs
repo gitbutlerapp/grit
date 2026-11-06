@@ -4,7 +4,7 @@
 //! dead-code and unused re-export lints are noise here. Helpers no target uses are
 //! still dead: check the whole `tests/` tree before adding or keeping one.
 
-#![allow(dead_code)]
+#[allow(dead_code)]
 
 mod attributes_harness;
 mod config_oracle;

@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::objects::{tag_object_line_oid, CommitRef, ObjectId, ObjectKind};
+use crate::objects::{tag_object_line_oid, CommitRef, ObjectError, ObjectId, ObjectKind};
 
 use super::Odb;
 
@@ -43,13 +43,17 @@ impl Odb {
                 return Ok((current, kind));
             }
             if !visited.get_or_insert_with(HashSet::new).insert(current) {
-                return Err(Error::CorruptObject(format!(
-                    "tag chain from {oid} loops back to {current}"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("tag chain from {oid} loops back to {current}"),
                 )));
             }
             let tag = self.read(&current)?;
             current = tag_object_line_oid(&tag.data).ok_or_else(|| {
-                Error::CorruptObject(format!("tag {current} has no valid object header"))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("tag {current} has no valid object header"),
+                ))
             })?;
         }
     }
@@ -120,21 +124,25 @@ impl Odb {
             }
             let tag = self.read(&current)?;
             if tag.kind != ObjectKind::Tag {
-                return Err(Error::CorruptObject(format!(
-                    "{current} is named as a tag but is a {}",
-                    tag.kind
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("{current} is named as a tag but is a {}", tag.kind),
                 )));
             }
             let (target, names_tag) = tag_target_header(&tag.data);
             let target = target.ok_or_else(|| {
-                Error::CorruptObject(format!("tag {current} has no valid object header"))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("tag {current} has no valid object header"),
+                ))
             })?;
             if !names_tag {
                 return Ok(Some(target));
             }
             if !visited.get_or_insert_with(HashSet::new).insert(current) {
-                return Err(Error::CorruptObject(format!(
-                    "tag chain from {oid} loops back to {current}"
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("tag chain from {oid} loops back to {current}"),
                 )));
             }
             current = target;
@@ -268,7 +276,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let odb = Odb::new(dir.path());
         let bad = odb.write(ObjectKind::Tag, b"not a tag\n").unwrap();
-        assert!(matches!(odb.peel_tags(bad), Err(Error::CorruptObject(_))));
+        assert!(matches!(
+            odb.peel_tags(bad),
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
+        ));
     }
 
     #[test]
@@ -342,7 +353,7 @@ mod tests {
         let lying = tag(&odb, c, "tag", "lying");
         assert!(matches!(
             odb.peel_tag_target(lying),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 
@@ -362,7 +373,7 @@ mod tests {
             .build();
         assert!(matches!(
             odb.peel_tag_target(a),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 
@@ -396,7 +407,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             odb.peel_to_tree(bad),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
     }
 
@@ -414,6 +425,9 @@ mod tests {
             .primary(store)
             .alternates(false)
             .build();
-        assert!(matches!(odb.peel_tags(a), Err(Error::CorruptObject(_))));
+        assert!(matches!(
+            odb.peel_tags(a),
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
+        ));
     }
 }

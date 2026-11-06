@@ -1,5 +1,6 @@
 //! Git-compatible `log -p` / `show` patch output streamed to a [`Write`](std::io::Write).
 
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
@@ -379,10 +380,18 @@ fn write_patch_unified_body_from_bytes<W: Write>(
             crate::commit_encoding::decode_latin1(new_bytes),
         )
     } else {
-        let old_s = std::str::from_utf8(old_bytes)
-            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
-        let new_s = std::str::from_utf8(new_bytes)
-            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
+        let old_s = std::str::from_utf8(old_bytes).map_err(|_| {
+            crate::error::Error::Object(ObjectError::corrupt_object(
+                None,
+                "blob is not valid UTF-8",
+            ))
+        })?;
+        let new_s = std::str::from_utf8(new_bytes).map_err(|_| {
+            crate::error::Error::Object(ObjectError::corrupt_object(
+                None,
+                "blob is not valid UTF-8",
+            ))
+        })?;
         (old_s.to_owned(), new_s.to_owned())
     };
     let old_path = if old_mode == 0 {
@@ -410,8 +419,12 @@ fn write_patch_unified_body_from_bytes<W: Write>(
             d,
             QUOTE_FULLY,
         )?;
-        let patch_str = std::str::from_utf8(&patch_buf)
-            .map_err(|_| crate::error::Error::CorruptObject("patch re-encoding failed".into()))?;
+        let patch_str = std::str::from_utf8(&patch_buf).map_err(|_| {
+            crate::error::Error::Object(ObjectError::corrupt_object(
+                None,
+                "patch re-encoding failed",
+            ))
+        })?;
         out.write_all(&crate::commit_encoding::encode_latin1_lossy(patch_str))?;
     } else {
         super::write_unified_diff_from_diff_options(
@@ -970,10 +983,18 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
             crate::commit_encoding::decode_latin1(new_bytes),
         )
     } else {
-        let old_s = std::str::from_utf8(old_bytes)
-            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
-        let new_s = std::str::from_utf8(new_bytes)
-            .map_err(|_| crate::error::Error::CorruptObject("blob is not valid UTF-8".into()))?;
+        let old_s = std::str::from_utf8(old_bytes).map_err(|_| {
+            crate::error::Error::Object(ObjectError::corrupt_object(
+                None,
+                "blob is not valid UTF-8",
+            ))
+        })?;
+        let new_s = std::str::from_utf8(new_bytes).map_err(|_| {
+            crate::error::Error::Object(ObjectError::corrupt_object(
+                None,
+                "blob is not valid UTF-8",
+            ))
+        })?;
         (old_s.to_owned(), new_s.to_owned())
     };
     let old_path = if old_mode == 0 {
@@ -1007,8 +1028,12 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
             d,
             QUOTE_FULLY,
         )?;
-        let patch_str = std::str::from_utf8(&patch_buf)
-            .map_err(|_| crate::error::Error::CorruptObject("patch re-encoding failed".into()))?;
+        let patch_str = std::str::from_utf8(&patch_buf).map_err(|_| {
+            crate::error::Error::Object(ObjectError::corrupt_object(
+                None,
+                "patch re-encoding failed",
+            ))
+        })?;
         out.write_all(&crate::commit_encoding::encode_latin1_lossy(patch_str))?;
     } else {
         super::write_unified_diff_from_diff_options(

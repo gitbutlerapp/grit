@@ -1,6 +1,6 @@
 //! Guard that push fast-path commit selection stays bounded on the deep-history fixture.
 
-#![allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used)]
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;

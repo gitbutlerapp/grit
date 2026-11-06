@@ -1,6 +1,6 @@
 //! Many tree/index diffs to exercise `diff/core.rs` toward the 80% total floor.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{

@@ -37,6 +37,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 pub(crate) mod handle;
 pub mod listing;
 pub mod query_reachability;
@@ -3608,7 +3609,9 @@ pub(crate) fn reflog_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, St
 
 fn map_reflog_store_validation(err: store::RefStoreError) -> Error {
     match err {
-        store::RefStoreError::InvalidReflog(sig) => Error::InvalidSignature(sig),
+        store::RefStoreError::InvalidReflog(sig) => {
+            Error::Object(ObjectError::InvalidSignature(sig))
+        }
         other => Error::from(other),
     }
 }

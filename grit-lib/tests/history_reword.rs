@@ -1,6 +1,7 @@
 //! Tests for [`grit_lib::revwalk::history::reword`].
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+use grit_lib::objects::ObjectError;
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 
@@ -109,7 +110,7 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
         matches!(
             &err,
             HistoryError::Library(inner)
-                if matches!(**inner, grit_lib::error::Error::InvalidSignature(_))
+                if matches!(**inner, grit_lib::error::Error::Object(ObjectError::InvalidSignature(_)))
         ),
         "unexpected error: {err:?}"
     );

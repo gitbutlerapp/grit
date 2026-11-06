@@ -1,5 +1,6 @@
 //! Accepting pushes (`receive-pack`).
 
+use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -117,7 +118,9 @@ impl ReceivePackIngest {
                         continue;
                     }
                     let Some(obj) = overlay.read(oid)? else {
-                        return Err(crate::error::Error::ObjectNotFound(oid.to_hex()));
+                        return Err(
+                            crate::error::Error::Object(ObjectError::object_not_found(oid.to_hex()))
+                        );
                     };
                     primary.write(obj.kind, &obj.data, WriteOptions::default())?;
                 }

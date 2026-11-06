@@ -1,6 +1,6 @@
 //! Multi-table reftable stacks: merged iteration and indexed lookup (issue 2308).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

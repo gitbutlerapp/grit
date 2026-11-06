@@ -1,5 +1,5 @@
 //! Batched stat diffs over packed history written by grit and system Git.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;

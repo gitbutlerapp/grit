@@ -2,7 +2,7 @@
 //! writes must match what system `git add` stages, with and without pathspecs and with a
 //! normal-mode untracked cache on the index.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

@@ -1,5 +1,6 @@
 //! `resolve_merge_source`: merge arguments name branches, tags, commit ids or any revision.
 
+use grit_lib::objects::ObjectError;
 use grit_lib::error::Error;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::merge::{resolve_merge_source, MergeSource, MergeSourceKind};
@@ -195,11 +196,11 @@ fn tree_or_blob_is_rejected_with_object_kind() {
         ("blobtag".to_owned(), blob, ObjectKind::Blob),
     ] {
         match resolve_merge_source(&repo, &spec) {
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedObjectKind {
                 oid: got,
                 expected: ObjectKind::Commit,
                 actual,
-            }) => {
+            })) => {
                 assert_eq!(got, oid, "{spec}");
                 assert_eq!(actual, kind, "{spec}");
             }

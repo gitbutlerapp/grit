@@ -1,6 +1,6 @@
 //! Ref query sort, pattern, and limit parity with `git for-each-ref`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

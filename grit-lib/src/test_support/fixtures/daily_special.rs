@@ -1,5 +1,6 @@
 //! Deterministic daily-benchmark “special” repository shapes (many refs, big blobs, deep trees).
 
+use crate::objects::ObjectError;
 use std::fs;
 use std::path::Path;
 use std::time::Instant;
@@ -444,7 +445,7 @@ fn generate_into_repo(repo: &Repository, spec: SpecialSpec) -> Result<ObjectId> 
     }
     let head = *commits
         .last()
-        .ok_or_else(|| Error::CorruptObject("no commits generated".into()))?;
+        .ok_or_else(|| Error::Object(ObjectError::corrupt_object(None, "no commits generated")))?;
     let records = build_ref_records(repo, &commits, head, spec, &mut rng)?;
     install_refs(repo, &records, spec.ref_storage)?;
     Ok(head)

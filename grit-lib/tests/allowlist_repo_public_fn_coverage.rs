@@ -1,6 +1,6 @@
 //! Repository-backed coverage for remaining public-fn allowlist entries.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

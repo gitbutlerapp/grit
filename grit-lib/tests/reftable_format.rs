@@ -2,6 +2,7 @@
 //!
 //! Maps upstream `t/unit-tests/u-reftable-*.c` and `t0613-reftable-write-options.sh`.
 
+use grit_lib::objects::ObjectError;
 use std::collections::BTreeSet;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -491,7 +492,7 @@ fn every_truncation_is_typed_error_no_panic() {
         }));
         assert!(result.is_ok(), "panic at truncation length {len}");
         match ReftableReader::new(slice) {
-            Err(Error::Reftable(_)) | Err(Error::Zlib(_)) => {}
+            Err(Error::Reftable(_)) | Err(Error::Object(ObjectError::Zlib { .. })) => {}
             Err(other) => panic!("unexpected error type at len {len}: {other:?}"),
             Ok(reader) => {
                 if reader.read_refs().is_ok() && reader.read_logs().is_ok() {

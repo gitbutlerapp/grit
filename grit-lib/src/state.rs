@@ -25,6 +25,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 use std::fs;
 use std::path::Path;
 
@@ -1369,7 +1370,7 @@ mod head_state_tests {
 
     use super::{resolve_head, resolve_head_for_repository, HeadState};
     use crate::error::Error;
-    use crate::objects::{ObjectId, ObjectKind};
+    use crate::objects::{ObjectError, ObjectId, ObjectKind};
     use crate::repo::init_repository;
     use crate::RefStorageFormat;
     use tempfile::TempDir;
@@ -1462,11 +1463,11 @@ mod head_state_tests {
         std::fs::write(repo.git_dir().join("HEAD"), format!("{blob}\n")).unwrap();
         assert!(matches!(
             repo.head_tree(),
-            Err(Error::UnexpectedObjectKind {
+            Err(Error::Object(ObjectError::UnexpectedObjectKind {
                 expected: ObjectKind::Commit,
                 actual: ObjectKind::Blob,
                 ..
-            })
+            }))
         ));
     }
 }

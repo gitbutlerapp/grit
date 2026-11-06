@@ -6,7 +6,7 @@
 //! GRIT_CLEAN_PERF=1 cargo test -p grit-lib --test integration clean_dir_mode_clean_tree_perf_git_compat --release --features full-tests -- --test-threads=1
 //! ```
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 use std::process::Command;

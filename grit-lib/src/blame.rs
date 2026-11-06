@@ -1264,7 +1264,7 @@ use crate::index::Index;
 use crate::objects::{
     commit_author_and_message_lenient, find_tree_entry_by_name_dir_or_file_in_data,
     parse_commit_tree_and_parents_lenient, parse_commit_tree_and_parents_prefix, parse_tree,
-    Object, ObjectId, ObjectKind,
+    Object, ObjectError as LibObjectError, ObjectId, ObjectKind,
 };
 use crate::odb::Odb;
 use crate::pack::SingleLocalPackReader;
@@ -1820,7 +1820,7 @@ pub(crate) fn read_object_for_blame(
                     return odb.read(oid).map_err(LibError::from);
                 }
             }
-            Err(LibError::ObjectNotFound(oid.to_hex()))
+            Err(LibError::Object(ObjectError::object_not_found(oid.to_hex())))
         }
         Err(err) => Err(err.into()),
     }
@@ -2584,13 +2584,17 @@ impl SessionPackReader {
         }
         let mut data = Vec::new();
         if odb.read_into(oid, &mut data)? != ObjectKind::Commit {
-            return Err(LibError::CorruptObject(format!(
-                "{} is not a commit",
-                oid.to_hex()
+            return Err(LibError::Object(LibObjectError::corrupt_object(
+                None,
+                format!("{} is not a commit", oid.to_hex()),
             )));
         }
         parse_commit_tree_and_parents_lenient(&data, hex_len).ok_or_else(|| {
-            LibError::CorruptObject(format!("commit {} has no valid tree header", oid.to_hex()))
+            LibObjectError::corrupt_object(
+                None,
+                format!("commit {} has no valid tree header", oid.to_hex()),
+            )
+            .into()
         })
     }
 }

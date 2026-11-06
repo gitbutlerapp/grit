@@ -1,7 +1,7 @@
 //! Branch creation in a files-backend repository with many packed refs, checked against the
 //! system `git` binary: the write touches only the new ref and its reflog, and refs that
 //! block the new name (ancestors and descendants, loose or packed) are still reported.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fmt::Write as _;
 use std::fs;

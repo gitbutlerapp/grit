@@ -1,5 +1,5 @@
 //! `RepositoryRemotes::prune` and `set_head` compared with `git remote prune` / `set-head`.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use crate::support;
 

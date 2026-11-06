@@ -1,5 +1,6 @@
 //! `grit branch` — list branches, or create / delete / rename / configure one.
 
+use grit_lib::objects::ObjectError;
 use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::error::Error;
 use grit_lib::porcelain::branch::{
@@ -712,7 +713,7 @@ fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
         Error::RevParse(
             RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
         )
-        | Error::ObjectNotFound(_) => {
+        | Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) => {
             map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
                 label: rev.to_owned(),
                 reason: "revision not found".into(),

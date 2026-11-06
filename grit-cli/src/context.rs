@@ -1,5 +1,6 @@
 //! Shared repository helpers used across `grit` commands.
 
+use grit_lib::objects::ObjectError;
 use anyhow::{Context, Result};
 use grit_lib::change_id::resolved_change_id;
 use grit_lib::command_runner::hooks::HookStdio;
@@ -295,7 +296,12 @@ pub fn committer_reflog_signature(
         Err(grit_lib::error::Error::Identity(_)) => {
             let line = resolve_loose_committer_identity_with(repo.environment(), config, now);
             line.parse()
-                .map_err(|err| grit_lib::error::Error::InvalidSignature(err).into())
+                .map_err(|err| {
+                    grit_lib::error::Error::Object(grit_lib::objects::ObjectError::InvalidSignature(
+                        err,
+                    ))
+                    .into()
+                })
         }
         Err(other) => Err(other.into()),
     }

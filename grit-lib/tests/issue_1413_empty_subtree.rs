@@ -1,6 +1,6 @@
 //! Issue #1413: merged/replayed trees must not retain directory entries for empty subtrees.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

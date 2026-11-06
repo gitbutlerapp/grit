@@ -7,6 +7,7 @@
 //! the main store; on failure the directory is removed.
 
 use crate::git_path::CanonicalizeExt;
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::fs;
 use std::io;
@@ -175,9 +176,9 @@ impl ReceiveQuarantine {
     pub fn create(source: &Odb, git_dir: &Path) -> Result<Self> {
         let main_objects = source
             .files_objects_dir()
-            .ok_or(Error::UnsupportedObjectStore {
+            .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "receive quarantine",
-            })?
+            }))?
             .to_path_buf();
         let seq = QUARANTINE_SEQ.fetch_add(1, Ordering::Relaxed);
         let path = main_objects.join(format!(

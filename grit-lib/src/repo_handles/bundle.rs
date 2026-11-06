@@ -1,5 +1,6 @@
 //! Git bundle create/verify/list/unbundle scoped to a [`Repository`](crate::repo::Repository).
 
+use crate::objects::ObjectError;
 use std::path::Path;
 
 use crate::bundle::bundle_remote::BundleCreateOptions;
@@ -221,7 +222,9 @@ impl<'repo> RepositoryBundles<'repo> {
 fn lib_error_to_bundle_error(err: crate::error::Error) -> BundleError {
     match err {
         crate::error::Error::BundleMissingPrerequisites => BundleError::PrerequisitesNotConnected,
-        crate::error::Error::ObjectNotFound(id) => BundleError::ObjectNotFound(id),
+        crate::error::Error::Object(ObjectError::ObjectNotFound { spec: id, .. }) => {
+            BundleError::ObjectNotFound(id)
+        }
         other => BundleError::Io(other.to_string()),
     }
 }

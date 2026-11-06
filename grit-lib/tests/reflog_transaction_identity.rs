@@ -1,6 +1,7 @@
 //! Public ref transactions must reject forged reflog identity strings (issue #1972).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+use grit_lib::objects::ObjectError;
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 
@@ -41,7 +42,7 @@ fn forged_head_update(tip: ObjectId) -> RefUpdate {
 }
 
 fn assert_invalid_reflog_signature(err: Error) {
-    let is_invalid = matches!(err, Error::InvalidSignature(_))
+    let is_invalid = matches!(err, Error::Object(ObjectError::InvalidSignature(_)))
         || matches!(err, Error::RefStore(RefStoreError::InvalidReflog(_)));
     assert!(is_invalid, "expected invalid reflog/signature, got {err:?}");
 }

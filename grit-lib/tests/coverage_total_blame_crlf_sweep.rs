@@ -1,6 +1,6 @@
 //! Deep blame, CRLF, apply, and pathspec sweeps for `[total]` line coverage.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::apply::parse_patch;
 use grit_lib::blame::{blame_file, BlameOptions};

@@ -3,6 +3,7 @@
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
+use crate::objects::ObjectError;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::index_from_tree::index_from_tree_with_owned_seed_worktree_stats;
@@ -235,7 +236,9 @@ fn plan_reset(
     opts: &ResetOptions,
     with_worktree_preview: bool,
 ) -> Result<(ObjectId, HeadState, ResetPreview)> {
-    opts.identity.validate().map_err(Error::InvalidSignature)?;
+    opts.identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let head = resolve_head_for_repository(repo)?;
     let previous = head.oid().copied().ok_or(Error::UnbornHead)?;
 
@@ -539,10 +542,12 @@ mod tests {
             let error = plan_reset(&repo, &opts, with_worktree_preview).unwrap_err();
             assert!(matches!(
                 error,
-                Error::InvalidSignature(crate::ident::SignatureError::ForbiddenCharacter {
-                    field: crate::ident::SignatureField::Email,
-                    ch: '\n',
-                })
+                Error::Object(ObjectError::InvalidSignature(
+                    crate::ident::SignatureError::ForbiddenCharacter {
+                        field: crate::ident::SignatureField::Email,
+                        ch: '\n',
+                    }
+                ))
             ));
         }
     }

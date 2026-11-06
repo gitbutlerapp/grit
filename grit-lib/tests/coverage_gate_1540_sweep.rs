@@ -1,6 +1,6 @@
 //! Cross-module sweeps to close the 80% total and 85% history/revwalk floors (#1540).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

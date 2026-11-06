@@ -45,6 +45,7 @@
 //! without the recency and promise checks, and refusing to run when the index
 //! names a candidate rather than keeping it.
 
+use crate::objects::ObjectError;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -448,7 +449,9 @@ pub fn drop_promised_blobs(
     } else {
         match GcLock::try_acquire(repo, opts.now.unix_timestamp())? {
             GcLockAttempt::Acquired(lock) => Some(lock),
-            GcLockAttempt::Held(holder) => return Err(Error::MaintenanceRunning { holder }),
+            GcLockAttempt::Held(holder) => {
+                return Err(Error::Object(ObjectError::MaintenanceRunning { holder }));
+            }
         }
     };
     run(repo, &config, opts)
@@ -543,12 +546,12 @@ impl From<Refusal> for DropPromisedBlobsSkip {
 impl From<Refusal> for Error {
     fn from(refusal: Refusal) -> Self {
         match refusal {
-            Refusal::PreciousObjects => Error::PreciousObjectsRepository {
+            Refusal::PreciousObjects => Error::Object(ObjectError::PreciousObjectsRepository {
                 operation: OPERATION,
-            },
-            Refusal::NoPromisorRemote => Error::NoPromisorRemote {
+            }),
+            Refusal::NoPromisorRemote => Error::Object(ObjectError::NoPromisorRemote {
                 operation: OPERATION,
-            },
+            }),
             Refusal::InProgress(op) => Error::OperationInProgress(op),
         }
     }
@@ -911,8 +914,12 @@ fn scan_pack(
 /// The uncompressed size of the entry at `offset`: its header size for a whole
 /// object, the result size recorded at the start of a delta.
 fn entry_result_size(bytes: &[u8], offset: u64, hash_bytes: usize) -> Result<u64> {
-    let mut pos = usize::try_from(offset)
-        .map_err(|_| Error::CorruptObject("pack offset out of range".to_owned()))?;
+    let mut pos = usize::try_from(offset).map_err(|_| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack offset out of range".to_owned(),
+        ))
+    })?;
     let (packed, size) = crate::pack::parse_pack_object_header(bytes, &mut pos)?;
     match packed {
         PackedType::OfsDelta => {
@@ -971,7 +978,8 @@ impl<'a> EntryKinds<'a> {
     /// neither this pack nor the local object store.
     fn kind(&mut self, pos: usize) -> Result<Option<ObjectKind>> {
         let corrupt = |what: &str| {
-            Error::CorruptObject(format!("{what} in {}", self.idx.pack_path.display()))
+            ObjectError::corrupt_object(None, format!("{what} in {}", self.idx.pack_path.display()))
+                .into()
         };
         let mut chain: Vec<usize> = Vec::new();
         let mut cur = pos;
@@ -1010,7 +1018,9 @@ impl<'a> EntryKinds<'a> {
                         Some(base_pos) => cur = base_pos,
                         None => match self.odb.read_info_without_fetch(&base) {
                             Ok(info) => break Some(info.kind),
-                            Err(Error::ObjectNotFound(_)) => break None,
+                            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+                                break None
+                            }
                             Err(err) => return Err(err),
                         },
                     }

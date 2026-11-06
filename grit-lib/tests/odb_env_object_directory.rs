@@ -5,6 +5,7 @@
 //! Objects are read from and written to the environment's directory instead of
 //! `<git-dir>/objects`, checked against the system `git` with the same variable set.
 
+use grit_lib::objects::ObjectError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -320,7 +321,7 @@ fn odb_builder_must_name_env_object_directory() {
     assert!(
         matches!(
             mismatch,
-            Err(Error::OdbObjectsDirMismatch { ref repository, .. }) if repository == &objq
+            Err(Error::Object(ObjectError::OdbObjectsDirMismatch { ref repository, .. }) if repository == &objq
         ),
         "{mismatch:?}"
     );

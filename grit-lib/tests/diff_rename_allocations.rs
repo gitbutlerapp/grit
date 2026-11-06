@@ -1,6 +1,6 @@
 //! Large inexact rename matrices must reuse per-blob scoring data.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 #[allow(unused_imports)]
 mod support;

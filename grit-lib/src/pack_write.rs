@@ -4,7 +4,7 @@
 //! [`crate::transfer::build_pack`]) and need a Git-compatible `.pack`/`.idx` pair
 //! on disk without shelling out to `git index-pack`.
 
-#![allow(dead_code)]
+use crate::objects::ObjectError;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,15 +48,22 @@ impl Default for InstallPackOptions {
 fn validated_pack_body(pack: &[u8], hash_algo: HashAlgo) -> Result<(usize, usize)> {
     let hash_bytes = hash_algo.len();
     if pack.len() < 12 + hash_bytes {
-        return Err(Error::CorruptObject("pack file too small".into()));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack file too small",
+        )));
     }
     if &pack[0..4] != b"PACK" {
-        return Err(Error::CorruptObject("invalid PACK signature".into()));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "invalid PACK signature",
+        )));
     }
     let version = u32::from_be_bytes(pack[4..8].try_into().unwrap_or([0; 4]));
     if version != 2 && version != 3 {
-        return Err(Error::CorruptObject(format!(
-            "unsupported pack version {version}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("unsupported pack version {version}"),
         )));
     }
     let count = u32::from_be_bytes(pack[8..12].try_into().unwrap_or([0; 4])) as usize;
@@ -79,8 +86,9 @@ pub fn enumerate_whole_pack_entries(
     let mut out = Vec::with_capacity(count);
     let mut scratch = ZlibInflateScratch::default();
     while pos < body_end {
-        let offset =
-            u64::try_from(pos).map_err(|_| Error::CorruptObject("pack offset overflow".into()))?;
+        let offset = u64::try_from(pos).map_err(|_| {
+            Error::Object(ObjectError::corrupt_object(None, "pack offset overflow"))
+        })?;
         let (packed_type, size) = parse_pack_object_header(pack, &mut pos)?;
         match packed_type {
             PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
@@ -92,16 +100,17 @@ pub fn enumerate_whole_pack_entries(
                 out.push(PackIndexWriteEntry { oid, offset });
             }
             PackedType::RefDelta | PackedType::OfsDelta => {
-                return Err(Error::CorruptObject(
-                    "enumerate_whole_pack_entries requires a non-delta pack".into(),
-                ));
+                return Err(Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "enumerate_whole_pack_entries requires a non-delta pack",
+                )));
             }
         }
     }
     if out.len() != count {
-        return Err(Error::CorruptObject(format!(
-            "pack header object count {count} != scanned {}",
-            out.len()
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack header object count {count} != scanned {}", out.len()),
         )));
     }
     out.sort_by(|a, b| a.oid.as_bytes().cmp(b.oid.as_bytes()));
@@ -123,9 +132,10 @@ fn write_pack_index_v2(
 ) -> Result<()> {
     let pack_bytes = fs::read(pack_path).map_err(Error::Io)?;
     if pack_bytes.len() < hash_bytes {
-        return Err(Error::CorruptObject(
-            "pack too small for idx trailer".into(),
-        ));
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            "pack too small for idx trailer",
+        )));
     }
     let mut fanout = [0u32; 256];
     for byte in 0u32..256 {
@@ -147,8 +157,12 @@ fn write_pack_index_v2(
     for e in entries {
         let start = e.offset as usize;
         let mut end = start;
-        skip_one_pack_object(&pack_bytes, &mut end, e.offset, hash_bytes)
-            .map_err(|err| Error::CorruptObject(format!("idx crc walk: {err}")))?;
+        skip_one_pack_object(&pack_bytes, &mut end, e.offset, hash_bytes).map_err(|err| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("idx crc walk: {err}"),
+            ))
+        })?;
         let crc = crc32fast::hash(&pack_bytes[start..end]);
         buf.extend_from_slice(&crc.to_be_bytes());
     }
@@ -164,8 +178,9 @@ fn write_pack_index_v2(
         20 => HashAlgo::Sha1.checksum_digest(&buf),
         32 => HashAlgo::Sha256.checksum_digest(&buf),
         _ => {
-            return Err(Error::CorruptObject(format!(
-                "unsupported hash width {hash_bytes} for pack index"
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("unsupported hash width {hash_bytes} for pack index"),
             )));
         }
     };
@@ -238,8 +253,9 @@ pub fn whole_pack_uncompressed_size(pack: &[u8], hash_algo: HashAlgo) -> Result<
         }
     }
     if seen != header_count {
-        return Err(Error::CorruptObject(format!(
-            "pack header object count {header_count} != scanned {seen}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack header object count {header_count} != scanned {seen}"),
         )));
     }
     Ok(total)
@@ -272,8 +288,11 @@ fn packed_type_to_kind(pt: PackedType) -> Result<ObjectKind> {
         PackedType::Tree => Ok(ObjectKind::Tree),
         PackedType::Blob => Ok(ObjectKind::Blob),
         PackedType::Tag => Ok(ObjectKind::Tag),
-        PackedType::RefDelta | PackedType::OfsDelta => Err(Error::CorruptObject(
-            "delta object in whole-object enumeration".into(),
+        PackedType::RefDelta | PackedType::OfsDelta => Err(Error::Object(
+            ObjectError::corrupt_object(
+                None,
+                "delta object in whole-object enumeration",
+            ),
         )),
     }
 }
@@ -383,13 +402,22 @@ mod tests {
     fn whole_pack_uncompressed_size_rejects_malformed_input() {
         use crate::error::Error;
         let err = whole_pack_uncompressed_size(&[], HashAlgo::Sha1).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
         let truncated = b"PACK";
         let err = whole_pack_uncompressed_size(truncated, HashAlgo::Sha1).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
         let bad_sig = b"NOPE\x00\x00\x00\x02\x00\x00\x00\x00";
         let err = whole_pack_uncompressed_size(bad_sig, HashAlgo::Sha1).unwrap_err();
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
     }
 
     #[test]

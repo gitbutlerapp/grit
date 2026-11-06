@@ -2,7 +2,7 @@
 //! checked against the system `git` on a repository it wrote (packed refs, an
 //! upstream, a linked worktree), plus the reftable backend and an injected
 //! `MemoryRefStore`.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::path::Path;
 use std::sync::Arc;

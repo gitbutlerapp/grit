@@ -2372,7 +2372,11 @@ fn resolve_specs_with_options(
     for spec in specs {
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => continue,
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) | Error::InvalidRef(_))
+                if ignore_missing =>
+            {
+                continue
+            }
             Err(err) => return Err(err),
         };
         match repo.odb().peel_to_commit(oid) {
@@ -2384,7 +2388,8 @@ fn resolve_specs_with_options(
             // (e.g. submodule-change detection over a remote carrying a tag-of-blob, t5516
             // "refuse fetch to current branch of worktree") do not abort.
             Ok(None) => {}
-            Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) | Error::InvalidRef(_))
+                if ignore_missing => {}
             Err(err) => return Err(err),
         }
     }
@@ -2435,7 +2440,9 @@ fn resolve_specs_for_objects_with_options(
         if let Ok(raw_oid) = spec.parse::<ObjectId>() {
             let raw_object = match repo.odb().read(&raw_oid) {
                 Ok(obj) => obj,
-                Err(ObjectError::ObjectNotFound { .. }) if ignore_missing => continue,
+                Err(ObjectError::ObjectNotFound { .. }) if ignore_missing => {
+                    continue
+                }
                 Err(ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_))
                     if missing_action != MissingAction::Error =>
                 {
@@ -2458,9 +2465,12 @@ fn resolve_specs_for_objects_with_options(
                     let tag = parse_tag(&raw_object.data)?;
                     let expected_kind = ExpectedObjectKind::from_tag_type(&tag.object_type)
                         .ok_or_else(|| {
-                            Error::CorruptObject(format!(
-                                "object {spec} has unsupported tag type '{}'",
-                                tag.object_type
+                            Error::Object(ObjectError::corrupt_object(
+                                None,
+                                format!(
+                                    "object {spec} has unsupported tag type '{}'",
+                                    tag.object_type
+                                ),
                             ))
                         })?;
                     if expected_kind == ExpectedObjectKind::Commit {
@@ -2496,14 +2506,22 @@ fn resolve_specs_for_objects_with_options(
             if !path.is_empty() {
                 let treeish_oid = match resolve_revision_for_range_end(repo, treeish) {
                     Ok(oid) => oid,
-                    Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {
+                    Err(
+                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                            | Error::InvalidRef(_),
+                    ) if ignore_missing =>
+                    {
                         continue;
                     }
                     Err(err) => return Err(err),
                 };
                 let object_oid = match resolve_treeish_path(repo, treeish_oid, path) {
                     Ok(oid) => oid,
-                    Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {
+                    Err(
+                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                            | Error::InvalidRef(_),
+                    ) if ignore_missing =>
+                    {
                         continue;
                     }
                     Err(err) => return Err(err),
@@ -2529,7 +2547,11 @@ fn resolve_specs_for_objects_with_options(
 
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => continue,
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) | Error::InvalidRef(_))
+                if ignore_missing =>
+            {
+                continue
+            }
             Err(err) => return Err(err),
         };
         match repo.odb().peel_to_commit(oid) {
@@ -2540,17 +2562,18 @@ fn resolve_specs_for_objects_with_options(
                 }
                 commits.push(commit_oid);
             }
-            Ok(None) | Err(Error::CorruptObject(_) | Error::ObjectNotFound(_))
-                if ignore_missing => {}
-            Ok(None) | Err(Error::CorruptObject(_) | Error::ObjectNotFound(_)) => {
+            Ok(None) => {
                 roots.push(RootObject {
                     oid,
                     input: spec.clone(),
                     expected_kind: None,
                     root_path: None,
                     wrap_with_tag: None,
-                })
+                });
             }
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
+            | Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))
+                if ignore_missing => {}
             Err(err) => return Err(err),
         }
     }
@@ -2694,9 +2717,10 @@ fn walk_closure_ordered_with_missing(
         }
         let parents = match graph.parents_of(oid) {
             Ok(parents) => parents,
-            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                if missing_action != MissingAction::Error =>
-            {
+            Err(
+                Error::Object(ObjectError::ObjectNotFound { .. })
+                | Error::Object(ObjectError::PromisedObjectMissing(_)),
+            ) if missing_action != MissingAction::Error => {
                 if missing_action.reports_missing() && missing_seen.insert(oid) {
                     missing.push(oid);
                 }
@@ -4233,7 +4257,10 @@ impl DenseWalkCache {
             .odb()
             .read_into_caching_delta_bases(&tree, &mut self.tree_read_buf)?;
         if kind != ObjectKind::Tree {
-            return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("object {tree} is not a tree"),
+            )));
         }
         let resolved = match crate::objects::find_tree_entry_by_name_dir_or_file_in_data(
             &self.tree_read_buf,
@@ -5090,8 +5117,9 @@ fn is_tree_mode(mode: u32) -> bool {
 fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
     let object = repo.odb().read(&tree_oid)?;
     if object.kind != ObjectKind::Tree {
-        return Err(Error::CorruptObject(format!(
-            "object {tree_oid} is not a tree"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object {tree_oid} is not a tree"),
         )));
     }
     parse_tree(&object.data)
@@ -5123,8 +5151,9 @@ fn tree_has_pathspec_match_cached(
     };
     let kind = repo.odb().read_into(&tree_oid, buf)?;
     if kind != ObjectKind::Tree {
-        return Err(Error::CorruptObject(format!(
-            "object {tree_oid} is not a tree"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object {tree_oid} is not a tree"),
         )));
     }
     let oid_len = repo.odb().hash_algo().len();
@@ -5785,7 +5814,9 @@ fn whole_commit_parents(
     }
     crate::objects::parse_commit_tree_and_parents_lenient(buf, hex_len)
         .map(|(_, parents)| parents)
-        .ok_or_else(|| Error::CorruptObject(format!("commit {oid} has no valid tree header")))
+        .ok_or_else(|| {
+            Error::Object(ObjectError::corrupt_object(None, format!("commit {oid} has no valid tree header")))
+        })
 }
 
 /// Whether any replacement ref applies to object reads in `repo`.
@@ -5868,7 +5899,10 @@ fn try_rev_list_accelerated(
             return try_commit_graph_count_only(repo, include, exclude, options);
         }
         Err(e) => {
-            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            )));
         }
     };
     let (peeled_wants, filter_want_tips) = peeled_wants_from_rev_list_inputs(include, object_roots);
@@ -5885,7 +5919,10 @@ fn try_rev_list_accelerated(
             return try_commit_graph_count_only(repo, include, exclude, options);
         }
         Err(BitmapWalkError::Bitmap(e)) => {
-            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            )));
         }
         Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
@@ -5903,9 +5940,12 @@ fn try_rev_list_accelerated(
     )?;
 
     let (commit_count, non_commit_count) = if excluded_object_ids.is_empty() {
-        let commit_count = reachable
-            .count_by_kind(ObjectKind::Commit)
-            .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
+        let commit_count = reachable.count_by_kind(ObjectKind::Commit).map_err(|e| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            ))
+        })?;
         let total = reachable.count();
         (commit_count, total.saturating_sub(commit_count))
     } else {
@@ -5999,7 +6039,7 @@ where
     {
         Ok(Some(index)) => index,
         Ok(None) => return Ok(false),
-        Err(e) => return Err(Error::CorruptObject(format!("pack bitmap: {e}"))),
+        Err(e) => return Err(e.into()),
     };
     let (peeled_wants, filter_want_tips) = peeled_wants_from_rev_list_inputs(include, &[]);
     let reachable = match index.reachability_with_peeled_wants(
@@ -6013,7 +6053,10 @@ where
         Ok(set) => set,
         Err(BitmapWalkError::Unsupported(_)) => return Ok(false),
         Err(BitmapWalkError::Bitmap(e)) => {
-            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            )));
         }
         Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
@@ -6093,7 +6136,7 @@ pub(crate) fn try_bitmap_reachable_commit_set_for_specs(
     let index = match BitmapIndex::open(repo) {
         Ok(Some(index)) => index,
         Ok(None) => return Ok(None),
-        Err(e) => return Err(Error::CorruptObject(format!("pack bitmap: {e}"))),
+        Err(e) => return Err(e.into()),
     };
     if index.backing_pack_index().is_none() {
         return Ok(None);
@@ -6126,7 +6169,10 @@ pub(crate) fn try_bitmap_reachable_commit_set_for_specs(
         Ok(set) => set,
         Err(BitmapWalkError::Unsupported(_)) => return Ok(None),
         Err(BitmapWalkError::Bitmap(e)) => {
-            return Err(Error::CorruptObject(format!("pack bitmap: {e}")));
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            )));
         }
         Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
@@ -7646,7 +7692,9 @@ pub(crate) struct CommitGraph<'r> {
 fn read_commit_bytes(repo: &Repository, oid: ObjectId) -> Result<Vec<u8>> {
     match repo.read_commit_bytes_with_replace(&oid) {
         Ok(bytes) => Ok(bytes),
-        Err(Error::UnexpectedObjectKind { .. }) => Err(rev_list_unexpected_kind(oid, "commit")),
+        Err(Error::Object(ObjectError::UnexpectedObjectKind { .. })) => {
+            Err(rev_list_unexpected_kind(oid, "commit"))
+        }
         Err(other) => Err(other),
     }
 }
@@ -7890,7 +7938,7 @@ impl<'r> CommitGraph<'r> {
                         let effective = repo.object_id_after_replace(&oid);
                         repo.odb().read_commit_through_subject(&effective).map_err(
                             |err| match err {
-                                Error::UnexpectedObjectKind { .. } => {
+                                Error::Object(ObjectError::UnexpectedObjectKind { .. }) => {
                                     rev_list_unexpected_kind(oid, "commit")
                                 }
                                 other => other,
@@ -8618,9 +8666,10 @@ fn commit_parent_trees(
     for &parent in parents {
         let commit = match load_commit(repo, parent) {
             Ok(commit) => commit,
-            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                if missing_action != MissingAction::Error =>
-            {
+            Err(
+                Error::Object(ObjectError::ObjectNotFound { .. })
+                | Error::Object(ObjectError::PromisedObjectMissing(_)),
+            ) if missing_action != MissingAction::Error => {
                 if missing_action.reports_missing() && missing_seen.insert(parent) {
                     missing.push(parent);
                 }
@@ -8918,8 +8967,9 @@ fn collect_pathspec_matching_tree_objects_inner(
 ) -> Result<()> {
     let object = repo.odb().read(&tree_oid)?;
     if object.kind != ObjectKind::Tree {
-        return Err(Error::CorruptObject(format!(
-            "object {tree_oid} is not a tree"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object {tree_oid} is not a tree"),
         )));
     }
     let oid_len = repo.odb().hash_algo().len();
@@ -8988,9 +9038,10 @@ fn collect_reachable_objects_segmented(
         let start = result.len();
         let commit_tree = match graph.commit_tree(commit_oid) {
             Ok(tree) => tree,
-            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                if missing_action != MissingAction::Error =>
-            {
+            Err(
+                Error::Object(ObjectError::ObjectNotFound { .. })
+                | Error::Object(ObjectError::PromisedObjectMissing(_)),
+            ) if missing_action != MissingAction::Error => {
                 if missing_action.reports_missing() && missing_seen.insert(commit_oid) {
                     missing.push(commit_oid);
                 }
@@ -9417,9 +9468,10 @@ fn collect_tree_objects_filtered(
     }
     let tree_blob = match tree_state.tree_blob(repo, tree_oid) {
         Ok(blob) => blob,
-        Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-            if missing_action != MissingAction::Error =>
-        {
+        Err(
+            Error::Object(ObjectError::ObjectNotFound { .. })
+            | Error::Object(ObjectError::PromisedObjectMissing(_)),
+        ) if missing_action != MissingAction::Error => {
             if missing_action.reports_missing() && missing_seen.insert(tree_oid) {
                 missing.push(tree_oid);
             }
@@ -9928,9 +9980,12 @@ fn collect_root_object(
             let tag = parse_tag(&object.data)?;
             let expected_kind =
                 ExpectedObjectKind::from_tag_type(&tag.object_type).ok_or_else(|| {
-                    Error::CorruptObject(format!(
-                        "object {} has unsupported tag type '{}'",
-                        root.input, tag.object_type
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "object {} has unsupported tag type '{}'",
+                            root.input, tag.object_type
+                        ),
                     ))
                 })?;
             let nested = RootObject {
@@ -10000,9 +10055,10 @@ fn collect_reachable_objects_in_commit_order(
     for &commit_oid in commits {
         let commit = match load_commit(repo, commit_oid) {
             Ok(commit) => commit,
-            Err(Error::ObjectNotFound(_) | Error::PromisedObjectMissing(_))
-                if missing_action != MissingAction::Error =>
-            {
+            Err(
+                Error::Object(ObjectError::ObjectNotFound { .. })
+                | Error::Object(ObjectError::PromisedObjectMissing(_)),
+            ) if missing_action != MissingAction::Error => {
                 if missing_action.reports_missing() && missing_seen.insert(commit_oid) {
                     missing.push(commit_oid);
                 }
@@ -12365,7 +12421,10 @@ mod line_coverage_tests {
             },
         )
         .expect_err("unsupported tag type");
-        assert!(matches!(err, Error::CorruptObject(_)));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
 
         Ok(())
     }

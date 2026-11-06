@@ -392,100 +392,11 @@ fn maintenance_running_message(holder: &GcLockHolder) -> String {
 }
 
 impl ObjectError {
-    /// Map a legacy umbrella variant into [`ObjectError`] during the object-error migration.
+    /// Map a repository-level [`Error`] into [`ObjectError`] when crossing into the ODB.
     #[must_use]
     pub fn from_umbrella(err: Error) -> Self {
         match err {
             Error::Object(inner) => inner,
-            Error::InvalidObjectId(input) => Self::InvalidObjectId { input },
-            Error::HashCollision { oid } => Self::HashCollision { oid },
-            Error::ObjectNotFound(spec) => Self::object_not_found(spec),
-            Error::PromisedObjectMissing(oid) => Self::PromisedObjectMissing(oid),
-            Error::PromisorFetchFailed { missing, failures } => Self::PromisorFetchFailed {
-                missing,
-                failures: failures
-                    .into_iter()
-                    .map(|(name, e)| (name, Box::new(Self::from_umbrella(e))))
-                    .collect(),
-            },
-            Error::CorruptObject(msg) => Self::corrupt_object(None, msg),
-            Error::PackIndexChecksumMismatch { path, mismatch } => {
-                Self::PackIndexChecksumMismatch { path, mismatch }
-            }
-            Error::UnresolvedDeltas { count } => Self::UnresolvedDeltas { count },
-            Error::PackDeltaBaseNotWritten { target, base } => {
-                Self::PackDeltaBaseNotWritten { target, base }
-            }
-            Error::InvalidObject { kind, check } => Self::InvalidObject { kind, check },
-            Error::InvalidTreeEntry(e) => Self::InvalidTreeEntry(e),
-            Error::InvalidSignature(e) => Self::InvalidSignature(e),
-            Error::UnexpectedObjectKind {
-                oid,
-                expected,
-                actual,
-            } => Self::UnexpectedObjectKind {
-                oid,
-                expected,
-                actual,
-            },
-            Error::CommitGraphParentMissing { commit, parent } => {
-                Self::CommitGraphParentMissing { commit, parent }
-            }
-            Error::DeltaChainTooDeep { limit } => Self::DeltaChainTooDeep { limit },
-            Error::UnknownObjectType(ty) => Self::UnknownObjectType { ty },
-            Error::ObjectHeaderTooLong { oid } => Self::ObjectHeaderTooLong { oid },
-            Error::Zlib(detail) => Self::Zlib { detail },
-            Error::CorruptLooseObject { oid, path, source } => Self::CorruptLooseObject {
-                oid,
-                path,
-                source: Box::new(Self::from_umbrella(*source)),
-            },
-            Error::CorruptPackedObject {
-                oid,
-                pack,
-                offset,
-                source,
-            } => Self::CorruptPackedObject {
-                oid,
-                pack,
-                offset,
-                source: Box::new(Self::from_umbrella(*source)),
-            },
-            Error::LooseHashMismatch { path, real_oid } => {
-                Self::LooseHashMismatch { path, real_oid }
-            }
-            Error::LooseObjectWrite { path, source } => Self::LooseObjectWrite { path, source },
-            Error::ObjectStreamTruncated { expected, actual } => {
-                Self::ObjectStreamTruncated { expected, actual }
-            }
-            Error::MaintenanceRunning { holder } => Self::MaintenanceRunning { holder },
-            Error::Midx(e) => Self::Midx(e),
-            Error::Offload(e) => Self::Offload(e),
-            Error::NoPromisorRemote { operation } => Self::NoPromisorRemote { operation },
-            Error::UnsupportedObjectStore { operation } => {
-                Self::UnsupportedObjectStore { operation }
-            }
-            Error::PreciousObjectsRepository { operation } => {
-                Self::PreciousObjectsRepository { operation }
-            }
-            Error::ObjectFormatMismatch { repository, store } => {
-                Self::ObjectFormatMismatch { repository, store }
-            }
-            Error::OdbObjectsDirMismatch {
-                builder,
-                repository,
-            } => Self::OdbObjectsDirMismatch {
-                builder,
-                repository,
-            },
-            Error::TreeSha256InvalidHex => Self::TreeSha256InvalidHex,
-            Error::TreeSha256InvalidRevision { found } => Self::TreeSha256InvalidRevision { found },
-            Error::TreeSha256MissingSubmodules(v) => Self::TreeSha256MissingSubmodules(v),
-            Error::TreeSha256RequiresSigning => Self::TreeSha256RequiresSigning,
-            Error::TagVerifyNotTag { oid, found } => Self::TagVerifyNotTag { oid, found },
-            Error::TagVerifyMissingObjectHeader => Self::TagVerifyMissingObjectHeader,
-            Error::TagVerifyDuplicateTreeSha256Header => Self::TagVerifyDuplicateTreeSha256Header,
-            Error::TreeSha256Claim(e) => Self::TreeSha256Claim(e),
             Error::LockHeld(lock) => Self::LockHeld(lock),
             Error::GitDirPathIo {
                 path,
@@ -577,6 +488,21 @@ impl ObjectError {
         )
     }
 
+    /// Low-level read failure that [`Self::wrap_packed_read_failure`] may wrap.
+    #[must_use]
+    pub fn is_object_read_wrap_source(&self) -> bool {
+        if self.is_damaged_object() {
+            return true;
+        }
+        matches!(
+            self,
+            Self::ObjectHeaderTooLong { .. }
+                | Self::ObjectStreamTruncated { .. }
+                | Self::DeltaChainTooDeep { .. }
+                | Self::UnresolvedDeltas { .. }
+        )
+    }
+
     /// Attach loose-object path context to low-level read failures.
     #[must_use]
     pub fn wrap_loose_read_failure(oid: ObjectId, path: PathBuf, err: ObjectError) -> ObjectError {
@@ -638,5 +564,35 @@ impl From<ObjectError> for Error {
             ObjectError::Nested(inner) => *inner,
             other => Self::Object(other),
         }
+    }
+}
+
+impl From<crate::objects::TreeEntryError> for Error {
+    fn from(err: crate::objects::TreeEntryError) -> Self {
+        Error::Object(ObjectError::InvalidTreeEntry(err))
+    }
+}
+
+impl From<SignatureError> for Error {
+    fn from(err: SignatureError) -> Self {
+        Error::Object(ObjectError::InvalidSignature(err))
+    }
+}
+
+impl From<MidxError> for Error {
+    fn from(err: MidxError) -> Self {
+        Error::Object(ObjectError::Midx(err))
+    }
+}
+
+impl From<OffloadError> for Error {
+    fn from(err: OffloadError) -> Self {
+        Error::Object(ObjectError::Offload(err))
+    }
+}
+
+impl From<TreeSha256ClaimError> for Error {
+    fn from(err: TreeSha256ClaimError) -> Self {
+        Error::Object(ObjectError::TreeSha256Claim(err))
     }
 }

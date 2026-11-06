@@ -1,6 +1,6 @@
 //! Reftable stack compaction, autocompaction, and multi-table append paths.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

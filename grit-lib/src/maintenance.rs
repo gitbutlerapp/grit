@@ -14,6 +14,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -710,11 +711,11 @@ pub fn write_commit_graph(
 ) -> Result<CommitGraphWriteReport> {
     let odb = repo.odb();
     odb.require_files_primary("commit-graph write")?;
-    let objects_dir = odb
-        .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
-            operation: "commit-graph write",
-        })?;
+    let objects_dir =
+        odb.files_objects_dir()
+            .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "commit-graph write",
+            }))?;
     let path = objects_dir.join("info").join("commit-graph");
 
     if let Some(reason) = CommitGraphSkipReason::detect_for_repository(repo)? {
@@ -793,11 +794,11 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
         None => midx_version_from_config(&*repo.config()?)?,
     };
     let version = Some(midx_write_version(requested)?);
-    let objects_dir = odb
-        .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
-            operation: "midx write",
-        })?;
+    let objects_dir =
+        odb.files_objects_dir()
+            .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "midx write",
+            }))?;
     let pack_dir = objects_dir.join("pack");
     let pack_count = fs::read_dir(&pack_dir)
         .map(|rd| {
@@ -908,11 +909,11 @@ fn repack_detail(
     poll_cancel(&mut NullProgress, cancel)?;
     let odb = repo.odb();
     odb.require_files_primary("repack")?;
-    let objects_dir = odb
-        .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
-            operation: "repack",
-        })?;
+    let objects_dir =
+        odb.files_objects_dir()
+            .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "repack",
+            }))?;
     let pack_dir = objects_dir.join("pack");
 
     let mut report = RepackReport::default();
@@ -1089,9 +1090,12 @@ fn repack_detail(
         };
         report.packs_written = 1;
         report.objects = ingested.object_ids.len();
-        let pack_path = ingested.pack_path.ok_or(Error::UnsupportedObjectStore {
-            operation: "repack",
-        })?;
+        let pack_path =
+            ingested
+                .pack_path
+                .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                    operation: "repack",
+                }))?;
 
         let idx_path = pack_path.with_extension("idx");
         if cfg
@@ -1132,7 +1136,7 @@ fn repack_detail(
                         // Pack was built from an earlier root snapshot; live tips moved on
                         // (concurrent receive-pack). Skip the bitmap this run.
                     }
-                    Err(e) => return Err(Error::CorruptObject(e.to_string())),
+                    Err(e) => return Err(Error::Message(e.to_string())),
                 }
             }
         }
@@ -1218,11 +1222,11 @@ pub fn repack_all_with_cancel(
     cancel: &dyn Cancel,
 ) -> Result<RepackStats> {
     let odb = repo.odb();
-    let objects_dir = odb
-        .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
-            operation: "repack",
-        })?;
+    let objects_dir =
+        odb.files_objects_dir()
+            .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "repack",
+            }))?;
     let pack_dir = objects_dir.join("pack");
     let mut stats = RepackStats {
         loose_before: count_loose_objects(odb)?,
@@ -1508,11 +1512,11 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
         keep_newer_than,
         opts.dry_run,
     )?;
-    let objects_dir = odb
-        .files_objects_dir()
-        .ok_or(Error::UnsupportedObjectStore {
-            operation: "prune temporary objects",
-        })?;
+    let objects_dir =
+        odb.files_objects_dir()
+            .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "prune temporary objects",
+            }))?;
     let temp =
         prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
     stats.pruned += temp.pruned;
@@ -1655,7 +1659,9 @@ pub fn gc_with_cancel(repo: &Repository, opts: &GcOptions, cancel: &dyn Cancel) 
     } else {
         match GcLock::try_acquire(repo, now)? {
             GcLockAttempt::Acquired(lock) => Some(lock),
-            GcLockAttempt::Held(holder) => return Err(Error::MaintenanceRunning { holder }),
+            GcLockAttempt::Held(holder) => {
+                return Err(Error::Object(ObjectError::MaintenanceRunning { holder }));
+            }
         }
     };
     gc_locked(repo, opts, now, cancel)
@@ -2041,9 +2047,9 @@ fn gc_locked(
 
     if let GcLoosePrunePolicy::Enabled { keep_newer_than } = &prune_policy {
         let temp = prune_stale_temporary_objects_with_cutoff(
-            repo.odb()
-                .files_objects_dir()
-                .ok_or(Error::UnsupportedObjectStore { operation: "gc" })?,
+            repo.odb().files_objects_dir().ok_or(Error::Object(
+                ObjectError::UnsupportedObjectStore { operation: "gc" },
+            ))?,
             *keep_newer_than,
             dry_run,
         )?;
@@ -3137,7 +3143,7 @@ mod tests {
         assert_eq!(GcLock::current_holder(&repo, now), Some(recorded));
         assert!(matches!(
             gc(&repo, &GcOptions::default()),
-            Err(Error::MaintenanceRunning { .. })
+            Err(Error::Object(ObjectError::MaintenanceRunning { .. }))
         ));
         assert!(!repo.git_dir().join("gc.pid.lock").exists());
         drop(lock);

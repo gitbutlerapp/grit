@@ -1,6 +1,8 @@
 //! Repository-level fsck compared to system `git fsck` (upstream t1450-style cases).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+
+use grit_lib::objects::ObjectError;
 
 use std::fs;
 use std::process::Command;
@@ -919,7 +921,9 @@ fn corrupt_idx_trailer_is_idx_mismatch() {
     );
     assert!(matches!(
         read_pack_index(&idx),
-        Err(grit_lib::error::Error::PackIndexChecksumMismatch { ref path, .. }) if *path == idx
+        Err(grit_lib::error::Error::Object(
+            ObjectError::PackIndexChecksumMismatch { ref path, .. }
+        )) if *path == idx
     ));
     let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
     assert!(

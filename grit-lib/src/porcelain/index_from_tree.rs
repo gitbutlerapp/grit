@@ -1,5 +1,6 @@
 //! Build stage-0 indexes from tree objects and refresh worktree stat caches.
 
+use crate::objects::ObjectError;
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -490,11 +491,11 @@ fn sparse_candidate_subtrees(
 ) -> Result<()> {
     let obj = repo.odb().read(tree)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::UnexpectedObjectKind {
+        return Err(Error::Object(ObjectError::UnexpectedObjectKind {
             oid: *tree,
             expected: ObjectKind::Tree,
             actual: obj.kind,
-        });
+        }));
     }
     for entry in parse_tree(&obj.data)? {
         validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
@@ -619,11 +620,11 @@ impl TreeIndexWalk<'_> {
 
         let obj = self.repo.odb().read(tree_oid)?;
         if obj.kind != ObjectKind::Tree {
-            return Err(Error::UnexpectedObjectKind {
+            return Err(Error::Object(ObjectError::UnexpectedObjectKind {
                 oid: *tree_oid,
                 expected: ObjectKind::Tree,
                 actual: obj.kind,
-            });
+            }));
         }
         let mut entry_count: i32 = 0;
         let mut children = Vec::new();

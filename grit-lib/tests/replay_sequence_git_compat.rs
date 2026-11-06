@@ -1,6 +1,6 @@
 //! Git on-disk compatibility tests for [`grit_lib::porcelain::replay_sequence`].
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::io::Write;

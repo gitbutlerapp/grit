@@ -1,6 +1,6 @@
 //! Shared helpers for index / sparse-checkout git compatibility tests.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;

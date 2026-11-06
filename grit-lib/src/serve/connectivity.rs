@@ -27,6 +27,7 @@
 //!   itself. Missing objects are looked up in one batch at the end: probing them
 //!   one at a time would rescan the pack directory on every miss.
 
+use crate::objects::ObjectError;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::rc::Rc;
 
@@ -127,7 +128,7 @@ impl PushedObjects<'_> {
         };
         match odb.read_info_without_fetch(oid) {
             Ok(info) => Ok(Some(info.kind)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }

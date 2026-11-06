@@ -1,5 +1,6 @@
 //! Shared revision resolution error text for commands.
 
+use grit_lib::objects::ObjectError;
 use anyhow::Error as AnyhowError;
 use grit_lib::error::Error as LibError;
 use grit_lib::revwalk::object_inspect::ResolveError;
@@ -37,7 +38,7 @@ pub fn map_lib_revision_error(err: &LibError) -> Option<String> {
         LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
             Some(format!("invalid reflog date '{date}'"))
         }
-        LibError::ObjectNotFound(spec) => Some(format!("revision '{spec}' not found")),
+        LibError::Object(ObjectError::ObjectNotFound { spec: spec, .. }) => Some(format!("revision '{spec}' not found")),
         _ => None,
     }
 }
@@ -52,7 +53,7 @@ pub fn map_commit_spec_error(err: LibError) -> AnyhowError {
         LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
             json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
         }
-        LibError::ObjectNotFound(spec) => {
+        LibError::Object(ObjectError::ObjectNotFound { spec: spec, .. }) => {
             json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
         }
         LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {

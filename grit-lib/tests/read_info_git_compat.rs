@@ -1,5 +1,6 @@
 //! [`Odb::read_info`] matches `git cat-file --batch-check` across storage layouts.
 
+use grit_lib::objects::ObjectError;
 use grit_lib::error::Error;
 use grit_lib::objects::delta_encode::encode_lcp_delta;
 use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
@@ -339,7 +340,7 @@ fn read_info_missing_object_is_not_found() {
     let odb = Odb::new(&objects);
     let missing = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").expect("oid");
     match odb.read_info(&missing) {
-        Err(Error::ObjectNotFound(_)) => {}
+        Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
         other => panic!("expected ObjectNotFound, got {other:?}"),
     }
 }
@@ -362,7 +363,7 @@ fn read_info_corrupt_loose_header_is_typed_error() {
 
     let odb = Odb::new(&objects);
     match odb.read_info(&oid) {
-        Err(Error::CorruptObject(_)) | Err(Error::ObjectHeaderTooLong { .. }) => {}
+        Err(Error::Object(ObjectError::CorruptObject { .. })) | Err(Error::Object(ObjectError::ObjectHeaderTooLong { .. })) => {}
         other => panic!("expected corrupt header error, got {other:?}"),
     }
 }

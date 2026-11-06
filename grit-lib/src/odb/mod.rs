@@ -660,9 +660,9 @@ impl Odb {
     fn read_tree_payload(&self, oid: &ObjectId) -> Result<Vec<u8>> {
         let obj = self.read_impl(oid, false)?;
         if obj.kind != ObjectKind::Tree {
-            return Err(Error::CorruptObject(format!(
-                "expected tree, got {}",
-                obj.kind.as_str()
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("expected tree, got {}", obj.kind.as_str()),
             )));
         }
         Ok(obj.data)
@@ -1042,7 +1042,7 @@ impl Odb {
         if let Some(obj) = self.try_read_primary_after_negative_revalidate(oid)? {
             return Ok(obj);
         }
-        Err(Error::ObjectNotFound(oid.to_hex()))
+        Err(Error::Object(ObjectError::object_not_found(oid.to_hex())))
     }
 
     #[cold]
@@ -1076,7 +1076,7 @@ impl Odb {
         if let Some(info) = self.try_read_primary_info_after_negative_revalidate(oid)? {
             return Ok(info);
         }
-        Err(Error::ObjectNotFound(oid.to_hex()))
+        Err(Error::Object(ObjectError::object_not_found(oid.to_hex())))
     }
 
     #[cold]
@@ -1089,7 +1089,7 @@ impl Odb {
         if let Some(kind) = self.try_read_primary_into_after_negative_revalidate(oid, buf)? {
             return Ok(kind);
         }
-        Err(Error::ObjectNotFound(oid.to_hex()))
+        Err(Error::Object(ObjectError::object_not_found(oid.to_hex())))
     }
 
     #[cfg(test)]
@@ -1145,7 +1145,7 @@ impl Odb {
         for oid in oids {
             let obj = store
                 .read(&oid)?
-                .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+                .ok_or_else(|| Error::Object(ObjectError::object_not_found(oid.to_hex())))?;
             payloads.push((obj.kind, obj.data));
         }
         self.mem_overlay_active.store(false, Ordering::Release);
@@ -1787,7 +1787,7 @@ impl Odb {
             pack::PackLookupOptions::ALL_LOCAL_PACKS,
         ) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -1805,7 +1805,7 @@ impl Odb {
             pack::PackLookupOptions::ALL_LOCAL_PACKS,
         ) {
             Ok(info) => Ok(Some(info)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -2163,12 +2163,11 @@ impl Odb {
     /// Propagates the primary store failure. Only valid when [`Self::uses_files_primary`]
     /// is false.
     pub(crate) fn missing_materialized_many(&self, oids: &[ObjectId]) -> Result<Vec<ObjectId>> {
-        let primary =
-            self.custom_primary
-                .as_ref()
-                .ok_or_else(|| Error::UnsupportedObjectStore {
-                    operation: "missing_materialized_many",
-                })?;
+        let primary = self.custom_primary.as_ref().ok_or_else(|| {
+            Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "missing_materialized_many",
+            })
+        })?;
         if oids.is_empty() {
             return Ok(Vec::new());
         }
@@ -2750,7 +2749,7 @@ impl Odb {
                     return self.object_not_found_after_primary_revalidate(oid);
                 }
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
-                    return Err(err);
+                    return Err(err.into());
                 }
             }
         }
@@ -3077,7 +3076,7 @@ impl Odb {
                     return self.object_kind_not_found_after_primary_revalidate(oid, buf);
                 }
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
-                    return Err(err);
+                    return Err(err.into());
                 }
             }
         }
@@ -3193,7 +3192,7 @@ impl Odb {
             buf,
         ) {
             Ok(kind) => Ok(Some(kind)),
-            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -3219,8 +3218,9 @@ impl Odb {
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(ObjectInfo {
                 kind: obj.kind,
-                size: u64::try_from(obj.data.len())
-                    .map_err(|_| Error::CorruptObject("object size overflow".to_owned()))?,
+                size: u64::try_from(obj.data.len()).map_err(|_| {
+                    Error::Object(ObjectError::corrupt_object(None, "object size overflow".to_owned()))
+                })?,
             });
         }
 
@@ -3329,7 +3329,7 @@ impl Odb {
             };
             match res {
                 crate::promisor_fetch::PromisorMissResolution::PromisedMissing(err) => {
-                    return Err(err);
+                    return Err(err.into());
                 }
                 crate::promisor_fetch::PromisorMissResolution::NotPromisorRepo => {
                     return self.object_info_not_found_after_primary_revalidate(oid);
@@ -3357,8 +3357,9 @@ impl Odb {
         if let Some(obj) = self.overlay_read(oid) {
             return Ok(Some(ObjectInfo {
                 kind: obj.kind,
-                size: u64::try_from(obj.data.len())
-                    .map_err(|_| Error::CorruptObject("object size overflow".to_owned()))?,
+                size: u64::try_from(obj.data.len()).map_err(|_| {
+                    Error::Object(ObjectError::corrupt_object(None, "object size overflow".to_owned()))
+                })?,
             }));
         }
 
@@ -3529,7 +3530,10 @@ impl Odb {
         }
         if let Some(obj) = self.overlay_read(oid) {
             let size = u64::try_from(obj.data.len()).map_err(|_| {
-                Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("object size overflow for {}", oid.to_hex()),
+                ))
             })?;
             return f(ObjectStream {
                 kind: obj.kind,
@@ -3753,16 +3757,19 @@ impl Odb {
         }
         if self.overlay_active() || size < stream::STREAMED_WRITE_MIN_SIZE {
             let len = usize::try_from(size).map_err(|_| {
-                Error::CorruptObject(format!("object size {size} exceeds address space"))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("object size {size} exceeds address space"),
+                ))
             })?;
             let mut data = Vec::with_capacity(len);
             let read =
                 std::io::Read::read_to_end(&mut std::io::Read::take(reader, size), &mut data)?;
             if read != len {
-                return Err(Error::ObjectStreamTruncated {
+                return Err(Error::Object(ObjectError::ObjectStreamTruncated {
                     expected: size,
                     actual: read as u64,
-                });
+                }));
             }
             return self.write_with_options(kind, &data, options);
         }
@@ -4113,9 +4120,9 @@ impl Odb {
     /// Same as [`Self::write`].
     pub fn write_local(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "write_local",
-            });
+            }));
         }
         let oid = hash_object_data_with(self.hash_algo(), kind, data)?;
 
@@ -4152,9 +4159,9 @@ impl Odb {
         mut supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
     ) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "write_local_stream",
-            });
+            }));
         }
         let loose = self.local_loose()?;
         let oid = loose
@@ -4181,9 +4188,9 @@ impl Odb {
     /// promisor pack are still written because [`Self::exists_local`] treats those as absent.
     pub fn write_loose_materialize(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "write_loose_materialize",
-            });
+            }));
         }
         let oid = hash_object_data_with(self.hash_algo(), kind, data)?;
         if let Ok(primary) = self.primary() {
@@ -4247,9 +4254,9 @@ impl Odb {
     /// Same as [`Self::write_raw`].
     pub fn write_raw_local(&self, store_bytes: &[u8]) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "write_raw_local",
-            });
+            }));
         }
         let obj = parse_object_bytes(store_bytes)?;
         let oid = hash_object_data_with(self.hash_algo(), obj.kind, &obj.data)?;
@@ -4290,7 +4297,12 @@ pub(crate) fn zlib_compress_blob_loose(
 ) -> Result<Vec<u8>> {
     use std::io::Write as _;
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), compression);
-    let zlib_err = |e: std::io::Error| Error::Zlib(e.to_string());
+    let zlib_err = |e: std::io::Error| {
+        ObjectError::Zlib {
+            detail: e.to_string(),
+        }
+        .into()
+    };
     write!(encoder, "{} {}\0", ObjectKind::Blob, data.len()).map_err(zlib_err)?;
     encoder.write_all(data).map_err(zlib_err)?;
     encoder.finish().map_err(zlib_err)

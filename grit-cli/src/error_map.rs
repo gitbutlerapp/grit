@@ -1,6 +1,7 @@
 //! Single chain walk that maps library and wrapped failures to CLI exit codes,
 //! human text, hints, and structured `--json` payloads.
 
+use grit_lib::objects::ObjectError;
 use std::error::Error as StdError;
 
 use anyhow::Error;
@@ -87,7 +88,7 @@ pub fn human_message_for_lib(err: &LibError) -> String {
         return msg;
     }
     match err {
-        LibError::HashCollision { oid } => format!(
+        LibError::Object(ObjectError::HashCollision { oid }) => format!(
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
             oid.to_hex()
         ),
@@ -325,7 +326,7 @@ fn lock_classified_from_cause(cause: &(dyn StdError + 'static)) -> Option<Classi
 
 fn hash_oid_from_cause(cause: &(dyn StdError + 'static)) -> Option<ObjectId> {
     match cause.downcast_ref::<LibError>()? {
-        LibError::HashCollision { oid } => Some(*oid),
+        LibError::Object(ObjectError::HashCollision { oid }) => Some(*oid),
         _ => None,
     }
 }
@@ -411,8 +412,10 @@ pub fn map_remote_error(err: RemoteError) -> Error {
                 commits: Vec::new(),
             })
         }
-        RemoteError::Library(LibError::HashCollision { oid }) => {
-            crate::json_error::map_lib_error(LibError::HashCollision { oid })
+        RemoteError::Library(LibError::Object(ObjectError::HashCollision { oid })) => {
+            crate::json_error::map_lib_error(LibError::Object(ObjectError::HashCollision {
+                oid,
+            }))
         }
         RemoteError::Library(hook @ LibError::Hook(_)) => Error::new(hook),
         RemoteError::Library(lib) if lib.is_cancelled() => Error::new(lib),

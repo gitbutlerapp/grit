@@ -1,6 +1,7 @@
 //! Abbreviation and short-id lookup through a store that implements only the required
 //! [`ObjectStore`] methods (issue 1736), plus a round-trip against `git rev-parse --short`.
 
+use grit_lib::objects::ObjectError;
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::ops::ControlFlow;
@@ -191,10 +192,10 @@ fn default_lookup_prefix_handles_odd_even_empty_full_and_invalid_prefixes() {
     assert_eq!(lookup(&a.to_hex(), 0).expect("full"), vec![a]);
     assert!(lookup("abe", 0).expect("miss").is_empty());
 
-    assert!(matches!(lookup("abg", 0), Err(Error::InvalidObjectId(_))));
+    assert!(matches!(lookup("abg", 0), Err(Error::Object(ObjectError::InvalidObjectId { input: _ }))));
     assert!(matches!(
         lookup(&format!("{}0", a.to_hex()), 0),
-        Err(Error::InvalidObjectId(_))
+        Err(ObjectError::InvalidObjectId { input: _ }.into())
     ));
 }
 

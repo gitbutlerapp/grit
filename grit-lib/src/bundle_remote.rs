@@ -1,6 +1,6 @@
 //! Fetch and remote helpers for on-disk bundle files (clone / `grit fetch` from a `.bundle`).
 
-#![allow(dead_code)]
+use crate::objects::ObjectError;
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -661,7 +661,7 @@ fn preflight_bundle_fetch_refspecs(bundle: &Bundle, opts: &FetchOptions) -> Resu
 fn map_bundle_err(e: BundleError) -> Error {
     match e {
         BundleError::Cancelled => Error::Cancelled,
-        BundleError::ObjectNotFound(id) => Error::ObjectNotFound(id),
+        BundleError::ObjectNotFound(id) => Error::Object(ObjectError::object_not_found(id)),
         BundleError::MissingPrerequisites { .. } | BundleError::PrerequisitesNotConnected => {
             Error::BundleMissingPrerequisites
         }

@@ -2,6 +2,7 @@
 //!
 //! Pack reuse is internal to upload-pack; there is no separate public embedder API.
 
+use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
@@ -110,7 +111,9 @@ impl StreamingReuse {
             .idx_path
             .parent()
             .and_then(|p| p.parent())
-            .ok_or_else(|| Error::CorruptObject("pack path layout".to_owned()))?;
+            .ok_or_else(|| {
+                Error::Object(ObjectError::corrupt_object(None, "pack path layout".to_owned()))
+            })?;
         let Some((bytes, start, end)) = crate::pack::packed_full_object_range(objects_dir, oid)?
         else {
             return Ok(None);

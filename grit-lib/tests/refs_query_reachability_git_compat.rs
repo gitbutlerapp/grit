@@ -1,6 +1,6 @@
 //! Ref query `--contains`, `--merged`, and `--points-at` parity with `git for-each-ref`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

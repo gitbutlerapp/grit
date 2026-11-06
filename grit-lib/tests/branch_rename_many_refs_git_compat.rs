@@ -1,5 +1,5 @@
 //! Rename with unrelated packed refs, including loose overrides and peeled tags.
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fmt::Write as _;
 use std::fs;

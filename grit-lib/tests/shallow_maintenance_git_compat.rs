@@ -3,7 +3,7 @@
 //! A shallow clone records its boundary commits in `.git/shallow`; their parents are
 //! absent and every history walk must treat them as parentless, as Git does.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeSet;
 use std::path::Path;

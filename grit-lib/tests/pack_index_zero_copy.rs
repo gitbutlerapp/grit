@@ -1,6 +1,6 @@
 //! Zero-copy pack index compatibility and lookup oracles against system `git`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::objects::pack::{parse_pack_index_bytes, read_pack_index, read_pack_index_no_verify};
 use grit_lib::objects::ObjectId;

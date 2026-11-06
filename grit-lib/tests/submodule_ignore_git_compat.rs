@@ -1,6 +1,6 @@
 //! `diff.ignoreSubmodules` / `submodule.*.ignore` parity with system git (issue #2524).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 

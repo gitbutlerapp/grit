@@ -6,7 +6,7 @@
 //! exact argv matters, the same scenario is replayed with the system `git` and the logs compared.
 
 #![cfg(unix)]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

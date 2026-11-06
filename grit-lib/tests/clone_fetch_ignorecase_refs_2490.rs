@@ -1,7 +1,7 @@
 //! Issue #2490: clone and fetch must tolerate remote refs that differ only by ASCII case
 //! when `core.ignorecase` is enabled (macOS APFS / Windows NTFS).
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
 use std::path::Path;

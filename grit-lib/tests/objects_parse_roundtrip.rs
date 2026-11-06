@@ -1,5 +1,6 @@
 //! Parse/serialize round-trips for Git objects (t1006/t1007 object bodies).
 
+use grit_lib::objects::ObjectError;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -273,21 +274,21 @@ fn tree_sorting_gitlinks_symlinks_and_mode_100664() {
 fn object_id_from_hex_errors_are_typed() {
     assert!(matches!(
         ObjectId::from_hex("not-hex"),
-        Err(Error::InvalidObjectId(_))
+        Err(ObjectError::InvalidObjectId { input: _ }.into())
     ));
     assert!(matches!(
         ObjectId::from_hex("abc"),
-        Err(Error::InvalidObjectId(_))
+        Err(ObjectError::InvalidObjectId { input: _ }.into())
     ));
     let short = "a".repeat(39);
     assert!(matches!(
         ObjectId::from_hex(&short),
-        Err(Error::InvalidObjectId(_))
+        Err(ObjectError::InvalidObjectId { input: _ }.into())
     ));
     let valid_len_non_hex = "g".repeat(40);
     assert!(matches!(
         ObjectId::from_hex(&valid_len_non_hex),
-        Err(Error::InvalidObjectId(_))
+        Err(ObjectError::InvalidObjectId { input: _ }.into())
     ));
 }
 
@@ -439,26 +440,26 @@ fn object_id_display_and_is_full_hex() {
 fn parse_errors_use_typed_variants() {
     assert!(matches!(
         parse_commit(b"author x\n\n".as_ref()),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
     ));
     assert!(matches!(
         parse_tag(b"object".as_ref()),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
     ));
     assert!(matches!(
         parse_tag(
             b"object 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\
 type not-a-kind\ntag t\n\n"
         ),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
     ));
     assert!(matches!(
         parse_tree(b"100644 incomplete".as_ref()),
-        Err(Error::CorruptObject(_))
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
     ));
     assert!(matches!(
         ObjectKind::from_bytes(b"not-a-type"),
-        Err(Error::UnknownObjectType(_))
+        Err(ObjectError::UnknownObjectType { ty: _ }.into())
     ));
 }
 

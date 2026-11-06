@@ -1,6 +1,6 @@
 //! Dense parse and load snippets to ratchet `config.rs` line coverage.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::environment::Environment;
 use grit_lib::config::{

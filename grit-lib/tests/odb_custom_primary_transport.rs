@@ -5,6 +5,7 @@
 //! of the bundle's pack into the custom primary. Staging writes go through the custom primary,
 //! and fsck validates the objects the primary lists.
 
+use grit_lib::objects::ObjectError;
 use grit_test_support::{git, rev_parse};
 use std::fs;
 use std::path::Path;
@@ -477,7 +478,7 @@ fn partial_fetch_custom_primary_is_refused() {
     assert!(
         matches!(
             err,
-            RemoteError::Library(Error::UnsupportedObjectStore { operation }) if operation == "partial fetch"
+            RemoteError::Library(Error::Object(ObjectError::UnsupportedObjectStore { operation }) if operation == "partial fetch"
         ),
         "{err:?}"
     );

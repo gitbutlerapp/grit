@@ -17,7 +17,7 @@
 //! Use [`ChecksumHasher`] / [`HashAlgo::checksum_digest`], [`HashingWriter`], and
 //! [`verify_trailer`].
 
-#![allow(dead_code)]
+use crate::objects::ObjectError;
 
 use std::io::{self, Write};
 
@@ -261,10 +261,13 @@ impl ObjectHasher {
                 };
                 let bytes = oid.as_bytes();
                 if out.len() < bytes.len() {
-                    return Err(Error::InvalidObjectId(format!(
-                        "digest buffer too short: need {} bytes, have {}",
-                        bytes.len(),
-                        out.len()
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "digest buffer too short: need {} bytes, have {}",
+                            bytes.len(),
+                            out.len()
+                        ),
                     )));
                 }
                 out[..bytes.len()].copy_from_slice(bytes);
@@ -274,9 +277,12 @@ impl ObjectHasher {
                 let digest = h.finalize();
                 let len = digest.len();
                 if out.len() < len {
-                    return Err(Error::InvalidObjectId(format!(
-                        "digest buffer too short: need {len} bytes, have {}",
-                        out.len()
+                    return Err(Error::Object(ObjectError::corrupt_object(
+                        None,
+                        format!(
+                            "digest buffer too short: need {len} bytes, have {}",
+                            out.len()
+                        ),
                     )));
                 }
                 out[..len].copy_from_slice(&digest);
@@ -401,9 +407,9 @@ fn object_id_from_sha1_digest(digest: &sha1dc::Digest) -> ObjectId {
 }
 
 fn collision_to_error(collision: sha1dc::Collision) -> Error {
-    Error::HashCollision {
+    Error::Object(ObjectError::HashCollision {
         oid: object_id_from_sha1_digest(&collision.digest()),
-    }
+    })
 }
 
 /// A writer that forwards bytes to an inner sink while accumulating a checksum.
@@ -901,10 +907,13 @@ mod tests {
             let mut hasher = ObjectHasher::new(HashAlgo::Sha1);
             hasher.update(&bytes);
             let err = hasher.finalize().expect_err("SHAttered block must collide");
-            assert!(matches!(err, Error::HashCollision { .. }));
+            assert!(matches!(
+                err,
+                Error::Object(ObjectError::HashCollision { .. })
+            ));
             assert!(matches!(
                 HashAlgo::Sha1.digest(&bytes),
-                Err(Error::HashCollision { .. })
+                Err(Error::Object(ObjectError::HashCollision { .. }))
             ));
 
             // As a blob, the header shifts the colliding blocks: the object id is an

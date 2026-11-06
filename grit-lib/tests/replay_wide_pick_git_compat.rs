@@ -4,7 +4,7 @@
 //! and the single index write that follows it. Git must read the result as a clean repository
 //! whose index carries fresh stat data and a valid cache-tree.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::path::Path;

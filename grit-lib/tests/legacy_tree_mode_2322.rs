@@ -1,6 +1,6 @@
 //! Issue #2322: legacy tree modes (100664 / 100775) must canonicalize in the index and diffs.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::Write;
 use std::path::Path;

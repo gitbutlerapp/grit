@@ -1,7 +1,7 @@
 //! Ignore rules and wildmatch integration (t0008, t3001, t3003): cross-check
 //! [`IgnoreMatcher::check_path`] against system `git check-ignore`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::process::Command;
 

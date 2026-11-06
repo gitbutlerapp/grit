@@ -1,7 +1,7 @@
 //! Held `index.lock`: typed [`Error::LockHeld`] with the pid sidecar's live vs stale holder
 //! (native liveness, no `kill` CLI), and Git sees the repository unchanged afterwards.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 use std::path::Path;

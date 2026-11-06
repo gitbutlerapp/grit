@@ -18,6 +18,7 @@
 //! assert_eq!(oid.to_hex().len(), 40);
 //! ```
 
+use crate::objects::ObjectError;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -198,7 +199,9 @@ impl Odb {
     /// Filesystem-only helper: error when the primary is not files-backed.
     pub(crate) fn require_files_primary(&self, operation: &'static str) -> Result<()> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore { operation });
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation,
+            }));
         }
         Ok(())
     }
@@ -225,13 +228,18 @@ impl Odb {
     pub fn gc(&self) -> Result<()> {
         self.require_files_primary("gc")?;
         let Some(git_dir) = self.config_git_dir() else {
-            return Err(Error::UnsupportedObjectStore { operation: "gc" });
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation: "gc",
+            }));
         };
         let opts = crate::environment::RepositoryOptions::empty();
         let repo = if git_dir.file_name().is_some_and(|n| n == ".git") {
-            let wt = git_dir
-                .parent()
-                .ok_or(Error::UnsupportedObjectStore { operation: "gc" })?;
+            let wt =
+                git_dir
+                    .parent()
+                    .ok_or(Error::Object(ObjectError::UnsupportedObjectStore {
+                        operation: "gc",
+                    }))?;
             Repository::open(git_dir, &opts.with_work_tree(wt))?
         } else {
             Repository::open(git_dir, &opts)?
@@ -259,14 +267,14 @@ impl Odb {
     pub fn write_commit_graph(&self) -> Result<()> {
         self.require_files_primary("commit-graph write")?;
         let Some(git_dir) = self.config_git_dir() else {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "commit-graph write",
-            });
+            }));
         };
         let Some(objects_dir) = self.files_objects_dir() else {
-            return Err(Error::UnsupportedObjectStore {
+            return Err(Error::Object(ObjectError::UnsupportedObjectStore {
                 operation: "commit-graph write",
-            });
+            }));
         };
         let config = ConfigSet::load(
             &crate::environment::Environment::empty(),

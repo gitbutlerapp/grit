@@ -1,6 +1,6 @@
 //! A long-lived ODB must read more packs than its process descriptor limit.
 #![cfg(target_os = "linux")]
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::process::Command;
 

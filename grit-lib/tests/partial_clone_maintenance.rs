@@ -1,5 +1,6 @@
 //! Offline maintenance preserves Git's promisor/local pack boundary (#2065).
 
+use grit_lib::objects::ObjectError;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,7 +49,7 @@ struct OfflineFetcher(AtomicUsize);
 impl PromisorFetcher for OfflineFetcher {
     fn fetch_missing(&self, _: &Repository, oids: &[ObjectId]) -> Result<()> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Err(Error::ObjectNotFound(oids[0].to_hex()))
+        Err(Error::Object(ObjectError::object_not_found(oids[0].to_hex())))
     }
 }
 
@@ -262,7 +263,7 @@ fn missing_local_objects_are_errors_without_fetching() {
             opts.dry_run = dry_run;
             opts.keep_unreachable = false;
             let err = repack_all(&f.repo, &opts).expect_err("missing local object must fail");
-            assert!(matches!(err, Error::ObjectNotFound(_)), "{spec}: {err:?}");
+            assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })), "{spec}: {err:?}");
             let mut prune = PruneOptions::default();
             prune.dry_run = dry_run;
             prune.older_than = Some(
@@ -270,7 +271,7 @@ fn missing_local_objects_are_errors_without_fetching() {
             );
             assert!(matches!(
                 prune_loose_objects(&f.repo, &prune),
-                Err(Error::ObjectNotFound(_))
+                Err(Error::Object(ObjectError::object_not_found(_)))
             ));
             assert_eq!(f.fetcher.0.load(Ordering::SeqCst), 0);
         }

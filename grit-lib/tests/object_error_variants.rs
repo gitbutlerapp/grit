@@ -1,10 +1,11 @@
 //! Typed object-store errors: damaged fixtures from system git, variant assertions.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 
-use grit_lib::objects::error::ObjectError;
+use grit_lib::error::Error;
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::read_pack_index;
 use grit_lib::objects::ObjectId;
@@ -70,7 +71,7 @@ fn pack_index_checksum_mismatch_flipped_trailer() {
     let err = read_pack_index(&idx).expect_err("bad idx checksum");
     match err {
         Error::Object(ObjectError::PackIndexChecksumMismatch { .. })
-        | Error::PackIndexChecksumMismatch { .. } => {}
+        | Error::Object(ObjectError::PackIndexChecksumMismatch { .. }) => {}
         other => panic!("expected pack index checksum error, got {other:?}"),
     }
 }
@@ -143,7 +144,7 @@ fn thin_pack_unresolved_deltas_without_bases() {
     .expect_err("thin pack without bases");
     let object_err = match err {
         Error::Object(inner) => inner,
-        Error::UnresolvedDeltas { count } => ObjectError::UnresolvedDeltas { count },
+        Error::Object(ObjectError::UnresolvedDeltas { count }) => ObjectError::UnresolvedDeltas { count },
         other => panic!("expected unresolved deltas, got {other:?}"),
     };
     match object_err {

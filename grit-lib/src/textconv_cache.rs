@@ -3,6 +3,7 @@
 //! Matches Git's `notes-cache.c`: the notes ref's **commit subject** stores the current
 //! `diff.<driver>.textconv` command string; when it changes, the cache is treated as empty.
 
+use crate::objects::ObjectError;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -38,9 +39,10 @@ fn collect_tree_entries(
 ) -> crate::error::Result<()> {
     let tree_obj = odb.read(tree_oid)?;
     if tree_obj.kind != ObjectKind::Tree {
-        return Err(crate::error::Error::CorruptObject(
+        return Err(crate::error::Error::Object(ObjectError::corrupt_object(
+            None,
             "notes tree is not a tree object".to_owned(),
-        ));
+        )));
     }
     for entry in parse_tree(&tree_obj.data)? {
         let mut path = prefix.to_vec();

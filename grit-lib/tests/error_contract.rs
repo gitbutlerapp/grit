@@ -1,6 +1,6 @@
 //! Pinning tests for the error contract (task 7099 step 1).
 
-#![allow(
+#[allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::assertions_on_constants

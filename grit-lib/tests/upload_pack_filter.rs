@@ -3,7 +3,7 @@
 //! sends, with and without pack bitmaps, and the pack must index with
 //! `git index-pack` (not `--strict`: a filtered pack is not closed by design).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::BTreeSet;
 use std::io::Write;

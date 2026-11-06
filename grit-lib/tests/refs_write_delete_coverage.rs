@@ -1,6 +1,6 @@
 //! `write_ref_cas`, `delete_ref`, and physical listing coverage.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

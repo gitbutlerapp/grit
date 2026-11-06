@@ -1,6 +1,6 @@
 //! Line coverage for `merge_diff.rs` public helpers (combined diff plumbing).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions;

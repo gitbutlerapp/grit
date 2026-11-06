@@ -17,6 +17,7 @@
 //! expected to map `GIT_PROTOCOL` to a [`ProtocolVersion`] and to load
 //! configuration at their own boundary.
 
+use crate::objects::ObjectError;
 mod connectivity;
 mod object_info;
 pub(crate) mod promised_objects;
@@ -623,7 +624,8 @@ pub(crate) fn check_object_format(repo: &Repository, client: Option<&str>) -> Re
         Some(name) if name != ours => Err(ServeError::ObjectFormatMismatch {
             client: name.to_owned(),
             repository: ours,
-        }),
+        }
+        .into()),
         _ => Ok(()),
     }
 }

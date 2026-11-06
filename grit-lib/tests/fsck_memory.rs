@@ -2,7 +2,7 @@
 //!
 //! Lives in its own test binary so no other test allocates while the peak is measured.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::Write;
 use std::process::{Command, Stdio};

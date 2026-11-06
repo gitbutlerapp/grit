@@ -6,7 +6,7 @@
 //! finishes well inside the time limit; a per-entry walk of full history and trees that
 //! re-walks every diamond would not.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

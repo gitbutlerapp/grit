@@ -36,6 +36,7 @@ use crate::notes::{
     apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
 };
 use crate::objects::odb::Odb;
+use crate::objects::ObjectError;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{
@@ -1834,9 +1835,11 @@ fn create_commit_with_index(
         }
     }
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
-    fsck_commit_idents(&bytes, repo.odb().hash_algo()).map_err(|check| Error::InvalidObject {
-        kind: crate::objects::ObjectKind::Commit,
-        check,
+    fsck_commit_idents(&bytes, repo.odb().hash_algo()).map_err(|check| {
+        Error::Object(ObjectError::InvalidObject {
+            kind: crate::objects::ObjectKind::Commit,
+            check,
+        })
     })?;
     poll_cancel(progress, cancel)?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;

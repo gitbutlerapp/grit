@@ -1,6 +1,6 @@
 //! `porcelain::pull` rebase integration against system `git pull --rebase`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::change_id::{change_id, resolved_change_id, ChangeIdPolicy};
 use grit_lib::config::environment::{Environment, RepositoryOptions};

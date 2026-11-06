@@ -1,6 +1,6 @@
 //! Cross-check typed repository handles against system `git`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
 

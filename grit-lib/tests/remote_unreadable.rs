@@ -2,7 +2,7 @@
 //! [`Error::RemoteUnreadable`] on every operation (list refs, fetch, push, clone) and every
 //! transport, so callers never match on message text.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::Read;
 #[cfg(feature = "http-ureq")]

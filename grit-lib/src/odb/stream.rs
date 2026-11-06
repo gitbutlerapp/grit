@@ -5,6 +5,7 @@
 //! objects; at or above the threshold they are written as a single-object pack, matching Git's
 //! large-file storage split.
 
+use crate::objects::ObjectError;
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -47,16 +48,20 @@ pub(crate) fn read_first_payload_chunk(reader: &mut dyn Read, size: u64) -> Resu
     if size == 0 {
         return Ok((Vec::new(), 0));
     }
-    let take = usize::try_from(size.min(CHUNK as u64))
-        .map_err(|_| Error::CorruptObject(format!("object size {size} exceeds address space")))?;
+    let take = usize::try_from(size.min(CHUNK as u64)).map_err(|_| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object size {size} exceeds address space"),
+        ))
+    })?;
     let mut first = vec![0u8; take];
     let n = reader.read(&mut first)?;
     first.truncate(n);
     if n == 0 {
-        return Err(Error::ObjectStreamTruncated {
+        return Err(Error::Object(ObjectError::ObjectStreamTruncated {
             expected: size,
             actual: 0,
-        });
+        }));
     }
     Ok((first, size - n as u64))
 }
@@ -96,10 +101,10 @@ fn for_each_chunk(
         let want = usize::try_from(remaining).map_or(buf.len(), |r| r.min(buf.len()));
         let n = match reader.read(&mut buf[..want]) {
             Ok(0) => {
-                return Err(Error::ObjectStreamTruncated {
+                return Err(Error::Object(ObjectError::ObjectStreamTruncated {
                     expected: size,
                     actual: size - remaining,
-                })
+                }));
             }
             Ok(n) => n,
             Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
@@ -172,7 +177,7 @@ impl StagedPack {
         let (first, tail) = read_first_payload_chunk(reader, size)?;
         let compression = compression_after_first_chunk(&first, compression);
         let payload_len = usize::try_from(size).map_err(|_| {
-            Error::CorruptObject(format!("object size {size} exceeds address space"))
+            Error::Object(ObjectError::corrupt_object(None, format!("object size {size} exceeds address space")))
         })?;
         fs::create_dir_all(pack_dir)?;
         let tmp = tempfile::Builder::new()
@@ -314,10 +319,10 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             err,
-            Error::ObjectStreamTruncated {
+            Error::Object(ObjectError::ObjectStreamTruncated {
                 expected: 10,
-                actual: 3
-            }
+                actual: 3,
+            })
         ));
     }
 
@@ -587,10 +592,10 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             err,
-            Error::ObjectStreamTruncated {
+            Error::Object(ObjectError::ObjectStreamTruncated {
                 expected: 100_000,
-                actual: 4_000
-            }
+                actual: 4_000,
+            })
         ));
         assert!(pack_files(&odb).is_empty(), "{:?}", pack_files(&odb));
     }

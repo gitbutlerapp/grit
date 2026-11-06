@@ -1,6 +1,6 @@
 //! Non-UTF-8 blame lines expose lossy decoding and raw bytes (issue #2260).
 #![cfg(feature = "full-tests")]
-#![allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used)]
 
 use std::path::Path;
 use std::process::Command;

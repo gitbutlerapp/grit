@@ -1,6 +1,6 @@
 //! Pack zlib helpers for index-pack (parallel inflate path).
 
-#![allow(dead_code)]
+use crate::objects::ObjectError;
 
 use std::io::Read;
 
@@ -17,20 +17,24 @@ const SKIP_BUF_LEN: usize = 64 * 1024;
 /// Returns the number of compressed bytes consumed from `pack` starting at `offset`.
 pub(crate) fn skip_zlib_at(pack: &[u8], offset: usize, expected_size: usize) -> Result<usize> {
     let slice = pack.get(offset..).ok_or_else(|| {
-        Error::CorruptObject(format!(
-            "pack stream truncated: need zlib at offset {offset}"
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack stream truncated: need zlib at offset {offset}"),
         ))
     })?;
     if expected_size == 0 {
         let mut decoder = ZlibDecoder::new(slice);
         let mut out = Vec::new();
-        decoder
-            .read_to_end(&mut out)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+        decoder.read_to_end(&mut out).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
         if !out.is_empty() {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "0-byte packed object inflated to non-empty output".to_owned(),
-            ));
+            )));
         }
         return Ok(decoder.total_in() as usize);
     }
@@ -38,25 +42,30 @@ pub(crate) fn skip_zlib_at(pack: &[u8], offset: usize, expected_size: usize) -> 
     let mut scratch = [0u8; SKIP_BUF_LEN];
     let mut produced = 0usize;
     while produced < expected_size {
-        let n = decoder
-            .read(&mut scratch)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+        let n = decoder.read(&mut scratch).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
         if n == 0 {
             break;
         }
         produced += n;
     }
     if produced != expected_size {
-        return Err(Error::CorruptObject(format!(
-            "decompressed {produced} bytes but expected {expected_size}"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("decompressed {produced} bytes but expected {expected_size}"),
         )));
     }
     // Consume the zlib trailer (Adler-32) so `total_in` spans the full member, matching Git's
     // pack index CRC and object boundaries.
     loop {
-        let n = decoder
-            .read(&mut scratch)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
+        let n = decoder.read(&mut scratch).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
         if n == 0 {
             break;
         }
@@ -97,9 +106,17 @@ mod tests {
 
     fn zlib_compress_pack_payload(data: &[u8], level: i32) -> Result<Vec<u8>> {
         let mut enc = ZlibEncoder::new(Vec::new(), flate2_compression_for_pack_level(level));
-        enc.write_all(data)
-            .map_err(|e| Error::Zlib(e.to_string()))?;
-        enc.finish().map_err(|e| Error::Zlib(e.to_string()))
+        enc.write_all(data).map_err(|e| {
+            Error::Object(ObjectError::Zlib {
+                detail: e.to_string(),
+            })
+        })?;
+        enc.finish().map_err(|e| {
+            ObjectError::Zlib {
+                detail: e.to_string(),
+            }
+            .into()
+        })
     }
 
     #[test]

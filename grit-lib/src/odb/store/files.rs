@@ -207,7 +207,11 @@ impl FilesSource {
             buf,
         ) {
             Ok(kind) => return Ok(Some(kind)),
-            Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+            Err(err)
+                if matches!(
+                    err,
+                    Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                ) => {}
             Err(err) => return Err(ObjectError::from(err)),
         }
 
@@ -220,7 +224,11 @@ impl FilesSource {
                 buf,
             ) {
                 Ok(kind) => return Ok(Some(kind)),
-                Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+                Err(err)
+                    if matches!(
+                        err,
+                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                    ) => {}
                 Err(err) => return Err(ObjectError::from(err)),
             }
         }
@@ -259,7 +267,11 @@ impl FilesSource {
 
         match pack::try_read_object_from_packs_with_options(&self.objects_dir, oid, pack_opts) {
             Ok(obj) => return Ok(Some(obj)),
-            Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+            Err(err)
+                if matches!(
+                    err,
+                    Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                ) => {}
             Err(err) => return Err(ObjectError::from(err)),
         }
 
@@ -270,7 +282,11 @@ impl FilesSource {
                 PackLookupOptions::MIDX_COVERED_PACKS,
             ) {
                 Ok(obj) => return Ok(Some(obj)),
-                Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+                Err(err)
+                    if matches!(
+                        err,
+                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                    ) => {}
                 Err(err) => return Err(ObjectError::from(err)),
             }
         }
@@ -310,7 +326,11 @@ impl FilesSource {
         match pack::try_read_object_info_from_packs_with_options(&self.objects_dir, oid, pack_opts)
         {
             Ok(info) => return Ok(Some(info)),
-            Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+            Err(err)
+                if matches!(
+                    err,
+                    Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                ) => {}
             Err(err) => return Err(ObjectError::from(err)),
         }
 
@@ -321,7 +341,11 @@ impl FilesSource {
                 PackLookupOptions::MIDX_COVERED_PACKS,
             ) {
                 Ok(info) => return Ok(Some(info)),
-                Err(err) if matches!(err, Error::ObjectNotFound(_)) => {}
+                Err(err)
+                    if matches!(
+                        err,
+                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+                    ) => {}
                 Err(err) => return Err(ObjectError::from(err)),
             }
         }

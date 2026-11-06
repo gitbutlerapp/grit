@@ -3,7 +3,7 @@
 //! The listing and the upstream lookups read `packed-refs` through one cached view per
 //! repository handle; these tests pin that the view tracks rewrites made by another process.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 use std::process::Command;

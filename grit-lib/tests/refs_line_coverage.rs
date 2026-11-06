@@ -1,6 +1,6 @@
 //! Extra refs helpers for line coverage (alternates, globs, packed listing).
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

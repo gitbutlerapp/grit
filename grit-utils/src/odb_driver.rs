@@ -12,7 +12,7 @@ use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions};
 use grit_lib::objects::pack::{
     read_object_from_pack_at_offset, read_pack_index_cached, PackIndex, SingleLocalPackReader,
 };
-use grit_lib::objects::{parse_commit, Object, ObjectId, ObjectKind};
+use grit_lib::objects::{parse_commit, Object, ObjectError, ObjectId, ObjectKind};
 use grit_lib::remote::serve::{upload_pack, ProtocolVersion, ServeOptions};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions, RevListResult};
@@ -57,7 +57,7 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
             if let Some(reader) = fast.as_mut() {
                 match reader.read_object(&oid) {
                     Ok(object) => write_batch_object_body(&mut stdout, hex, &object)?,
-                    Err(Error::ObjectNotFound(_)) => {
+                    Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
                         write_batch_object(&mut stdout, repo, hex, &oid)?;
                     }
                     Err(e) => return Err(e.into()),
@@ -99,8 +99,10 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
             let info_result = if let Some(reader) = fast.as_mut() {
                 match reader.read_info(&oid) {
                     Ok(info) => Ok(info),
-                    Err(Error::ObjectNotFound(_)) => repo.odb().read_info(&oid),
-                    Err(e) => Err(e),
+                    Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+                        repo.odb().read_info(&oid)
+                    }
+                    Err(e) => Err(ObjectError::from_umbrella(e)),
                 }
             } else {
                 repo.odb().read_info(&oid)
@@ -109,7 +111,7 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
                 Ok(info) => {
                     writeln!(stdout, "{hex_str} {} {}", info.kind.as_str(), info.size)?;
                 }
-                Err(Error::ObjectNotFound(_)) => {
+                Err(ObjectError::ObjectNotFound { spec: _, .. }) => {
                     writeln!(stdout, "{hex_str} missing")?;
                 }
                 Err(e) => return Err(e.into()),
@@ -172,7 +174,7 @@ fn write_batch_object(
     let hex_str = std::str::from_utf8(hex).context("oid line utf-8")?;
     match repo.odb().read(oid) {
         Ok(object) => write_batch_object_body(out, hex, &object),
-        Err(Error::ObjectNotFound(_)) => {
+        Err(ObjectError::ObjectNotFound { spec: _, .. }) => {
             writeln!(out, "{hex_str} missing")?;
             Ok(())
         }

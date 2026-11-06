@@ -15,6 +15,7 @@
 //! See `Documentation/technical/index-format.txt` in the Git source tree for
 //! the authoritative format specification.
 
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -3163,7 +3164,9 @@ impl Index {
     ) -> Result<()> {
         let oid = rev_parse::resolve_revision(repo, treeish)?;
         let tree_oid = repo.odb().peel_to_tree(oid)?.ok_or_else(|| {
-            Error::ObjectNotFound(format!("cannot peel {oid} to tree for --with-tree"))
+            Error::Object(ObjectError::object_not_found(format!(
+                "cannot peel {oid} to tree for --with-tree"
+            )))
         })?;
         for e in self.entries.iter_mut() {
             if e.stage() != 0 {
@@ -3217,8 +3220,9 @@ fn read_tree_into_overlay(
 ) -> Result<()> {
     let obj = repo.odb().read(tree_oid)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::ObjectNotFound(format!(
-            "object {tree_oid} is not a tree"
+        return Err(Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("object {tree_oid} is not a tree"),
         )));
     }
     let entries = parse_tree(&obj.data)?;

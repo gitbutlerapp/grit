@@ -1,6 +1,6 @@
 //! History rewrites preserve change-id headers and store derived ids when missing.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

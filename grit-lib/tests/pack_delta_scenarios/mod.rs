@@ -2,7 +2,8 @@
 //!
 //! Several test binaries include this module and each uses only part of it.
 
-#![allow(dead_code)]
+use grit_lib::objects::ObjectError;
+#[allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -207,14 +208,14 @@ pub fn read_blob(odb: &Odb, hex: &str) -> Result<grit_lib::objects::Object, Erro
 
 pub fn expect_corrupt_object(err: Error) {
     assert!(
-        matches!(err, Error::CorruptObject(_)),
+        matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
         "expected CorruptObject, got {err:?}"
     );
 }
 
 pub fn expect_delta_chain_limit(err: Error) {
     assert!(
-        matches!(err, Error::DeltaChainTooDeep { .. }),
+        matches!(err, Error::Object(ObjectError::DeltaChainTooDeep { .. })),
         "expected DeltaChainTooDeep, got {err:?}"
     );
 }

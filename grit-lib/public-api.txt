@@ -5333,26 +5333,11 @@ pub grit_lib::error::Error::Cancelled
 pub grit_lib::error::Error::CheckoutRollbackIncomplete
 pub grit_lib::error::Error::CheckoutRollbackIncomplete::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::error::Error::CheckoutRollbackIncomplete::unrestored: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::error::Error::CommitGraphParentMissing
-pub grit_lib::error::Error::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::CommitPathsRequired
 pub grit_lib::error::Error::Config(grit_lib::error::ConfigError)
-#[non_exhaustive] pub grit_lib::error::Error::CorruptLooseObject
-pub grit_lib::error::Error::CorruptLooseObject::oid: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::CorruptLooseObject::path: std::path::PathBuf
-pub grit_lib::error::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::Error>
-pub grit_lib::error::Error::CorruptObject(alloc::string::String)
-#[non_exhaustive] pub grit_lib::error::Error::CorruptPackedObject
-pub grit_lib::error::Error::CorruptPackedObject::offset: u64
-pub grit_lib::error::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::CorruptPackedObject::pack: std::path::PathBuf
-pub grit_lib::error::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::error::Error::CorruptStash(&'static str)
 pub grit_lib::error::Error::CredentialsUnavailable
 pub grit_lib::error::Error::CredentialsUnavailable::helpers: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::error::Error::DeltaChainTooDeep
-pub grit_lib::error::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::error::Error::DetachedHead
 pub grit_lib::error::Error::DirtyWorktree
 pub grit_lib::error::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
@@ -5373,8 +5358,6 @@ pub grit_lib::error::Error::GitDirPathIo
 pub grit_lib::error::Error::GitDirPathIo::operation: grit_lib::error::GitDirPathOperation
 pub grit_lib::error::Error::GitDirPathIo::path: alloc::string::String
 pub grit_lib::error::Error::GitDirPathIo::source: core::io::error::Error
-pub grit_lib::error::Error::HashCollision
-pub grit_lib::error::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::error::Error::Hook(grit_lib::command_runner::hooks::HookError)
 pub grit_lib::error::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
@@ -5395,10 +5378,6 @@ pub grit_lib::error::Error::InvalidAttrPathspec::spec: alloc::string::String
 pub grit_lib::error::Error::InvalidHead
 pub grit_lib::error::Error::InvalidIdentity(grit_lib::ident::CommitIdentityError)
 pub grit_lib::error::Error::InvalidNotesRef(alloc::string::String)
-pub grit_lib::error::Error::InvalidObject
-pub grit_lib::error::Error::InvalidObject::check: grit_lib::maintenance::fsck::FsckError
-pub grit_lib::error::Error::InvalidObject::kind: grit_lib::objects::ObjectKind
-pub grit_lib::error::Error::InvalidObjectId(alloc::string::String)
 pub grit_lib::error::Error::InvalidPath(alloc::string::String)
 pub grit_lib::error::Error::InvalidPathComponent
 pub grit_lib::error::Error::InvalidPathComponent::path: alloc::string::String
@@ -5406,24 +5385,13 @@ pub grit_lib::error::Error::InvalidPathComponent::reason: grit_lib::path_validat
 pub grit_lib::error::Error::InvalidRef(alloc::string::String)
 pub grit_lib::error::Error::InvalidRefStorageFormat
 pub grit_lib::error::Error::InvalidRefStorageFormat::value: alloc::string::String
-pub grit_lib::error::Error::InvalidSignature(grit_lib::ident::SignatureError)
-pub grit_lib::error::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::error::Error::Io(core::io::error::Error)
 pub grit_lib::error::Error::LocalUploadPack(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
 pub grit_lib::error::Error::LocalUploadPackPanicked
 pub grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError)
-pub grit_lib::error::Error::LooseHashMismatch
-pub grit_lib::error::Error::LooseHashMismatch::path: alloc::string::String
-pub grit_lib::error::Error::LooseHashMismatch::real_oid: alloc::string::String
-pub grit_lib::error::Error::LooseObjectWrite
-pub grit_lib::error::Error::LooseObjectWrite::path: alloc::string::String
-pub grit_lib::error::Error::LooseObjectWrite::source: core::io::error::Error
-pub grit_lib::error::Error::MaintenanceRunning
-pub grit_lib::error::Error::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
 pub grit_lib::error::Error::MergeCommit
 pub grit_lib::error::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::Message(alloc::string::String)
-pub grit_lib::error::Error::Midx(grit_lib::prelude::MidxError)
 pub grit_lib::error::Error::MoveBadSource
 pub grit_lib::error::Error::MoveBadSource::destination: alloc::string::String
 pub grit_lib::error::Error::MoveBadSource::src: alloc::string::String
@@ -5447,8 +5415,6 @@ pub grit_lib::error::Error::MoveNothingToMove::src: alloc::string::String
 pub grit_lib::error::Error::MoveSourceNotTracked
 pub grit_lib::error::Error::MoveSourceNotTracked::src: alloc::string::String
 pub grit_lib::error::Error::NoMergeInProgress
-pub grit_lib::error::Error::NoPromisorRemote
-pub grit_lib::error::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::error::Error::NoReplayInProgress
 pub grit_lib::error::Error::NotARepository(grit_lib::error::NotARepositoryReason)
 pub grit_lib::error::Error::NotFastForward
@@ -5473,26 +5439,7 @@ pub grit_lib::error::Error::NothingStagedToCommit::unstaged: usize
 pub grit_lib::error::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::error::Error::NothingToCommit
 pub grit_lib::error::Error::Object(grit_lib::objects::error::ObjectError)
-#[non_exhaustive] pub grit_lib::error::Error::ObjectFormatMismatch
-pub grit_lib::error::Error::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
-pub grit_lib::error::Error::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
-pub grit_lib::error::Error::ObjectHeaderTooLong
-pub grit_lib::error::Error::ObjectHeaderTooLong::oid: alloc::string::String
-pub grit_lib::error::Error::ObjectNotFound(alloc::string::String)
-pub grit_lib::error::Error::ObjectStreamTruncated
-pub grit_lib::error::Error::ObjectStreamTruncated::actual: u64
-pub grit_lib::error::Error::ObjectStreamTruncated::expected: u64
-pub grit_lib::error::Error::OdbObjectsDirMismatch
-pub grit_lib::error::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
-pub grit_lib::error::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
-pub grit_lib::error::Error::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::error::Error::OperationInProgress(grit_lib::state::InProgressOperation)
-pub grit_lib::error::Error::PackDeltaBaseNotWritten
-pub grit_lib::error::Error::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::PackDeltaBaseNotWritten::target: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::PackIndexChecksumMismatch
-pub grit_lib::error::Error::PackIndexChecksumMismatch::mismatch: grit_lib::hash::TrailerMismatch
-pub grit_lib::error::Error::PackIndexChecksumMismatch::path: std::path::PathBuf
 pub grit_lib::error::Error::PackedRefsUnexpectedLine
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -5507,12 +5454,6 @@ pub grit_lib::error::Error::PathspecIgnored
 pub grit_lib::error::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecNoMatch
 pub grit_lib::error::Error::PathspecNoMatch::spec: alloc::string::String
-pub grit_lib::error::Error::PreciousObjectsRepository
-pub grit_lib::error::Error::PreciousObjectsRepository::operation: &'static str
-pub grit_lib::error::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
-pub grit_lib::error::Error::PromisorFetchFailed
-pub grit_lib::error::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
-pub grit_lib::error::Error::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::PushAtomicUnsupported
 pub grit_lib::error::Error::PushOptionsUnsupported
 pub grit_lib::error::Error::ReceivedPackTempMissing
@@ -5577,32 +5518,12 @@ pub grit_lib::error::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::error::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
 pub grit_lib::error::Error::Submodule(grit_lib::error::SubmoduleError)
 pub grit_lib::error::Error::Tag(grit_lib::porcelain::tag::TagError)
-pub grit_lib::error::Error::TagVerifyDuplicateTreeSha256Header
-pub grit_lib::error::Error::TagVerifyMissingObjectHeader
-pub grit_lib::error::Error::TagVerifyNotTag
-pub grit_lib::error::Error::TagVerifyNotTag::found: grit_lib::objects::ObjectKind
-pub grit_lib::error::Error::TagVerifyNotTag::oid: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::TreeSha256Claim(grit_lib::tree_sha256::TreeSha256ClaimError)
-pub grit_lib::error::Error::TreeSha256InvalidHex
-pub grit_lib::error::Error::TreeSha256InvalidRevision
-pub grit_lib::error::Error::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
-pub grit_lib::error::Error::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
-pub grit_lib::error::Error::TreeSha256RequiresSigning
 pub grit_lib::error::Error::UnbornHead
-pub grit_lib::error::Error::UnexpectedObjectKind
-pub grit_lib::error::Error::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
-pub grit_lib::error::Error::UnexpectedObjectKind::expected: grit_lib::objects::ObjectKind
-pub grit_lib::error::Error::UnexpectedObjectKind::oid: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::Error::UnmergedConflictMarkers
 pub grit_lib::error::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::UnrelatedHistories
 pub grit_lib::error::Error::UnrelatedHistories::ours: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
-pub grit_lib::error::Error::UnresolvedDeltas
-pub grit_lib::error::Error::UnresolvedDeltas::count: u64
-pub grit_lib::error::Error::UnsupportedObjectStore
-pub grit_lib::error::Error::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::error::Error::UnsupportedRepositoryFormatVersion(u32)
 pub grit_lib::error::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::error::Error::WorktreeFileChanged
@@ -5615,7 +5536,6 @@ pub grit_lib::error::Error::WouldOverwrite
 pub grit_lib::error::Error::WouldOverwrite::message: alloc::string::String
 pub grit_lib::error::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::WouldOverwrite::reason: grit_lib::error::OverwriteReason
-pub grit_lib::error::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
 pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
@@ -5624,6 +5544,7 @@ pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
 pub fn grit_lib::error::Error::is_damaged_object(&self) -> bool
 pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::is_object_not_found(&self) -> bool
+pub fn grit_lib::error::Error::is_object_read_wrap_source(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
@@ -5708,6 +5629,8 @@ impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::erro
 pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::bitmap::BitmapError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::bitmap::BitmapError) -> Self
 impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch::BranchError> for grit_lib::error::Error
@@ -8627,6 +8550,8 @@ pub fn grit_lib::objects::bitmap::BitmapError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::objects::bitmap::BitmapError
 impl core::cmp::PartialEq for grit_lib::objects::bitmap::BitmapError
 pub fn grit_lib::objects::bitmap::BitmapError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::objects::bitmap::BitmapError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::bitmap::BitmapError) -> Self
 impl core::convert::From<grit_lib::objects::bitmap::BitmapError> for grit_lib::objects::bitmap::BitmapWalkError
 pub fn grit_lib::objects::bitmap::BitmapWalkError::from(grit_lib::objects::bitmap::BitmapError) -> Self
 impl core::error::Error for grit_lib::objects::bitmap::BitmapError
@@ -8992,6 +8917,7 @@ impl grit_lib::objects::error::ObjectError
 pub fn grit_lib::objects::error::ObjectError::corrupt_object(core::option::Option<grit_lib::objects::ObjectId>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::objects::error::ObjectError::from_umbrella(grit_lib::error::Error) -> Self
 pub fn grit_lib::objects::error::ObjectError::is_damaged_object(&self) -> bool
+pub fn grit_lib::objects::error::ObjectError::is_object_read_wrap_source(&self) -> bool
 pub fn grit_lib::objects::error::ObjectError::kind_name(&self) -> &'static str
 pub fn grit_lib::objects::error::ObjectError::object_not_found(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::objects::error::ObjectError::wrap_loose_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, grit_lib::objects::error::ObjectError) -> grit_lib::objects::error::ObjectError
@@ -10721,6 +10647,7 @@ impl grit_lib::objects::error::ObjectError
 pub fn grit_lib::objects::error::ObjectError::corrupt_object(core::option::Option<grit_lib::objects::ObjectId>, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::objects::error::ObjectError::from_umbrella(grit_lib::error::Error) -> Self
 pub fn grit_lib::objects::error::ObjectError::is_damaged_object(&self) -> bool
+pub fn grit_lib::objects::error::ObjectError::is_object_read_wrap_source(&self) -> bool
 pub fn grit_lib::objects::error::ObjectError::kind_name(&self) -> &'static str
 pub fn grit_lib::objects::error::ObjectError::object_not_found(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::objects::error::ObjectError::wrap_loose_read_failure(grit_lib::objects::ObjectId, std::path::PathBuf, grit_lib::objects::error::ObjectError) -> grit_lib::objects::error::ObjectError
@@ -14657,26 +14584,11 @@ pub grit_lib::prelude::Error::Cancelled
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::prelude::Error::CheckoutRollbackIncomplete::unrestored: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::prelude::Error::CommitGraphParentMissing
-pub grit_lib::prelude::Error::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::CommitPathsRequired
 pub grit_lib::prelude::Error::Config(grit_lib::error::ConfigError)
-#[non_exhaustive] pub grit_lib::prelude::Error::CorruptLooseObject
-pub grit_lib::prelude::Error::CorruptLooseObject::oid: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::CorruptLooseObject::path: std::path::PathBuf
-pub grit_lib::prelude::Error::CorruptLooseObject::source: alloc::boxed::Box<grit_lib::error::Error>
-pub grit_lib::prelude::Error::CorruptObject(alloc::string::String)
-#[non_exhaustive] pub grit_lib::prelude::Error::CorruptPackedObject
-pub grit_lib::prelude::Error::CorruptPackedObject::offset: u64
-pub grit_lib::prelude::Error::CorruptPackedObject::oid: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::CorruptPackedObject::pack: std::path::PathBuf
-pub grit_lib::prelude::Error::CorruptPackedObject::source: alloc::boxed::Box<grit_lib::error::Error>
 pub grit_lib::prelude::Error::CorruptStash(&'static str)
 pub grit_lib::prelude::Error::CredentialsUnavailable
 pub grit_lib::prelude::Error::CredentialsUnavailable::helpers: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::prelude::Error::DeltaChainTooDeep
-pub grit_lib::prelude::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::prelude::Error::DetachedHead
 pub grit_lib::prelude::Error::DirtyWorktree
 pub grit_lib::prelude::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
@@ -14697,8 +14609,6 @@ pub grit_lib::prelude::Error::GitDirPathIo
 pub grit_lib::prelude::Error::GitDirPathIo::operation: grit_lib::error::GitDirPathOperation
 pub grit_lib::prelude::Error::GitDirPathIo::path: alloc::string::String
 pub grit_lib::prelude::Error::GitDirPathIo::source: core::io::error::Error
-pub grit_lib::prelude::Error::HashCollision
-pub grit_lib::prelude::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::prelude::Error::Hook(grit_lib::command_runner::hooks::HookError)
 pub grit_lib::prelude::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
@@ -14719,10 +14629,6 @@ pub grit_lib::prelude::Error::InvalidAttrPathspec::spec: alloc::string::String
 pub grit_lib::prelude::Error::InvalidHead
 pub grit_lib::prelude::Error::InvalidIdentity(grit_lib::ident::CommitIdentityError)
 pub grit_lib::prelude::Error::InvalidNotesRef(alloc::string::String)
-pub grit_lib::prelude::Error::InvalidObject
-pub grit_lib::prelude::Error::InvalidObject::check: grit_lib::maintenance::fsck::FsckError
-pub grit_lib::prelude::Error::InvalidObject::kind: grit_lib::objects::ObjectKind
-pub grit_lib::prelude::Error::InvalidObjectId(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidPath(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidPathComponent
 pub grit_lib::prelude::Error::InvalidPathComponent::path: alloc::string::String
@@ -14730,24 +14636,13 @@ pub grit_lib::prelude::Error::InvalidPathComponent::reason: grit_lib::path_valid
 pub grit_lib::prelude::Error::InvalidRef(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidRefStorageFormat
 pub grit_lib::prelude::Error::InvalidRefStorageFormat::value: alloc::string::String
-pub grit_lib::prelude::Error::InvalidSignature(grit_lib::ident::SignatureError)
-pub grit_lib::prelude::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::prelude::Error::Io(core::io::error::Error)
 pub grit_lib::prelude::Error::LocalUploadPack(alloc::boxed::Box<grit_lib::remote::serve::ServeError>)
 pub grit_lib::prelude::Error::LocalUploadPackPanicked
 pub grit_lib::prelude::Error::LockHeld(grit_lib::error::LockHeldError)
-pub grit_lib::prelude::Error::LooseHashMismatch
-pub grit_lib::prelude::Error::LooseHashMismatch::path: alloc::string::String
-pub grit_lib::prelude::Error::LooseHashMismatch::real_oid: alloc::string::String
-pub grit_lib::prelude::Error::LooseObjectWrite
-pub grit_lib::prelude::Error::LooseObjectWrite::path: alloc::string::String
-pub grit_lib::prelude::Error::LooseObjectWrite::source: core::io::error::Error
-pub grit_lib::prelude::Error::MaintenanceRunning
-pub grit_lib::prelude::Error::MaintenanceRunning::holder: grit_lib::maintenance::GcLockHolder
 pub grit_lib::prelude::Error::MergeCommit
 pub grit_lib::prelude::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::Message(alloc::string::String)
-pub grit_lib::prelude::Error::Midx(grit_lib::prelude::MidxError)
 pub grit_lib::prelude::Error::MoveBadSource
 pub grit_lib::prelude::Error::MoveBadSource::destination: alloc::string::String
 pub grit_lib::prelude::Error::MoveBadSource::src: alloc::string::String
@@ -14771,8 +14666,6 @@ pub grit_lib::prelude::Error::MoveNothingToMove::src: alloc::string::String
 pub grit_lib::prelude::Error::MoveSourceNotTracked
 pub grit_lib::prelude::Error::MoveSourceNotTracked::src: alloc::string::String
 pub grit_lib::prelude::Error::NoMergeInProgress
-pub grit_lib::prelude::Error::NoPromisorRemote
-pub grit_lib::prelude::Error::NoPromisorRemote::operation: &'static str
 pub grit_lib::prelude::Error::NoReplayInProgress
 pub grit_lib::prelude::Error::NotARepository(grit_lib::error::NotARepositoryReason)
 pub grit_lib::prelude::Error::NotFastForward
@@ -14797,26 +14690,7 @@ pub grit_lib::prelude::Error::NothingStagedToCommit::unstaged: usize
 pub grit_lib::prelude::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::prelude::Error::NothingToCommit
 pub grit_lib::prelude::Error::Object(grit_lib::objects::error::ObjectError)
-#[non_exhaustive] pub grit_lib::prelude::Error::ObjectFormatMismatch
-pub grit_lib::prelude::Error::ObjectFormatMismatch::repository: grit_lib::objects::HashAlgo
-pub grit_lib::prelude::Error::ObjectFormatMismatch::store: grit_lib::objects::HashAlgo
-pub grit_lib::prelude::Error::ObjectHeaderTooLong
-pub grit_lib::prelude::Error::ObjectHeaderTooLong::oid: alloc::string::String
-pub grit_lib::prelude::Error::ObjectNotFound(alloc::string::String)
-pub grit_lib::prelude::Error::ObjectStreamTruncated
-pub grit_lib::prelude::Error::ObjectStreamTruncated::actual: u64
-pub grit_lib::prelude::Error::ObjectStreamTruncated::expected: u64
-pub grit_lib::prelude::Error::OdbObjectsDirMismatch
-pub grit_lib::prelude::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
-pub grit_lib::prelude::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
-pub grit_lib::prelude::Error::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::prelude::Error::OperationInProgress(grit_lib::state::InProgressOperation)
-pub grit_lib::prelude::Error::PackDeltaBaseNotWritten
-pub grit_lib::prelude::Error::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::PackDeltaBaseNotWritten::target: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::PackIndexChecksumMismatch
-pub grit_lib::prelude::Error::PackIndexChecksumMismatch::mismatch: grit_lib::hash::TrailerMismatch
-pub grit_lib::prelude::Error::PackIndexChecksumMismatch::path: std::path::PathBuf
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -14831,12 +14705,6 @@ pub grit_lib::prelude::Error::PathspecIgnored
 pub grit_lib::prelude::Error::PathspecIgnored::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecNoMatch
 pub grit_lib::prelude::Error::PathspecNoMatch::spec: alloc::string::String
-pub grit_lib::prelude::Error::PreciousObjectsRepository
-pub grit_lib::prelude::Error::PreciousObjectsRepository::operation: &'static str
-pub grit_lib::prelude::Error::PromisedObjectMissing(grit_lib::objects::ObjectId)
-pub grit_lib::prelude::Error::PromisorFetchFailed
-pub grit_lib::prelude::Error::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, grit_lib::error::Error)>
-pub grit_lib::prelude::Error::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::PushAtomicUnsupported
 pub grit_lib::prelude::Error::PushOptionsUnsupported
 pub grit_lib::prelude::Error::ReceivedPackTempMissing
@@ -14901,32 +14769,12 @@ pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges
 pub grit_lib::prelude::Error::StashWouldOverwriteLocalChanges::paths: alloc::string::String
 pub grit_lib::prelude::Error::Submodule(grit_lib::error::SubmoduleError)
 pub grit_lib::prelude::Error::Tag(grit_lib::porcelain::tag::TagError)
-pub grit_lib::prelude::Error::TagVerifyDuplicateTreeSha256Header
-pub grit_lib::prelude::Error::TagVerifyMissingObjectHeader
-pub grit_lib::prelude::Error::TagVerifyNotTag
-pub grit_lib::prelude::Error::TagVerifyNotTag::found: grit_lib::objects::ObjectKind
-pub grit_lib::prelude::Error::TagVerifyNotTag::oid: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::TreeSha256Claim(grit_lib::tree_sha256::TreeSha256ClaimError)
-pub grit_lib::prelude::Error::TreeSha256InvalidHex
-pub grit_lib::prelude::Error::TreeSha256InvalidRevision
-pub grit_lib::prelude::Error::TreeSha256InvalidRevision::found: grit_lib::objects::ObjectKind
-pub grit_lib::prelude::Error::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
-pub grit_lib::prelude::Error::TreeSha256RequiresSigning
 pub grit_lib::prelude::Error::UnbornHead
-pub grit_lib::prelude::Error::UnexpectedObjectKind
-pub grit_lib::prelude::Error::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
-pub grit_lib::prelude::Error::UnexpectedObjectKind::expected: grit_lib::objects::ObjectKind
-pub grit_lib::prelude::Error::UnexpectedObjectKind::oid: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::prelude::Error::UnmergedConflictMarkers
 pub grit_lib::prelude::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::UnrelatedHistories
 pub grit_lib::prelude::Error::UnrelatedHistories::ours: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::UnrelatedHistories::theirs: grit_lib::objects::ObjectId
-pub grit_lib::prelude::Error::UnresolvedDeltas
-pub grit_lib::prelude::Error::UnresolvedDeltas::count: u64
-pub grit_lib::prelude::Error::UnsupportedObjectStore
-pub grit_lib::prelude::Error::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::prelude::Error::UnsupportedRepositoryFormatVersion(u32)
 pub grit_lib::prelude::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::prelude::Error::WorktreeFileChanged
@@ -14939,7 +14787,6 @@ pub grit_lib::prelude::Error::WouldOverwrite
 pub grit_lib::prelude::Error::WouldOverwrite::message: alloc::string::String
 pub grit_lib::prelude::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::WouldOverwrite::reason: grit_lib::error::OverwriteReason
-pub grit_lib::prelude::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
 pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
@@ -14948,6 +14795,7 @@ pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
 pub fn grit_lib::error::Error::is_damaged_object(&self) -> bool
 pub fn grit_lib::error::Error::is_git_dir_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::is_object_not_found(&self) -> bool
+pub fn grit_lib::error::Error::is_object_read_wrap_source(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::is_worktree_file_in_use(&self) -> bool
 pub fn grit_lib::error::Error::kind_name(&self) -> &'static str
@@ -15032,6 +14880,8 @@ impl core::convert::From<grit_lib::maintenance::OffloadError> for grit_lib::erro
 pub fn grit_lib::error::Error::from(grit_lib::maintenance::OffloadError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
+impl core::convert::From<grit_lib::objects::bitmap::BitmapError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::objects::bitmap::BitmapError) -> Self
 impl core::convert::From<grit_lib::objects::error::ObjectError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::error::ObjectError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch::BranchError> for grit_lib::error::Error
@@ -18485,7 +18335,7 @@ pub grit_lib::remote::clone::CloneError::Library(grit_lib::error::Error)
 pub grit_lib::remote::clone::CloneError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::remote::clone::CloneError::RemoteRefNotFound(alloc::string::String)
 impl grit_lib::remote::clone::CloneError
-pub fn grit_lib::remote::clone::CloneError::failed_promisor_remotes(&self) -> &[(alloc::string::String, grit_lib::error::Error)]
+pub fn grit_lib::remote::clone::CloneError::failed_promisor_remotes(&self) -> &[(alloc::string::String, alloc::boxed::Box<grit_lib::objects::error::ObjectError>)]
 pub fn grit_lib::remote::clone::CloneError::is_cancelled(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_ref_not_found(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_unreadable(&self) -> bool

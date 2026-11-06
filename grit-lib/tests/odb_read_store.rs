@@ -2,6 +2,7 @@
 //! forwarding [`ObjectStore`] impls for `Arc<T>`, `Box<T>` and `&T` that let decorators wrap
 //! a shared store.
 
+use grit_lib::objects::ObjectError;
 use std::fs;
 use std::io::Read;
 use std::ops::ControlFlow;
@@ -126,7 +127,7 @@ fn read_store_covers_primary_read_sources_and_alternates() {
     assert!(!sources.contains(&extra_oid).expect("read source"));
     assert!(matches!(
         odb.primary(),
-        Err(Error::UnsupportedObjectStore {
+        Err(Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "primary"
         })
     ));

@@ -1,5 +1,6 @@
 //! Notes round-trips and fanout updates checked against system `git`.
 
+use grit_lib::objects::ObjectError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::notes::{read_notes_tree, resolve_configured_notes_ref, NotesRef};
@@ -391,7 +392,7 @@ fn list_with_bodies_reports_missing_note_blob() {
         .list_with_bodies(&NotesRef::commits(), None)
         .expect_err("a missing note blob must not read as an empty note");
     assert!(
-        matches!(err, Error::ObjectNotFound(_)),
+        matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })),
         "expected ObjectNotFound for the note blob, got {err:?}"
     );
 }

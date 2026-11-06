@@ -1,5 +1,6 @@
 //! Repack/prune maintenance API round-trips against system `git`.
 
+use grit_lib::objects::ObjectError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
@@ -463,7 +464,7 @@ fn custom_backend_unsupported_error() {
     let err = repack(&custom, &RepackOptions::default()).expect_err("custom backend");
     assert!(matches!(
         err,
-        Error::UnsupportedObjectStore {
+        Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "repack"
         }
     ));

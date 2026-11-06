@@ -115,7 +115,7 @@ impl MidxObjects {
             prepared_midx_chain_strict(store.objects_dir())
         }) {
             Ok(chain) => Ok(chain),
-            Err(Error::Midx(_)) => Ok(None),
+            Err(Error::Object(ObjectError::Midx(_))) => Ok(None),
             Err(err) => Err(ObjectError::from(err)),
         }
     }
@@ -167,10 +167,7 @@ impl ObjectStore for MidxObjects {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            ObjectError::from(Error::CorruptObject(format!(
-                "object size overflow for {}",
-                oid.to_hex()
-            )))
+            ObjectError::corrupt_object(None, format!("object size overflow for {}", oid.to_hex()))
         })?;
         Ok(Some(ObjectStream {
             kind: info.kind,
@@ -226,7 +223,9 @@ impl ObjectStore for MidxObjects {
 fn classify_midx_status(objects_dir: &std::path::Path) -> ObjectResult<MidxObjectsStatus> {
     match prepared_midx_chain_strict(objects_dir) {
         Ok(Some(_)) => Ok(MidxObjectsStatus::Active),
-        Ok(None) | Err(Error::Midx(_)) | Err(Error::CorruptObject(_)) => {
+        Ok(None)
+        | Err(Error::Object(ObjectError::Midx(_)))
+        | Err(Error::Object(ObjectError::CorruptObject { .. })) => {
             Ok(MidxObjectsStatus::Unusable)
         }
         Err(err) => Err(ObjectError::from(err)),

@@ -1,6 +1,6 @@
 //! `sparse:oid` partial-clone filters must match system `git rev-list --objects --filter`.
 
-#![allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used)]
 
 use std::collections::HashSet;
 use std::io::Write;

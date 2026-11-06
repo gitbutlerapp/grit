@@ -1,5 +1,6 @@
 //! Switch branches or detach `HEAD` at a commit, updating the working tree when needed.
 
+use crate::objects::ObjectError;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::branch_tracking::write_branch_upstream_config;
@@ -411,8 +412,8 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 
 fn map_revision_spec_error(spec: &str, err: Error) -> Error {
     match err {
-        Error::ObjectNotFound(_)
-        | Error::RevParse(
+        e if e.is_object_not_found() => Error::RevisionNotFound(spec.to_owned()),
+        Error::RevParse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }

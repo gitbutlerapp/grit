@@ -1,6 +1,6 @@
 //! Basic `refs_fsck` integration for files-backend repositories.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
 

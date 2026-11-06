@@ -1,6 +1,7 @@
 //! `grit fetch` — download refs and objects from a remote (default: the current
 //! branch's remote, else `origin`).
 
+use grit_lib::objects::ObjectError;
 use crate::commands::fetch_args::FetchArgs;
 use crate::output::OutputMode;
 use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
@@ -597,8 +598,8 @@ mod map_remote_error_tests {
 
     #[test]
     fn library_object_not_found_keeps_remote_display() {
-        let err = map_remote_error(RemoteError::Library(LibError::ObjectNotFound(
-            "deadbeef".into(),
+        let err = map_remote_error(RemoteError::Library(LibError::Object(
+            ObjectError::object_not_found("deadbeef"),
         )));
         assert!(err.downcast_ref::<LibError>().is_none());
         assert_eq!(
@@ -612,7 +613,9 @@ mod map_remote_error_tests {
     #[test]
     fn library_hash_collision_stays_typed_for_json() {
         let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
-        let err = map_remote_error(RemoteError::Library(LibError::HashCollision { oid }));
+        let err = map_remote_error(RemoteError::Library(LibError::Object(
+            ObjectError::HashCollision { oid },
+        )));
         let payload = structured_json_payload(&err).expect("structured payload");
         assert_eq!(payload.kind, crate::error_kind::ErrorKind::HashCollision);
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));

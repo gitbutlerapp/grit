@@ -1,5 +1,6 @@
 //! Exercise index.rs APIs against git-produced repositories (coverage + compatibility).
 
+use grit_lib::objects::ObjectError;
 use crate::support;
 
 use std::fs;
@@ -124,7 +125,7 @@ fn overlay_tree_on_index_peels_nested_tags_and_rejects_blobs() {
     );
     assert!(matches!(
         overlaid("blob-tag"),
-        Err(grit_lib::error::Error::ObjectNotFound(_))
+        Err(grit_lib::error::Error::Object(ObjectError::object_not_found(_)))
     ));
 }
 
@@ -171,7 +172,10 @@ fn index_lock_held_reports_lock_path() {
     let lock_path = tmp.path().join("index.lock");
     fs::write(&lock_path, b"").expect("touch lock");
     match IndexLock::acquire(&path, None) {
-        Err(grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError { path, holder })) => {
+        Err(grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError {
+            path,
+            holder,
+        })) => {
             assert_eq!(path, lock_path);
             assert_eq!(holder, None);
         }

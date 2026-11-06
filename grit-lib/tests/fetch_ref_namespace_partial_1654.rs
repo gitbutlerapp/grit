@@ -1,7 +1,7 @@
 //! Regression for GitHub issue #1654: fetch must apply non-conflicting tracking
 //! ref updates when a stale nested ref blocks another, and hint at `--prune`.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
 use std::path::Path;

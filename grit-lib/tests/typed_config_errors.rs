@@ -131,7 +131,7 @@ fn entries_with_prefix_rejects_empty_and_malformed_prefixes() {
     let set = ConfigSet::new();
     for prefix in ["", "   ", ".", "bad_sec.", "-x_y"] {
         match set.entries_with_prefix(prefix) {
-            Err(Error::Config(ConfigError::InvalidListPrefix { prefix: got })) => {
+            Err(Error::Config(ConfigError::InvalidListPrefix { prefix: got }) => {
                 assert_eq!(got, prefix);
             }
             other => panic!("{prefix:?}: expected InvalidListPrefix, got {other:?}"),

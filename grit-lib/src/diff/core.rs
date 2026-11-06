@@ -22,6 +22,7 @@
 //! numstat.
 
 use crate::git_path::CanonicalizeExt;
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::fs;
 #[cfg(unix)]
@@ -3342,7 +3343,7 @@ pub(crate) fn diff_trees_with_renames_for_pathspecs_and_policy_result(
 /// errors when it is missing or malformed.
 pub fn tree_oid_of_commit(odb: &Odb, commit_oid: &ObjectId) -> Result<ObjectId> {
     odb.commit_tree(commit_oid).map_err(|err| match err {
-        Error::UnexpectedObjectKind { .. } => {
+        Error::Object(ObjectError::UnexpectedObjectKind { .. }) => {
             Error::InvalidRef(format!("invalid ref: {commit_oid} is not a commit"))
         }
         other => other,
@@ -10423,12 +10424,14 @@ fn read_new_side_bytes(
         return blob_bytes(odb, &entry.new_oid);
     }
     let path = entry.new_path.as_deref().ok_or_else(|| {
-        Error::ObjectNotFound("modified entry missing new_path for worktree read".into())
+        Error::Object(ObjectError::object_not_found(
+            "modified entry missing new_path for worktree read",
+        ))
     })?;
     let root = work_root.ok_or_else(|| {
-        Error::ObjectNotFound(format!(
-            "worktree bytes required for {} but no work_root was provided",
-            path
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("worktree bytes required for {path} but no work_root was provided"),
         ))
     })?;
     if let Some(wctx) = worktree {
@@ -10448,7 +10451,9 @@ fn worktree_side_differs_after_normalize(
     config: &ConfigSet,
 ) -> Result<bool> {
     let path = entry.new_path.as_deref().ok_or_else(|| {
-        Error::ObjectNotFound("modified entry missing new_path for worktree read".into())
+        Error::Object(ObjectError::object_not_found(
+            "modified entry missing new_path for worktree read",
+        ))
     })?;
     let raw = fs::read(work_root.join(path)).map_err(Error::Io)?;
     let canonical = read_new_side_bytes(odb, entry, Some(work_root), Some(worktree), config)?;
@@ -14296,7 +14301,10 @@ mod diff_index_to_tree_cache_tree_tests {
             .write(ObjectKind::Tree, b"100644 name-without-oid")
             .expect("tree");
         let err = diff_trees(&odb, Some(&good), Some(&corrupt), "").expect_err("corrupt");
-        assert!(matches!(err, Error::CorruptObject(_)), "{err:?}");
+        assert!(
+            matches!(err, Error::Object(ObjectError::CorruptObject { .. })),
+            "{err:?}"
+        );
     }
 }
 

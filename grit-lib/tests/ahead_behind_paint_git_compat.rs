@@ -1,7 +1,7 @@
 //! `TipComparison::compute` vs `git rev-list --left-right --count` on diverged,
 //! repeatedly merged, and clock-skewed histories.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fmt::Write as _;
 use std::io::Write as _;

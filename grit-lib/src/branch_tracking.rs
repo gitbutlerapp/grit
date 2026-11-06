@@ -1,6 +1,7 @@
 //! Comparison bases for a branch (its upstream or the repository's target branch) and
 //! remote-tracking ref updates after a push.
 
+use crate::objects::ObjectError;
 use std::path::Path;
 
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
@@ -356,7 +357,7 @@ fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
     }
     match peel_to_commit_for_merge_base(repo, oid) {
         Ok(commit) => Ok(commit),
-        Err(crate::error::Error::ObjectNotFound(_)) => Ok(oid),
+        Err(crate::error::Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(oid),
         Err(err) => Err(err),
     }
 }

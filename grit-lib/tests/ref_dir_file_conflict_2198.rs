@@ -3,7 +3,7 @@
 //! loose or packed, for `branch`, `switch -c` and `fetch` alike. System `git` refuses the same
 //! creates.
 
-#![allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
 use std::path::{Path, PathBuf};

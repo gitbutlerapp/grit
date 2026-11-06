@@ -18,6 +18,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 use thiserror::Error;
 
 use crate::diagnostics::Warning;
@@ -258,7 +259,7 @@ impl Repository {
     pub fn resolve(&self, spec: &str) -> std::result::Result<ResolvedObject, ResolveError> {
         let oid = match resolve_revision(self, spec) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 });
@@ -332,7 +333,7 @@ impl Repository {
 
         let oid = match resolve_revision_for_verify(self, spec) {
             Ok(o) => o,
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 });
@@ -797,7 +798,7 @@ mod tests {
         crate::refs::write_ref(repo.git_dir(), "refs/tags/broken", &broken).expect("tag ref");
         assert!(matches!(
             repo.revision_label("broken"),
-            Err(Error::CorruptObject(_))
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
         ));
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
         let dangling = crate::refs::store::RefTransaction::new()

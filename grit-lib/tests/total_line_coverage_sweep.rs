@@ -1,6 +1,6 @@
 //! Broad public-API sweeps outside the history core that still count toward `[total]`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;

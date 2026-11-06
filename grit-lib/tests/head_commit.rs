@@ -1,7 +1,7 @@
 //! [`Repository::head_commit`] and [`Repository::head_tree`] on repositories written by the
 //! system `git`, on an injected ref store, and through the history engine that relies on them.
 
-#![allow(clippy::expect_used)]
+#[allow(clippy::expect_used)]
 
 use std::fs;
 use std::path::Path;

@@ -16,6 +16,7 @@
 //! Scope note: only the local / on-disk path is in scope here. `git://`,
 //! `http(s)`, and `ssh` remotes are out of scope and left as TODOs.
 
+use crate::objects::ObjectError;
 use std::cell::OnceCell;
 use std::collections::{HashSet, VecDeque};
 use std::path::Path;
@@ -234,7 +235,7 @@ impl<'a> LazyReachable<'a> {
             return Ok(());
         }
         match require_objects_exist(self.odb, self.roots, &HashSet::new()) {
-            Err(Error::ObjectNotFound(_)) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
                 require_objects_exist(self.odb, self.roots, self.promised()?)
             }
             result => result,
@@ -291,7 +292,7 @@ fn reachable_closure(
         }
         let obj = odb
             .try_read_once(&oid)?
-            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
+            .ok_or_else(|| Error::Object(ObjectError::object_not_found(oid.to_hex())))?;
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
@@ -355,7 +356,7 @@ fn require_objects_exist(odb: &Odb, oids: &[ObjectId], promised: &HashSet<Object
         }
         let packed = indexes.iter().any(|idx| idx.find_position(oid).is_some());
         if !packed && !odb.contains(oid)? {
-            return Err(Error::ObjectNotFound(oid.to_hex()));
+            return Err(Error::Object(ObjectError::object_not_found(oid.to_hex())));
         }
     }
     Ok(())
@@ -866,7 +867,10 @@ mod prune_walk_tests {
             .expect("cached promises")
             .contains(&missing));
         let next = LazyReachable::new(repo.odb(), &roots, &shallow);
-        assert!(matches!(next.get(), Err(Error::ObjectNotFound(_))));
+        assert!(matches!(
+            next.get(),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))
+        ));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //! `wanted-refs` section for `want-ref`, and the `fetch=` capability line,
 //! each checked against the system `git upload-pack` answering the same request.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{Cursor, Write};
 use std::path::Path;

@@ -6,6 +6,7 @@
 //! after, so memory follows the delta chains being walked and the checks' compact
 //! results, not the uncompressed size of the pack.
 
+use crate::objects::ObjectError;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -77,10 +78,13 @@ where
             },
             Ok(actual) => PackFsckObjectOutcome::Failed {
                 oid,
-                err: Error::CorruptObject(format!(
-                    "packed object {} hashes to {}",
-                    oid.to_hex(),
-                    actual.to_hex()
+                err: Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "packed object {} hashes to {}",
+                        oid.to_hex(),
+                        actual.to_hex()
+                    ),
                 )),
             },
             Err(err) => PackFsckObjectOutcome::Failed { oid, err },
@@ -159,7 +163,10 @@ fn pending_delta(
     let base = match packed_type {
         PackedType::RefDelta => {
             let raw = pack_bytes.get(pos..pos + hash_bytes).ok_or_else(|| {
-                Error::CorruptObject(format!("truncated ref-delta base at offset {offset}"))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("truncated ref-delta base at offset {offset}"),
+                ))
             })?;
             pos += hash_bytes;
             DeltaBase::Oid(ObjectId::from_bytes(raw)?)
@@ -169,13 +176,17 @@ fn pending_delta(
             DeltaBase::Offset(base as usize)
         }
         PackedType::Commit | PackedType::Tree | PackedType::Blob | PackedType::Tag => {
-            return Err(Error::CorruptObject(format!(
-                "expected a delta at offset {offset}"
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("expected a delta at offset {offset}"),
             )));
         }
     };
     let uncompressed_size = usize::try_from(size).map_err(|_| {
-        Error::CorruptObject(format!("pack object size overflow at offset {offset}"))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            format!("pack object size overflow at offset {offset}"),
+        ))
     })?;
     let end = offset.saturating_add(record.size_in_pack as usize);
     Ok((
@@ -231,8 +242,12 @@ where
             }
             PackedType::OfsDelta | PackedType::RefDelta => {
                 let (delta, base) = pending_delta(&pack_bytes, record, hash_bytes)?;
-                let index = u32::try_from(pending.len())
-                    .map_err(|_| Error::CorruptObject("too many deltas in pack".to_owned()))?;
+                let index = u32::try_from(pending.len()).map_err(|_| {
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "too many deltas in pack".to_owned(),
+                    ))
+                })?;
                 children.push(base, index);
                 pending.push(delta);
                 delta_oids.push(oid);
@@ -266,9 +281,12 @@ where
             pending[index as usize].offset,
             PackFsckObjectOutcome::Failed {
                 oid,
-                err: Error::CorruptObject(format!(
-                    "delta base for {} could not be resolved during pack fsck",
-                    oid.to_hex()
+                err: Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!(
+                        "delta base for {} could not be resolved during pack fsck",
+                        oid.to_hex()
+                    ),
                 )),
             },
         ));

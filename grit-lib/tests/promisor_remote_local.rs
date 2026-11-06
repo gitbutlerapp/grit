@@ -1,7 +1,7 @@
 //! A partial clone of a local path that accepted a large-object promisor fetches the
 //! omitted blob from that LOP, all served in-process by grit's own upload-pack.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 use std::sync::Arc;

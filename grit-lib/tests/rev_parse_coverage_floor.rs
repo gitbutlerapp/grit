@@ -1,5 +1,6 @@
 //! Targeted hits for `rev_parse.rs` lines needed to satisfy the 85% file floor.
 
+use grit_lib::objects::ObjectError;
 use crate::support;
 
 use std::fs;
@@ -40,15 +41,15 @@ fn unknown_abbreviated_object_id_errors() {
     commit_file(wt, "f.txt", "x\n", "c");
     let repo = open_grit(wt);
     let err = resolve_revision_for_verify(&repo, "0000000").expect_err("missing abbrev");
-    assert!(matches!(err, Error::ObjectNotFound(_)));
+    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })));
     let err = resolve_revision_for_verify(&repo, "00000000").expect_err("missing abbrev8");
-    assert!(matches!(err, Error::ObjectNotFound(_)));
+    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })));
     let _ = expand_at_minus_to_branch_name(&repo, "@{-0}");
     let _ = expand_at_minus_to_branch_name(&repo, "@{-99}");
     let _ = resolve_at_minus_to_oid(&repo, "@{-99}");
     let _ = resolve_revision(&repo, "HEAD");
     let err = resolve_revision_for_verify(&repo, "1234567").expect_err("7hex");
-    assert!(matches!(err, Error::ObjectNotFound(_)));
+    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })));
 }
 
 #[test]

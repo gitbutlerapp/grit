@@ -1,7 +1,7 @@
 //! Receive-pack hook cancellation on Windows (issue #2526).
 
 #![cfg(windows)]
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::process::Command;
 use std::thread;

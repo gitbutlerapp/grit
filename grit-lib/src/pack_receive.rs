@@ -4,7 +4,7 @@
 //! (channel 1). These helpers demux that stream without holding the full pack in
 //! a `Vec` when the caller writes to disk instead.
 
-#![allow(dead_code)]
+use crate::objects::ObjectError;
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
@@ -695,9 +695,12 @@ fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
             if attempt + 1 < MAX_ATTEMPTS {
                 continue;
             }
-            return Err(Error::CorruptObject(format!(
-                "received pack size mismatch: expected {expected_len}, got {}",
-                meta.len()
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!(
+                    "received pack size mismatch: expected {expected_len}, got {}",
+                    meta.len()
+                ),
             )));
         }
         let mut header = [0u8; 4];
@@ -712,9 +715,10 @@ fn assert_received_pack_durable(path: &Path, expected_len: u64) -> Result<()> {
             Err(e) => return Err(Error::Io(e)),
         }
         if &header != b"PACK" {
-            return Err(Error::CorruptObject(
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
                 "received data is not a pack stream".to_owned(),
-            ));
+            )));
         }
         return Ok(());
     }

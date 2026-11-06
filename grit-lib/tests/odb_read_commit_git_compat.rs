@@ -1,6 +1,7 @@
 //! `Odb::read_commit` / `Odb::commit_tree` (and the `Objects` forwards) agree with
 //! `git rev-parse` on commits written by system `git`, both loose and after `git gc` packs them.
 
+use grit_lib::objects::ObjectError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -76,7 +77,7 @@ fn assert_commits_match_git(root: &Path) {
             assert!(
                 matches!(
                     err,
-                    Error::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: kind }
+                    Error::Object(ObjectError::UnexpectedObjectKind { oid, expected: ObjectKind::Commit, actual: kind }
                         if oid == id && kind == actual
                 ),
                 "{rev}: {err:?}"

@@ -1,7 +1,7 @@
 //! Client side of the `promisor-remote` exchange, against grit's own `upload_pack` run
 //! in-process: what the fetch sends, what it accepts, and what it records.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{BufReader, Read, Write};
 use std::path::Path;

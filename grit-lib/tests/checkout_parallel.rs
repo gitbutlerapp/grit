@@ -1,5 +1,6 @@
 //! Serial vs parallel checkout must produce identical worktrees and index files.
 
+use grit_lib::objects::ObjectError;
 use filetime::FileTime;
 use grit_lib::command_runner::{CommandStdin, RecordedResponse, RecordingRunner};
 use grit_lib::config::environment::RepositoryOptions;
@@ -555,7 +556,7 @@ fn parallel_pool_error_rolls_back_every_job() {
     let err =
         checkout_tree_changes(&open_with_policy(root, 1, None), &changes).expect_err("serial fail");
     assert!(
-        matches!(&err, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        matches!(&err, grit_lib::error::Error::Object(ObjectError::ObjectNotFound { spec: oid, .. }) if *oid == missing.to_hex()),
         "serial: {err:?}"
     );
     for i in 0..N {
@@ -568,7 +569,7 @@ fn parallel_pool_error_rolls_back_every_job() {
     let err_parallel = checkout_tree_changes(&open_with_forced_parallel_pool(root, 4), &changes)
         .expect_err("parallel fail");
     assert!(
-        matches!(&err_parallel, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        matches!(&err_parallel, grit_lib::error::Error::Object(ObjectError::ObjectNotFound { spec: oid, .. }) if *oid == missing.to_hex()),
         "parallel: {err_parallel:?}"
     );
     for i in 0..N {
@@ -622,7 +623,7 @@ fn missing_blob_error_rolls_back_earlier_write() {
     let err = checkout_tree_changes(&open_with_policy(root, 1, None), &changes)
         .expect_err("missing object must fail");
     assert!(
-        matches!(&err, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        matches!(&err, grit_lib::error::Error::Object(ObjectError::ObjectNotFound { spec: oid, .. }) if *oid == missing.to_hex()),
         "serial: {err:?}"
     );
     assert!(
@@ -633,7 +634,7 @@ fn missing_blob_error_rolls_back_earlier_write() {
     let err_parallel = checkout_tree_changes(&open_with_policy(root, 4, Some(0)), &changes)
         .expect_err("parallel path must fail the same way");
     assert!(
-        matches!(&err_parallel, grit_lib::error::Error::ObjectNotFound(oid) if *oid == missing.to_hex()),
+        matches!(&err_parallel, grit_lib::error::Error::Object(ObjectError::ObjectNotFound { spec: oid, .. }) if *oid == missing.to_hex()),
         "parallel: {err_parallel:?}"
     );
     assert!(

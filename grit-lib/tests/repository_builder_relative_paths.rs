@@ -2,6 +2,7 @@
 //!
 //! This binary holds a single test because it changes the process working directory.
 
+use grit_lib::objects::ObjectError;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -37,7 +38,10 @@ fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
         .odb_builder(OdbBuilder::files("elsewhere/objects"))
         .open(Path::new("repo/.git"), Some(Path::new("repo")));
     assert!(
-        matches!(mismatch, Err(Error::OdbObjectsDirMismatch { .. })),
+        matches!(
+            mismatch,
+            Err(Error::Object(ObjectError::OdbObjectsDirMismatch { .. }))
+        ),
         "{mismatch:?}"
     );
 
@@ -50,7 +54,10 @@ fn odb_builder_relative_objects_dir_matches_relative_git_dir() {
         )
         .open(Path::new("repo/.git"), Some(Path::new("repo")));
     assert!(
-        matches!(wrong_custom, Err(Error::OdbObjectsDirMismatch { .. })),
+        matches!(
+            wrong_custom,
+            Err(Error::Object(ObjectError::OdbObjectsDirMismatch { .. }))
+        ),
         "a custom primary must still name the repository's objects dir: {wrong_custom:?}"
     );
 

@@ -24,6 +24,7 @@
 //! # }
 //! ```
 
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -112,9 +113,9 @@ impl CommitFilter {
     pub(crate) fn matches(&self, repo: &Repository, oid: ObjectId) -> Result<bool> {
         let object = repo.odb().read(&oid)?;
         if object.kind != ObjectKind::Commit {
-            return Err(Error::CorruptObject(format!(
-                "expected commit object for {oid}, found {:?}",
-                object.kind
+            return Err(Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("expected commit object for {oid}, found {:?}", object.kind),
             )));
         }
         Ok(self.matches_bytes(&object.data))

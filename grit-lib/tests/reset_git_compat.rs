@@ -1,5 +1,6 @@
 //! Round-trip `grit reset` with system `git fsck` / `git status`.
 
+use grit_lib::objects::ObjectError;
 use crate::support;
 
 use std::path::Path;
@@ -514,7 +515,7 @@ fn append_reflog_rejects_malformed_identity() {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::InvalidSignature(_)),
+            matches!(err, Error::Object(ObjectError::InvalidSignature(_)))),
             "expected InvalidSignature for {bad:?}, got {err:?}"
         );
     }

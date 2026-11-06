@@ -7,6 +7,7 @@
 //!
 //! Single-commit callers should keep using [`crate::porcelain::replay::replay_commit`].
 
+use crate::objects::ObjectError;
 use crate::progress::{Cancel, ProgressSink};
 use std::fs;
 use std::num::NonZeroU32;
@@ -342,7 +343,9 @@ pub fn continue_replay_sequence(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<SequenceOutcome> {
-    identity.validate().map_err(Error::InvalidSignature)?;
+    identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let mut index = repo.load_index()?;
@@ -537,7 +540,9 @@ pub fn skip_replay_step(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<SequenceOutcome> {
-    identity.validate().map_err(Error::InvalidSignature)?;
+    identity
+        .validate()
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let (branch_ref, head_oid) = branch_head(repo)?;
@@ -1617,7 +1622,7 @@ fn write_sequencer_state(
     if rewrite_opts {
         let committer_sig = committer
             .parse::<crate::ident::Signature>()
-            .map_err(Error::InvalidSignature)?;
+            .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
         write_persisted_options(
             git_dir,
             &ReplaySequenceRequest {
@@ -2047,7 +2052,7 @@ fn hard_reset_replay_tip(
     let _ = branch_ref;
     let identity = "Grit <grit@local> 0 +0000"
         .parse()
-        .map_err(Error::InvalidSignature)?;
+        .map_err(|e| Error::Object(ObjectError::InvalidSignature(e)))?;
     reset_to_commit(
         repo,
         &ResetOptions::new(target, ResetMode::Hard, identity, "abort replay"),

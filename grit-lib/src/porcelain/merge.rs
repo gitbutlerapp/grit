@@ -24,6 +24,7 @@
 //! - [`resolve_merge_source`] — turn a merge argument (branch, tag, object id or any
 //!   revision expression) into the commit to merge.
 
+use crate::objects::ObjectError;
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -675,8 +676,8 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
     // A full-length hex id parses without an object lookup, so a missing object only shows up
     // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
     let not_found = |err: Error| match err {
-        Error::ObjectNotFound(_)
-        | Error::RevParse(
+        e if e.is_object_not_found() => Error::RevisionNotFound(spec.to_owned()),
+        Error::RevParse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
             | RevParseError::AmbiguousArgument { .. }
@@ -702,11 +703,11 @@ pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource
         }
     };
     if actual != ObjectKind::Commit {
-        return Err(Error::UnexpectedObjectKind {
+        return Err(Error::Object(ObjectError::UnexpectedObjectKind {
             oid: peeled,
             expected: ObjectKind::Commit,
             actual,
-        });
+        }));
     }
     Ok(MergeSource { oid: peeled, kind })
 }
