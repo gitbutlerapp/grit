@@ -767,6 +767,13 @@ pub fn run(
         });
         fetch_opts.limit = fetch_limit_plus_one(page_limit);
         fetch_opts.retain_commit_data = !display.graph;
+        fetch_opts.retained_commit_extent = if fetch_opts.retain_commit_data
+            && log_through_subject_retained_extent(display, &format, output_mode)
+        {
+            CommitExtent::ThroughSubject
+        } else {
+            CommitExtent::Whole
+        };
         let mut list_result = walk
             .rev_list_result(&token_refs, &fetch_opts)
             .context("could not list commits")?;
@@ -1118,6 +1125,17 @@ fn rows_need_commit_details(
     display.decorate
         || output_mode == OutputMode::Json
         || (format.any_format_flag() && !format.log_patch_text())
+}
+
+/// Use a through-subject read for listing when one-line human/Markdown output needs no extra fields.
+fn log_through_subject_retained_extent(
+    display: LogDisplayOptions,
+    format: &DiffFormatArgs,
+    output_mode: OutputMode,
+) -> bool {
+    display.oneline
+        && !rows_need_commit_details(display, format, output_mode)
+        && !display.line_counts
 }
 
 #[allow(clippy::too_many_arguments)]

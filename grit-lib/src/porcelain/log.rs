@@ -245,6 +245,18 @@ impl CommitReuse for OidHashMap<CommitData> {
     fn take_commit(&mut self, oid: &ObjectId) -> Option<Result<CommitData>> {
         self.remove(oid).map(Ok)
     }
+
+    fn cached_subject_line(&self, oid: &ObjectId) -> Option<Result<String>> {
+        self.get(oid).map(|data| {
+            Ok(data
+                .message
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .map(str::trim)
+                .unwrap_or("(no subject)")
+                .to_owned())
+        })
+    }
 }
 
 impl<T: CommitReuse + ?Sized> CommitReuse for &mut T {

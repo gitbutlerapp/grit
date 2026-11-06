@@ -310,6 +310,7 @@ pub(crate) fn rev_list_options_from_walk(
         commit_filter: walk.commit_filter.clone(),
         pickaxe: walk.pickaxe.clone(),
         retain_commit_data: walk.retain_commit_data,
+        retained_commit_extent: walk.retained_commit_extent,
         left_right: walk.left_right || walk.cherry_mark,
         cherry_mark: walk.cherry_mark,
         follow: walk.follow,

@@ -13,9 +13,9 @@ use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::{LeftRightCounts, MergeFilter, RefSelection, RevWalkListOptions};
 
 use support::{
-    assert_rev_list_commits_match_git, build_commit_dag, git, git_commit_graph_write,
-    git_merge_base, git_merge_base_is_ancestor, git_rev_list, setup_path_simplify_history,
-    HistoryRepo,
+    assert_rev_list_commits_match_git, build_commit_dag, commit_labeled_with_dates, git,
+    git_commit_graph_write, git_merge_base, git_merge_base_is_ancestor, git_rev_list,
+    setup_path_simplify_history, HistoryRepo,
 };
 
 fn open_grit(wt: &Path) -> Repository {
@@ -455,6 +455,41 @@ fn merges_and_no_merges_match_git() {
             "{git_flag}"
         );
     }
+}
+
+#[test]
+fn no_merges_unlimited_order_matches_git_equal_committer_dates() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let oids = setup_revwalk_filter_fixture(wt);
+    let tip = oids["tip"];
+    let first = commit_labeled_with_dates(
+        wt,
+        "tie-a",
+        &[tip],
+        "@1700000000 +0000",
+        "@1700000000 +0000",
+    );
+    let second = commit_labeled_with_dates(
+        wt,
+        "tie-b",
+        &[first],
+        "@1700000000 +0000",
+        "@1700000000 +0000",
+    );
+    git(wt, &["update-ref", "refs/heads/main", &second.to_hex()]);
+
+    let repo = open_grit(wt);
+    let opts = RevWalkListOptions {
+        merges: MergeFilter::NoMerges,
+        ..RevWalkListOptions::default()
+    };
+    let git_oids = git_rev_list(wt, &["--no-merges", "main"]);
+    let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
+    assert_eq!(
+        grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
+        git_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
+    );
 }
 
 #[test]

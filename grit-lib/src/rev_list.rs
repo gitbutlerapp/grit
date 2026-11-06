@@ -53,8 +53,8 @@ impl WalkExclude {
     }
 }
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef,
-    ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    commit_through_subject_len, oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree,
+    CommitData, CommitRef, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -594,6 +594,11 @@ pub struct RevListOptions {
     /// Keep the commits a walk parses anyway in [`RevListResult::commit_data`], so callers that
     /// render the listed commits do not read and inflate them a second time.
     pub retain_commit_data: bool,
+    /// How much of each retained commit object to keep when [`Self::retain_commit_data`] is set.
+    ///
+    /// [`CommitExtent::ThroughSubject`] matches [`Odb::read_commit_through_subject`](crate::odb::Odb::read_commit_through_subject)
+    /// and is enough for one-line listings and commit filters without re-reading full bodies.
+    pub retained_commit_extent: CommitExtent,
     /// Follow renames when history is limited to a single literal file path (Git `log --follow`).
     /// Requires exactly one plain file pathspec in [`Self::paths`].
     pub follow: bool,
@@ -687,6 +692,7 @@ impl Default for RevListOptions {
             commit_filter: None,
             pickaxe: None,
             retain_commit_data: false,
+            retained_commit_extent: CommitExtent::default(),
             follow: false,
             cancel: None,
         }
@@ -6434,20 +6440,14 @@ fn can_use_bounded_commit_filter_list(options: &RevListOptions) -> bool {
         .as_ref()
         .is_some_and(|f| f.is_active())
         || options.pickaxe.is_some();
+    let stripped = RevListOptions {
+        commit_filter: None,
+        pickaxe: None,
+        ..options.clone()
+    };
     output_filter
-        && (options.max_count.is_some()
-            || options.skip > 0
-            || options.count
-            || options.since_cutoff.is_some())
         && options.ordering == OrderingMode::Default
-        && plain_commit_walk(
-            &RevListOptions {
-                commit_filter: None,
-                pickaxe: None,
-                ..options.clone()
-            },
-            false,
-        )
+        && plain_commit_walk(&stripped, false)
 }
 
 fn try_bounded_commit_filter_limit_list(
@@ -6464,13 +6464,6 @@ fn try_bounded_commit_filter_limit_list(
         return Ok(None);
     }
     if include.is_empty() || !can_use_bounded_commit_filter_list(options) {
-        return Ok(None);
-    }
-    if !options.count
-        && options.max_count.is_none()
-        && options.skip == 0
-        && options.since_cutoff.is_none()
-    {
         return Ok(None);
     }
     let max_count = options.max_count;
@@ -6505,7 +6498,12 @@ fn try_bounded_commit_filter_limit_list(
                 )?;
                 // Reuse traversal bytes for filters and output, without keeping every
                 // nonmatching commit when a selective filter scans a long history.
-                graph.keep_unreleased_commit_bytes(CommitExtent::Whole);
+                let traverse_extent = if pickaxe.is_some() {
+                    CommitExtent::Whole
+                } else {
+                    options.retained_commit_extent
+                };
+                graph.keep_unreleased_commit_bytes(traverse_extent);
 
                 let author_dates = options.ordering == OrderingMode::AuthorDateWalk;
                 let mut matched_seen = 0usize;
@@ -6556,10 +6554,16 @@ fn try_bounded_commit_filter_limit_list(
                                     } else if max_count.is_none_or(|m| ordered.len() < m) {
                                         ordered.push(oid);
                                         if options.retain_commit_data {
-                                            commit_data.insert(
-                                                oid,
-                                                parse_commit(graph.commit_bytes(oid)?)?,
-                                            );
+                                            let bytes = graph.commit_bytes(oid)?;
+                                            let data = if traverse_extent
+                                                == CommitExtent::ThroughSubject
+                                                && commit_through_subject_len(bytes).is_none()
+                                            {
+                                                load_commit(repo, oid)?
+                                            } else {
+                                                parse_commit(bytes)?
+                                            };
+                                            commit_data.insert(oid, data);
                                         }
                                     }
                                 }
@@ -6656,12 +6660,6 @@ fn try_bounded_parent_filter_limit_list(
             options.use_commit_graph,
             options.first_parent,
         )?;
-        if options.retain_commit_data {
-            graph.retain_parsed_commits(expected_parsed_commits(
-                options.skip.saturating_add(max_count.unwrap_or(64)),
-            ));
-        }
-
         let mut matched_seen = 0usize;
         streaming_date_walk(&mut graph, include, &excluded, false, None, |graph, oid| {
             let parent_count = graph.parent_count_for_filter(oid)?;
@@ -6677,7 +6675,26 @@ fn try_bounded_parent_filter_limit_list(
                 WalkControl::Continue
             })
         })?;
-        commit_data = graph.take_retained_commits(&ordered);
+        if options.retain_commit_data {
+            for &oid in &ordered {
+                let data = match options.retained_commit_extent {
+                    CommitExtent::Whole => load_commit(repo, oid)?,
+                    CommitExtent::ThroughSubject => {
+                        let effective = repo.object_id_after_replace(&oid);
+                        let mut bytes = repo.odb().read_commit_through_subject(&effective)?;
+                        if commit_through_subject_len(&bytes).is_none() {
+                            bytes = read_commit_bytes(repo, oid)?;
+                        }
+                        if commit_through_subject_len(&bytes).is_some() {
+                            parse_commit(&bytes)?
+                        } else {
+                            load_commit(repo, oid)?
+                        }
+                    }
+                };
+                commit_data.insert(oid, data);
+            }
+        }
         Ok(())
     })?;
 
