@@ -133,7 +133,8 @@ impl RefName {
     ///
     /// Returns [`RefNameError`] when the name fails any enabled rule.
     pub fn parse(name: &str, policy: &RefNamePolicy) -> Result<Self, RefNameError> {
-        let normalized = check_refname_format_borrowed(name, policy.format_options())?;
+        let format = effective_format_options(name, policy);
+        let normalized = check_refname_format_borrowed(name, &format)?;
         let stored: Cow<'_, str> = normalized;
         apply_policy_checks(stored.as_ref(), policy)?;
         Ok(Self(stored.into_owned()))
@@ -193,13 +194,14 @@ impl RefNameRef {
     /// Returns [`RefNameError::NormalizationRequired`] when `policy` enables normalization and
     /// the normalized form differs from `name`. Use [`RefName::parse`] in that case.
     pub fn parse<'a>(name: &'a str, policy: &RefNamePolicy) -> Result<&'a Self, RefNameError> {
-        if policy.format_options().normalize {
-            let normalized = check_refname_format_borrowed(name, policy.format_options())?;
+        let format = effective_format_options(name, policy);
+        if format.normalize {
+            let normalized = check_refname_format_borrowed(name, &format)?;
             if let Cow::Owned(_) = normalized {
                 return Err(RefNameError::NormalizationRequired);
             }
         } else {
-            check_refname_format_borrowed(name, policy.format_options())?;
+            check_refname_format_borrowed(name, &format)?;
         }
         apply_policy_checks(name, policy)?;
         Ok(Self::new(name))
@@ -216,6 +218,18 @@ impl RefNameRef {
         // SAFETY: RefNameRef is repr(transparent) over str.
         unsafe { &*(s as *const str as *const RefNameRef) }
     }
+}
+
+/// Format flags for the first validation pass: pseudo-refs and HEAD need
+/// `--allow-onelevel` when `storable()` or `advertised_symref()` is enabled.
+fn effective_format_options(name: &str, policy: &RefNamePolicy) -> RefFormatOptions {
+    let mut format = policy.format_options().clone();
+    if !name.starts_with("refs/") {
+        if policy.requires_storable() || policy.requires_advertised_symref() {
+            format.allow_onelevel = true;
+        }
+    }
+    format
 }
 
 fn branch_short_checks(name: &str) -> Result<(), RefNameError> {

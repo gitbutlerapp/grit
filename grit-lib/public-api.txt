@@ -16354,7 +16354,7 @@ pub fn grit_lib::refs::branch_tracking::status_integration_hint(&grit_lib::refs:
 pub fn grit_lib::refs::branch_tracking::upstream_status(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::branch_tracking::UpstreamStatus>>
 pub fn grit_lib::refs::branch_tracking::upstream_tracking_full_ref(&grit_lib::repo::Repository, &str) -> core::option::Option<alloc::string::String>
 pub mod grit_lib::refs::check_ref_format
-pub enum grit_lib::refs::check_ref_format::RefNameError
+#[non_exhaustive] pub enum grit_lib::refs::check_ref_format::RefNameError
 pub grit_lib::refs::check_ref_format::RefNameError::AtBrace
 pub grit_lib::refs::check_ref_format::RefNameError::BranchStartsWithDash
 pub grit_lib::refs::check_ref_format::RefNameError::ComponentStartsDot
@@ -16366,10 +16366,15 @@ pub grit_lib::refs::check_ref_format::RefNameError::IllegalChar
 pub grit_lib::refs::check_ref_format::RefNameError::InvalidWildcard
 pub grit_lib::refs::check_ref_format::RefNameError::LeadingSlash
 pub grit_lib::refs::check_ref_format::RefNameError::LoneAt
+pub grit_lib::refs::check_ref_format::RefNameError::NormalizationRequired
+pub grit_lib::refs::check_ref_format::RefNameError::NotAdvertisedFetchRef
+pub grit_lib::refs::check_ref_format::RefNameError::NotStorable
 pub grit_lib::refs::check_ref_format::RefNameError::OneLevel
+pub grit_lib::refs::check_ref_format::RefNameError::ReceivePackRefused
 pub grit_lib::refs::check_ref_format::RefNameError::ReservedBranchName
 pub grit_lib::refs::check_ref_format::RefNameError::TrailingDot
 pub grit_lib::refs::check_ref_format::RefNameError::TrailingSlash
+pub grit_lib::refs::check_ref_format::RefNameError::UnsafeForFilesystem
 impl core::cmp::Eq for grit_lib::refs::check_ref_format::RefNameError
 impl core::cmp::PartialEq for grit_lib::refs::check_ref_format::RefNameError
 pub fn grit_lib::refs::check_ref_format::RefNameError::eq(&self, &Self) -> bool
@@ -16386,31 +16391,89 @@ impl core::marker::Unpin for grit_lib::refs::check_ref_format::RefNameError
 impl core::marker::UnsafeUnpin for grit_lib::refs::check_ref_format::RefNameError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_format::RefNameError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNameError
-pub struct grit_lib::refs::check_ref_format::RefNameOptions
-pub grit_lib::refs::check_ref_format::RefNameOptions::allow_onelevel: bool
-pub grit_lib::refs::check_ref_format::RefNameOptions::normalize: bool
-pub grit_lib::refs::check_ref_format::RefNameOptions::refspec_pattern: bool
-impl core::clone::Clone for grit_lib::refs::check_ref_format::RefNameOptions
-pub fn grit_lib::refs::check_ref_format::RefNameOptions::clone(&self) -> Self
-impl core::default::Default for grit_lib::refs::check_ref_format::RefNameOptions
-pub fn grit_lib::refs::check_ref_format::RefNameOptions::default() -> Self
-impl core::fmt::Debug for grit_lib::refs::check_ref_format::RefNameOptions
-pub fn grit_lib::refs::check_ref_format::RefNameOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::refs::check_ref_format::RefNameOptions
-impl core::marker::Send for grit_lib::refs::check_ref_format::RefNameOptions
-impl core::marker::Sync for grit_lib::refs::check_ref_format::RefNameOptions
-impl core::marker::Unpin for grit_lib::refs::check_ref_format::RefNameOptions
-impl core::marker::UnsafeUnpin for grit_lib::refs::check_ref_format::RefNameOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_format::RefNameOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNameOptions
-pub fn grit_lib::refs::check_ref_format::check_refname_format(&str, &grit_lib::refs::check_ref_format::RefNameOptions) -> core::result::Result<alloc::string::String, grit_lib::refs::check_ref_format::RefNameError>
+pub struct grit_lib::refs::check_ref_format::RefName(_)
+impl grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
+pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+impl core::borrow::Borrow<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::clone::Clone for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::store::RefName
+impl core::cmp::Ord for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialEq for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::eq(&self, &Self) -> bool
+impl core::cmp::PartialOrd for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::AsRef<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::convert::AsRef<str> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &str
+impl core::fmt::Debug for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefName
+impl core::ops::deref::Deref for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::check_ref_format::RefNameRef
+pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::marker::Freeze for grit_lib::refs::store::RefName
+impl core::marker::Send for grit_lib::refs::store::RefName
+impl core::marker::Sync for grit_lib::refs::store::RefName
+impl core::marker::Unpin for grit_lib::refs::store::RefName
+impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefName
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefName
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefName
+#[non_exhaustive] pub struct grit_lib::refs::check_ref_format::RefNamePolicy
+impl grit_lib::refs::check_ref_format::RefNamePolicy
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::advertised_fetch(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::advertised_symref(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::allow_onelevel(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::new() -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::normalize(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::receive_pack(self, bool) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::refspec_pattern(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::safe_for_fs(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::storable(self) -> Self
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::symref_target() -> Self
+impl core::clone::Clone for grit_lib::refs::check_ref_format::RefNamePolicy
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::clone(&self) -> Self
+impl core::default::Default for grit_lib::refs::check_ref_format::RefNamePolicy
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::check_ref_format::RefNamePolicy
+pub fn grit_lib::refs::check_ref_format::RefNamePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::check_ref_format::RefNamePolicy
+impl core::marker::Send for grit_lib::refs::check_ref_format::RefNamePolicy
+impl core::marker::Sync for grit_lib::refs::check_ref_format::RefNamePolicy
+impl core::marker::Unpin for grit_lib::refs::check_ref_format::RefNamePolicy
+impl core::marker::UnsafeUnpin for grit_lib::refs::check_ref_format::RefNamePolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_format::RefNamePolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNamePolicy
+#[repr(transparent)] pub struct grit_lib::refs::check_ref_format::RefNameRef(_)
+impl grit_lib::refs::check_ref_format::RefNameRef
+pub fn grit_lib::refs::check_ref_format::RefNameRef::as_str(&self) -> &str
+pub fn grit_lib::refs::check_ref_format::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
+impl core::borrow::Borrow<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::fmt::Display for grit_lib::refs::check_ref_format::RefNameRef
+pub fn grit_lib::refs::check_ref_format::RefNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::check_ref_format::RefNameRef
+impl core::marker::Send for grit_lib::refs::check_ref_format::RefNameRef
+impl !core::marker::Sized for grit_lib::refs::check_ref_format::RefNameRef
+impl core::marker::Sync for grit_lib::refs::check_ref_format::RefNameRef
+impl core::marker::Unpin for grit_lib::refs::check_ref_format::RefNameRef
+impl core::marker::UnsafeUnpin for grit_lib::refs::check_ref_format::RefNameRef
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_format::RefNameRef
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNameRef
 pub fn grit_lib::refs::check_ref_format::collapse_slashes(&str) -> alloc::string::String
-pub fn grit_lib::refs::check_ref_format::is_valid_advertised_symref_target(&str) -> bool
-pub fn grit_lib::refs::check_ref_format::is_valid_fetch_advertised_ref(&str) -> bool
-pub fn grit_lib::refs::check_ref_format::receive_pack_refname_ok(&str, bool) -> bool
-pub fn grit_lib::refs::check_ref_format::refname_is_safe(&str) -> bool
-pub fn grit_lib::refs::check_ref_format::validate_branch_short_name(&str) -> core::result::Result<(), grit_lib::refs::check_ref_format::RefNameError>
-pub fn grit_lib::refs::check_ref_format::validate_tag_short_name(&str) -> core::result::Result<(), grit_lib::refs::check_ref_format::RefNameError>
 pub mod grit_lib::refs::gc
 pub struct grit_lib::refs::gc::PruneStats
 pub grit_lib::refs::gc::PruneStats::kept: usize
@@ -17452,7 +17515,12 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefEntry
 pub struct grit_lib::refs::store::RefName(_)
 impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
+pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+impl core::borrow::Borrow<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
 impl core::clone::Clone for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::RefName
@@ -17462,6 +17530,8 @@ impl core::cmp::PartialEq for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::eq(&self, &Self) -> bool
 impl core::cmp::PartialOrd for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::AsRef<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
 impl core::convert::AsRef<str> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &str
 impl core::fmt::Debug for grit_lib::refs::store::RefName
@@ -17471,6 +17541,9 @@ pub fn grit_lib::refs::store::RefName::fmt(&self, &mut core::fmt::Formatter<'_>)
 impl core::hash::Hash for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefName
+impl core::ops::deref::Deref for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::check_ref_format::RefNameRef
+pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
 impl core::marker::Freeze for grit_lib::refs::store::RefName
 impl core::marker::Send for grit_lib::refs::store::RefName
 impl core::marker::Sync for grit_lib::refs::store::RefName
@@ -17936,10 +18009,6 @@ pub fn grit_lib::refs::delete_ref(&std::path::Path, &str) -> grit_lib::error::Re
 pub fn grit_lib::refs::delete_ref_cas(&std::path::Path, &str, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::effective_log_refs_config(&std::path::Path) -> grit_lib::refs::LogRefsConfig
 pub fn grit_lib::refs::expand_ref_dwim_full_name(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<(usize, core::option::Option<alloc::string::String>)>
-pub fn grit_lib::refs::is_valid_advertised_symref_target(&str) -> bool
-pub fn grit_lib::refs::is_valid_fetch_advertised_ref(&str) -> bool
-pub fn grit_lib::refs::is_valid_ls_refs_advertised_name(&str) -> bool
-pub fn grit_lib::refs::is_valid_storable_ref_name(&str) -> bool
 pub fn grit_lib::refs::list_refs(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::list_refs_for_repository(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::list_refs_glob(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
@@ -17969,8 +18038,8 @@ pub fn grit_lib::refs::update_branch_for_commit(&std::path::Path, &grit_lib::ref
 pub fn grit_lib::refs::update_branch_for_commit_on_store(&dyn grit_lib::refs::store::RefStore, &grit_lib::refs::BranchCommitRefUpdate<'_>, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::update_direct_ref_on_store(&dyn grit_lib::refs::store::RefStore, &std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::verify_branch_commit_cas(core::option::Option<grit_lib::objects::ObjectId>, core::option::Option<grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::verify_ref_transaction_batch(&std::path::Path, &[grit_lib::refs::RefBatchItem]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub fn grit_lib::refs::verify_ref_available_for_create(&std::path::Path, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
+pub fn grit_lib::refs::verify_ref_transaction_batch(&std::path::Path, &[grit_lib::refs::RefBatchItem]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub fn grit_lib::refs::warn_ambiguous_refs_from_config(&grit_lib::repo::Repository) -> bool
 pub fn grit_lib::refs::write_packed_refs_file(&std::path::Path, &[grit_lib::refs::PackedRefRecord]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::write_ref(&std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>

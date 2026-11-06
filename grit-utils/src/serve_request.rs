@@ -7,6 +7,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::check_ref_format::{RefName, RefNamePolicy};
 use grit_lib::repo::Repository;
 
 /// Capabilities on the first `want` line for clone-style serve benchmarks.
@@ -90,7 +91,7 @@ fn ref_want_oids(repo: &Repository) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     for (name, oid) in refs {
-        if !grit_lib::refs::is_valid_fetch_advertised_ref(&name) {
+        if RefName::parse(&name, &RefNamePolicy::default().advertised_fetch()).is_err() {
             continue;
         }
         if seen.insert(oid) {
