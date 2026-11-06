@@ -264,12 +264,7 @@ fn entry_from_resolved(spec: &str, resolved: &ResolvedObject, oid: String) -> Re
 }
 
 fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> anyhow::Error {
-    let lib = grit_lib::error::Error::RevParse(err);
-    if let Some(msg) = crate::revision_errors::map_lib_revision_error(&lib) {
-        anyhow::anyhow!(msg)
-    } else {
-        anyhow::anyhow!("could not resolve ref '{spec}': {lib}")
-    }
+    crate::error_map::map_rev_parse_ref_error(spec, err)
 }
 
 fn kind_label(kind: ObjectKind) -> &'static str {

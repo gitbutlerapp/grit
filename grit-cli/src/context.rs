@@ -4,9 +4,7 @@ use anyhow::{Context, Result};
 use grit_lib::change_id::resolved_change_id;
 use grit_lib::command_runner::hooks::HookStdio;
 use grit_lib::config::environment::Environment;
-use grit_lib::config::ident_resolve::{
-    resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
-};
+use grit_lib::config::ident_resolve::{resolve_identity_with, IdentRole};
 use grit_lib::config::ConfigSet;
 use grit_lib::ident::Signature;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId};
@@ -277,10 +275,8 @@ pub fn identity(
 /// The author or committer `repo` records on a new commit, stash, or notes commit
 /// ([`Repository::identity`]), with setup advice when no identity is configured.
 pub fn signature(repo: &Repository, role: IdentRole, now: OffsetDateTime) -> Result<Signature> {
-    repo.identity(role, now).map_err(|err| match err {
-        grit_lib::error::Error::Identity(err) => crate::error_map::identity_error(err),
-        other => other.into(),
-    })
+    repo.identity(role, now)
+        .map_err(crate::error_map::map_repo_identity_error)
 }
 
 /// Committer for reflog entries: configured [`signature`] when available, otherwise the
@@ -290,13 +286,5 @@ pub fn committer_reflog_signature(
     config: &ConfigSet,
     now: OffsetDateTime,
 ) -> Result<Signature> {
-    match repo.identity(IdentRole::Committer, now) {
-        Ok(sig) => Ok(sig),
-        Err(grit_lib::error::Error::Identity(_)) => {
-            let line = resolve_loose_committer_identity_with(repo.environment(), config, now);
-            line.parse()
-                .map_err(|err| grit_lib::error::Error::InvalidSignature(err).into())
-        }
-        Err(other) => Err(other.into()),
-    }
+    crate::error_map::committer_reflog_signature(repo, config, now)
 }

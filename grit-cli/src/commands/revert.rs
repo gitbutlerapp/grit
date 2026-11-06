@@ -9,7 +9,6 @@ use crate::operation_output::{
     OperationConflictBlock,
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-use crate::revision_errors::map_commit_spec_error;
 use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
@@ -275,7 +274,8 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     if opts.commits.is_empty() {
         bail!("at least one commit is required unless using --continue, --abort, or --skip");
     }
-    let sources = commits_to_revert(&repo, &opts.commits).map_err(map_commit_spec_error)?;
+    let sources =
+        commits_to_revert(&repo, &opts.commits).map_err(crate::error_map::map_commit_spec_error)?;
     if opts.dry_run {
         return Ok(RevertOutcome::dry_run(sources));
     }

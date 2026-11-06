@@ -48,7 +48,7 @@ pub fn unborn_head_from_repo(repo: &Repository) -> Option<Error> {
     }
 }
 
-/// Replace bare [`LibError::UnbornHead`] anywhere in the chain with a guided error.
+/// Replace bare unborn-HEAD library errors anywhere in the chain with a guided error.
 pub fn enrich_unborn_head(err: Error) -> Error {
     if err.downcast_ref::<StructuredCliError>().is_some() {
         return err;

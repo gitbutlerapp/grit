@@ -5,22 +5,30 @@ use std::error::Error as StdError;
 
 use anyhow::Error;
 use grit_lib::command_runner::hooks::HookError;
+use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ident_resolve::IdentityError;
+use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
+use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
+use grit_lib::porcelain::paths::BlockedRemoval;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::refs::store::RefStoreError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::remote::RemoteError;
-use grit_lib::revwalk::rev_parse_error::RevParseError;
+use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
+use grit_lib::state::InProgressOperation;
+use time::OffsetDateTime;
 
 use crate::error_kind::ErrorKind;
 use crate::exit_status::ExitStatus;
+use crate::json_error::operation_in_progress_for_repo;
 use crate::json_error::{
-    hash_collision, lock_held, would_overwrite_error, StructuredCliError, StructuredJsonError,
+    hash_collision, lock_held, operation_in_progress, would_overwrite_error, StructuredCliError,
+    StructuredJsonError,
 };
-use crate::revision_errors;
+use crate::ui::PathDisplayOptions;
 
 /// Fully classified CLI failure (exit code, human text, optional JSON payload).
 #[derive(Debug, Clone)]
@@ -80,13 +88,49 @@ impl ClassifiedError {
     }
 }
 
+fn operation_in_progress_human(action: &str, kind: InProgressOperation) -> String {
+    let description = kind.description();
+    let article = if description
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c.to_ascii_lowercase(), 'a' | 'e' | 'i' | 'o' | 'u'))
+    {
+        "an"
+    } else {
+        "a"
+    };
+    format!("cannot {action} while {article} {description} is in progress")
+}
+
+fn format_ambiguous_change_id(spec: &str, candidates: &[AmbiguousChangeIdHint]) -> String {
+    let mut msg = format!("ambiguous change id '{spec}'");
+    for hint in candidates {
+        let short_id = hint.change_id.chars().take(8).collect::<String>();
+        msg.push_str(&format!(
+            "\n  {} {} {}",
+            hint.oid_hex, short_id, hint.subject
+        ));
+    }
+    msg
+}
+
 /// Human-readable text for a bare [`LibError`] (same rules as the legacy CLI mapper).
 #[must_use]
 pub fn human_message_for_lib(err: &LibError) -> String {
-    if let Some(msg) = revision_errors::map_lib_revision_error(err) {
-        return msg;
-    }
     match err {
+        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
+            format_ambiguous_change_id(prefix, candidates)
+        }
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+            format!("revision '{name}' not found")
+        }
+        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+            format!("revision '{spec}' not found")
+        }
+        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+            format!("invalid reflog date '{date}'")
+        }
+        LibError::ObjectNotFound(spec) => format!("revision '{spec}' not found"),
         LibError::HashCollision { oid } => format!(
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
             oid.to_hex()
@@ -113,7 +157,77 @@ pub fn human_message_for_lib(err: &LibError) -> String {
             }
             message
         }
+        LibError::RemoveBlocked { paths } => remove_blocked_human(paths, false, None),
+        LibError::OperationInProgress(kind) => operation_in_progress_human("proceed", *kind),
         other => other.git_stderr_message(),
+    }
+}
+
+/// Format a failed `-c KEY=VALUE` parse for clap's value parser.
+#[must_use]
+pub fn format_config_override_parse_error(err: LibError) -> String {
+    classify(&Error::new(err)).human
+}
+
+/// `grit config --unset` when the key is not present in the chosen config file.
+#[must_use]
+pub fn config_key_not_set_error(key: &str) -> Error {
+    Error::msg(format!("key '{key}' is not set"))
+}
+
+/// Map unset failures from config write helpers.
+#[must_use]
+pub fn map_config_unset_error(key: &str, err: LibError) -> Error {
+    match err {
+        LibError::Config(grit_lib::error::ConfigError::KeyNotSet { .. }) => {
+            config_key_not_set_error(key)
+        }
+        other => Error::new(other),
+    }
+}
+
+/// Rebase upstream resolution when `@{upstream}` is used but the branch has no upstream.
+#[must_use]
+pub fn rebase_no_upstream_error(branch: &str) -> Error {
+    Error::msg(format!(
+        "no upstream configured for branch '{branch}'\n\
+         Set one with `grit branch -u <remote>/<branch>`"
+    ))
+}
+
+/// Resolve a revision for rebase upstream, mapping missing upstream when using the default spec.
+pub fn resolve_rebase_upstream_revision(
+    spec: &str,
+    use_default_upstream: bool,
+    resolve: Result<ObjectId, LibError>,
+) -> Result<ObjectId, Error> {
+    match resolve {
+        Ok(oid) => Ok(oid),
+        Err(LibError::RevParse(RevParseError::NoUpstream { branch })) if use_default_upstream => {
+            Err(rebase_no_upstream_error(&branch))
+        }
+        Err(other) => {
+            Err(Error::new(other).context(format!("could not resolve upstream '{spec}'")))
+        }
+    }
+}
+
+/// Map a library error to `anyhow`, using structured JSON for typed failures.
+#[must_use]
+pub fn map_lib_error(err: LibError) -> Error {
+    match err {
+        LibError::RevisionNotFound(spec) => crate::json_error::revision_not_found(&spec),
+        LibError::UnbornHead => crate::unborn_errors::unborn_head_from_cwd()
+            .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
+        other => {
+            let wrapped = Error::new(other);
+            let classified = classify(&wrapped);
+            if classified.payload.is_some() {
+                classified.into_anyhow()
+            } else {
+                wrapped
+            }
+        }
     }
 }
 
@@ -168,6 +282,184 @@ pub fn stage_conflict_markers_human(paths: &[String]) -> String {
         msg.pop();
     }
     msg
+}
+
+/// Map [`RevParseError`] from `grit resolve` ref resolution.
+#[must_use]
+pub fn map_rev_parse_ref_error(spec: &str, err: RevParseError) -> Error {
+    if matches!(
+        err,
+        RevParseError::AmbiguousChangeId { .. }
+            | RevParseError::InvalidObjectName { .. }
+            | RevParseError::AmbiguousArgument { .. }
+            | RevParseError::ReflogDateUnparseable { .. }
+    ) {
+        Error::msg(human_message_for_lib(&LibError::RevParse(err)))
+    } else {
+        Error::msg(format!("could not resolve ref '{spec}': {err}"))
+    }
+}
+
+/// Map an error from expanding commit arguments (`grit pick` / `grit revert`).
+#[must_use]
+pub fn map_commit_spec_error(err: LibError) -> Error {
+    match err {
+        LibError::RevParse(RevParseError::InvalidObjectName { name }) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{name}' not found"))
+        }
+        LibError::RevParse(RevParseError::AmbiguousArgument { spec }) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
+        LibError::ObjectNotFound(spec) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
+        LibError::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates }) => {
+            Error::msg(format_ambiguous_change_id(&prefix, &candidates))
+        }
+        LibError::RevParse(RevParseError::ReflogDateUnparseable { date }) => {
+            Error::msg(format!("invalid reflog date '{date}'"))
+        }
+        LibError::InvalidRef(msg) => Error::msg(msg),
+        other => map_lib_error(other),
+    }
+}
+
+/// Map a library error from `grit switch` (includes in-progress operation hints from repo state).
+#[must_use]
+pub fn map_switch_lib_error(repo: &grit_lib::repo::Repository, err: LibError) -> Error {
+    if let LibError::OperationInProgress(kind) = err {
+        return operation_in_progress_for_repo(repo, "switch branches", kind);
+    }
+    map_lib_error(err)
+}
+
+/// Map [`PullError::Repository`] failures during `grit pull`.
+#[must_use]
+pub fn map_pull_repository_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
+    match err {
+        PullError::Remote(remote) => map_remote_error(remote),
+        PullError::Repository(hook @ LibError::Hook(_)) => {
+            if repo.git_dir().join("MERGE_HEAD").is_file() {
+                crate::json_error::hook_failed_with_hint(
+                    hook,
+                    "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
+                )
+            } else {
+                Error::new(hook)
+            }
+        }
+        PullError::Repository(LibError::OperationInProgress(kind)) => {
+            operation_in_progress_for_repo(repo, "pull", kind)
+        }
+        PullError::Repository(lib) => map_lib_error(lib),
+        rest => Error::new(rest),
+    }
+}
+
+/// Map errors while building [`PullOptions`] for `grit pull`.
+#[must_use]
+pub fn map_pull_options_error(repo: &grit_lib::repo::Repository, err: PullError) -> Error {
+    match err {
+        PullError::Repository(LibError::OperationInProgress(kind)) => {
+            operation_in_progress_for_repo(repo, "pull", kind)
+        }
+        other => Error::new(other),
+    }
+}
+
+/// Map [`remove_paths`](grit_lib::porcelain::paths::remove_paths) failures for `grit rm`.
+#[must_use]
+pub fn map_remove_paths_error(
+    err: LibError,
+    cached: bool,
+    path_display: Option<&PathDisplayOptions>,
+) -> Error {
+    match err {
+        LibError::RemoveBlocked { paths } => {
+            Error::msg(remove_blocked_human(&paths, cached, path_display))
+        }
+        other => map_lib_error(other),
+    }
+}
+
+fn remove_blocked_human(
+    paths: &[BlockedRemoval],
+    cached: bool,
+    path_display: Option<&PathDisplayOptions>,
+) -> String {
+    let format_path = |p: &str| {
+        path_display
+            .map(|opts| opts.format_path_for_human(p))
+            .unwrap_or_else(|| p.to_owned())
+    };
+    let mut msg = String::from("not removed, these files have content that would be lost:\n");
+    for blocked in paths {
+        msg.push_str(&format!(
+            "    {} ({})\n",
+            format_path(&blocked.path),
+            blocked.reason
+        ));
+    }
+    let cached_would_help = !cached
+        && paths
+            .iter()
+            .all(|blocked| blocked.reason.allowed_with_cached());
+    msg.push_str(if cached_would_help {
+        "(use --cached to stop tracking them and keep the files, or --force to remove them anyway)"
+    } else {
+        "(use --force to remove them anyway)"
+    });
+    msg
+}
+
+/// Append would-overwrite path names when reporting integrate follow-up failures.
+#[must_use]
+pub fn integrate_failure_text(err: &Error) -> String {
+    let text = format!("{err:#}");
+    let paths = err.chain().find_map(|cause| {
+        let lib = match cause.downcast_ref::<PullError>() {
+            Some(PullError::Repository(lib)) => Some(lib),
+            _ => cause.downcast_ref::<LibError>(),
+        };
+        match lib {
+            Some(LibError::WouldOverwrite { paths, .. }) if !paths.is_empty() => {
+                Some(paths.join(", "))
+            }
+            _ => None,
+        }
+    });
+    match paths {
+        Some(paths) => format!("{text}: {paths}"),
+        None => text,
+    }
+}
+
+/// Map repository identity resolution failures to structured CLI errors.
+#[must_use]
+pub fn map_repo_identity_error(err: LibError) -> Error {
+    match err {
+        LibError::Identity(identity) => identity_error(identity),
+        other => Error::new(other),
+    }
+}
+
+/// Committer for reflog entries when configured identity is missing.
+pub fn committer_reflog_signature(
+    repo: &grit_lib::repo::Repository,
+    config: &ConfigSet,
+    now: OffsetDateTime,
+) -> Result<Signature, Error> {
+    use grit_lib::config::ident_resolve::resolve_loose_committer_identity_with;
+
+    match repo.identity(IdentRole::Committer, now) {
+        Ok(sig) => Ok(sig),
+        Err(LibError::Identity(_)) => {
+            let line = resolve_loose_committer_identity_with(repo.environment(), config, now);
+            line.parse()
+                .map_err(|err| Error::new(LibError::InvalidSignature(err)))
+        }
+        Err(other) => Err(Error::new(other)),
+    }
 }
 
 /// Map library errors from [`grit_lib::porcelain::add::stage`] to structured CLI errors.
@@ -668,6 +960,12 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::NoMergeInProgress | LibError::NoReplayInProgress => {
             Some(no_operation_in_progress(err.to_string()))
         }
+        LibError::OperationInProgress(kind) => {
+            Some(operation_in_progress("proceed", *kind, None))
+        }
+        LibError::RemoveBlocked { paths } => {
+            Some(Error::msg(remove_blocked_human(paths, false, None)))
+        }
         LibError::StashNotFound { .. } => Some(stash_not_found(err)),
         LibError::RevParse(
             RevParseError::PathNotInRevision { .. }
@@ -1025,6 +1323,8 @@ fn shell_words(paths: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::json_error::structured_json_payload;
 
@@ -1335,5 +1635,108 @@ mod tests {
     #[test]
     fn lib_errors_rendered_in_one_place() {
         crate::error_map_contract::assert_lib_error_match_ratchet();
+    }
+
+    #[test]
+    fn library_object_not_found_keeps_remote_display() {
+        use grit_lib::remote::RemoteError;
+
+        let err = super::map_remote_error(RemoteError::Library(LibError::ObjectNotFound(
+            "deadbeef".into(),
+        )));
+        assert!(err.downcast_ref::<LibError>().is_none());
+        assert_eq!(
+            crate::cli_messages::human_error_message(&err),
+            "object not found: deadbeef",
+            "must not remap to revision-not-found wording"
+        );
+        assert!(crate::json_error::structured_json_payload(&err).is_none());
+    }
+
+    #[test]
+    fn library_hash_collision_stays_typed_for_json() {
+        use grit_lib::remote::RemoteError;
+
+        let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
+        let err = super::map_remote_error(RemoteError::Library(LibError::HashCollision { oid }));
+        let payload = crate::json_error::structured_json_payload(&err).expect("structured payload");
+        assert_eq!(payload.kind, ErrorKind::HashCollision);
+        assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));
+    }
+
+    /// Library error carried as the `source()` of another error type, so `anyhow` downcasts
+    /// cannot see it and only a chain walk finds it.
+    #[derive(Debug)]
+    struct WrappedLib(LibError);
+
+    impl std::fmt::Display for WrappedLib {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("wrapped operation failed")
+        }
+    }
+
+    impl std::error::Error for WrappedLib {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            Some(&self.0)
+        }
+    }
+
+    fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
+        let path = PathBuf::from("/repo/.git/index.lock");
+        let err = Error::new(WrappedLib(LibError::LockHeld {
+            path: path.clone(),
+            holder,
+        }))
+        .context("staging files");
+        (err, path)
+    }
+
+    #[test]
+    fn nested_lock_held_gets_lock_prose_in_human_message() {
+        let (err, path) = wrapped_lock_held(Some(grit_lib::lockfile::LockHolder {
+            pid: 42,
+            running: false,
+        }));
+        assert!(err.downcast_ref::<LibError>().is_none());
+        let human = crate::cli_messages::human_error_message(&err);
+        assert!(
+            human.contains(&grit_lib::config::git_path::user_display_path(&path)),
+            "{human}"
+        );
+        assert!(human.contains("stale lock"), "{human}");
+        assert!(human.contains("process 42"), "{human}");
+    }
+
+    #[test]
+    fn context_wrapped_config_error_keeps_config_message() {
+        use grit_lib::error::ConfigError;
+
+        let err = Error::new(LibError::Config(ConfigError::BadConfigLineInFile {
+            file: ".git/config".into(),
+            line: 6,
+        }))
+        .context("not in a repository");
+        let human = crate::cli_messages::human_error_message(&err);
+        assert!(human.contains("bad config line"), "{human}");
+        assert!(!human.contains("not in a repository"), "{human}");
+        assert!(human.starts_with("fatal:"), "{human}");
+    }
+
+    #[test]
+    fn ensure_structured_rewraps_nested_lock_held() {
+        use crate::json_error::{ensure_structured, structured_json_payload, StructuredCliError};
+
+        let (err, path) = wrapped_lock_held(None);
+        let structured = ensure_structured(err);
+        assert!(structured.downcast_ref::<StructuredCliError>().is_some());
+        let human = crate::cli_messages::human_error_message(&structured);
+        assert!(human.contains("another process holds"), "{human}");
+        let payload = structured_json_payload(&structured).expect("payload");
+        assert_eq!(payload.kind, ErrorKind::LockHeld);
+        assert_eq!(payload.error, human);
+        assert_eq!(
+            payload.lock.expect("lock").path,
+            grit_lib::config::git_path::user_display_path(&path)
+        );
     }
 }

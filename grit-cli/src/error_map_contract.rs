@@ -4,7 +4,9 @@ use std::path::Path;
 
 use anyhow::Error;
 use grit_lib::command_runner::hooks::{HookError, HookOutput};
-use grit_lib::error::{AuthFailure, Error as LibError, NotARepositoryReason, OverwriteReason};
+use grit_lib::error::{
+    AuthFailure, ConfigError, Error as LibError, NotARepositoryReason, OverwriteReason,
+};
 use grit_lib::error::{RemoteUnreadableReason, WorktreeOperation};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::branch::BranchError;
@@ -21,17 +23,19 @@ use crate::error_map::{
 use crate::exit_status::ExitStatus;
 use crate::json_error::{
     gitbutler_workspace_commit, incompatible_output_flags, invalid_commit_filter, invalid_pickaxe,
-    lock_held, map_lib_error, no_operation_in_progress, operation_in_progress, replay_conflict,
-    revision_not_found, would_overwrite_error, StructuredCliError, StructuredJsonError,
+    map_lib_error, no_operation_in_progress, replay_conflict, revision_not_found,
+    StructuredCliError, StructuredJsonError,
 };
 use grit_lib::config::ident_resolve::{IdentRole, IdentityError};
 use grit_lib::error::{GitDirPathOperation, WorktreePathOperation};
 use grit_lib::lockfile::LockHolder;
+use grit_lib::path_validate::PathComponentError;
+use grit_lib::porcelain::paths::{BlockedRemoval, RemoveBlockReason};
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::porcelain::tag::TagError;
 use grit_lib::remote::clone::CloneError;
 use grit_lib::revwalk::history::RebaseSessionError;
-use grit_lib::revwalk::rev_parse_error::RevParseError;
+use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 
 struct ContractRow {
@@ -202,36 +206,29 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "lock_held",
         build: || {
-            lock_held(
-                Path::new("/repo/.git/index.lock"),
-                Some(LockHolder {
+            Error::new(LibError::LockHeld {
+                path: Path::new("/repo/.git/index.lock").into(),
+                holder: Some(LockHolder {
                     pid: 42,
                     running: false,
                 }),
-            )
+            })
         },
         kind: Some(ErrorKind::LockHeld),
         exit: ExitStatus::Failure,
         human: || {
-            lock_held(
-                Path::new("/repo/.git/index.lock"),
-                Some(LockHolder {
-                    pid: 42,
-                    running: false,
-                }),
-            )
-            .to_string()
+            "/repo/.git/index.lock is a stale lock left by process 42, which is no longer running; remove it and retry".to_owned()
         },
         hint: None,
     },
     ContractRow {
         label: "would_overwrite",
         build: || {
-            would_overwrite_error(
-                OverwriteReason::LocalChanges,
-                vec!["f.txt".into()],
-                "local changes would be overwritten by checkout".into(),
-            )
+            Error::new(LibError::WouldOverwrite {
+                reason: OverwriteReason::LocalChanges,
+                paths: vec!["f.txt".into()],
+                message: "local changes would be overwritten by checkout".into(),
+            })
         },
         kind: Some(ErrorKind::WouldOverwrite),
         exit: ExitStatus::Failure,
@@ -368,11 +365,155 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "operation_in_progress",
-        build: || operation_in_progress("commit", InProgressOperation::Merge, None),
+        build: || Error::new(LibError::OperationInProgress(InProgressOperation::Merge)),
         kind: Some(ErrorKind::OperationInProgress),
         exit: ExitStatus::Failure,
-        human: || "cannot commit while a merge is in progress".to_owned(),
+        human: || "cannot proceed while a merge is in progress".to_owned(),
         hint: None,
+    },
+    ContractRow {
+        label: "config_bad_line",
+        build: || {
+            Error::new(LibError::Config(ConfigError::BadConfigLineInFile {
+                file: ".git/config".into(),
+                line: 6,
+            }))
+        },
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "fatal: bad config line 6 in file '.git/config'".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "remove_blocked",
+        build: || {
+            Error::new(LibError::RemoveBlocked {
+                paths: vec![BlockedRemoval {
+                    path: "tracked.txt".into(),
+                    reason: RemoveBlockReason::LocalModifications,
+                }],
+            })
+        },
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || {
+            "not removed, these files have content that would be lost:\n    tracked.txt (local modifications)\n(use --cached to stop tracking them and keep the files, or --force to remove them anyway)".to_owned()
+        },
+        hint: None,
+    },
+    ContractRow {
+        label: "rev_parse_ambiguous_change_id",
+        build: || {
+            Error::new(LibError::RevParse(RevParseError::AmbiguousChangeId {
+                prefix: "abc".into(),
+                candidates: vec![AmbiguousChangeIdHint {
+                    oid_hex: "f92d74e3874587aaf443d1db961d4e26dde13e9c".into(),
+                    change_id: "changeid123456".into(),
+                    subject: "fix bug".into(),
+                }],
+            }))
+        },
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || {
+            "ambiguous change id 'abc'\n  f92d74e3874587aaf443d1db961d4e26dde13e9c changeid fix bug".to_owned()
+        },
+        hint: None,
+    },
+    ContractRow {
+        label: "rev_parse_invalid_object_name",
+        build: || {
+            Error::new(LibError::RevParse(RevParseError::InvalidObjectName {
+                name: "deadbeef".into(),
+            }))
+        },
+        kind: Some(ErrorKind::RevisionNotFound),
+        exit: ExitStatus::Failure,
+        human: || "revision 'deadbeef' not found".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "rev_parse_ambiguous_argument",
+        build: || {
+            Error::new(LibError::RevParse(RevParseError::AmbiguousArgument {
+                spec: "HEAD:foo".into(),
+            }))
+        },
+        kind: Some(ErrorKind::RevisionNotFound),
+        exit: ExitStatus::Failure,
+        human: || "revision 'HEAD:foo' not found".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "rev_parse_reflog_date_unparseable",
+        build: || {
+            Error::new(LibError::RevParse(RevParseError::ReflogDateUnparseable {
+                date: "not-a-date".into(),
+            }))
+        },
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "invalid reflog date 'not-a-date'".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "invalid_path_component",
+        build: || {
+            Error::new(LibError::invalid_path_component(
+                "foo/../bar",
+                PathComponentError::DotDot,
+            ))
+        },
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "cannot use path 'foo/../bar': path component is parent directory".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "index_unmerged",
+        build: || Error::new(LibError::IndexUnmerged),
+        kind: Some(ErrorKind::UnmergedPaths),
+        exit: ExitStatus::Failure,
+        human: || {
+            "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again".to_owned()
+        },
+        hint: Some("resolve conflicts with `grit add` or `grit rm`, then commit, or finish with `grit merge --continue` / `grit merge --abort`"),
+    },
+    ContractRow {
+        label: "no_replay_in_progress",
+        build: || Error::new(LibError::NoReplayInProgress),
+        kind: Some(ErrorKind::NoOperationInProgress),
+        exit: ExitStatus::Failure,
+        human: || "no cherry-pick or revert in progress".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "rev_parse_path_missing_worktree_and_index",
+        build: || {
+            Error::new(LibError::RevParse(
+                RevParseError::PathMissingFromWorktreeAndIndex {
+                    path: "missing.txt".into(),
+                },
+            ))
+        },
+        kind: Some(ErrorKind::PathNotFound),
+        exit: ExitStatus::Failure,
+        human: || {
+            "path 'missing.txt' does not exist (neither on disk nor in the index)".to_owned()
+        },
+        hint: None,
+    },
+    ContractRow {
+        label: "move_source_not_tracked",
+        build: || {
+            Error::new(LibError::MoveSourceNotTracked {
+                src: "untracked.txt".into(),
+            })
+        },
+        kind: Some(ErrorKind::BranchError),
+        exit: ExitStatus::Failure,
+        human: || "'untracked.txt' is not under version control".to_owned(),
+        hint: Some("track 'untracked.txt' with `grit add` before moving it"),
     },
     ContractRow {
         label: "gitbutler_workspace",
@@ -419,6 +560,14 @@ static CONTRACT: &[ContractRow] = &[
         kind: Some(ErrorKind::EmptyCommitMessage),
         exit: ExitStatus::Failure,
         human: || LibError::EmptyCommitMessage.to_string(),
+        hint: None,
+    },
+    ContractRow {
+        label: "lib_object_not_found",
+        build: || Error::new(LibError::ObjectNotFound("deadbeef".into())),
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "revision 'deadbeef' not found".to_owned(),
         hint: None,
     },
     ContractRow {
@@ -894,124 +1043,101 @@ pub fn assert_error_map_contract() {
     }
 }
 
-struct MatchBudget {
-    path: &'static str,
-    max: usize,
+struct ControlFlowAllowance {
+    file: &'static str,
+    line_contains: &'static str,
 }
 
-/// Per-file caps on `LibError::` / `grit_lib::error::Error::` matches outside `error_map.rs`.
-/// Lower a file's `max` only after removing matches (ratchet — never increase).
-static MATCH_BUDGETS: &[MatchBudget] = &[
-    MatchBudget {
-        path: "src/revision_errors.rs",
-        max: 11,
+/// Explicit control-flow matches on library errors outside `error_map.rs` (not presentation).
+static CONTROL_FLOW_ALLOWANCES: &[ControlFlowAllowance] = &[
+    ControlFlowAllowance {
+        file: "src/unborn_errors.rs",
+        line_contains: "Some(LibError::UnbornHead)",
     },
-    MatchBudget {
-        path: "src/exit_status.rs",
-        max: 9,
+    ControlFlowAllowance {
+        file: "src/json_error.rs",
+        line_contains: "Some(LibError::Hook(hook))",
     },
-    MatchBudget {
-        path: "src/json_error.rs",
-        max: 5,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "grit_lib::error::Error::is_cancelled",
     },
-    MatchBudget {
-        path: "src/commands/add.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "grit_lib::error::Error::Hook(HookError::Failed",
     },
-    MatchBudget {
-        path: "src/context.rs",
-        max: 3,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "grit_lib::error::Error::remote_unreadable(",
     },
-    MatchBudget {
-        path: "src/commands/pull.rs",
-        max: 3,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "grit_lib::error::Error::Auth {",
     },
-    MatchBudget {
-        path: "src/commands/config.rs",
-        max: 3,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "grit_lib::error::Error::Cancelled",
     },
-    MatchBudget {
-        path: "src/cli_messages.rs",
-        max: 2,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "RemoteError::Library(grit_lib::error::Error::Cancelled)",
     },
-    MatchBudget {
-        path: "src/unborn_errors.rs",
-        max: 2,
+    ControlFlowAllowance {
+        file: "src/exit_status.rs",
+        line_contains: "map_branch_error(grit_lib::error::Error::Branch",
     },
-    MatchBudget {
-        path: "src/commands/fetch.rs",
-        max: 2,
+    ControlFlowAllowance {
+        file: "src/commands/add.rs",
+        line_contains: "LibError::Cancelled",
     },
-    MatchBudget {
-        path: "src/commands/history.rs",
-        max: 2,
+    ControlFlowAllowance {
+        file: "src/commands/serve.rs",
+        line_contains: "LibError::Cancelled",
     },
-    MatchBudget {
-        path: "src/commands/rm.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/bundle.rs",
+        line_contains: "grit_lib::error::Error::Cancelled",
     },
-    MatchBudget {
-        path: "src/commands/switch.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/stash.rs",
+        line_contains: "LibError::HunkSelection(_)",
     },
-    MatchBudget {
-        path: "src/commands/auth.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/auth.rs",
+        line_contains: "grit_lib::error::Error::Auth { .. }",
     },
-    MatchBudget {
-        path: "src/commands/log.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/log.rs",
+        line_contains: "grit_lib::error::Error::Io(_)",
     },
-    MatchBudget {
-        path: "src/commands/stash.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/cat.rs",
+        line_contains: "map_err(grit_lib::error::Error::Io)",
     },
-    MatchBudget {
-        path: "src/commands/bundle.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/diff.rs",
+        line_contains: "grit_lib::error::Error::PathError",
     },
-    MatchBudget {
-        path: "src/commands/serve.rs",
-        max: 1,
-    },
-    MatchBudget {
-        path: "src/commands/checkin.rs",
-        max: 1,
-    },
-    MatchBudget {
-        path: "src/commands/resolve.rs",
-        max: 1,
-    },
-    MatchBudget {
-        path: "src/commands/diff.rs",
-        max: 1,
-    },
-    MatchBudget {
-        path: "src/commands/cat.rs",
-        max: 1,
+    ControlFlowAllowance {
+        file: "src/commands/history.rs",
+        line_contains: "LibError::Hook(_)",
     },
 ];
 
 const LIB_ERROR_MATCH_PREFIXES: &[&str] = &["LibError::", "grit_lib::error::Error::"];
 
-fn lib_error_match_count(text: &str) -> usize {
-    LIB_ERROR_MATCH_PREFIXES
+fn line_allowed(rel: &str, line: &str) -> bool {
+    CONTROL_FLOW_ALLOWANCES
         .iter()
-        .map(|prefix| text.matches(prefix).count())
-        .sum()
+        .any(|entry| entry.file == rel && line.contains(entry.line_contains))
 }
 
-fn visit_rs_sources(
-    manifest: &Path,
-    dir: &Path,
-    budgets: &std::collections::HashMap<&'static str, usize>,
-    total: &mut usize,
-) {
+fn visit_rs_sources(manifest: &Path, dir: &Path) {
     for entry in std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read {}: {e}", dir.display())) {
         let entry = entry.unwrap_or_else(|e| panic!("dir entry: {e}"));
         let path = entry.path();
         if path.is_dir() {
-            visit_rs_sources(manifest, &path, budgets, total);
+            visit_rs_sources(manifest, &path);
             continue;
         }
         if path.extension().is_none_or(|ext| ext != "rs") {
@@ -1026,34 +1152,23 @@ fn visit_rs_sources(
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        let count = lib_error_match_count(&text);
-        if count == 0 {
-            continue;
+        for (line_no, line) in text.lines().enumerate() {
+            if !LIB_ERROR_MATCH_PREFIXES
+                .iter()
+                .any(|prefix| line.contains(prefix))
+            {
+                continue;
+            }
+            assert!(
+                line_allowed(&rel, line),
+                "{rel}:{} presentation or unlisted LibError match — centralize in error_map.rs or add a control-flow allowance:\n{line}",
+                line_no + 1
+            );
         }
-        let max = *budgets.get(rel.as_str()).unwrap_or_else(|| {
-            panic!(
-                "{rel} has {count} LibError matches but no MATCH_BUDGETS entry (add one or centralize in error_map.rs)"
-            )
-        });
-        assert!(
-            count <= max,
-            "{rel} has {count} LibError matches (max {max})"
-        );
-        *total += count;
     }
 }
 
 pub fn assert_lib_error_match_ratchet() {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let budgets: std::collections::HashMap<&'static str, usize> = MATCH_BUDGETS
-        .iter()
-        .map(|entry| (entry.path, entry.max))
-        .collect();
-    let mut total = 0usize;
-    visit_rs_sources(manifest, &manifest.join("src"), &budgets, &mut total);
-    const TOTAL_MATCHES_OUTSIDE_ERROR_MAP: usize = 54;
-    assert_eq!(
-        total, TOTAL_MATCHES_OUTSIDE_ERROR_MAP,
-        "update TOTAL_MATCHES_OUTSIDE_ERROR_MAP downward after removing matches (now {total})"
-    );
+    visit_rs_sources(manifest, &manifest.join("src"));
 }

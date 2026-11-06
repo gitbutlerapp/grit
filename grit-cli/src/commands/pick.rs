@@ -9,7 +9,6 @@ use crate::operation_output::{
     ConflictJson, OperationConflictBlock,
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-use crate::revision_errors::map_commit_spec_error;
 use crate::ui::path_display_for_discovered_repo;
 use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
@@ -241,7 +240,8 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         bail!("at least one commit or `--continue` / `--abort` / `--skip` is required");
     }
 
-    let sources = commits_to_replay(&repo, &opts.commits).map_err(map_commit_spec_error)?;
+    let sources =
+        commits_to_replay(&repo, &opts.commits).map_err(crate::error_map::map_commit_spec_error)?;
     if opts.dry_run {
         return Ok(PickOutcome {
             commits: sources

@@ -4,9 +4,7 @@
 use std::io::Write;
 
 use anyhow::{bail, Result};
-use grit_lib::error::Error as LibError;
 use grit_lib::objects::{short_hex, ObjectId};
-use grit_lib::porcelain::pull::PullError;
 use grit_lib::remote::{
     redact_url_for_display,
     snapshot_checkout::{
@@ -533,23 +531,7 @@ struct FollowUp {
 
 /// `err` in words, naming the files when uncommitted changes are in the way.
 fn failure_text(err: &anyhow::Error) -> String {
-    let text = format!("{err:#}");
-    let paths = err.chain().find_map(|cause| {
-        let lib = match cause.downcast_ref::<PullError>() {
-            Some(PullError::Repository(lib)) => Some(lib),
-            _ => cause.downcast_ref::<LibError>(),
-        };
-        match lib {
-            Some(LibError::WouldOverwrite { paths, .. }) if !paths.is_empty() => {
-                Some(paths.join(", "))
-            }
-            _ => None,
-        }
-    });
-    match paths {
-        Some(paths) => format!("{text}: {paths}"),
-        None => text,
-    }
+    crate::error_map::integrate_failure_text(err)
 }
 
 /// Bring the checkout onto the target the merge made, in the order

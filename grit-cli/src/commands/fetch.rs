@@ -587,36 +587,7 @@ fn plural(n: usize) -> &'static str {
 
 #[cfg(test)]
 mod map_remote_error_tests {
-    use grit_lib::error::Error as LibError;
     use grit_lib::objects::ObjectId;
-    use grit_lib::remote::RemoteError;
-
-    use super::map_remote_error;
-    use crate::cli_messages::human_error_message;
-    use crate::json_error::structured_json_payload;
-
-    #[test]
-    fn library_object_not_found_keeps_remote_display() {
-        let err = map_remote_error(RemoteError::Library(LibError::ObjectNotFound(
-            "deadbeef".into(),
-        )));
-        assert!(err.downcast_ref::<LibError>().is_none());
-        assert_eq!(
-            human_error_message(&err),
-            "object not found: deadbeef",
-            "must not remap to revision-not-found wording"
-        );
-        assert!(structured_json_payload(&err).is_none());
-    }
-
-    #[test]
-    fn library_hash_collision_stays_typed_for_json() {
-        let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
-        let err = map_remote_error(RemoteError::Library(LibError::HashCollision { oid }));
-        let payload = structured_json_payload(&err).expect("structured payload");
-        assert_eq!(payload.kind, crate::error_kind::ErrorKind::HashCollision);
-        assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));
-    }
 
     fn lib_outcome(
         modes: &[(&str, grit_lib::remote::transfer::UpdateMode)],

@@ -14,7 +14,6 @@ use crate::output::OutputMode;
 use crate::progress::summary::transfer_header;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
-use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
@@ -78,14 +77,8 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         None => {}
     }
     let mut options =
-        PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args)).map_err(
-            |err| match err {
-                PullError::Repository(LibError::OperationInProgress(kind)) => {
-                    crate::json_error::operation_in_progress_for_repo(&repo, "pull", kind)
-                }
-                other => anyhow::Error::new(other),
-            },
-        )?;
+        PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
+            .map_err(|err| crate::error_map::map_pull_options_error(&repo, err))?;
     let head = resolve_head_for_repository(&repo)?;
     let invocation = resolve_pull_invocation(
         &config,
@@ -141,28 +134,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
                 return Err(mapped);
             }
         }
-        Err(other) => {
-            return Err(match other {
-                PullError::Remote(remote) => map_remote_error(remote),
-                PullError::Repository(hook @ grit_lib::error::Error::Hook(_)) => {
-                    if repo.git_dir().join("MERGE_HEAD").is_file() {
-                        crate::json_error::hook_failed_with_hint(
-                            hook,
-                            "the merge is still in progress: run `grit merge --continue` to commit it, or `grit merge --abort` to cancel; autostashed edits come back either way",
-                        )
-                    } else {
-                        anyhow::Error::new(hook)
-                    }
-                }
-                PullError::Repository(LibError::OperationInProgress(kind)) => {
-                    return Err(crate::json_error::operation_in_progress_for_repo(
-                        &repo, "pull", kind,
-                    ));
-                }
-                PullError::Repository(lib) => crate::json_error::map_lib_error(lib),
-                rest => anyhow::Error::new(rest),
-            });
-        }
+        Err(other) => return Err(crate::error_map::map_pull_repository_error(&repo, other)),
     };
     let mut outcome = map_outcome(lib);
     outcome.transfer.records = progress.phases().to_vec();

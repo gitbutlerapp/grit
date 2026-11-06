@@ -2,21 +2,18 @@
 
 use anyhow::{bail, Result};
 use grit_lib::command_runner::hooks::PostOperationHooks;
-use grit_lib::error::Error as LibError;
 use grit_lib::objects::short_hex;
 use grit_lib::porcelain::branch::{upstream_tracking_display, TrackMode};
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
 };
-use grit_lib::state::{status_operation, wt_status_get_state, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
 use crate::commands::reset::OrphanedCommitJson;
 use crate::context;
-use crate::json_error;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
@@ -226,15 +223,7 @@ pub fn run(
         &mut grit_lib::progress::NullProgress,
         &interrupt,
     )
-    .map_err(|err| match err {
-        LibError::OperationInProgress(kind) => {
-            let operation = wt_status_get_state(repo.git_dir(), &HeadState::Invalid, false)
-                .ok()
-                .and_then(|state| status_operation(&state, false));
-            json_error::operation_in_progress("switch branches", kind, operation.as_ref())
-        }
-        other => json_error::map_lib_error(other),
-    })?;
+    .map_err(|err| crate::error_map::map_switch_lib_error(&repo, err))?;
 
     let detached = outcome.is_detached();
     Ok(SwitchOutcome {

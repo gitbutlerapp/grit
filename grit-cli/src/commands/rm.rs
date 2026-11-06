@@ -2,7 +2,7 @@
 
 use crate::pathspec_args::PathspecArgs;
 use anyhow::{bail, Result};
-use grit_lib::porcelain::paths::{remove_paths, BlockedRemoval, RemoveOptions, RemoveOutcome};
+use grit_lib::porcelain::paths::{remove_paths, RemoveOptions, RemoveOutcome};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::ResolvedPathspecs;
 use schemars::JsonSchema;
@@ -122,48 +122,6 @@ fn rm(
         dry_run,
         ignore_unmatch,
     };
-    remove_paths(repo, &opts, cancel).map_err(|err| map_paths_error(err, cached, path_display))
-}
-
-fn map_paths_error(
-    err: grit_lib::error::Error,
-    cached: bool,
-    path_display: Option<&PathDisplayOptions>,
-) -> anyhow::Error {
-    match err {
-        grit_lib::error::Error::RemoveBlocked { paths } => {
-            anyhow::anyhow!(blocked_message(&paths, cached, path_display))
-        }
-        other => crate::json_error::map_lib_error(other),
-    }
-}
-
-fn blocked_message(
-    paths: &[BlockedRemoval],
-    cached: bool,
-    path_display: Option<&PathDisplayOptions>,
-) -> String {
-    let format_path = |p: &str| {
-        path_display
-            .map(|opts| opts.format_path_for_human(p))
-            .unwrap_or_else(|| p.to_owned())
-    };
-    let mut msg = String::from("not removed, these files have content that would be lost:\n");
-    for blocked in paths {
-        msg.push_str(&format!(
-            "    {} ({})\n",
-            format_path(&blocked.path),
-            blocked.reason
-        ));
-    }
-    let cached_would_help = !cached
-        && paths
-            .iter()
-            .all(|blocked| blocked.reason.allowed_with_cached());
-    msg.push_str(if cached_would_help {
-        "(use --cached to stop tracking them and keep the files, or --force to remove them anyway)"
-    } else {
-        "(use --force to remove them anyway)"
-    });
-    msg
+    remove_paths(repo, &opts, cancel)
+        .map_err(|err| crate::error_map::map_remove_paths_error(err, cached, path_display))
 }

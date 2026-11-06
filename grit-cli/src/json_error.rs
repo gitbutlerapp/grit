@@ -157,7 +157,7 @@ pub struct HookFailureJson {
     pub stderr: String,
 }
 
-/// A [`HookError`] anywhere in `err`'s chain, bare or wrapped in [`LibError::Hook`].
+/// A [`HookError`] anywhere in `err`'s chain, bare or wrapped in the library hook error.
 pub fn hook_error_from_chain(err: &Error) -> Option<&HookError> {
     err.chain()
         .find_map(|cause| match cause.downcast_ref::<LibError>() {
@@ -166,7 +166,7 @@ pub fn hook_error_from_chain(err: &Error) -> Option<&HookError> {
         })
 }
 
-/// A failed hook with the next step as `hint`. The [`LibError::Hook`] stays in the chain, so
+/// A failed hook with the next step as `hint`. The library hook error stays in the chain, so
 /// the hook's captured output is still rendered.
 pub fn hook_failed_with_hint(err: LibError, hint: &str) -> Error {
     let err = Error::new(err);
@@ -385,23 +385,7 @@ pub fn structured_revision_not_found(human: impl Into<String>) -> Error {
     })
 }
 
-/// Map a library error to `anyhow`, using structured JSON for typed failures.
-pub fn map_lib_error(err: LibError) -> Error {
-    match err {
-        LibError::RevisionNotFound(spec) => revision_not_found(&spec),
-        LibError::UnbornHead => crate::unborn_errors::unborn_head_from_cwd()
-            .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
-        other => {
-            let wrapped = Error::new(other);
-            let classified = crate::error_map::classify(&wrapped);
-            if classified.payload.is_some() {
-                classified.into_anyhow()
-            } else {
-                wrapped
-            }
-        }
-    }
-}
+pub use crate::error_map::map_lib_error;
 
 /// Build a structured CLI error for a lock file that already exists.
 #[cold]
