@@ -3,7 +3,7 @@
 
 [meta]
 updated = "2026-11-06"
-semver_baseline = "d53fdbeb789bd7e6e82cccdbb24a167735c967fd"
+semver_baseline = "f920965b7cdd2785ea8693b58f454823616092ac"
 
 [counts]
 public_api_lines = 27940
