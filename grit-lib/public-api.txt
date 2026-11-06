@@ -16821,11 +16821,12 @@ pub struct grit_lib::refs::check_ref_format::RefName(_)
 impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::from_trusted(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
-impl core::borrow::Borrow<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
-pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::clone::Clone for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::RefName
@@ -16835,8 +16836,8 @@ impl core::cmp::PartialEq for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::eq(&self, &Self) -> bool
 impl core::cmp::PartialOrd for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::AsRef<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
-pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::convert::AsRef<str> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &str
 impl core::fmt::Debug for grit_lib::refs::store::RefName
@@ -16847,8 +16848,8 @@ impl core::hash::Hash for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefName
 impl core::ops::deref::Deref for grit_lib::refs::store::RefName
-pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::check_ref_format::RefNameRef
-pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::marker::Freeze for grit_lib::refs::store::RefName
 impl core::marker::Send for grit_lib::refs::store::RefName
 impl core::marker::Sync for grit_lib::refs::store::RefName
@@ -16882,23 +16883,38 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::check_ref_format::RefNamePoli
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_format::RefNamePolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNamePolicy
 #[repr(transparent)] pub struct grit_lib::refs::check_ref_format::RefNameRef(_)
-impl grit_lib::refs::check_ref_format::RefNameRef
-pub fn grit_lib::refs::check_ref_format::RefNameRef::as_str(&self) -> &str
-pub fn grit_lib::refs::check_ref_format::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
-impl core::borrow::Borrow<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
-pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
-impl core::convert::AsRef<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
-pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
-impl core::fmt::Display for grit_lib::refs::check_ref_format::RefNameRef
-pub fn grit_lib::refs::check_ref_format::RefNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::refs::check_ref_format::RefNameRef
-impl core::marker::Send for grit_lib::refs::check_ref_format::RefNameRef
-impl !core::marker::Sized for grit_lib::refs::check_ref_format::RefNameRef
-impl core::marker::Sync for grit_lib::refs::check_ref_format::RefNameRef
-impl core::marker::Unpin for grit_lib::refs::check_ref_format::RefNameRef
-impl core::marker::UnsafeUnpin for grit_lib::refs::check_ref_format::RefNameRef
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_format::RefNameRef
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNameRef
+impl grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::as_str(&self) -> &str
+pub fn grit_lib::refs::store::RefNameRef::from_trusted(&str) -> &Self
+pub fn grit_lib::refs::store::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
+impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::cmp::Eq for grit_lib::refs::store::RefNameRef
+impl core::cmp::Ord for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialEq for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::eq(&self, &Self) -> bool
+impl core::cmp::PartialOrd for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for alloc::string::String
+pub fn alloc::string::String::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for str
+pub fn str::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::fmt::Display for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefNameRef
+impl core::marker::Freeze for grit_lib::refs::store::RefNameRef
+impl core::marker::Send for grit_lib::refs::store::RefNameRef
+impl !core::marker::Sized for grit_lib::refs::store::RefNameRef
+impl core::marker::Sync for grit_lib::refs::store::RefNameRef
+impl core::marker::Unpin for grit_lib::refs::store::RefNameRef
+impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefNameRef
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefNameRef
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::check_ref_format::collapse_slashes(&str) -> alloc::string::String
 pub mod grit_lib::refs::gc
 pub struct grit_lib::refs::gc::PruneStats
@@ -17662,7 +17678,7 @@ pub grit_lib::refs::store::Expected::Any
 pub grit_lib::refs::store::Expected::Exists
 pub grit_lib::refs::store::Expected::Missing
 pub grit_lib::refs::store::Expected::Oid(grit_lib::objects::ObjectId)
-pub grit_lib::refs::store::Expected::Symref(alloc::string::String)
+pub grit_lib::refs::store::Expected::Symref(grit_lib::refs::store::RefName)
 impl core::clone::Clone for grit_lib::refs::store::Expected
 pub fn grit_lib::refs::store::Expected::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::Expected
@@ -17830,21 +17846,29 @@ impl core::fmt::Debug for grit_lib::refs::store::FilesRefStore
 pub fn grit_lib::refs::store::FilesRefStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::refs::store::RefStore for grit_lib::refs::store::FilesRefStore
 pub fn grit_lib::refs::store::FilesRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::FilesRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::FilesRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::FilesRefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::FilesRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::FilesRefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::FilesRefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::FilesRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::FilesRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::FilesRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::FilesRefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::FilesRefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::FilesRefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::FilesRefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl !core::marker::Freeze for grit_lib::refs::store::FilesRefStore
 impl core::marker::Send for grit_lib::refs::store::FilesRefStore
@@ -17871,28 +17895,36 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::FilesRefSto
 pub struct grit_lib::refs::store::MemoryRefStore
 impl grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::new() -> Self
-pub fn grit_lib::refs::store::MemoryRefStore::set_ref(&self, impl core::convert::Into<alloc::string::String>, grit_lib::refs::store::RawRef) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::MemoryRefStore::set_ref(&self, impl core::convert::AsRef<str>, grit_lib::refs::store::RawRef) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl core::default::Default for grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::default() -> Self
 impl core::fmt::Debug for grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::refs::store::RefStore for grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::MemoryRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::MemoryRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::MemoryRefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::MemoryRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::MemoryRefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::MemoryRefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::MemoryRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::MemoryRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::MemoryRefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::MemoryRefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl !core::marker::Freeze for grit_lib::refs::store::MemoryRefStore
 impl core::marker::Send for grit_lib::refs::store::MemoryRefStore
@@ -17902,8 +17934,8 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::store::MemoryRefStore
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::MemoryRefStore
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::MemoryRefStore
 pub struct grit_lib::refs::store::RefCaseOnlyRename
-pub grit_lib::refs::store::RefCaseOnlyRename::from: alloc::string::String
-pub grit_lib::refs::store::RefCaseOnlyRename::to: alloc::string::String
+pub grit_lib::refs::store::RefCaseOnlyRename::from: grit_lib::refs::store::RefName
+pub grit_lib::refs::store::RefCaseOnlyRename::to: grit_lib::refs::store::RefName
 impl core::clone::Clone for grit_lib::refs::store::RefCaseOnlyRename
 pub fn grit_lib::refs::store::RefCaseOnlyRename::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::RefCaseOnlyRename
@@ -17920,7 +17952,7 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefCaseOnlyRename
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefCaseOnlyRename
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefCaseOnlyRename
 pub struct grit_lib::refs::store::RefEntry
-pub grit_lib::refs::store::RefEntry::name: alloc::string::String
+pub grit_lib::refs::store::RefEntry::name: grit_lib::refs::store::RefName
 pub grit_lib::refs::store::RefEntry::peeled: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::store::RefEntry::value: grit_lib::refs::store::RawRef
 impl core::clone::Clone for grit_lib::refs::store::RefEntry
@@ -17942,11 +17974,12 @@ pub struct grit_lib::refs::store::RefName(_)
 impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
+pub fn grit_lib::refs::store::RefName::from_trusted(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
-impl core::borrow::Borrow<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
-pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::clone::Clone for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::RefName
@@ -17956,8 +17989,8 @@ impl core::cmp::PartialEq for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::eq(&self, &Self) -> bool
 impl core::cmp::PartialOrd for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::AsRef<grit_lib::refs::check_ref_format::RefNameRef> for grit_lib::refs::store::RefName
-pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::convert::AsRef<str> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &str
 impl core::fmt::Debug for grit_lib::refs::store::RefName
@@ -17968,8 +18001,8 @@ impl core::hash::Hash for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefName
 impl core::ops::deref::Deref for grit_lib::refs::store::RefName
-pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::check_ref_format::RefNameRef
-pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::check_ref_format::RefNameRef
+pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::marker::Freeze for grit_lib::refs::store::RefName
 impl core::marker::Send for grit_lib::refs::store::RefName
 impl core::marker::Sync for grit_lib::refs::store::RefName
@@ -17977,10 +18010,43 @@ impl core::marker::Unpin for grit_lib::refs::store::RefName
 impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefName
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefName
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefName
+#[repr(transparent)] pub struct grit_lib::refs::store::RefNameRef(_)
+impl grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::as_str(&self) -> &str
+pub fn grit_lib::refs::store::RefNameRef::from_trusted(&str) -> &Self
+pub fn grit_lib::refs::store::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
+impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::cmp::Eq for grit_lib::refs::store::RefNameRef
+impl core::cmp::Ord for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::cmp(&self, &Self) -> core::cmp::Ordering
+impl core::cmp::PartialEq for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::eq(&self, &Self) -> bool
+impl core::cmp::PartialOrd for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for alloc::string::String
+pub fn alloc::string::String::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
+pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for str
+pub fn str::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::fmt::Display for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefNameRef
+impl core::marker::Freeze for grit_lib::refs::store::RefNameRef
+impl core::marker::Send for grit_lib::refs::store::RefNameRef
+impl !core::marker::Sized for grit_lib::refs::store::RefNameRef
+impl core::marker::Sync for grit_lib::refs::store::RefNameRef
+impl core::marker::Unpin for grit_lib::refs::store::RefNameRef
+impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefNameRef
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefNameRef
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefNameRef
 pub struct grit_lib::refs::store::RefReflogRename
 pub grit_lib::refs::store::RefReflogRename::append: grit_lib::refs::store::ReflogUpdate
-pub grit_lib::refs::store::RefReflogRename::from: alloc::string::String
-pub grit_lib::refs::store::RefReflogRename::to: alloc::string::String
+pub grit_lib::refs::store::RefReflogRename::from: grit_lib::refs::store::RefName
+pub grit_lib::refs::store::RefReflogRename::to: grit_lib::refs::store::RefName
 impl core::clone::Clone for grit_lib::refs::store::RefReflogRename
 pub fn grit_lib::refs::store::RefReflogRename::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::RefReflogRename
@@ -18032,7 +18098,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefTransact
 pub struct grit_lib::refs::store::RefUpdate
 pub grit_lib::refs::store::RefUpdate::expected: grit_lib::refs::store::Expected
 pub grit_lib::refs::store::RefUpdate::flags: grit_lib::refs::store::RefUpdateFlags
-pub grit_lib::refs::store::RefUpdate::name: alloc::string::String
+pub grit_lib::refs::store::RefUpdate::name: grit_lib::refs::store::RefName
 pub grit_lib::refs::store::RefUpdate::new_value: core::option::Option<grit_lib::refs::store::RawRef>
 pub grit_lib::refs::store::RefUpdate::reflog: core::option::Option<grit_lib::refs::store::ReflogUpdate>
 impl core::clone::Clone for grit_lib::refs::store::RefUpdate
@@ -18104,21 +18170,29 @@ impl core::fmt::Debug for grit_lib::refs::store::ReftableRefStore
 pub fn grit_lib::refs::store::ReftableRefStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl grit_lib::refs::store::RefStore for grit_lib::refs::store::ReftableRefStore
 pub fn grit_lib::refs::store::ReftableRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::ReftableRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::ReftableRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::ReftableRefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::ReftableRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::ReftableRefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::ReftableRefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::ReftableRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::ReftableRefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl !core::marker::Freeze for grit_lib::refs::store::ReftableRefStore
 impl core::marker::Send for grit_lib::refs::store::ReftableRefStore
@@ -18157,80 +18231,112 @@ impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::SingleW
 pub trait grit_lib::refs::store::PreparedRefTransaction: core::marker::Send
 pub fn grit_lib::refs::store::PreparedRefTransaction::abort(alloc::boxed::Box<Self>) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::PreparedRefTransaction::commit(alloc::boxed::Box<Self>) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::PreparedRefTransaction::rejected_updates(&self) -> &[(alloc::string::String, grit_lib::refs::store::RefStoreError)]
+pub fn grit_lib::refs::store::PreparedRefTransaction::rejected_updates(&self) -> &[(grit_lib::refs::store::RefName, grit_lib::refs::store::RefStoreError)]
 pub trait grit_lib::refs::store::RefStore: core::marker::Send + core::marker::Sync + core::fmt::Debug
 pub fn grit_lib::refs::store::RefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::RefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::RefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::RefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::RefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::RefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::RefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::RefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::RefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::RefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::RefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::RefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::RefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::RefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::RefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::RefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::RefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::RefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::RefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::RefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::RefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl grit_lib::refs::store::RefStore for grit_lib::refs::store::FilesRefStore
 pub fn grit_lib::refs::store::FilesRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::FilesRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::FilesRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::FilesRefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::FilesRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::FilesRefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::FilesRefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::FilesRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::FilesRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::FilesRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::FilesRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::FilesRefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::FilesRefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::FilesRefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::FilesRefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::FilesRefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::FilesRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl grit_lib::refs::store::RefStore for grit_lib::refs::store::MemoryRefStore
 pub fn grit_lib::refs::store::MemoryRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::MemoryRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::MemoryRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::MemoryRefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::MemoryRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::MemoryRefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::MemoryRefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::MemoryRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::MemoryRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::MemoryRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::MemoryRefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::MemoryRefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::MemoryRefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::MemoryRefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::MemoryRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
 impl grit_lib::refs::store::RefStore for grit_lib::refs::store::ReftableRefStore
 pub fn grit_lib::refs::store::ReftableRefStore::as_files(&self) -> core::option::Option<&grit_lib::refs::store::FilesRefStore>
-pub fn grit_lib::refs::store::ReftableRefStore::create_reflog(&self, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog(&self, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::create_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::create_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::delete_reflog_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_physical_stack_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::for_each_ref(&self, &str, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry(&self, &str, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&str) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry_str(&self, &grit_lib::refs::store::RefNameRef, bool, &mut dyn core::ops::function::FnMut(&grit_lib::refs::reflog::ReflogEntry) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::for_each_reflog_ref(&self, &mut dyn core::ops::function::FnMut(&grit_lib::refs::store::RefNameRef) -> core::ops::control_flow::ControlFlow<()>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::format(&self) -> grit_lib::refs::store::RefStorageFormat
 pub fn grit_lib::refs::store::ReftableRefStore::prepare(&self, grit_lib::refs::store::RefTransaction) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::store::ReftableRefStore::prepare_for(&self, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::ReftableRefStore::read_raw(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::ReftableRefStore::read_raw(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
+pub fn grit_lib::refs::store::ReftableRefStore::read_raw_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<core::option::Option<grit_lib::refs::store::RawRef>>
 pub fn grit_lib::refs::store::ReftableRefStore::ref_lock_wait(&self) -> grit_lib::lockfile::LockWait
-pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &str, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog(&self, &str, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::ReftableRefStore::reflog_exists_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::replace_reflog_str(&self, &grit_lib::refs::store::RefNameRef, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::resolve(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::ReftableRefStore::resolve_str(&self, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::store::ReftableRefStore::rewrite_reflog_str(&self, &grit_lib::refs::store::RefNameRef, &mut dyn core::ops::function::FnMut(alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::store::ReftableRefStore::verify_update_targets(&self, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
-pub fn grit_lib::refs::store::resolve_store<S: grit_lib::refs::store::RefStore + ?core::marker::Sized>(&S, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::store::resolve_store<S: grit_lib::refs::store::RefStore + ?core::marker::Sized>(&S, &grit_lib::refs::store::RefNameRef) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub mod grit_lib::refs::version_sort
 pub fn grit_lib::refs::version_sort::compare_refname_versions(&str, &str, &[alloc::string::String]) -> core::cmp::Ordering
 pub enum grit_lib::refs::LogRefsConfig
@@ -18323,7 +18429,7 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::RefnameUnavailable
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::RefnameUnavailable
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::RefnameUnavailable
 pub struct grit_lib::refs::BranchCommitRefUpdate<'a>
-pub grit_lib::refs::BranchCommitRefUpdate::branch_ref: &'a str
+pub grit_lib::refs::BranchCommitRefUpdate::branch_ref: &'a grit_lib::refs::store::RefNameRef
 pub grit_lib::refs::BranchCommitRefUpdate::expected_old: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::refs::BranchCommitRefUpdate::identity: &'a str
 pub grit_lib::refs::BranchCommitRefUpdate::new_oid: grit_lib::objects::ObjectId
@@ -18356,8 +18462,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::PackedRefRecord
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::PackedRefRecord
 pub struct grit_lib::refs::PackedRefs
 impl grit_lib::refs::PackedRefs
-pub fn grit_lib::refs::PackedRefs::get(&self, &str) -> core::option::Option<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::PackedRefs::has_namespace_conflict(&self, &str) -> bool
+pub fn grit_lib::refs::PackedRefs::get(&self, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> core::option::Option<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::PackedRefs::has_namespace_conflict(&self, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> bool
 pub fn grit_lib::refs::PackedRefs::load(&std::path::Path) -> grit_lib::error::Result<Self>
 impl core::marker::Freeze for grit_lib::refs::PackedRefs
 impl core::marker::Send for grit_lib::refs::PackedRefs
@@ -18401,13 +18507,13 @@ impl !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::RefUpdateCommitOu
 pub struct grit_lib::refs::References<'repo>
 impl<'repo> grit_lib::refs::References<'repo>
 pub fn grit_lib::refs::References<'repo>::compare_and_swap(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
+pub fn grit_lib::refs::References<'repo>::list(&self, &str) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::refs::store::RefName, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::References<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::refs::References<'repo>::pack(&self, &grit_lib::maintenance::PackRefsOptions) -> grit_lib::error::Result<grit_lib::maintenance::PackRefsReport>
 pub fn grit_lib::refs::References<'repo>::query(&self, &grit_lib::refs::listing::RefQuery, &grit_lib::refs::listing::RefQueryOptions) -> core::result::Result<alloc::vec::Vec<grit_lib::refs::listing::RefListing>, grit_lib::refs::listing::RefQueryError>
 pub fn grit_lib::refs::References<'repo>::reflog(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
 pub fn grit_lib::refs::References<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::refs::References<'repo>::resolve(&self, &grit_lib::refs::store::RefName) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::References<'repo>::resolve(&self, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::References<'repo>::store(&self) -> &'repo dyn grit_lib::refs::store::RefStore
 pub fn grit_lib::refs::References<'repo>::update(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::References<'repo>::update_direct(&self, &grit_lib::refs::store::RefName, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
@@ -18424,15 +18530,15 @@ impl<'repo> core::marker::UnsafeUnpin for grit_lib::refs::References<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::References<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::References<'repo>
 pub const grit_lib::refs::SYMREF_MAXDEPTH: usize
-pub fn grit_lib::refs::append_reflog(&std::path::Path, &str, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::append_reflog(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &str, &str, bool) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::collect_alternate_ref_oids(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::commit_ref_store_batch(&std::path::Path, &[grit_lib::refs::store::RefUpdate]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::commit_ref_update_on_store(&dyn grit_lib::refs::store::RefStore, grit_lib::refs::store::RefUpdate) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::commit_ref_updates_non_atomic(&std::path::Path, alloc::vec::Vec<grit_lib::refs::store::RefUpdate>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::RefUpdateCommitOutcome>>
 pub fn grit_lib::refs::commit_ref_updates_on_store(&dyn grit_lib::refs::store::RefStore, &[grit_lib::refs::store::RefUpdate], &[grit_lib::refs::store::RefReflogRename]) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::common_dir(&std::path::Path) -> core::option::Option<std::path::PathBuf>
-pub fn grit_lib::refs::delete_ref(&std::path::Path, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::delete_ref_cas(&std::path::Path, &str, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::delete_ref(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::delete_ref_cas(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::effective_log_refs_config(&std::path::Path) -> grit_lib::refs::LogRefsConfig
 pub fn grit_lib::refs::expand_ref_dwim_full_name(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<(usize, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::refs::list_refs(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
@@ -18442,36 +18548,36 @@ pub fn grit_lib::refs::list_refs_glob_for_repository(&grit_lib::repo::Repository
 pub fn grit_lib::refs::list_refs_physical(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>>
 pub fn grit_lib::refs::lock_path_for_ref(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::refs::pack_remote_tracking_refs_for_clone(&std::path::Path, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::packed_refs_entry_exists(&std::path::Path, &str) -> grit_lib::error::Result<bool>
+pub fn grit_lib::refs::packed_refs_entry_exists(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::refs::peel_symref_to_terminal_ref(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::refs::prepare_with_lock_wait(&dyn grit_lib::refs::store::RefStore, grit_lib::refs::store::RefTransaction, grit_lib::lockfile::LockWait) -> core::result::Result<alloc::boxed::Box<(dyn grit_lib::refs::store::PreparedRefTransaction + core::marker::Send + '_)>, grit_lib::refs::store::RefStoreError>
 pub fn grit_lib::refs::read_head(&std::path::Path) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::refs::read_log_refs_config(&std::path::Path) -> grit_lib::refs::LogRefsConfig
-pub fn grit_lib::refs::read_raw_ref(&std::path::Path, &str) -> grit_lib::error::Result<grit_lib::refs::RawRefLookup>
+pub fn grit_lib::refs::read_raw_ref(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<grit_lib::refs::RawRefLookup>
 pub fn grit_lib::refs::read_ref_file(&std::path::Path) -> grit_lib::error::Result<grit_lib::refs::Ref>
-pub fn grit_lib::refs::read_symbolic_ref(&std::path::Path, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
-pub fn grit_lib::refs::read_symbolic_ref_for_repository(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
-pub fn grit_lib::refs::ref_matches_glob(&str, &str) -> bool
-pub fn grit_lib::refs::reflog_file_path(&std::path::Path, &str) -> std::path::PathBuf
+pub fn grit_lib::refs::read_symbolic_ref(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
+pub fn grit_lib::refs::read_symbolic_ref_for_repository(&grit_lib::repo::Repository, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
+pub fn grit_lib::refs::ref_matches_glob(impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &str) -> bool
+pub fn grit_lib::refs::reflog_file_path(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> std::path::PathBuf
 pub fn grit_lib::refs::resolve_at_n_branch(&std::path::Path, &str) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::refs::resolve_ref(&std::path::Path, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::refs::resolve_ref_cached(&std::path::Path, &str, &grit_lib::refs::PackedRefs) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::refs::resolve_ref(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::refs::resolve_ref_cached(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &grit_lib::refs::PackedRefs) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::resolve_ref_dwim(&std::path::Path, &str) -> (usize, core::option::Option<grit_lib::objects::ObjectId>)
 pub fn grit_lib::refs::shorten_unambiguous(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::refs::should_autocreate_reflog(&std::path::Path, &str) -> bool
-pub fn grit_lib::refs::should_autocreate_reflog_for_mode(&str, grit_lib::refs::LogRefsConfig) -> bool
+pub fn grit_lib::refs::should_autocreate_reflog(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> bool
+pub fn grit_lib::refs::should_autocreate_reflog_for_mode(impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, grit_lib::refs::LogRefsConfig) -> bool
 pub fn grit_lib::refs::update_branch_for_commit(&std::path::Path, &grit_lib::refs::BranchCommitRefUpdate<'_>) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::update_branch_for_commit_on_store(&dyn grit_lib::refs::store::RefStore, &grit_lib::refs::BranchCommitRefUpdate<'_>, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::update_direct_ref_on_store(&dyn grit_lib::refs::store::RefStore, &std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::verify_branch_commit_cas(core::option::Option<grit_lib::objects::ObjectId>, core::option::Option<grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::verify_ref_available_for_create(&std::path::Path, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
+pub fn grit_lib::refs::update_direct_ref_on_store(&dyn grit_lib::refs::store::RefStore, &std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::verify_branch_commit_cas(core::option::Option<grit_lib::objects::ObjectId>, core::option::Option<grit_lib::objects::ObjectId>, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::verify_ref_available_for_create(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &alloc::collections::btree::set::BTreeSet<alloc::string::String>, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub fn grit_lib::refs::verify_ref_transaction_batch(&std::path::Path, &[grit_lib::refs::RefBatchItem]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub fn grit_lib::refs::warn_ambiguous_refs_from_config(&grit_lib::repo::Repository) -> bool
 pub fn grit_lib::refs::write_packed_refs_file(&std::path::Path, &[grit_lib::refs::PackedRefRecord]) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::write_ref(&std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::write_ref_cached(&std::path::Path, &str, &grit_lib::objects::ObjectId, &mut grit_lib::refs::PackedRefs) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::write_ref_cas(&std::path::Path, &str, &grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::refs::write_symbolic_ref(&std::path::Path, &str, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::write_ref(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::write_ref_cached(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &grit_lib::objects::ObjectId, &mut grit_lib::refs::PackedRefs) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::write_ref_cas(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::write_symbolic_ref(&std::path::Path, impl core::convert::AsRef<grit_lib::refs::store::RefNameRef>, &str) -> grit_lib::error::Result<()>
 pub mod grit_lib::remote
 pub mod grit_lib::remote::bundle_uri
 pub enum grit_lib::remote::bundle_uri::BundleListMode
@@ -24966,7 +25072,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::NewCommit
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::NewCommit
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::NewCommit
 pub struct grit_lib::revwalk::history::PlannedRefUpdate
-pub grit_lib::revwalk::history::PlannedRefUpdate::name: alloc::string::String
+pub grit_lib::revwalk::history::PlannedRefUpdate::name: grit_lib::refs::store::RefName
 pub grit_lib::revwalk::history::PlannedRefUpdate::new: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::PlannedRefUpdate::old: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::revwalk::history::PlannedRefUpdate
