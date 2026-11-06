@@ -1185,7 +1185,10 @@ fn unpack_strict_rejects_missing_tree_reference() {
     )
     .expect_err("strict unpack must fail");
     assert!(
-        matches!(err, grit_lib::error::Error::Object(ObjectError::CorruptObject { .. })),
+        matches!(
+            err,
+            grit_lib::error::Error::Object(ObjectError::CorruptObject { .. })
+        ),
         "expected corrupt object, got {err:?}"
     );
 

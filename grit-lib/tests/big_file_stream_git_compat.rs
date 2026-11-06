@@ -2,7 +2,6 @@
 //! instead of being read into memory (#1850), and the result round-trips with system `git`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 

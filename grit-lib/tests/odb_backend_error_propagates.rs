@@ -1,7 +1,6 @@
 //! Custom [`ObjectStore`] backends surface [`ObjectError::Backend`].
 
 #[allow(clippy::unwrap_used)]
-
 use grit_lib::objects::error::{ObjectError, ObjectResult};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{HashAlgo, ObjectId};

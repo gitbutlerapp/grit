@@ -371,7 +371,7 @@ impl OffloadPack {
 ///
 /// # Errors
 ///
-/// [`Error::Offload`] for the [`OffloadError`] cases, [`Error::UnsupportedObjectStore`]
+/// [`ObjectError::Offload`] for the [`OffloadError`] cases, [`ObjectError::UnsupportedObjectStore`]
 /// without a files-backed object store, and read, write and config failures.
 pub fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
     let odb = repo.odb();
@@ -748,7 +748,7 @@ fn kept_object_the_promisor_pack_names(
         }
         let kind = match odb.read_info_without_fetch(&referrer) {
             Ok(info) => info.kind,
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => continue,
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => continue,
             Err(err) => return Err(err),
         };
         if kind == ObjectKind::Blob {
@@ -791,7 +791,7 @@ fn selected_blob_size(odb: &Odb, filter: ObjectFilterSpec, oid: &ObjectId) -> Re
     }
     let info = match odb.read_info_without_fetch(oid) {
         Ok(info) => info,
-        Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => return Ok(None),
+        Err(Error::Object(ObjectError::ObjectNotFound { .. })) => return Ok(None),
         Err(err) => return Err(err),
     };
     if info.kind != ObjectKind::Blob {

@@ -1,9 +1,9 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
-use grit_lib::objects::ObjectError;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
+use grit_lib::objects::ObjectError;
 use grit_lib::porcelain::reset::{
     reset_to_commit, OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome,
     DEFAULT_ORPHAN_LIMIT,
@@ -269,9 +269,11 @@ pub fn run(
 fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
     match err {
         Error::InvalidRef(msg) => anyhow::anyhow!(msg),
-        Error::Object(ObjectError::ObjectNotFound { spec: msg, .. }) => crate::json_error::structured_revision_not_found(format!(
-            "invalid revision '{spec}': {msg}"
-        )),
+        Error::Object(ObjectError::ObjectNotFound { spec: msg, .. }) => {
+            crate::json_error::structured_revision_not_found(format!(
+                "invalid revision '{spec}': {msg}"
+            ))
+        }
         other => anyhow::Error::new(other),
     }
 }

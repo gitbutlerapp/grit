@@ -4,7 +4,6 @@
 //! the same encoding (so hooks and helpers that run `git` see the overrides) and read Git's.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::path::Path;
 use std::process::Command;
 

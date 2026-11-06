@@ -192,7 +192,10 @@ fn default_lookup_prefix_handles_odd_even_empty_full_and_invalid_prefixes() {
     assert_eq!(lookup(&a.to_hex(), 0).expect("full"), vec![a]);
     assert!(lookup("abe", 0).expect("miss").is_empty());
 
-    assert!(matches!(lookup("abg", 0), Err(Error::Object(ObjectError::InvalidObjectId { input: _ }))));
+    assert!(matches!(
+        lookup("abg", 0),
+        Err(Error::Object(ObjectError::InvalidObjectId { input: _ }))
+    ));
     assert!(matches!(
         lookup(&format!("{}0", a.to_hex()), 0),
         Err(ObjectError::InvalidObjectId { input: _ }.into())

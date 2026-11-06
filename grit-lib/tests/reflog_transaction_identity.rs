@@ -1,9 +1,8 @@
 //! Public ref transactions must reject forged reflog identity strings (issue #1972).
 
-use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
+use grit_lib::objects::ObjectError;
 
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;

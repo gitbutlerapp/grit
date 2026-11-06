@@ -1,7 +1,6 @@
 //! Issue #2497: [`References::update`] must follow `HEAD` symrefs and write reflogs.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::zero_oid;
 use grit_lib::error::Error;

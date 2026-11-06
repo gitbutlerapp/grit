@@ -929,10 +929,7 @@ fn library_err(err: Error) -> HistoryError {
     if let Error::History(inner) = err {
         return inner;
     }
-    if matches!(
-        err,
-        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
-    ) {
+    if matches!(err, Error::Object(ObjectError::ObjectNotFound { .. })) {
         return HistoryError::Library(Box::new(err));
     }
     HistoryError::Planning {

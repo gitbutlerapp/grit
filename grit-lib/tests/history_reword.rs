@@ -1,9 +1,8 @@
 //! Tests for [`grit_lib::revwalk::history::reword`].
 
-use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
+use grit_lib::objects::ObjectError;
 
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
 use grit_lib::repo::Repository;

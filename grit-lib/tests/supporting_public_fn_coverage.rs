@@ -1,7 +1,6 @@
 //! Execute assorted public grit-lib helpers (strings, config, transport glue) for coverage.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

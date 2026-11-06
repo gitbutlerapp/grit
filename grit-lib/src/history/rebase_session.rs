@@ -1,6 +1,5 @@
 //! Stop/resume rebase sessions with Git-compatible `.git/rebase-merge/` state.
 
-use crate::objects::ObjectError;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;

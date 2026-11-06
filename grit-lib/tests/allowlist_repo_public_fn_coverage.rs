@@ -1,7 +1,6 @@
 //! Repository-backed coverage for remaining public-fn allowlist entries.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::collections::{HashMap, HashSet};

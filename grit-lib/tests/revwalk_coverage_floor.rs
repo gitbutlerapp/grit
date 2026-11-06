@@ -1,7 +1,6 @@
 //! Deep rev-list sweeps targeting the `group:revwalk` 85% floor.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};

@@ -24,7 +24,10 @@ fn committer_unix_seconds(committer: &str) -> Result<i64> {
         )));
     }
     parts[1].parse::<i64>().map_err(|_| {
-        Error::Object(ObjectError::corrupt_object(None, "invalid committer timestamp".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "invalid committer timestamp".to_owned(),
+        ))
     })
 }
 
@@ -217,7 +220,10 @@ impl<'r> SkippingNegotiator<'r> {
     fn push_parent(&mut self, entry_oid: ObjectId, to_push: ObjectId) -> Result<bool> {
         let (entry_ttl, entry_orig) = {
             let e = self.entries.get(&entry_oid).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "missing queue entry".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "missing queue entry".to_owned(),
+                ))
             })?;
             (e.ttl, e.original_ttl)
         };
@@ -233,7 +239,10 @@ impl<'r> SkippingNegotiator<'r> {
         }
 
         let parent_entry = self.entries.get_mut(&to_push).ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "missing parent entry".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "missing parent entry".to_owned(),
+            ))
         })?;
 
         if entry_common_or_adv {
@@ -268,7 +277,10 @@ impl<'r> SkippingNegotiator<'r> {
             let HeapItem {
                 oid: commit_oid, ..
             } = self.heap.pop().ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "negotiator heap inconsistency".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "negotiator heap inconsistency".to_owned(),
+                ))
             })?;
 
             let entry_ttl = self
@@ -276,7 +288,10 @@ impl<'r> SkippingNegotiator<'r> {
                 .get(&commit_oid)
                 .map(|e| e.ttl)
                 .ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "popped missing entry".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "popped missing entry".to_owned(),
+                    ))
                 })?;
 
             self.set_f(commit_oid, POPPED);

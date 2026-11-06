@@ -1,7 +1,6 @@
 //! Reversible status paths must identify the same file throughout blame (issue #2045).
 #![cfg(unix)]
 #[allow(clippy::unwrap_used)]
-
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 

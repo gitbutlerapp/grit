@@ -129,7 +129,7 @@ fn read_store_covers_primary_read_sources_and_alternates() {
         odb.primary(),
         Err(Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "primary"
-        })
+        }))
     ));
 }
 

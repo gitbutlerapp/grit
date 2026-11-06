@@ -1,7 +1,6 @@
 //! Forced tag replacement and dry-run behavior vs system `git`.
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::tag::{create_tag, list_tags, CreateTagRequest, TagKind};

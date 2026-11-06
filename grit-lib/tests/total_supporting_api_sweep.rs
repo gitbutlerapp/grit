@@ -1,7 +1,6 @@
 //! Exercises supporting modules with large missed-line counts toward `[total]`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::apply::{
     inflate_binary_payload, materialize_binary_patch_forward, materialize_binary_patch_reverse,
     parse_patch, write_git_binary_patch,

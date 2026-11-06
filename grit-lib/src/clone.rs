@@ -141,7 +141,7 @@ impl CloneError {
     /// # Returns
     ///
     /// The first object still missing when the checkout failed on
-    /// [`Error::PromisorFetchFailed`] or [`Error::PromisedObjectMissing`] (for example
+    /// [`ObjectError::PromisorFetchFailed`] or [`ObjectError::PromisedObjectMissing`] (for example
     /// with lazy fetch turned off); `None` otherwise.
     #[must_use]
     pub fn missing_promised_object(&self) -> Option<ObjectId> {
@@ -161,7 +161,7 @@ impl CloneError {
     /// # Returns
     ///
     /// Each failing remote's name with its first error, in the order they were tried;
-    /// empty when the checkout did not fail on [`Error::PromisorFetchFailed`].
+    /// empty when the checkout did not fail on [`ObjectError::PromisorFetchFailed`].
     #[must_use]
     pub fn failed_promisor_remotes(&self) -> &[(String, Box<ObjectError>)] {
         let Self::CheckoutFailed { source, .. } = self else {
@@ -695,7 +695,7 @@ pub struct CloneIntoOutcome {
 ///
 /// Same as [`clone`] except [`CloneError::DestNotEmpty`] cannot occur. Local clone sources
 /// whose object format differs from the repository's injected store return
-/// [`Error::ObjectFormatMismatch`](crate::error::Error::ObjectFormatMismatch).
+/// [`crate::objects::ObjectError::ObjectFormatMismatch`].
 pub fn clone_into(
     repo: Repository,
     opts: CloneIntoOptions,

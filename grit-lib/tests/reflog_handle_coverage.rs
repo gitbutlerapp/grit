@@ -1,7 +1,6 @@
 //! Public API coverage for [`RepositoryReflogs`](grit_lib::repo_handles::RepositoryReflogs).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::refs::append_reflog;
 use grit_lib::refs::store::RefName;

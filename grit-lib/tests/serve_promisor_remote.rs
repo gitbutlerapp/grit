@@ -2,7 +2,6 @@
 //! remotes the client accepted, and honors `uploadpack.allowAnySHA1InWant`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::io::Cursor;
 use std::path::Path;
 

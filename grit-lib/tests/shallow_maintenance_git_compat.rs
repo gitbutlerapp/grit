@@ -4,7 +4,6 @@
 //! absent and every history walk must treat them as parentless, as Git does.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;

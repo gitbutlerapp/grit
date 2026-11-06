@@ -100,9 +100,9 @@ fn lazy_fetch_disabled_by_env(env: &Environment) -> bool {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when no promisor remote is configured,
-/// [`Error::PromisorFetchFailed`] (each failed remote with its first error) when
-/// objects are still missing and some remote failed, [`Error::PromisedObjectMissing`]
+/// Returns [`ObjectError::NoPromisorRemote`] when no promisor remote is configured,
+/// [`ObjectError::PromisorFetchFailed`] (each failed remote with its first error) when
+/// objects are still missing and some remote failed, [`ObjectError::PromisedObjectMissing`]
 /// when every remote answered but none had the object, and [`Error::Cancelled`] when a
 /// fetch was cancelled.
 pub fn fetch_promisor_objects(
@@ -200,8 +200,8 @@ pub(crate) type FetchOne<'a> =
 ///
 /// # Errors
 ///
-/// When objects are still missing at the end: [`Error::PromisorFetchFailed`] when some
-/// attempt failed, or [`Error::PromisedObjectMissing`] when every attempt succeeded.
+/// When objects are still missing at the end: [`ObjectError::PromisorFetchFailed`] when some
+/// attempt failed, or [`ObjectError::PromisedObjectMissing`] when every attempt succeeded.
 /// A cancelled attempt ([`Error::is_cancelled`]) stops at once with that error.
 pub(crate) fn fetch_from_promisors(
     repo: &Repository,
@@ -280,9 +280,9 @@ impl PromisorLazyNestGuard {
         PROMISOR_LAZY_NEST.with(|cell| {
             let prev = cell.get();
             if prev >= MAX_LAZY_FETCH_NEST {
-                return Err(ObjectError::Nested(Box::new(Error::Message(format!(
-                    "too many nested promisor lazy fetches (limit {MAX_LAZY_FETCH_NEST})"
-                ))))
+                return Err(ObjectError::PromisorLazyFetchNestedTooDeep {
+                    limit: MAX_LAZY_FETCH_NEST,
+                }
                 .into());
             }
             cell.set(prev + 1);
@@ -301,7 +301,7 @@ impl Drop for PromisorLazyNestGuard {
 pub(crate) enum PromisorMissResolution {
     /// Object should be present; caller retries the read.
     RetryAfterFetch,
-    /// Not a partial-clone repository — surface [`Error::ObjectNotFound`].
+    /// Not a partial-clone repository — surface [`ObjectError::ObjectNotFound`].
     NotPromisorRepo,
     /// Lazy fetch disabled or no fetcher installed.
     PromisedMissing(ObjectError),
@@ -355,18 +355,16 @@ pub(crate) fn resolve_promisor_read_miss(
     lazy_retry_count: u32,
 ) -> Result<PromisorMissResolution> {
     if lazy_retry_count >= MAX_LAZY_READ_RETRIES {
-        return Err(ObjectError::Nested(Box::new(Error::Message(format!(
-            "promisor lazy fetch did not materialize {} after {MAX_LAZY_READ_RETRIES} attempts",
-            oid.to_hex()
-        ))))
+        return Err(ObjectError::PromisorLazyFetchIncomplete {
+            oid: *oid,
+            attempts: MAX_LAZY_READ_RETRIES,
+        }
         .into());
     }
 
-    let git_dir = odb.config_git_dir().ok_or_else(|| {
-        Error::Object(ObjectError::Nested(Box::new(Error::Message(
-            "promisor lazy fetch requires a git directory on the ODB".into(),
-        ))))
-    })?;
+    let git_dir = odb
+        .config_git_dir()
+        .ok_or(ObjectError::PromisorLazyFetchNoGitDir)?;
     let config = repo_caches.load_config(env, Some(git_dir), true)?;
     if !repo_treats_promisor_packs(git_dir, config.as_ref()) {
         return Ok(PromisorMissResolution::NotPromisorRepo);
@@ -389,11 +387,7 @@ pub(crate) fn resolve_promisor_read_miss(
     odb.invalidate_packs();
 
     if !odb.try_exists_stored(oid)? {
-        return Err(ObjectError::Nested(Box::new(Error::Message(format!(
-            "promisor fetch completed but {} is still missing locally",
-            oid.to_hex()
-        ))))
-        .into());
+        return Err(ObjectError::PromisorFetchStillMissing(*oid).into());
     }
     Ok(PromisorMissResolution::RetryAfterFetch)
 }
@@ -445,7 +439,12 @@ mod tests {
     }
 
     fn failed(msg: &str) -> PromisorAttemptError {
-        PromisorAttemptError::RequestFailed(Error::Message(msg.to_owned()))
+        PromisorAttemptError::RequestFailed(
+            ObjectError::PromisorRemoteFailure {
+                detail: msg.to_owned(),
+            }
+            .into(),
+        )
     }
 
     /// A remote holding `bodies`: like a server, it refuses the whole request when it
@@ -568,9 +567,12 @@ mod tests {
             &mut |name, w| {
                 if name == "lop" {
                     lop_asked += 1;
-                    return Err(PromisorAttemptError::RemoteUnusable(Error::Message(
-                        "bad lop url".into(),
-                    )));
+                    return Err(PromisorAttemptError::RemoteUnusable(
+                        ObjectError::PromisorRemoteFailure {
+                            detail: "bad lop url".into(),
+                        }
+                        .into(),
+                    ));
                 }
                 serve(&repo, &[b"a\n"], w)
             },
@@ -600,14 +602,22 @@ mod tests {
         })
         .unwrap_err();
         let shown = err.to_string();
-        assert!(shown.contains("remote 'lop': lop failed"), "{shown}");
-        assert!(shown.contains("remote 'origin': origin failed"), "{shown}");
+        assert!(
+            shown.contains("remote 'lop':") && shown.contains("lop failed"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("remote 'origin':") && shown.contains("origin failed"),
+            "{shown}"
+        );
         assert!(matches!(
             err,
             Error::Object(ObjectError::PromisorFetchFailed {
                 missing,
                 ref failures
             }) if missing == a && failures.len() == 2
+                && matches!(failures[0].1.as_ref(), ObjectError::PromisorRemoteFailure { detail } if detail == "lop failed")
+                && matches!(failures[1].1.as_ref(), ObjectError::PromisorRemoteFailure { detail } if detail == "origin failed")
         ));
 
         let err =

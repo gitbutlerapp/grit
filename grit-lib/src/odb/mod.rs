@@ -1251,7 +1251,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::UnsupportedObjectStore`] (`operation: "primary"`) when
+    /// - [`crate::objects::ObjectError::UnsupportedObjectStore`] (`operation: "primary"`) when
     ///   [`OdbBuilder::primary`] replaced the files-backed primary.
     /// - Failures while opening pack, MIDX, or loose backends.
     pub fn primary(&self) -> Result<Arc<FilesSource>> {
@@ -1787,7 +1787,7 @@ impl Odb {
             pack::PackLookupOptions::ALL_LOCAL_PACKS,
         ) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -1805,7 +1805,7 @@ impl Odb {
             pack::PackLookupOptions::ALL_LOCAL_PACKS,
         ) {
             Ok(info) => Ok(Some(info)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -1815,7 +1815,7 @@ impl Odb {
     /// This is always the repository layout path (including for custom primaries that do not
     /// store objects on disk). Prefer [`Self::files_objects_dir`] when the operation requires a
     /// files-backed primary; filesystem maintenance returns
-    /// [`Error::UnsupportedObjectStore`] otherwise.
+    /// [`crate::objects::ObjectError::UnsupportedObjectStore`] otherwise.
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
@@ -2625,12 +2625,12 @@ impl Odb {
     /// Read a loose object file at `path`, verifying the uncompressed payload hashes to `expected_oid`.
     ///
     /// Git stores loose objects under paths derived from the OID; if the file contents hash to a
-    /// different id (for example after a mistaken `mv`), this returns [`Error::LooseHashMismatch`].
+    /// different id (for example after a mistaken `mv`), this returns [`crate::objects::ObjectError::LooseHashMismatch`].
     ///
     /// # Errors
     ///
-    /// - [`Error::CorruptLooseObject`] — stored bytes could not be decoded (wraps zlib/header/EOF).
-    /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
+    /// - [`crate::objects::ObjectError::CorruptLooseObject`] — stored bytes could not be decoded (wraps zlib/header/EOF).
+    /// - [`crate::objects::ObjectError::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_loose_verify_oid(path: &Path, expected_oid: &ObjectId) -> ObjectResult<Object> {
         LooseStore::read_verify_oid(path, expected_oid)
     }
@@ -2658,8 +2658,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] — no file at the expected path.
-    /// - [`Error::CorruptLooseObject`] / [`Error::CorruptPackedObject`] — stored copy is damaged.
+    /// - [`crate::objects::ObjectError::ObjectNotFound`] — no file at the expected path.
+    /// - [`crate::objects::ObjectError::CorruptLooseObject`] / [`crate::objects::ObjectError::CorruptPackedObject`] — stored copy is damaged.
     pub fn read(&self, oid: &ObjectId) -> ObjectResult<Object> {
         self.read_impl(oid, true).map_err(object_error_from_repo)
     }
@@ -3192,7 +3192,7 @@ impl Odb {
             buf,
         ) {
             Ok(kind) => Ok(Some(kind)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -3205,8 +3205,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] — no object with this id in any consulted store.
-    /// - [`Error::CorruptLooseObject`] / [`Error::CorruptPackedObject`] — stored copy is damaged.
+    /// - [`crate::objects::ObjectError::ObjectNotFound`] — no object with this id in any consulted store.
+    /// - [`crate::objects::ObjectError::CorruptLooseObject`] / [`crate::objects::ObjectError::CorruptPackedObject`] — stored copy is damaged.
     pub fn read_info(&self, oid: &ObjectId) -> ObjectResult<ObjectInfo> {
         if self.is_empty_tree(oid) {
             return Ok(ObjectInfo {
@@ -3219,7 +3219,10 @@ impl Odb {
             return Ok(ObjectInfo {
                 kind: obj.kind,
                 size: u64::try_from(obj.data.len()).map_err(|_| {
-                    Error::Object(ObjectError::corrupt_object(None, "object size overflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "object size overflow".to_owned(),
+                    ))
                 })?,
             });
         }
@@ -3274,7 +3277,7 @@ impl Odb {
     /// Object metadata for local-only probes, serving, and maintenance.
     ///
     /// Like [`Self::read_info`], but does not resolve promisor misses by fetching
-    /// from a remote; missing local objects return [`Error::ObjectNotFound`].
+    /// from a remote; missing local objects return [`crate::objects::ObjectError::ObjectNotFound`].
     pub(crate) fn read_info_without_fetch(&self, oid: &ObjectId) -> Result<ObjectInfo> {
         match self.try_read_info_once(oid)? {
             Some(info) => Ok(info),
@@ -3358,7 +3361,10 @@ impl Odb {
             return Ok(Some(ObjectInfo {
                 kind: obj.kind,
                 size: u64::try_from(obj.data.len()).map_err(|_| {
-                    Error::Object(ObjectError::corrupt_object(None, "object size overflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "object size overflow".to_owned(),
+                    ))
                 })?,
             }));
         }
@@ -3426,7 +3432,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Same as [`Self::read`], including [`Error::ObjectNotFound`].
+    /// Same as [`Self::read`], including [`crate::objects::ObjectError::ObjectNotFound`].
     pub(crate) fn read_unless_larger(
         &self,
         oid: &ObjectId,
@@ -3618,7 +3624,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex.
+    /// Returns [`crate::objects::ObjectError::InvalidObjectId`] when `prefix` is not valid hex.
     pub fn lookup_prefix(
         &self,
         prefix: &str,
@@ -3692,7 +3698,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn hash(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         hash_object_data_with(self.hash_algo(), kind, data)
     }
@@ -3704,9 +3710,9 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectStreamTruncated`] — `reader` ended before `size` bytes.
+    /// - [`crate::objects::ObjectError::ObjectStreamTruncated`] — `reader` ended before `size` bytes.
     /// - [`Error::Io`] — reading failed.
-    /// - [`Error::HashCollision`] — sha1dc detected a chosen-prefix collision.
+    /// - [`crate::objects::ObjectError::HashCollision`] — sha1dc detected a chosen-prefix collision.
     pub fn hash_stream(
         &self,
         kind: ObjectKind,
@@ -3735,9 +3741,9 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectStreamTruncated`] — `reader` ended before `size` bytes.
-    /// - [`Error::Io`] / [`Error::Zlib`] — reading, compressing, or writing failed.
-    /// - [`Error::HashCollision`] — sha1dc detected a chosen-prefix collision.
+    /// - [`crate::objects::ObjectError::ObjectStreamTruncated`] — `reader` ended before `size` bytes.
+    /// - [`Error::Io`] / [`crate::objects::ObjectError::Zlib`] — reading, compressing, or writing failed.
+    /// - [`crate::objects::ObjectError::HashCollision`] — sha1dc detected a chosen-prefix collision.
     /// - Config errors from resolving the threshold or compression level.
     pub fn write_stream(
         &self,
@@ -3806,7 +3812,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn empty_tree_oid(&self) -> Result<ObjectId> {
         self.hash(ObjectKind::Tree, b"")
     }
@@ -3828,7 +3834,7 @@ impl Odb {
     /// # Errors
     ///
     /// - [`Error::Io`] — could not create the directory or write the file.
-    /// - [`Error::Zlib`] — compression failed.
+    /// - [`crate::objects::ObjectError::Zlib`] — compression failed.
     pub fn write(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         self.write_with_options(kind, data, WriteOptions::default())
     }
@@ -3944,7 +3950,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] when compression fails.
+    /// Returns [`crate::objects::ObjectError::Zlib`] when compression fails.
     pub fn zlib_compress_loose_store(&self, store_bytes: &[u8]) -> Result<Vec<u8>> {
         self.local_loose()?
             .zlib_compress_store_bytes(store_bytes)
@@ -3962,7 +3968,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Same as [`Self::write`]; [`Error::Zlib`] or [`Error::CorruptObject`] when a custom
+    /// Same as [`Self::write`]; [`crate::objects::ObjectError::Zlib`] or [`crate::objects::ObjectError::CorruptObject`] when a custom
     /// primary receives bytes that do not inflate to a valid object.
     pub fn write_loose_zlib_prehashed(
         &self,
@@ -4214,8 +4220,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::CorruptObject`] — the provided bytes don't form a valid header.
-    /// - [`Error::Io`] / [`Error::Zlib`] — storage errors.
+    /// - [`crate::objects::ObjectError::CorruptObject`] — the provided bytes don't form a valid header.
+    /// - [`Error::Io`] / [`crate::objects::ObjectError::Zlib`] — storage errors.
     pub fn write_raw(&self, store_bytes: &[u8]) -> Result<ObjectId> {
         let obj = parse_object_bytes(store_bytes)?;
         let oid = hash_object_data_with(self.hash_algo(), obj.kind, &obj.data)?;

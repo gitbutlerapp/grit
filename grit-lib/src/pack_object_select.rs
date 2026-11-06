@@ -462,7 +462,7 @@ pub(crate) struct TagCandidate {
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] or [`Error::CorruptObject`] for an unreadable tag in a
+/// [`ObjectError::ObjectNotFound`] or [`ObjectError::CorruptObject`] for an unreadable tag in a
 /// chain that is added.
 pub(crate) fn append_included_tags(
     odb: &Odb,
@@ -510,7 +510,7 @@ pub(crate) fn append_included_tags(
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] or [`Error::CorruptObject`] for an unreadable tag in a
+/// [`ObjectError::ObjectNotFound`] or [`ObjectError::CorruptObject`] for an unreadable tag in a
 /// qualifying chain.
 pub(crate) fn included_tag_chains(
     odb: &Odb,
@@ -1134,7 +1134,7 @@ fn collect_reachable_excluding_with_name_hashes(
             let obj = match read {
                 Ok(o) => o,
                 Err(_) if skip_missing => continue,
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             };
             walk.expand(oid, obj, path_hash, depth, oid_len)?;
         }
@@ -1801,7 +1801,7 @@ impl<'a> EnumerationWalk<'a> {
         }
         let info = if self.missing.is_some() {
             match self.odb.read_info_without_fetch(oid) {
-                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => return Ok(None),
+                Err(Error::Object(ObjectError::ObjectNotFound { .. })) => return Ok(None),
                 other => other,
             }
         } else {

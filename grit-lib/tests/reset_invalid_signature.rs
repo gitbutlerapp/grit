@@ -2,7 +2,6 @@
 
 use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 #[path = "support/reset_snapshot.rs"]
 mod reset_snapshot;
 
@@ -81,7 +80,7 @@ fn invalid_identities() -> Vec<(Signature, SignatureError)> {
 
 fn assert_invalid(error: Error, expected: &SignatureError) {
     match error {
-        Error::Object(ObjectError::InvalidSignature(actual))) => assert_eq!(&actual, expected),
+        Error::Object(ObjectError::InvalidSignature(actual)) => assert_eq!(&actual, expected),
         other => panic!("expected InvalidSignature({expected:?}), got {other:?}"),
     }
 }

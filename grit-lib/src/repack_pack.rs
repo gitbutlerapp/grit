@@ -146,7 +146,7 @@ struct SourcePack {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] for malformed source packs or CRC mismatches,
+/// Returns [`ObjectError::CorruptObject`] for malformed source packs or CRC mismatches,
 /// object read failures, and [`Error::Io`] when writing the staging file fails.
 pub(crate) fn write_repack_pack(
     odb: &Odb,
@@ -315,7 +315,10 @@ fn locate_objects(
                         .data
                         .get(pos..pos + hash_len)
                         .ok_or_else(|| {
-                            Error::Object(ObjectError::corrupt_object(None, "truncated ref-delta base".to_owned()))
+                            Error::Object(ObjectError::corrupt_object(
+                                None,
+                                "truncated ref-delta base".to_owned(),
+                            ))
                         })
                         .and_then(ObjectId::from_bytes)?;
                     pos += hash_len;
@@ -785,7 +788,10 @@ fn source_slice(packs: &[SourcePack], pack: u32, start: u64, end: u64) -> Result
         .zip(usize::try_from(end).ok())
         .and_then(|(s, e)| data.get(s..e))
         .ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "pack entry out of bounds".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "pack entry out of bounds".to_owned(),
+            ))
         })
 }
 
@@ -801,10 +807,12 @@ fn delta_header(
     size: usize,
     settings: &RepackPackSettings,
 ) -> Result<()> {
-    let base = plan[n]
-        .base()
-        .ok_or_else(|| Error::Object(ObjectError::corrupt_object(None, "delta without base".to_owned())))?
-        as usize;
+    let base = plan[n].base().ok_or_else(|| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "delta without base".to_owned(),
+        ))
+    })? as usize;
     let base_offset = new_offset[base];
     if base_offset == u64::MAX {
         return Err(Error::Object(ObjectError::corrupt_object(

@@ -1,14 +1,28 @@
 //! Zero-copy in-memory representation of Git pack index (`.idx`) files.
 
-use crate::error::{Error, Result};
+use crate::error::{Error, PathIoError};
+use crate::git_dir::GitDirPathOperation;
 use crate::hash::verify_trailer;
-use crate::objects::ObjectError;
-use crate::objects::{HashAlgo, ObjectId};
+use crate::objects::{HashAlgo, ObjectError, ObjectId, ObjectResult};
 use crate::pack_map::PackData;
 use std::cmp::Ordering;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+fn map_pack_index_open_error(idx_path: &Path, err: Error) -> ObjectError {
+    match err {
+        Error::Io(source) => ObjectError::PathIo {
+            path_io: PathIoError::git_dir(
+                idx_path.display().to_string(),
+                GitDirPathOperation::GcPack,
+                source,
+            ),
+        },
+        Error::Object(o) => o,
+        other => ObjectError::from_umbrella(other),
+    }
+}
 
 type OffsetLookupCache = Arc<Mutex<Option<Vec<(u64, u32)>>>>;
 
@@ -83,8 +97,8 @@ impl<'a> PackIndexEntryRef<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the index row encodes an invalid pack offset.
-    pub fn offset(&self) -> Result<u64> {
+    /// Returns [`ObjectError::CorruptObject`] when the index row encodes an invalid pack offset.
+    pub fn offset(&self) -> ObjectResult<u64> {
         self.index.offset_at(self.position)
     }
 
@@ -107,9 +121,9 @@ pub struct PackIndexEntry {
 }
 
 impl TryFrom<PackIndexEntryRef<'_>> for PackIndexEntry {
-    type Error = Error;
+    type Error = ObjectError;
 
-    fn try_from(r: PackIndexEntryRef<'_>) -> Result<Self> {
+    fn try_from(r: PackIndexEntryRef<'_>) -> ObjectResult<Self> {
         Ok(Self {
             oid: r.oid().to_vec(),
             offset: r.offset()?,
@@ -185,14 +199,14 @@ impl PackIndex {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when offset tables are malformed (including lazy-open
+    /// Returns [`ObjectError::CorruptObject`] when offset tables are malformed (including lazy-open
     /// indexes that skipped full verification).
-    pub fn offset_at(&self, i: usize) -> Result<u64> {
+    pub fn offset_at(&self, i: usize) -> ObjectResult<u64> {
         if i >= self.layout.count {
-            return Err(Error::Object(ObjectError::corrupt_object(
+            return Err(ObjectError::corrupt_object(
                 None,
                 format!("index row {i} out of range in {}", self.idx_path.display()),
-            )));
+            ));
         }
         match self.layout.version {
             PackIndexVersion::V1 => {
@@ -207,31 +221,31 @@ impl PackIndex {
         }
     }
 
-    fn decode_v2_offset_at(&self, _row: usize, raw: u32) -> Result<u64> {
+    fn decode_v2_offset_at(&self, _row: usize, raw: u32) -> ObjectResult<u64> {
         if (raw & 0x8000_0000) == 0 {
             return Ok(u64::from(raw));
         }
         let slot = (raw & 0x7fff_ffff) as usize;
         if slot >= self.layout.large_off_count {
-            return Err(Error::Object(ObjectError::corrupt_object(
+            return Err(ObjectError::corrupt_object(
                 None,
                 format!(
                     "large offset slot {slot} out of range ({} slots) in {}",
                     self.layout.large_off_count,
                     self.idx_path.display()
                 ),
-            )));
+            ));
         }
         let loff = self.layout.large_off_base + slot * 8;
         let trailer = self.layout.hash_bytes * 2;
         if loff + 8 > self.storage.len().saturating_sub(trailer) {
-            return Err(Error::Object(ObjectError::corrupt_object(
+            return Err(ObjectError::corrupt_object(
                 None,
                 format!(
                     "truncated large offset table in {}",
                     self.idx_path.display()
                 ),
-            )));
+            ));
         }
         Ok(read_u64_be_slice(&self.storage, loff))
     }
@@ -271,8 +285,8 @@ impl PackIndex {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the matching row encodes an invalid offset.
-    pub fn find_offset(&self, oid: &ObjectId) -> Result<Option<u64>> {
+    /// Returns [`ObjectError::CorruptObject`] when the matching row encodes an invalid offset.
+    pub fn find_offset(&self, oid: &ObjectId) -> ObjectResult<Option<u64>> {
         match self.find_position(oid) {
             Some(i) => Ok(Some(self.offset_at(i)?)),
             None => Ok(None),
@@ -283,7 +297,11 @@ impl PackIndex {
     ///
     /// Updates `cursor` to the matching row on success. When the probe regresses (out-of-order
     /// input), falls back to fanout + binary search and resets `cursor`.
-    pub fn find_offset_monotonic(&self, oid: &ObjectId, cursor: &mut usize) -> Result<Option<u64>> {
+    pub fn find_offset_monotonic(
+        &self,
+        oid: &ObjectId,
+        cursor: &mut usize,
+    ) -> ObjectResult<Option<u64>> {
         const FORWARD_SCAN_MAX: usize = 128;
         let needle = oid.as_bytes();
         if needle.len() != self.layout.hash_bytes {
@@ -335,7 +353,7 @@ impl PackIndex {
         Ok(None)
     }
     /// Whether this pack index contains the given OID.
-    pub fn contains(&self, oid: &ObjectId) -> Result<bool> {
+    pub fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         Ok(self.find_offset(oid)?.is_some())
     }
 
@@ -354,7 +372,7 @@ impl PackIndex {
     /// # Errors
     ///
     /// Returns an error when the index has a malformed large-offset entry.
-    pub fn next_pack_offset_after(&self, entry_offset: u64, pack_end: u64) -> Result<u64> {
+    pub fn next_pack_offset_after(&self, entry_offset: u64, pack_end: u64) -> ObjectResult<u64> {
         self.with_sorted_offsets(|pairs| {
             let next = pairs.partition_point(|p| p.0 <= entry_offset);
             pairs
@@ -372,8 +390,11 @@ impl PackIndex {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the index has a malformed large-offset entry.
-    pub(crate) fn with_offset_order<R>(&self, f: impl FnOnce(&[(u64, u32)]) -> R) -> Result<R> {
+    /// Returns [`ObjectError::CorruptObject`] when the index has a malformed large-offset entry.
+    pub(crate) fn with_offset_order<R>(
+        &self,
+        f: impl FnOnce(&[(u64, u32)]) -> R,
+    ) -> ObjectResult<R> {
         self.with_sorted_offsets(f)
     }
 
@@ -382,7 +403,7 @@ impl PackIndex {
     ///
     /// The table is decoded from the `.rev` sidecar when one is present and valid
     /// (checksummed once, no sort), and otherwise built by sorting the index rows.
-    fn with_sorted_offsets<R>(&self, f: impl FnOnce(&[(u64, u32)]) -> R) -> Result<R> {
+    fn with_sorted_offsets<R>(&self, f: impl FnOnce(&[(u64, u32)]) -> R) -> ObjectResult<R> {
         let mut guard = self.offset_lookup.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(pairs) = guard.as_deref() {
             return Ok(f(pairs));
@@ -405,7 +426,7 @@ impl PackIndex {
     ///
     /// Returns `None` when there is no sidecar, it fails validation, or its order
     /// does not match the offsets in this index.
-    fn sorted_offsets_from_rev(&self) -> Result<Option<Vec<(u64, u32)>>> {
+    fn sorted_offsets_from_rev(&self) -> ObjectResult<Option<Vec<(u64, u32)>>> {
         let rev_path = crate::pack_rev::rev_path_for_index(&self.idx_path);
         let Ok(data) = PackData::open_with_min_len(&rev_path, 12) else {
             return Ok(None);
@@ -425,7 +446,7 @@ impl PackIndex {
     }
 
     /// CRC32 for the index row at `entry_offset`, if any.
-    pub fn crc32_for_pack_offset(&self, entry_offset: u64) -> Result<Option<u32>> {
+    pub fn crc32_for_pack_offset(&self, entry_offset: u64) -> ObjectResult<Option<u32>> {
         Ok(match self.find_position_by_offset_sorted(entry_offset)? {
             Some(i) => self.crc32_at(i),
             None => None,
@@ -450,8 +471,8 @@ impl PackIndex {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the index has a malformed large-offset entry.
-    pub fn find_position_by_offset_sorted(&self, offset: u64) -> Result<Option<usize>> {
+    /// Returns [`ObjectError::CorruptObject`] when the index has a malformed large-offset entry.
+    pub fn find_position_by_offset_sorted(&self, offset: u64) -> ObjectResult<Option<usize>> {
         self.with_sorted_offsets(|pairs| {
             pairs
                 .binary_search_by_key(&offset, |p| p.0)
@@ -593,8 +614,8 @@ impl PackIndexRowReader<'_> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the matching row encodes an invalid offset.
-    pub(crate) fn find_offset(&mut self, oid: &ObjectId) -> Result<Option<u64>> {
+    /// Returns [`ObjectError::CorruptObject`] when the matching row encodes an invalid offset.
+    pub(crate) fn find_offset(&mut self, oid: &ObjectId) -> ObjectResult<Option<u64>> {
         let index = self.index;
         let needle = oid.as_bytes();
         let hash_bytes = index.layout.hash_bytes;
@@ -737,12 +758,16 @@ pub fn compute_fanout_from_entries(entries: &[PackIndexEntry]) -> [u32; 256] {
 }
 
 /// Parse pack index bytes (v1 or v2). When `verify` is true, check the trailing checksum.
-pub fn parse_pack_index_bytes(idx_path: &Path, bytes: Vec<u8>, verify: bool) -> Result<PackIndex> {
+pub fn parse_pack_index_bytes(
+    idx_path: &Path,
+    bytes: Vec<u8>,
+    verify: bool,
+) -> ObjectResult<PackIndex> {
     if bytes.len() < 8 {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("index file {} is too small", idx_path.display()),
-        )));
+        ));
     }
     let storage = PackIndexStorage(PackData::from_owned(bytes));
     parse_pack_index_storage(idx_path, &storage, verify)
@@ -752,10 +777,12 @@ pub fn parse_pack_index_bytes(idx_path: &Path, bytes: Vec<u8>, verify: bool) -> 
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] or [`Error::CorruptObject`] on failure, and
-/// [`Error::PackIndexChecksumMismatch`] when `verify` is set and the trailer is wrong.
-pub fn open_pack_index_file(idx_path: &Path, verify: bool) -> Result<PackIndex> {
-    let storage = PackIndexStorage(PackData::open_with_min_len(idx_path, IDX_MIN_LEN)?);
+/// Returns [`Error::Io`] or [`ObjectError::CorruptObject`] on failure, and
+/// [`ObjectError::PackIndexChecksumMismatch`] when `verify` is set and the trailer is wrong.
+pub fn open_pack_index_file(idx_path: &Path, verify: bool) -> ObjectResult<PackIndex> {
+    let storage = PackData::open_with_min_len(idx_path, IDX_MIN_LEN)
+        .map_err(|e| map_pack_index_open_error(idx_path, e))?;
+    let storage = PackIndexStorage(storage);
     parse_pack_index_storage(idx_path, &storage, verify)
 }
 
@@ -763,12 +790,12 @@ fn parse_pack_index_storage(
     idx_path: &Path,
     storage: &PackIndexStorage,
     verify: bool,
-) -> Result<PackIndex> {
+) -> ObjectResult<PackIndex> {
     if storage.len() < 8 {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("index file {} is too small", idx_path.display()),
-        )));
+        ));
     }
     let magic = &storage[0..4];
     if magic == [0xff, b't', b'O', b'c'] {
@@ -782,14 +809,14 @@ fn read_pack_index_v1(
     idx_path: &Path,
     storage: &PackIndexStorage,
     verify: bool,
-) -> Result<PackIndex> {
+) -> ObjectResult<PackIndex> {
     let bytes = storage.deref();
     let mut pos = 0usize;
     if bytes.len() < 256 * 4 + 20 {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("index file {} is too small", idx_path.display()),
-        )));
+        ));
     }
     let mut fanout = [0u32; 256];
     for slot in &mut fanout {
@@ -802,10 +829,10 @@ fn read_pack_index_v1(
         .saturating_add(object_count.saturating_mul(record_size))
         .saturating_add(20);
     if bytes.len() < need {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("truncated idx file {}", idx_path.display()),
-        )));
+        ));
     }
     let oid_base = pos;
     if verify {
@@ -815,10 +842,10 @@ fn read_pack_index_v1(
             if i > 0 {
                 let prev_start = oid_base + (i - 1) * record_size + 4;
                 if bytes[prev_start..prev_start + 20] > bytes[oid_start..oid_start + 20] {
-                    return Err(Error::Object(ObjectError::corrupt_object(
+                    return Err(ObjectError::corrupt_object(
                         None,
                         format!("oid lookup out of order in {}", idx_path.display()),
-                    )));
+                    ));
                 }
             }
         }
@@ -853,24 +880,24 @@ fn read_pack_index_v2(
     idx_path: &Path,
     storage: &PackIndexStorage,
     verify: bool,
-) -> Result<PackIndex> {
+) -> ObjectResult<PackIndex> {
     let bytes = storage.deref();
     if bytes.len() < 8 + 256 * 4 + 40 {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("index file {} is too small", idx_path.display()),
-        )));
+        ));
     }
     let mut pos = 4usize;
     let version = read_u32_be(bytes, &mut pos)?;
     if version != 2 {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!(
                 "unsupported idx version {version} in {}",
                 idx_path.display()
             ),
-        )));
+        ));
     }
     let mut fanout = [0u32; 256];
     for slot in &mut fanout {
@@ -885,10 +912,10 @@ fn read_pack_index_v2(
     let off32_base = crc_base + object_count * 4;
     let need = off32_base + object_count * 4;
     if bytes.len() < need {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("truncated idx file {}", idx_path.display()),
-        )));
+        ));
     }
     let large_off_base = off32_base + object_count * 4;
     let large_off_count = if verify {
@@ -900,13 +927,13 @@ fn read_pack_index_v2(
             if (v & 0x8000_0000) != 0 {
                 let slot = (v & 0x7fff_ffff) as usize;
                 if slot != next_large {
-                    return Err(Error::Object(ObjectError::corrupt_object(
+                    return Err(ObjectError::corrupt_object(
                         None,
                         format!(
                             "inconsistent 64b offset index at entry {i} in {}",
                             idx_path.display()
                         ),
-                    )));
+                    ));
                 }
                 next_large += 1;
                 count += 1;
@@ -916,18 +943,18 @@ fn read_pack_index_v2(
     } else {
         let tail = hash_bytes * 2;
         if bytes.len() < large_off_base + tail {
-            return Err(Error::Object(ObjectError::corrupt_object(
+            return Err(ObjectError::corrupt_object(
                 None,
                 format!("truncated idx file {}", idx_path.display()),
-            )));
+            ));
         }
         (bytes.len() - large_off_base - tail) / 8
     };
     if bytes.len() < large_off_base + large_off_count * 8 + 2 * hash_bytes {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("truncated large offset table in {}", idx_path.display()),
-        )));
+        ));
     }
     if verify {
         for i in 0..object_count {
@@ -935,10 +962,10 @@ fn read_pack_index_v2(
             if i > 0 {
                 let prev = oid_base + (i - 1) * hash_bytes;
                 if bytes[prev..prev + hash_bytes] > bytes[start..start + hash_bytes] {
-                    return Err(Error::Object(ObjectError::corrupt_object(
+                    return Err(ObjectError::corrupt_object(
                         None,
                         format!("oid lookup out of order in {}", idx_path.display()),
-                    )));
+                    ));
                 }
             }
         }
@@ -969,29 +996,32 @@ fn read_pack_index_v2(
     })
 }
 
-fn verify_idx_trailing_checksum(idx_path: &Path, bytes: &[u8], hash_bytes: usize) -> Result<()> {
+fn verify_idx_trailing_checksum(
+    idx_path: &Path,
+    bytes: &[u8],
+    hash_bytes: usize,
+) -> ObjectResult<()> {
     let Some(algo) = HashAlgo::from_len(hash_bytes) else {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             format!("unsupported index hash width {hash_bytes}"),
-        )));
+        ));
     };
-    verify_trailer(algo, bytes).map_err(|mismatch| {
-        Error::Object(ObjectError::PackIndexChecksumMismatch {
-            path: idx_path.to_path_buf(),
-            mismatch,
-        })
-    })
+    verify_trailer(algo, bytes).map_err(|mismatch| ObjectError::PackIndexChecksumMismatch {
+        path: idx_path.to_path_buf(),
+        mismatch,
+    })?;
+    Ok(())
 }
 
-fn check_fanout_monotonic(fanout: &[u32; 256], idx_path: &Path) -> Result<()> {
+fn check_fanout_monotonic(fanout: &[u32; 256], idx_path: &Path) -> ObjectResult<()> {
     let mut prev = 0u32;
     for &n in fanout {
         if n < prev {
-            return Err(Error::Object(ObjectError::corrupt_object(
+            return Err(ObjectError::corrupt_object(
                 None,
                 format!("non-monotonic index {}", idx_path.display()),
-            )));
+            ));
         }
         prev = n;
     }
@@ -1003,7 +1033,7 @@ fn detect_idx_hash_bytes_v2(
     fanout_end: usize,
     object_count: usize,
     idx_path: &Path,
-) -> Result<usize> {
+) -> ObjectResult<usize> {
     if object_count == 0 {
         let sha1_len = fanout_end.saturating_add(2 * 20);
         let sha256_len = fanout_end.saturating_add(2 * 32);
@@ -1013,8 +1043,7 @@ fn detect_idx_hash_bytes_v2(
             _ => Err(ObjectError::corrupt_object(
                 None,
                 format!("wrong index v2 file size in {}", idx_path.display()),
-            )
-            .into()),
+            )),
         };
     }
     for &hb in &[20usize, 32] {
@@ -1033,10 +1062,10 @@ fn detect_idx_hash_bytes_v2(
         }
         return Ok(hb);
     }
-    Err(Error::Object(ObjectError::corrupt_object(
+    Err(ObjectError::corrupt_object(
         None,
         format!("wrong index v2 file size in {}", idx_path.display()),
-    )))
+    ))
 }
 
 fn read_u32_be_slice(bytes: &[u8], start: usize) -> u32 {
@@ -1061,17 +1090,18 @@ fn read_u64_be_slice(bytes: &[u8], start: usize) -> u64 {
     ])
 }
 
-fn read_u32_be(bytes: &[u8], pos: &mut usize) -> Result<u32> {
+fn read_u32_be(bytes: &[u8], pos: &mut usize) -> ObjectResult<u32> {
     if bytes.len() < *pos + 4 {
-        return Err(Error::Object(ObjectError::corrupt_object(
+        return Err(ObjectError::corrupt_object(
             None,
             "unexpected end of idx while reading u32".to_owned(),
-        )));
+        ));
     }
-    let v =
-        u32::from_be_bytes(bytes[*pos..*pos + 4].try_into().map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, "failed to parse u32".to_owned()))
-        })?);
+    let v = u32::from_be_bytes(
+        bytes[*pos..*pos + 4]
+            .try_into()
+            .map_err(|_| ObjectError::corrupt_object(None, "failed to parse u32".to_owned()))?,
+    );
     *pos += 4;
     Ok(v)
 }
@@ -1493,7 +1523,7 @@ mod tests {
             message.starts_with("corrupt object: index checksum mismatch for "),
             "{message}"
         );
-        let Error::Object(ObjectError::PackIndexChecksumMismatch { path, mismatch }) = err else {
+        let ObjectError::PackIndexChecksumMismatch { path, mismatch } = err else {
             panic!("expected PackIndexChecksumMismatch: {message}");
         };
         assert_eq!(path, idx_path);
@@ -1540,10 +1570,7 @@ mod tests {
         parse_pack_index_bytes(Path::new("bad-large.idx"), body.clone(), false)
             .expect("lazy open skips large-slot assignment scan");
         let err = parse_pack_index_bytes(Path::new("bad-large.idx"), body, true).unwrap_err();
-        assert!(matches!(
-            err,
-            Error::Object(ObjectError::CorruptObject { .. })
-        ));
+        assert!(matches!(err, ObjectError::CorruptObject { .. }));
     }
 
     #[test]
@@ -1597,10 +1624,7 @@ mod tests {
         swapped_for_verify[second_off32..second_off32 + 4]
             .copy_from_slice(&0x8000_0000u32.to_be_bytes());
         let err = parse_pack_index_bytes(&idx_path, swapped_for_verify, true).expect_err("verify");
-        assert!(matches!(
-            err,
-            Error::Object(ObjectError::CorruptObject { .. })
-        ));
+        assert!(matches!(err, ObjectError::CorruptObject { .. }));
     }
 
     #[test]

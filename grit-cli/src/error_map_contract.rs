@@ -135,7 +135,7 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "hash_collision",
-        build: || map_lib_error(LibError::Object(ObjectError::HashCollision { oid: oid() }),
+        build: || map_lib_error(LibError::Object(ObjectError::HashCollision { oid: oid() })),
         kind: Some(ErrorKind::HashCollision),
         exit: ExitStatus::Failure,
         human: || format!(
@@ -425,8 +425,11 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "remote_library_object_not_found",
         build: || {
-            map_remote_error(RemoteError::Library(LibError::Object(ObjectError::corrupt_object(None, 
-                "deadbeef".into(),
+            map_remote_error(RemoteError::Library(LibError::Object(
+                ObjectError::ObjectNotFound {
+                    oid: None,
+                    spec: "deadbeef".into(),
+                },
             )))
         },
         kind: None,

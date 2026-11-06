@@ -466,6 +466,6 @@ fn custom_backend_unsupported_error() {
         err,
         Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "repack"
-        }
+        })
     ));
 }

@@ -1,7 +1,6 @@
 //! Tests for [`grit_lib::revwalk::history::drop`].
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

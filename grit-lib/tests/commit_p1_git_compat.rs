@@ -1,7 +1,6 @@
 //! Commit P1 flags vs the system `git` binary (trailers, dates, reuse, signoff).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::path::Path;
 use std::process::Command;
 

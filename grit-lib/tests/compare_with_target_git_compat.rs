@@ -136,8 +136,10 @@ fn compare_with_target_unknown_errors() {
     };
     let err = compare_with_target(&repo, &opts).unwrap_err();
     assert!(
-        matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))
-            || matches!(err, Error::InvalidRef(_))
+        matches!(
+            err,
+            Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+        ) || matches!(err, Error::InvalidRef(_))
             || matches!(err, Error::RevParse(_))
     );
 }

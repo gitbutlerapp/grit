@@ -4,7 +4,6 @@
 
 use grit_lib::objects::ObjectError;
 #[allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;

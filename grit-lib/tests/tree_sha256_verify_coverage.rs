@@ -1,7 +1,6 @@
 //! Coverage for tree-sha256 tag verification public API.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::commit::signing::GpgConfig;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::tag::{verify_tag_by_name, TagError, VerifiedTag};

@@ -87,7 +87,7 @@ impl OdbBuilder {
     ///
     /// The store's [`ObjectStore::hash_algo`] must match the repository's object format:
     /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
-    /// [`Error::ObjectFormatMismatch`] otherwise. [`Self::build`] does not check, since it
+    /// [`ObjectError::ObjectFormatMismatch`] otherwise. [`Self::build`] does not check, since it
     /// has no repository config to compare against.
     #[must_use]
     pub fn primary(mut self, store: Arc<dyn WritableObjectStore>) -> Self {
@@ -99,7 +99,7 @@ impl OdbBuilder {
     ///
     /// Like [`Self::primary`], its hash algorithm must match the repository's object format
     /// or [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
-    /// [`Error::ObjectFormatMismatch`].
+    /// [`ObjectError::ObjectFormatMismatch`].
     #[must_use]
     pub fn push_read_source(mut self, store: Arc<dyn ObjectStore>) -> Self {
         self.read_sources.push(store);
@@ -122,7 +122,7 @@ impl OdbBuilder {
     ///
     /// The graph's [`CommitGraphChain::hash_algo`] must match the repository's object format,
     /// or [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) fails with
-    /// [`Error::ObjectFormatMismatch`].
+    /// [`ObjectError::ObjectFormatMismatch`].
     #[must_use]
     pub fn commit_graph(mut self, chain: Arc<CommitGraphChain>) -> Self {
         self.commit_graph = Some(chain);
@@ -220,7 +220,7 @@ impl Odb {
 
     /// In-process garbage collection for the files-backed object directory.
     ///
-    /// Custom primaries return [`Error::UnsupportedObjectStore`].
+    /// Custom primaries return [`ObjectError::UnsupportedObjectStore`].
     ///
     /// # Errors
     ///
@@ -262,7 +262,7 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnsupportedObjectStore`] for custom primaries, or errors from graph
+    /// Returns [`ObjectError::UnsupportedObjectStore`] for custom primaries, or errors from graph
     /// generation or I/O.
     pub fn write_commit_graph(&self) -> Result<()> {
         self.require_files_primary("commit-graph write")?;

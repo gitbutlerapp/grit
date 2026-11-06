@@ -62,7 +62,7 @@ impl PendingDelta {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the header is longer than 255 bytes.
+    /// Returns [`ObjectError::CorruptObject`] when the header is longer than 255 bytes.
     pub fn new(
         offset: usize,
         zlib_offset: usize,
@@ -102,7 +102,10 @@ impl PackBytes<'_> {
     fn read<'s>(&'s self, start: usize, end: usize, buf: &'s mut Vec<u8>) -> Result<&'s [u8]> {
         match self {
             Self::Slice(pack) => pack.get(start..end).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "pack object out of range".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack object out of range".to_owned(),
+                ))
             }),
             Self::File(file) => {
                 buf.clear();
@@ -391,7 +394,7 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
     /// # Errors
     ///
     /// Returns the first error a visitor returned (which stops every worker), or
-    /// [`Error::CorruptObject`] if a worker thread panicked.
+    /// [`ObjectError::CorruptObject`] if a worker thread panicked.
     pub(crate) fn run(
         &self,
         roots: &[DeltaRoot],
@@ -438,7 +441,10 @@ impl<'a, V: DeltaVisitor> DeltaWalk<'a, V> {
                 if handle.join().is_err() {
                     record_first_error(
                         &first_error,
-                        Error::Object(ObjectError::corrupt_object(None, "delta worker stopped".to_owned())),
+                        Error::Object(ObjectError::corrupt_object(
+                            None,
+                            "delta worker stopped".to_owned(),
+                        )),
                     );
                 }
             }

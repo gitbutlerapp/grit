@@ -1,7 +1,6 @@
 //! Parallel worktree scans compare symlinks as link-target blobs (#2076).
 #![cfg(unix)]
 #[allow(clippy::expect_used)]
-
 use grit_lib::objects::FileMode;
 use std::collections::BTreeMap;
 use std::fs;

@@ -9,7 +9,7 @@
 pub(crate) use crate::pack_index::parse_pack_index_bytes;
 pub use crate::pack_index::{PackIndex, PackIndexEntryRef};
 
-use crate::objects::ObjectError;
+use crate::objects::{ObjectError, ObjectResult};
 #[cfg(test)]
 use crate::pack_index::compute_fanout_from_oid_slices;
 
@@ -123,7 +123,9 @@ fn wrap_pack_cache_read_err(
 }
 
 pub(crate) mod pack_cache {
-    use super::{read_pack_index_no_verify, Error, ObjectError, ObjectKind, PackIndex, Result};
+    use super::{
+        read_pack_index_no_verify, Error, ObjectError, ObjectKind, ObjectResult, PackIndex, Result,
+    };
     use crate::pack_map::{fingerprint_from_file, PackData, PackFingerprint};
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::fs;
@@ -589,7 +591,7 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object(oid) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(super::wrap_pack_cache_read_err(
                 objects_dir,
                 reader.idx.as_ref(),
@@ -616,7 +618,7 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object_unless_whole_larger(oid, limit) {
             Ok(read) => Ok(Some(read)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(super::wrap_pack_cache_read_err(
                 objects_dir,
                 reader.idx.as_ref(),
@@ -658,7 +660,7 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object_into_with_delta_policy(oid, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(super::wrap_pack_cache_read_err(
                 objects_dir,
                 reader.idx.as_ref(),
@@ -800,18 +802,20 @@ pub(crate) mod pack_cache {
         oid: &crate::objects::ObjectId,
     ) -> Result<Option<u64>> {
         if !pack_thread_locals_apply_to(objects_dir) {
-            return idx.find_offset(oid);
+            return idx.find_offset(oid).map_err(Error::from);
         }
-        PACK_MONOTONIC_CURSOR.with(|cell| {
-            let mut slot = cell.borrow_mut();
-            if slot.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
-                *slot = Some((objects_dir.to_path_buf(), 0));
-            }
-            let Some((_, cursor)) = slot.as_mut() else {
-                return idx.find_offset(oid);
-            };
-            idx.find_offset_monotonic(oid, cursor)
-        })
+        PACK_MONOTONIC_CURSOR
+            .with(|cell| {
+                let mut slot = cell.borrow_mut();
+                if slot.as_ref().is_none_or(|(dir, _)| dir != objects_dir) {
+                    *slot = Some((objects_dir.to_path_buf(), 0));
+                }
+                let Some((_, cursor)) = slot.as_mut() else {
+                    return idx.find_offset(oid);
+                };
+                idx.find_offset_monotonic(oid, cursor)
+            })
+            .map_err(Error::from)
     }
 
     /// The pack that served the last lookup in `objects_dir` ([`remember_pack_hit`]), when
@@ -839,7 +843,7 @@ pub(crate) mod pack_cache {
         };
         match super::read_object_from_pack_at_offset(&idx, offset) {
             Ok(obj) => Ok(Some(obj)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
@@ -859,7 +863,7 @@ pub(crate) mod pack_cache {
         };
         match super::read_object_at_depth_into(&idx, offset, 0, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) if err.is_object_read_wrap_source() => Ok(None),
             Err(err) => Err(err),
         }
@@ -877,7 +881,7 @@ pub(crate) mod pack_cache {
         };
         match super::read_object_info_from_pack_at_offset(&idx, offset) {
             Ok(info) => Ok(Some(info)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -1365,7 +1369,7 @@ pub(crate) mod pack_cache {
     }
 
     /// Get a parsed pack index from cache, parsing from disk only on cache miss.
-    pub fn get_index(idx_path: &Path) -> Result<Arc<PackIndex>> {
+    pub fn get_index(idx_path: &Path) -> ObjectResult<Arc<PackIndex>> {
         if let Some(hit) = cached_index(idx_path) {
             if index_cache_hit_stale(&hit) {
                 PACK_INDEXES.with(|cell| {
@@ -2324,9 +2328,9 @@ fn reprepare_pack_directory_on_miss_in_context(objects_dir: &Path) -> Result<boo
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] when the file is missing or [`Error::CorruptObject`] for
+/// Returns [`Error::Io`] when the file is missing or [`ObjectError::CorruptObject`] for
 /// malformed indexes.
-pub fn read_pack_index_cached(idx_path: &Path) -> Result<Arc<PackIndex>> {
+pub fn read_pack_index_cached(idx_path: &Path) -> ObjectResult<Arc<PackIndex>> {
     if crate::pack_store::PackStore::has_context() {
         return pack_cache::get_index(idx_path);
     }
@@ -2429,7 +2433,7 @@ pub fn collect_local_pack_info(objects_dir: &Path) -> Result<LocalPackInfo> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the pack is too small or an entry
+/// Returns [`ObjectError::CorruptObject`] when the pack is too small or an entry
 /// offset cannot be walked, or [`Error::Io`] on filesystem failure.
 /// Write a v2 pack index file.
 ///
@@ -2542,7 +2546,7 @@ fn sort_index_entries(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when an object id or the trailer does not have
+/// Returns [`ObjectError::CorruptObject`] when an object id or the trailer does not have
 /// `hash_bytes` bytes, or the large-offset table overflows, and [`Error::Io`] on write
 /// failure.
 pub(crate) fn write_v2_pack_index_sorting(
@@ -2657,9 +2661,9 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when format checks fail and
-/// [`Error::PackIndexChecksumMismatch`] when the `.idx` trailer is wrong.
-pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
+/// Returns [`ObjectError::CorruptObject`] when format checks fail and
+/// [`ObjectError::PackIndexChecksumMismatch`] when the `.idx` trailer is wrong.
+pub fn read_pack_index(idx_path: &Path) -> ObjectResult<PackIndex> {
     crate::pack_index::open_pack_index_file(idx_path, true)
 }
 
@@ -2668,7 +2672,7 @@ pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
 /// Git reads the `.idx` offset table without re-checking its trailer in the MIDX
 /// write path (`midx-write.c`/`packfile.c` `open_pack_index`), so a deliberately
 /// corrupted-but-structurally-valid idx (t5319 64-bit offset tests) still loads.
-pub fn read_pack_index_no_verify(idx_path: &Path) -> Result<PackIndex> {
+pub fn read_pack_index_no_verify(idx_path: &Path) -> ObjectResult<PackIndex> {
     crate::pack_index::open_pack_index_file(idx_path, false)
 }
 
@@ -2742,7 +2746,7 @@ enum DeltaBaseLink {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when a ref-delta record is missing its base oid.
+/// Returns [`ObjectError::CorruptObject`] when a ref-delta record is missing its base oid.
 fn resolve_delta_depth(
     i: usize,
     base_links: &[Option<DeltaBaseLink>],
@@ -3005,7 +3009,7 @@ pub(crate) struct VerifiedPackForFsck {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the index or pack are malformed.
+/// Returns [`ObjectError::CorruptObject`] when the index or pack are malformed.
 pub(crate) fn verify_pack_for_fsck(idx_path: &Path) -> Result<VerifiedPackForFsck> {
     let (idx, pack_bytes, records) = verify_pack_structure_and_records(idx_path, true)?;
     Ok(VerifiedPackForFsck {
@@ -3068,7 +3072,7 @@ fn pack_trailer_fsck_issue(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the index or pack are malformed.
+/// Returns [`ObjectError::CorruptObject`] when the index or pack are malformed.
 pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord>> {
     let VerifiedPackForFsck {
         idx,
@@ -3192,7 +3196,10 @@ fn verify_pack_structure_and_records(
     let mut base_links: Vec<Option<DeltaBaseLink>> = Vec::with_capacity(offsets.len());
     for (i, offset) in offsets.iter().copied().enumerate() {
         let oid = by_offset.get(&offset).cloned().ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, format!("missing object id for offset {}", offset)))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("missing object id for offset {}", offset),
+            ))
         })?;
         let next_off = offsets
             .get(i + 1)
@@ -3591,9 +3598,12 @@ fn apply_delta_chain_forward_into(
     let chain_a = &mut state.chain_a;
     let chain_b = &mut state.chain_b;
     let mut rev: Vec<&PendingDeltaFrame> = pending.iter().rev().collect();
-    let last = rev
-        .pop()
-        .ok_or_else(|| Error::Object(ObjectError::corrupt_object(None, "empty delta chain".to_owned())))?;
+    let last = rev.pop().ok_or_else(|| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "empty delta chain".to_owned(),
+        ))
+    })?;
     if rev.is_empty() {
         apply_delta_into(out, base_data, &last.delta)?;
         if caching && (last.pack_id != result_pack_id || last.offset != result_offset) {
@@ -3704,9 +3714,12 @@ fn apply_delta_chain_forward_prefix_into(
     let chain_a = &mut state.chain_a;
     let chain_b = &mut state.chain_b;
     let mut rev: Vec<&PendingDeltaFrame> = pending.iter().rev().collect();
-    let last = rev
-        .pop()
-        .ok_or_else(|| Error::Object(ObjectError::corrupt_object(None, "empty delta chain".to_owned())))?;
+    let last = rev.pop().ok_or_else(|| {
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "empty delta chain".to_owned(),
+        ))
+    })?;
     let prefix_ok = |buf: &[u8]| commit_prefix_has_author(buf);
     if rev.is_empty() {
         apply_delta_prefix_into(out, base_data, &last.delta, max_out, prefix_ok)?;
@@ -3906,7 +3919,7 @@ fn pack_bytes_parse_may_be_stale(err: &Error) -> bool {
 }
 
 /// Resolve one pack object, walking delta chains iteratively across packs with shared
-/// [`DeltaChainState`] so cycles and depth limits surface as [`Error::DeltaChainTooDeep`].
+/// [`DeltaChainState`] so cycles and depth limits surface as [`ObjectError::DeltaChainTooDeep`].
 ///
 /// On corruption/zlib errors, revalidates the starting pack's on-disk signature once and
 /// retries the full resolution before surfacing the error.
@@ -4416,7 +4429,7 @@ fn read_pack_object_at(
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] if the OID is not in this pack.
+/// Returns [`ObjectError::ObjectNotFound`] if the OID is not in this pack.
 pub fn read_object_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<Object> {
     if crate::pack_store::PackStore::has_context() {
         return read_object_from_pack_at_depth(idx, oid, 0);
@@ -4938,7 +4951,10 @@ fn pack_entry_bytes<'a>(
         return Ok((pack, start));
     }
     let pack_end = pack.len().checked_sub(idx.hash_bytes()).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "truncated pack trailer".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "truncated pack trailer".to_owned(),
+        ))
     })?;
     let end = idx.next_pack_offset_after(offset, pack_end as u64)? as usize;
     Ok((pack.read_range(start, end, buf)?, 0))
@@ -5020,7 +5036,7 @@ fn read_object_from_packs_in_context_into(
         buf,
     ) {
         Ok(kind) => Ok(kind),
-        Err(err @ Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+        Err(err @ Error::Object(ObjectError::ObjectNotFound { .. })) => {
             if reprepare_pack_directory_on_miss(objects_dir)? {
                 try_read_object_from_packs_with_options_into(
                     objects_dir,
@@ -5044,7 +5060,7 @@ fn read_object_from_packs_in_context(objects_dir: &Path, oid: &ObjectId) -> Resu
         PackLookupOptions::ALL_LOCAL_PACKS,
     ) {
         Ok(obj) => Ok(obj),
-        Err(err @ Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+        Err(err @ Error::Object(ObjectError::ObjectNotFound { .. })) => {
             if reprepare_pack_directory_on_miss_in_context(objects_dir)? {
                 try_read_object_from_packs_with_options(
                     objects_dir,
@@ -5362,7 +5378,7 @@ impl SingleLocalPackReader {
     ///
     /// # Errors
     ///
-    /// [`Error::CorruptObject`] when an offset lies outside the pack or an entry header is
+    /// [`ObjectError::CorruptObject`] when an offset lies outside the pack or an entry header is
     /// malformed.
     pub(crate) fn object_kinds_at_sorted_offsets(
         &self,
@@ -5383,7 +5399,10 @@ impl SingleLocalPackReader {
                 PackedType::OfsDelta => Some(parse_ofs_delta_base(pack_bytes, &mut pos, offset)?),
                 PackedType::RefDelta => {
                     let raw = pack_bytes.get(pos..pos + hash_bytes).ok_or_else(|| {
-                        Error::Object(ObjectError::corrupt_object(None, "truncated ref-delta base OID".to_owned()))
+                        Error::Object(ObjectError::corrupt_object(
+                            None,
+                            "truncated ref-delta base OID".to_owned(),
+                        ))
                     })?;
                     self.idx.find_offset(&ObjectId::from_bytes(raw)?)?
                 }
@@ -5989,7 +6008,7 @@ impl SingleLocalPackReader {
     ///
     /// Propagates pack index lookup errors.
     pub fn pack_offset(&self, oid: &ObjectId) -> Result<Option<u64>> {
-        self.idx.find_offset(oid)
+        self.idx.find_offset(oid).map_err(Error::from)
     }
 }
 fn pack_indexes_for_lookup(
@@ -6036,7 +6055,7 @@ fn pack_indexes_for_lookup(
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] if no pack contains the OID.
+/// Returns [`ObjectError::ObjectNotFound`] if no pack contains the OID.
 pub fn read_object_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<Object> {
     if crate::pack_store::PackStore::has_context() {
         return read_object_from_packs_in_context(objects_dir, oid);
@@ -6070,7 +6089,7 @@ pub fn read_object_from_packs_into(
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when no pack lists `oid`.
+/// Returns [`ObjectError::ObjectNotFound`] when no pack lists `oid`.
 pub fn read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result<ObjectInfo> {
     match try_read_object_info_from_packs_with_options(
         objects_dir,
@@ -6078,7 +6097,7 @@ pub fn read_object_info_from_packs(objects_dir: &Path, oid: &ObjectId) -> Result
         PackLookupOptions::ALL_LOCAL_PACKS,
     ) {
         Ok(info) => Ok(info),
-        Err(err @ Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+        Err(err @ Error::Object(ObjectError::ObjectNotFound { .. })) => {
             if reprepare_pack_directory_on_miss(objects_dir)? {
                 try_read_object_info_from_packs_with_options(
                     objects_dir,
@@ -6116,7 +6135,7 @@ pub(crate) fn try_read_object_info_from_packs_with_options(
                 pack_cache::remember_pack_hit(objects_dir, idx);
                 return Ok(info);
             }
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {}
             Err(err) => last_err = Some(err),
         }
     }
@@ -6153,7 +6172,7 @@ pub(crate) fn try_read_object_from_packs_with_options(
             }
             // The object is missing from this particular pack despite the index
             // claim — keep looking in the others.
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {}
             // The pack copy is unreadable (corrupt delta/zlib/header). A redundant
             // pack may still hold an intact copy, so remember the error and retry.
             Err(err) if err.is_object_read_wrap_source() => {
@@ -6212,7 +6231,7 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
                 pack_cache::remember_pack_hit(objects_dir, idx);
                 return Ok(kind);
             }
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {}
             Err(err) if err.is_object_read_wrap_source() => {
                 last_damage = Some(PackReadDamage {
                     pack: idx.pack_path.clone(),
@@ -6344,9 +6363,12 @@ fn parse_in_pack_delta_reuse_zlib(
         entry_offset,
         reusable_base,
         DeltaReuseLookups {
-            row_at_offset: &|offset| idx.find_position_by_offset_sorted(offset),
+            row_at_offset: &|offset| {
+                idx.find_position_by_offset_sorted(offset)
+                    .map_err(Error::from)
+            },
             entry_end: &|| pack_entry_raw_end(idx, pack_bytes, entry_offset),
-            entry_crc: &|| idx.crc32_for_pack_offset(entry_offset),
+            entry_crc: &|| idx.crc32_for_pack_offset(entry_offset).map_err(Error::from),
         },
     )
 }
@@ -6487,7 +6509,7 @@ pub(crate) struct PackedSlot {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when a pack entry header is malformed, or
+/// Returns [`ObjectError::CorruptObject`] when a pack entry header is malformed, or
 /// [`Error::Io`] when a pack cannot be read.
 pub(crate) fn locate_packed_objects(
     objects_dir: &Path,
@@ -6537,7 +6559,7 @@ pub(crate) type OnDiskReuseZlibEntry = (ObjectId, u64, Arc<PackData>, usize, usi
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when a pack stream is malformed.
+/// Returns [`ObjectError::CorruptObject`] when a pack stream is malformed.
 pub(crate) fn collect_packed_delta_reuse_for_send(
     objects_dir: &Path,
     send: &HashSet<ObjectId>,
@@ -6644,7 +6666,7 @@ fn scan_packed_delta_reuse(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the pack stream is malformed.
+/// Returns [`ObjectError::CorruptObject`] when the pack stream is malformed.
 pub fn packed_ref_delta_reuse_slice(
     objects_dir: &Path,
     oid: &ObjectId,
@@ -6984,10 +7006,16 @@ pub(crate) fn decode_pack_object_size_varint_from_first(
         let digit = (c & 0x7f) as u64;
         size = size
             .checked_add(digit.checked_shl(shift).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "pack object size overflow".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack object size overflow".to_owned(),
+                ))
             })?)
             .ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "pack object size overflow".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack object size overflow".to_owned(),
+                ))
             })?;
         shift += 7;
     }
@@ -7002,7 +7030,10 @@ pub(crate) fn decode_pack_object_size_varint(
 ) -> Result<u64> {
     decode_pack_object_size_varint_from_first(first, || {
         let b = *bytes.get(*pos).ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "unexpected end of variable size header".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "unexpected end of variable size header".to_owned(),
+            ))
         })?;
         *pos += 1;
         Ok(b)
@@ -7084,19 +7115,28 @@ pub fn read_packed_delta_dependency(
 
 pub(crate) fn parse_ofs_delta_base(bytes: &[u8], pos: &mut usize, this_offset: u64) -> Result<u64> {
     let mut c = *bytes.get(*pos).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "truncated ofs-delta header".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "truncated ofs-delta header".to_owned(),
+        ))
     })?;
     *pos += 1;
     let mut value = (c & 0x7f) as u64;
     while (c & 0x80) != 0 {
         c = *bytes.get(*pos).ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "truncated ofs-delta header".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "truncated ofs-delta header".to_owned(),
+            ))
         })?;
         *pos += 1;
         value = ((value + 1) << 7) | (c & 0x7f) as u64;
     }
     this_offset.checked_sub(value).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "invalid ofs-delta base offset".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "invalid ofs-delta base offset".to_owned(),
+        ))
     })
 }
 

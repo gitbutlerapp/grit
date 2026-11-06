@@ -1,7 +1,6 @@
 //! Integration tests for [`grit_lib::revwalk::history::apply_rewrite`].
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

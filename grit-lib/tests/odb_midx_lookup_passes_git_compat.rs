@@ -2,7 +2,6 @@
 //! does not cover, and covered packs holding objects the index does not list.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;

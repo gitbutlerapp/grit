@@ -203,11 +203,7 @@ mod tests {
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("hex");
         let err = load_commit(&repo, missing).unwrap_err();
         assert!(
-            matches!(
-                err,
-                Error::Object(ObjectError::ObjectNotFound { .. })
-                    | Error::Object(ObjectError::ObjectNotFound { .. })
-            ),
+            matches!(err, Error::Object(ObjectError::ObjectNotFound { .. })),
             "{err:?}"
         );
         let err = commit_tree(&repo, blob).unwrap_err();

@@ -201,7 +201,7 @@ impl PackedObjects {
         self.with_pack(
             |objects_dir| match pack::read_object_from_packs(objects_dir, oid) {
                 Ok(obj) => Ok(Some(obj)),
-                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+                Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
                 Err(err) => Err(ObjectError::from(err)),
             },
         )
@@ -215,7 +215,7 @@ impl PackedObjects {
         self.with_pack(|objects_dir| {
             match pack::read_object_from_packs_into(objects_dir, oid, buf) {
                 Ok(kind) => Ok(Some(kind)),
-                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+                Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
                 Err(err) => Err(ObjectError::from(err)),
             }
         })
@@ -225,7 +225,7 @@ impl PackedObjects {
         self.with_pack(
             |objects_dir| match pack::read_object_info_from_packs(objects_dir, oid) {
                 Ok(info) => Ok(Some(info)),
-                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+                Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
                 Err(err) => Err(ObjectError::from(err)),
             },
         )
@@ -604,10 +604,7 @@ fn stream_from_buffered_read(
         return Ok(None);
     };
     let size = u64::try_from(obj.data.len()).map_err(|_| {
-        ObjectError::corrupt_object(
-            None,
-            format!("object size overflow for {}", oid.to_hex()),
-        )
+        ObjectError::corrupt_object(None, format!("object size overflow for {}", oid.to_hex()))
     })?;
     Ok(Some(ObjectStream {
         kind: obj.kind,

@@ -225,9 +225,7 @@ fn classify_midx_status(objects_dir: &std::path::Path) -> ObjectResult<MidxObjec
         Ok(Some(_)) => Ok(MidxObjectsStatus::Active),
         Ok(None)
         | Err(Error::Object(ObjectError::Midx(_)))
-        | Err(Error::Object(ObjectError::CorruptObject { .. })) => {
-            Ok(MidxObjectsStatus::Unusable)
-        }
+        | Err(Error::Object(ObjectError::CorruptObject { .. })) => Ok(MidxObjectsStatus::Unusable),
         Err(err) => Err(ObjectError::from(err)),
     }
 }

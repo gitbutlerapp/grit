@@ -4,7 +4,6 @@
 
 use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};

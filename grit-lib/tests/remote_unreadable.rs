@@ -3,7 +3,6 @@
 //! transport, so callers never match on message text.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::io::Read;
 #[cfg(feature = "http-ureq")]
 use std::io::Write;

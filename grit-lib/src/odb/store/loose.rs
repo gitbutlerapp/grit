@@ -240,7 +240,7 @@ impl LooseStore {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] when compression fails.
+    /// Returns [`ObjectError::Zlib`] when compression fails.
     pub fn zlib_compress_store_bytes(&self, store_bytes: &[u8]) -> ObjectResult<Vec<u8>> {
         zlib_compress_store_bytes(store_bytes, self.compression)
     }
@@ -384,9 +384,9 @@ impl LooseStore {
     ///
     /// # Errors
     ///
-    /// - [`Error::Zlib`] — decompression failed.
-    /// - [`Error::CorruptObject`] — header is malformed.
-    /// - [`Error::LooseHashMismatch`] — payload OID does not match `expected_oid`.
+    /// - [`ObjectError::Zlib`] — decompression failed.
+    /// - [`ObjectError::CorruptObject`] — header is malformed.
+    /// - [`ObjectError::LooseHashMismatch`] — payload OID does not match `expected_oid`.
     pub fn read_verify_oid(path: &Path, expected_oid: &ObjectId) -> ObjectResult<Object> {
         let file = fs::File::open(path).map_err(Error::Io)?;
         let raw = match read_zlib_loose_payload(file) {
@@ -426,8 +426,8 @@ impl LooseStore {
     ///
     /// # Errors
     ///
-    /// Same as [`ObjectStore::read`]: [`Error::Io`], [`Error::Zlib`] or
-    /// [`Error::CorruptObject`] for unreadable or malformed objects.
+    /// Same as [`ObjectStore::read`]: [`Error::Io`], [`ObjectError::Zlib`] or
+    /// [`ObjectError::CorruptObject`] for unreadable or malformed objects.
     pub(crate) fn read_unless_larger(
         &self,
         oid: &ObjectId,
@@ -717,12 +717,8 @@ pub(crate) fn strip_decompressed_object_header(
     })?;
     let (kind, size) = parse_object_header_prefix(buf)?;
     let payload_start = nul + 1;
-    let size_usize = usize::try_from(size).map_err(|_| {
-        ObjectError::corrupt_object(
-            None,
-            format!("invalid object size: {size}"),
-        )
-    })?;
+    let size_usize = usize::try_from(size)
+        .map_err(|_| ObjectError::corrupt_object(None, format!("invalid object size: {size}")))?;
     if buf.len().saturating_sub(payload_start) != size_usize {
         let oid_str = oid_hint.map(ObjectId::to_hex).unwrap_or_else(|| {
             hash_algo_digest_hex(HashAlgo::Sha1, buf).unwrap_or_else(|_| "?".to_owned())
@@ -811,9 +807,11 @@ pub(crate) fn zlib_compress_store_bytes(
 pub(crate) fn decompress_zlib_loose_bytes(zlib: &[u8]) -> ObjectResult<Vec<u8>> {
     let mut decoder = flate2::read::ZlibDecoder::new(zlib);
     let mut raw = Vec::new();
-    decoder.read_to_end(&mut raw).map_err(|e| ObjectError::Zlib {
-        detail: e.to_string(),
-    })?;
+    decoder
+        .read_to_end(&mut raw)
+        .map_err(|e| ObjectError::Zlib {
+            detail: e.to_string(),
+        })?;
     Ok(raw)
 }
 
@@ -835,17 +833,10 @@ pub(crate) fn parse_object_header_prefix(raw: &[u8]) -> ObjectResult<(ObjectKind
     }
 
     let kind = ObjectKind::from_bytes(&header[..sp])?;
-    let size_str = std::str::from_utf8(&header[sp + 1..]).map_err(|_| {
-        ObjectError::corrupt_object(
-            None,
-            "non-UTF-8 object size".to_owned(),
-        )
-    })?;
+    let size_str = std::str::from_utf8(&header[sp + 1..])
+        .map_err(|_| ObjectError::corrupt_object(None, "non-UTF-8 object size".to_owned()))?;
     let size: u64 = size_str.parse().map_err(|_| {
-        ObjectError::corrupt_object(
-            None,
-            format!("invalid object size: {size_str}"),
-        )
+        ObjectError::corrupt_object(None, format!("invalid object size: {size_str}"))
     })?;
     Ok((kind, size))
 }
@@ -871,17 +862,10 @@ fn parse_object_bytes_inner(raw: &[u8], oid_hint: Option<&ObjectId>) -> ObjectRe
 
     let kind = ObjectKind::from_bytes(&header[..sp])?;
 
-    let size_str = std::str::from_utf8(&header[sp + 1..]).map_err(|_| {
-        ObjectError::corrupt_object(
-            None,
-            "non-UTF-8 object size".to_owned(),
-        )
-    })?;
+    let size_str = std::str::from_utf8(&header[sp + 1..])
+        .map_err(|_| ObjectError::corrupt_object(None, "non-UTF-8 object size".to_owned()))?;
     let size: usize = size_str.parse().map_err(|_| {
-        ObjectError::corrupt_object(
-            None,
-            format!("invalid object size: {size_str}"),
-        )
+        ObjectError::corrupt_object(None, format!("invalid object size: {size_str}"))
     })?;
 
     if data.len() != size {

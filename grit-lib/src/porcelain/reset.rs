@@ -150,7 +150,7 @@ pub struct ResetOutcome {
 ///
 /// # Errors
 ///
-/// Same validation failures as [`reset_to_commit`], including [`Error::InvalidSignature`]
+/// Same validation failures as [`reset_to_commit`], including [`crate::objects::ObjectError::InvalidSignature`]
 /// for an invalid [`ResetOptions::identity`], even when the target is already `HEAD`
 /// or reflog updates are disabled. No repository state is changed.
 pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPreview> {
@@ -173,7 +173,7 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 /// refs, index and worktree unchanged. Returns an error when there is no current commit,
 /// the work tree is required but missing (hard/keep reset), local edits block keep reset,
 /// or ref/index/checkout I/O fails.
-/// An invalid [`ResetOptions::identity`] returns [`Error::InvalidSignature`] before
+/// An invalid [`ResetOptions::identity`] returns [`crate::objects::ObjectError::InvalidSignature`] before
 /// changing HEAD, branch refs, index, worktree, reflogs, or operation state (including
 /// merge autostashes). This also applies to dry runs, resets to the current HEAD,
 /// and resets with reflog updates disabled. Later I/O failures may leave partial updates.

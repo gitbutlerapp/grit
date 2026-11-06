@@ -366,9 +366,7 @@ fn commit_with_unstartable_pre_commit_hook_fails_with_spawn_error() {
 
     match commit_one_file(&repo, tmp.path()) {
         Err(grit_lib::error::Error::Hook(HookError::Spawn {
-            hook_name,
-            source,
-            ..
+            hook_name, source, ..
         })) => {
             assert_eq!(hook_name, "pre-commit");
             assert_eq!(source.kind(), io::ErrorKind::NotFound);
@@ -657,9 +655,7 @@ fn commit_msg_hook_using_grep_rejects_the_commit() {
 
     match commit_staged(&repo, &dir, "WIP thing") {
         Err(grit_lib::error::Error::Hook(HookError::Failed {
-            hook_name,
-            status,
-            ..
+            hook_name, status, ..
         })) => {
             assert_eq!(hook_name, "commit-msg");
             assert_eq!(status, 1);

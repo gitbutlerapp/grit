@@ -1,7 +1,6 @@
 //! Shared [`RewriteOptions`] behavior across history entry points.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::index::write_tree::write_tree_from_index;

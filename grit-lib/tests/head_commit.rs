@@ -2,7 +2,6 @@
 //! system `git`, on an injected ref store, and through the history engine that relies on them.
 
 #[allow(clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;

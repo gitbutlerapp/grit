@@ -1,6 +1,5 @@
 //! Typed failures from [`crate::rev_list`].
 
-use crate::objects::ObjectError;
 use thiserror::Error;
 
 /// Failure modes when walking revisions or parsing `rev-list` options.

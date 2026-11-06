@@ -32,7 +32,7 @@ impl<'a> CommitRef<'a> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when required headers are missing or malformed.
+    /// Returns [`ObjectError::CorruptObject`] when required headers are missing or malformed.
     ///
     /// A header block that ends at EOF (no blank line before the message) is accepted with
     /// an empty message, matching Git's commit parser.
@@ -343,17 +343,26 @@ fn scan_commit(data: &[u8], lenient: bool) -> Result<CommitScan<'_>> {
 fn parse_one_pass<'a>(data: &'a [u8]) -> Result<CommitRef<'a>> {
     let scan = scan_commit(data, false)?;
     let author_bytes = scan.author_raw.ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "commit missing author header".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "commit missing author header".to_owned(),
+        ))
     })?;
     let committer_bytes = scan.committer_raw.ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "commit missing committer header".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "commit missing committer header".to_owned(),
+        ))
     })?;
 
     Ok(CommitRef {
         headers_block: scan.headers_block,
         message: scan.message,
         tree: scan.tree.ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "commit missing tree header".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "commit missing tree header".to_owned(),
+            ))
         })?,
         parents: scan.parents,
         author_raw: author_bytes,
@@ -490,7 +499,10 @@ impl ExtraScan {
 
 fn merge_identity_continuation(slot: &mut Option<Cow<'_, [u8]>>, rest: &[u8]) -> Result<()> {
     let merged = slot.as_mut().ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "orphan header continuation".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "orphan header continuation".to_owned(),
+        ))
     })?;
     match merged {
         Cow::Borrowed(first) => {

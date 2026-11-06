@@ -1,7 +1,6 @@
 //! Locked reflog rewrite paths must not drop concurrent appends (issue #2286 follow-ups).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::sync::Arc;
 use std::thread;
 

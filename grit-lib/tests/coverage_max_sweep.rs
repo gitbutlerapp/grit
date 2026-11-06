@@ -1,7 +1,6 @@
 //! Large cross-module sweep to lift total and history aggregate line coverage.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::apply::parse_patch;
 use grit_lib::blame::{blame_file, BlameOptions};
 use grit_lib::config::ConfigSet;

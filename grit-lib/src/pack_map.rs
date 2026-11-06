@@ -136,7 +136,7 @@ impl PackData {
     /// # Errors
     ///
     /// Returns [`Error::Io`] when the file cannot be opened or read, and
-    /// [`Error::CorruptObject`] when the file is shorter than a pack header.
+    /// [`ObjectError::CorruptObject`] when the file is shorter than a pack header.
     pub(crate) fn open(path: &Path) -> Result<Arc<Self>> {
         Self::open_with_min_len(path, HEADER_LEN as u64)
     }
@@ -383,7 +383,7 @@ impl PackData {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the buffer is not a well-formed pack prefix/trailer.
+    /// Returns [`ObjectError::CorruptObject`] when the buffer is not a well-formed pack prefix/trailer.
     pub(crate) fn fingerprint(&self, hash_bytes: usize) -> Result<PackFingerprint> {
         fingerprint_from_slice(self, hash_bytes)
     }
@@ -478,7 +478,7 @@ pub(crate) fn map_read_only_file(file: &File, len: usize) -> std::io::Result<Mma
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] on read failure and [`Error::CorruptObject`] for malformed packs.
+/// Returns [`Error::Io`] on read failure and [`ObjectError::CorruptObject`] for malformed packs.
 pub(crate) fn fingerprint_from_file(path: &Path, hash_bytes: usize) -> Result<PackFingerprint> {
     let mut file = File::open(path).map_err(Error::Io)?;
     let file_len = file.metadata().map_err(Error::Io)?.len();

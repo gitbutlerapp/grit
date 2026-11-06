@@ -1,7 +1,6 @@
 //! Execute allowlisted public helpers that need little or no repository setup.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::objects::FileMode;

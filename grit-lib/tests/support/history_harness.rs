@@ -1,7 +1,6 @@
 //! Hermetic system-`git` helpers for history (rev-list, rev-parse, index) tests.
 
 #[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
-
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;

@@ -659,7 +659,7 @@ pub struct MergeSource {
 /// # Errors
 ///
 /// - [`Error::RevisionNotFound`] when `spec` names nothing.
-/// - [`Error::UnexpectedObjectKind`] when `spec` names (or a tag peels to) a tree or blob.
+/// - [`ObjectError::UnexpectedObjectKind`] when `spec` names (or a tag peels to) a tree or blob.
 /// - Object database errors (missing or corrupt objects behind a ref) are propagated.
 pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
     let named = [

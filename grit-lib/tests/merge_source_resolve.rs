@@ -1,7 +1,7 @@
 //! `resolve_merge_source`: merge arguments name branches, tags, commit ids or any revision.
 
-use grit_lib::objects::ObjectError;
 use grit_lib::error::Error;
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::merge::{resolve_merge_source, MergeSource, MergeSourceKind};
 use grit_lib::repo::Repository;

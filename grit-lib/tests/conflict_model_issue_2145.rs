@@ -5,7 +5,6 @@
 //! `git status --porcelain=v2` shows for the index grit wrote.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 

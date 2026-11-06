@@ -1,7 +1,6 @@
 //! Oracle helpers: compare grit config APIs to system `git config`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
-
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 

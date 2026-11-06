@@ -3,7 +3,6 @@
 //! [`ProgressSink::should_cancel`].
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 

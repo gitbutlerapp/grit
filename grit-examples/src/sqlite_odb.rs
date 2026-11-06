@@ -168,7 +168,11 @@ impl SqliteOdbStore {
         {
             let mut enc = ZlibEncoder::new(&mut zlib, compression);
             enc.write_all(store_bytes).map_err(Error::Io)?;
-            enc.finish().map_err(|e| ObjectError::Zlib { detail: e.to_string() }.into())?;
+            enc.finish().map_err(|e| {
+                Error::from(ObjectError::Zlib {
+                    detail: e.to_string(),
+                })
+            })?;
         }
         state
             .conn
@@ -197,7 +201,7 @@ impl ObjectStore for SqliteOdbStore {
             return Err(ObjectError::corrupt_object(
                 None,
                 format!("sqlite odb hash mismatch for {}", oid.to_hex()),
-            )));
+            ));
         }
         Ok(Some(obj))
     }
@@ -266,7 +270,7 @@ impl ObjectStore for SqliteOdbStore {
             return Ok(None);
         };
         let size = u64::try_from(obj.data.len()).map_err(|_| {
-            ObjectError::corrupt_object(None, format!("object size overflow for {}", oid.to_hex())).into()
+            ObjectError::corrupt_object(None, format!("object size overflow for {}", oid.to_hex()))
         })?;
         Ok(Some(ObjectStream {
             kind: obj.kind,
@@ -300,13 +304,18 @@ impl ObjectStore for SqliteOdbStore {
         Ok(())
     }
 
-    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> ObjectResult<()> {
+    fn lookup_prefix(
+        &self,
+        prefix: &str,
+        limit: usize,
+        out: &mut Vec<ObjectId>,
+    ) -> ObjectResult<()> {
         let prefix = prefix.to_ascii_lowercase();
         if !prefix.is_empty() && !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(ObjectError::InvalidObjectId { input: prefix }.into());
+            return Err(ObjectError::InvalidObjectId { input: prefix });
         }
         if prefix.len() > self.algo.hex_len() {
-            return Err(ObjectError::InvalidObjectId { input: prefix }.into());
+            return Err(ObjectError::InvalidObjectId { input: prefix });
         }
         let guard = self
             .db
@@ -333,7 +342,12 @@ impl ObjectStore for SqliteOdbStore {
 }
 
 impl WritableObjectStore for SqliteOdbStore {
-    fn write(&self, kind: ObjectKind, data: &[u8], _options: WriteOptions) -> ObjectResult<ObjectId> {
+    fn write(
+        &self,
+        kind: ObjectKind,
+        data: &[u8],
+        _options: WriteOptions,
+    ) -> ObjectResult<ObjectId> {
         let oid = hash::hash_object(self.algo, kind, data)?;
         let store_bytes = build_store_bytes(kind, data);
         let mut guard = self
@@ -403,12 +417,14 @@ fn read_algo(conn: &Connection) -> ObjectResult<HashAlgo> {
             [],
             |row| row.get(0),
         )
-        .map_err(|_| ObjectError::corrupt_object(None, "sqlite odb missing schema_version".into()).into())?;
+        .map_err(|_| {
+            ObjectError::corrupt_object(None, "sqlite odb missing schema_version".to_owned())
+        })?;
     if version != SCHEMA_VERSION {
         return Err(ObjectError::corrupt_object(
             None,
             format!("unsupported sqlite odb schema version {version}"),
-        )));
+        ));
     }
     let algo_value: i64 = conn
         .query_row(
@@ -416,7 +432,9 @@ fn read_algo(conn: &Connection) -> ObjectResult<HashAlgo> {
             [],
             |row| row.get(0),
         )
-        .map_err(|_| ObjectError::corrupt_object(None, "sqlite odb missing hash_algo".into()).into())?;
+        .map_err(|_| {
+            ObjectError::corrupt_object(None, "sqlite odb missing hash_algo".to_owned())
+        })?;
     parse_algo_meta_value(algo_value)
 }
 
@@ -431,9 +449,10 @@ fn parse_algo_meta_value(value: i64) -> ObjectResult<HashAlgo> {
     match value {
         1 => Ok(HashAlgo::Sha1),
         2 => Ok(HashAlgo::Sha256),
-        _ => Err(ObjectError::corrupt_object(None, format!(
-            "unknown sqlite odb hash_algo value {value}"
-        )).into()),
+        _ => Err(ObjectError::corrupt_object(
+            None,
+            format!("unknown sqlite odb hash_algo value {value}"),
+        )),
     }
 }
 
@@ -443,14 +462,14 @@ fn parse_oid_blob(bytes: &[u8], algo: HashAlgo) -> ObjectResult<ObjectId> {
         return Err(ObjectError::corrupt_object(
             None,
             format!("sqlite odb oid length {} expected {expected}", bytes.len()),
-        )));
+        ));
     }
     let oid = ObjectId::from_bytes(bytes)?;
     if oid.algo() != algo {
         return Err(ObjectError::corrupt_object(
             None,
             format!("sqlite odb oid algorithm mismatch for {}", oid.to_hex()),
-        )));
+        ));
     }
     Ok(oid)
 }
@@ -464,7 +483,9 @@ fn decompress_zlib(zlib: &[u8]) -> ObjectResult<Vec<u8>> {
     let mut raw = Vec::new();
     decoder
         .read_to_end(&mut raw)
-        .map_err(|e| ObjectError::Zlib { detail: e.to_string() }.into())?;
+        .map_err(|e| ObjectError::Zlib {
+            detail: e.to_string(),
+        })?;
     Ok(raw)
 }
 
@@ -476,28 +497,27 @@ fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
 }
 
 fn parse_store_bytes(raw: &[u8]) -> ObjectResult<Object> {
-    let nul = raw
-        .iter()
-        .position(|&b| b == 0)
-        .ok_or_else(|| ObjectError::corrupt_object(None, "missing object header terminator".into()).into())?;
+    let nul = raw.iter().position(|&b| b == 0).ok_or_else(|| {
+        ObjectError::corrupt_object(None, "missing object header terminator".to_owned())
+    })?;
     let header = std::str::from_utf8(&raw[..nul])
-        .map_err(|_| ObjectError::corrupt_object(None, "invalid object header utf-8".into()).into())?;
+        .map_err(|_| ObjectError::corrupt_object(None, "invalid object header utf-8".to_owned()))?;
     let mut parts = header.splitn(2, ' ');
     let kind_str = parts
         .next()
-        .ok_or_else(|| ObjectError::corrupt_object(None, "empty object header".into()).into())?;
+        .ok_or_else(|| ObjectError::corrupt_object(None, "empty object header".to_owned()))?;
     let size_str = parts
         .next()
-        .ok_or_else(|| ObjectError::corrupt_object(None, "missing object size".into()).into())?;
-    let kind: ObjectKind = kind_str
-        .parse()
-        .map_err(|_| ObjectError::corrupt_object(None, format!("unknown object kind {kind_str}")).into())?;
-    let size: usize = size_str
-        .parse()
-        .map_err(|_| ObjectError::corrupt_object(None, format!("invalid object size {size_str}")).into())?;
-    let payload = raw
-        .get(nul + 1..)
-        .ok_or_else(|| ObjectError::corrupt_object(None, "object payload shorter than header".into()).into())?;
+        .ok_or_else(|| ObjectError::corrupt_object(None, "missing object size".to_owned()))?;
+    let kind: ObjectKind = kind_str.parse().map_err(|_| {
+        ObjectError::corrupt_object(None, format!("unknown object kind {kind_str}"))
+    })?;
+    let size: usize = size_str.parse().map_err(|_| {
+        ObjectError::corrupt_object(None, format!("invalid object size {size_str}"))
+    })?;
+    let payload = raw.get(nul + 1..).ok_or_else(|| {
+        ObjectError::corrupt_object(None, "object payload shorter than header".to_owned())
+    })?;
     if payload.len() != size {
         return Err(ObjectError::corrupt_object(
             None,
@@ -505,7 +525,7 @@ fn parse_store_bytes(raw: &[u8]) -> ObjectResult<Object> {
                 "object size {size} does not match payload {}",
                 payload.len()
             ),
-        )));
+        ));
     }
     Ok(Object {
         kind,
@@ -518,7 +538,7 @@ fn info_from_store_bytes(raw: &[u8]) -> ObjectResult<ObjectInfo> {
     Ok(ObjectInfo {
         kind: obj.kind,
         size: u64::try_from(obj.data.len())
-            .map_err(|_| ObjectError::corrupt_object(None, "object size overflow".into()).into())?,
+            .map_err(|_| ObjectError::corrupt_object(None, "object size overflow".to_owned()))?,
     })
 }
 

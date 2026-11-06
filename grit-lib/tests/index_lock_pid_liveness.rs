@@ -2,7 +2,6 @@
 //! (native liveness, no `kill` CLI), and Git sees the repository unchanged afterwards.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 use std::process::Command;

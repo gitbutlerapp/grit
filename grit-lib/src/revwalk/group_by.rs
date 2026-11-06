@@ -500,7 +500,7 @@ fn load_commit_prefix_and_count_author(
                 accumulate_author_count(&obj.data, mailmap, counter)?;
                 return Ok(Some(obj.data));
             }
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                 reader.clear_commit_header_prefix();
                 *pack_reader = None;
                 continue;

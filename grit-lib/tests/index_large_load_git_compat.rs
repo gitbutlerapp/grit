@@ -2,7 +2,6 @@
 //! alongside entry parsing, and corruption reporting on that path.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

@@ -5,7 +5,6 @@
 //! still dead: check the whole `tests/` tree before adding or keeping one.
 
 #[allow(dead_code)]
-
 mod attributes_harness;
 mod config_oracle;
 mod diff_harness;

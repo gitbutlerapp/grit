@@ -2,7 +2,6 @@
 //! ref updates when a stale nested ref blocks another, and hint at `--prune`.
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::fs;
 use std::path::Path;
 

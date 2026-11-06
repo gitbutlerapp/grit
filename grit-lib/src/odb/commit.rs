@@ -29,9 +29,9 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] when `oid` is missing.
-    /// - [`Error::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
-    /// - [`Error::CorruptObject`] when the commit's required headers are missing or malformed.
+    /// - [`ObjectError::ObjectNotFound`] when `oid` is missing.
+    /// - [`ObjectError::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
+    /// - [`ObjectError::CorruptObject`] when the commit's required headers are missing or malformed.
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit(&self, oid: &ObjectId) -> Result<CommitData> {
         let object = self.read(oid)?;
@@ -75,8 +75,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] when `oid` is missing.
-    /// - [`Error::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
+    /// - [`ObjectError::ObjectNotFound`] when `oid` is missing.
+    /// - [`ObjectError::UnexpectedObjectKind`] when `oid` names a tree, blob or tag.
     /// - Any other error [`Self::read`] reports.
     pub fn read_commit_through_subject(&self, oid: &ObjectId) -> Result<Vec<u8>> {
         if self.custom_primary.is_none() {

@@ -114,5 +114,8 @@ fn tree_ref_iter_malformed_matches_parse_tree_errors() {
         .collect::<Result<Vec<_>, _>>()
         .expect_err("iter trunc");
     assert_eq!(format!("{parse_err}"), format!("{iter_err}"));
-    assert!(matches!(parse_err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        parse_err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }

@@ -666,7 +666,7 @@ fn parse_branch_tracking(config: &str, branch: &str) -> Option<(String, String)>
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] or [`Error::InvalidRef`] when resolution
+/// Returns [`ObjectError::ObjectNotFound`] or [`Error::InvalidRef`] when resolution
 /// fails.
 /// Split `spec` at a `..` range operator, avoiding the three-dot symmetric-diff form.
 ///
@@ -1249,7 +1249,9 @@ pub fn resolve_revision_as_commit(repo: &Repository, spec: &str) -> Result<Objec
         let right_c = peel_to_commit_for_merge_base(repo, right_tip)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
         return bases.into_iter().next().ok_or_else(|| {
-            Error::Object(ObjectError::object_not_found(format!("no merge base for '{spec}'")))
+            Error::Object(ObjectError::object_not_found(format!(
+                "no merge base for '{spec}'"
+            )))
         });
     }
     if let Some((_excl, tip)) = try_parse_double_dot_log_range(repo, spec)? {
@@ -1282,7 +1284,9 @@ pub fn resolve_revision_as_commit_without_index_dwim(
         let right_c = peel_to_commit_for_merge_base(repo, right_tip)?;
         let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_c, &[right_c])?;
         return bases.into_iter().next().ok_or_else(|| {
-            Error::Object(ObjectError::object_not_found(format!("no merge base for '{spec}'")))
+            Error::Object(ObjectError::object_not_found(format!(
+                "no merge base for '{spec}'"
+            )))
         });
     }
     if let Some((_excl, tip)) = try_parse_double_dot_log_range_without_index_dwim(repo, spec)? {
@@ -1511,7 +1515,9 @@ fn resolve_revision_with_navigation(
             )?;
             let bases = crate::merge_base::merge_bases_first_vs_rest(repo, left_oid, &[right_oid])?;
             return bases.into_iter().next().ok_or_else(|| {
-                Error::Object(ObjectError::object_not_found(format!("no merge base for '{spec}'")))
+                Error::Object(ObjectError::object_not_found(format!(
+                    "no merge base for '{spec}'"
+                )))
             });
         }
     }
@@ -1593,10 +1599,7 @@ fn resolve_revision_with_navigation(
     let nav_cache = NavParentCache::new(repo, metadata);
     for step in nav_steps {
         oid = apply_nav_step(repo, &nav_cache, oid, step).map_err(|e| {
-            if matches!(
-                e,
-                Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
-            ) {
+            if matches!(e, Error::Object(ObjectError::ObjectNotFound { .. })) {
                 RevParseError::RevisionOutOfRange {
                     spec: spec.to_owned(),
                 }
@@ -1752,7 +1755,7 @@ pub fn try_peel_to_commit_for_merge_base(
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when the object cannot be peeled to a tree (e.g. a blob).
+/// Returns [`ObjectError::ObjectNotFound`] when the object cannot be peeled to a tree (e.g. a blob).
 pub fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
     let obj = repo.read_replaced(&oid)?;
     match obj.kind {
@@ -1765,7 +1768,10 @@ pub fn peel_to_tree(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
             let tag = crate::objects::parse_tag(&obj.data)?;
             peel_to_tree(repo, tag.object)
         }
-        _ => Err(Error::Object(ObjectError::object_not_found(format!("cannot peel {} to tree", oid)))),
+        _ => Err(Error::Object(ObjectError::object_not_found(format!(
+            "cannot peel {} to tree",
+            oid
+        )))),
     }
 }
 
@@ -2042,10 +2048,9 @@ fn apply_nav_step(
             let mut current = peel_annotated_tag_chain(repo, oid)?;
             for _ in 0..n {
                 let parents = nav.parents_of(current)?;
-                current = parents
-                    .first()
-                    .copied()
-                    .ok_or_else(|| Error::Object(ObjectError::object_not_found(format!("{current}~1"))))?;
+                current = parents.first().copied().ok_or_else(|| {
+                    Error::Object(ObjectError::object_not_found(format!("{current}~1")))
+                })?;
             }
             Ok(current)
         }
@@ -2434,9 +2439,9 @@ fn resolve_base(
             Ok(crate::state::HeadState::Branch { oid: None, .. }) => Err(Error::UnbornHead),
             Ok(crate::state::HeadState::Branch { oid: Some(oid), .. }) => Ok(oid),
             Ok(crate::state::HeadState::Detached { oid }) => Ok(oid),
-            Ok(crate::state::HeadState::Invalid) | Err(_) => {
-                Err(Error::Object(ObjectError::object_not_found(spec.to_owned())))
-            }
+            Ok(crate::state::HeadState::Invalid) | Err(_) => Err(Error::Object(
+                ObjectError::object_not_found(spec.to_owned()),
+            )),
         };
     }
 
@@ -2816,7 +2821,9 @@ fn resolve_base(
         }
         .into());
     }
-    Err(Error::Object(ObjectError::object_not_found(spec.to_owned())))
+    Err(Error::Object(ObjectError::object_not_found(
+        spec.to_owned(),
+    )))
 }
 
 fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEntry>> {
@@ -3424,7 +3431,7 @@ fn diagnose_tree_path_error(
 }
 
 fn diagnose_index_path_error(repo: &Repository, path: &str, stage: u8, err: Error) -> Error {
-    let Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) = err else {
+    let Error::Object(ObjectError::ObjectNotFound { .. }) = err else {
         return err;
     };
     let work_path = repo
@@ -3622,7 +3629,10 @@ pub fn resolve_index_path_entry(repo: &Repository, spec: &str) -> Result<Option<
             )))
         })?;
     let entry = index.get(path.as_bytes(), colon.stage).ok_or_else(|| {
-        Error::Object(ObjectError::object_not_found(format!(":{}:{}", colon.stage, path)))
+        Error::Object(ObjectError::object_not_found(format!(
+            ":{}:{}",
+            colon.stage, path
+        )))
     })?;
     Ok(Some(IndexPathEntry {
         path,
@@ -3749,7 +3759,9 @@ pub(crate) fn resolve_treeish_path_to_object(
         current_tree = entry.oid;
     }
 
-    Err(Error::Object(ObjectError::object_not_found(path.to_owned())))
+    Err(Error::Object(ObjectError::object_not_found(
+        path.to_owned(),
+    )))
 }
 
 pub(crate) fn resolve_treeish_path(
@@ -4078,7 +4090,9 @@ impl<'repo> MessageSearchWalker<'repo> {
             }
         }
 
-        Err(Error::Object(ObjectError::object_not_found(format!(":/{pattern}"))))
+        Err(Error::Object(ObjectError::object_not_found(format!(
+            ":/{pattern}"
+        ))))
     }
 }
 

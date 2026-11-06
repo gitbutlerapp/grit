@@ -1,7 +1,6 @@
 //! Branch inventory vs `git for-each-ref` (upstream, track, worktree, subject).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;

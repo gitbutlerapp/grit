@@ -1,7 +1,6 @@
 //! t3070-wildmatch: grit wildmatch vs upstream vector table and git ls-files cross-check.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::path::Path;
 use std::time::{Duration, Instant};
 

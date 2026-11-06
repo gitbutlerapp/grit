@@ -1,7 +1,6 @@
 //! Git-compatible C-style path quoting (`core.quotepath`, t3300-style funny names).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::process::Command;
 
 use grit_lib::porcelain::quote_path::quote_c_style;

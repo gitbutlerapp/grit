@@ -1,7 +1,6 @@
 //! `grit fetch` — download refs and objects from a remote (default: the current
 //! branch's remote, else `origin`).
 
-use grit_lib::objects::ObjectError;
 use crate::commands::fetch_args::FetchArgs;
 use crate::output::OutputMode;
 use crate::progress::summary::{stdout_color, transfer_header, TransferSummary};
@@ -589,7 +588,7 @@ fn plural(n: usize) -> &'static str {
 #[cfg(test)]
 mod map_remote_error_tests {
     use grit_lib::error::Error as LibError;
-    use grit_lib::objects::ObjectId;
+    use grit_lib::objects::{ObjectError, ObjectId};
     use grit_lib::remote::RemoteError;
 
     use super::map_remote_error;

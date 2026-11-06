@@ -79,9 +79,9 @@ fn commit_info_from_ref(commit: &CommitRef<'_>) -> CommitGraphCommitInfo {
 ///
 /// # Errors
 ///
-/// [`crate::error::Error::CorruptObject`] when `oid` is not a commit, plus any read or
+/// [`crate::objects::ObjectError::CorruptObject`] when `oid` is not a commit, plus any read or
 /// parse error from [`Odb::read_commit`].
-pub(crate) fn load_commit_graph_commit_info(
+pub fn load_commit_graph_commit_info(
     odb: &Odb,
     oid: ObjectId,
 ) -> crate::error::Result<CommitGraphCommitInfo> {
@@ -343,7 +343,7 @@ pub struct BloomWriteStats {
 }
 #[expect(clippy::too_many_arguments)]
 /// Build raw commit-graph bytes (without touching the filesystem).
-pub(crate) fn build_commit_graph_bytes(
+pub fn build_commit_graph_bytes(
     sorted_oids: &[ObjectId],
     infos: &HashMap<ObjectId, CommitGraphCommitInfo>,
     odb: &Odb,
@@ -685,7 +685,7 @@ pub(crate) fn collect_reachable_commit_infos_for_repository(
 ///
 /// Prefer [`collect_reachable_commit_oids_for_repository`] when a [`crate::repo::Repository`] is
 /// available (reftable and linked worktrees require the ref store).
-pub(crate) fn collect_reachable_commit_oids(
+pub fn collect_reachable_commit_oids(
     git_dir: &std::path::Path,
     odb: &Odb,
 ) -> crate::error::Result<HashSet<ObjectId>> {
@@ -990,7 +990,9 @@ mod tests {
 
     use crate::bloom::BloomFilterSettings;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
-    use crate::objects::{oid_hash_map, serialize_commit, CommitData, ObjectError, ObjectId, ObjectKind};
+    use crate::objects::{
+        oid_hash_map, serialize_commit, CommitData, ObjectError, ObjectId, ObjectKind,
+    };
 
     fn commit_infos_std(
         infos: &crate::objects::OidHashMap<super::CommitGraphCommitInfo>,

@@ -1,7 +1,6 @@
 //! `Repository::verify_object` vs `git rev-parse --verify -q` where Git defines behavior.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::object_inspect::ResolveError;
 

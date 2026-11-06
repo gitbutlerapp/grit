@@ -433,7 +433,7 @@ impl StashPushOptions {
     /// # Errors
     ///
     /// Returns [`Error::StashOptionConflict`] when options conflict and
-    /// [`Error::InvalidSignature`] when [`Self::identity`] cannot be written into a commit.
+    /// [`crate::objects::ObjectError::InvalidSignature`] when [`Self::identity`] cannot be written into a commit.
     pub fn validate(&self) -> Result<()> {
         self.identity.validate()?;
         if self.mode == StashMode::StagedOnly && self.include_untracked {

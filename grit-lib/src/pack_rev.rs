@@ -62,7 +62,7 @@ pub fn hashfile_checksum_valid(data: &[u8], hash_len: usize) -> bool {
 pub fn build_pack_rev_bytes(index: &PackIndex) -> Result<Vec<u8>> {
     let offsets: Vec<u64> = index
         .iter()
-        .map(|e| e.offset())
+        .map(|e| e.offset().map_err(Error::from))
         .collect::<Result<Vec<_>>>()?;
     Ok(build_pack_rev_bytes_from_index_order_offsets(&offsets))
 }
@@ -176,7 +176,7 @@ fn write_pack_rev_sidecar_with_shared(index: &PackIndex, shared_repo: i32) -> Re
     let hash_len = index.hash_bytes();
     let pack_checksum = read_pack_trailer(&index.pack_path, hash_len)?;
     let offsets: Vec<u64> = (0..index.len())
-        .map(|i| index.offset_at(i))
+        .map(|i| index.offset_at(i).map_err(Error::from))
         .collect::<Result<Vec<_>>>()?;
     let rev_bytes =
         build_pack_rev_bytes_from_index_order_offsets_and_checksum(&offsets, &pack_checksum);
@@ -273,7 +273,7 @@ pub fn pack_rev_fsck_messages(
     }
 
     let Ok(offsets) = (0..n)
-        .map(|i| index.offset_at(i))
+        .map(|i| index.offset_at(i).map_err(Error::from))
         .collect::<Result<Vec<_>>>()
     else {
         msgs.push("corrupt pack index offsets".to_owned());
@@ -334,7 +334,7 @@ pub fn verify_pack_rev_file_contents(
         ));
     }
     let offsets: Vec<u64> = (0..n)
-        .map(|i| index.offset_at(i))
+        .map(|i| index.offset_at(i).map_err(Error::from))
         .collect::<Result<Vec<_>>>()
         .map_err(|e| format!("corrupt pack index: {e}"))?;
     let mut order: Vec<u32> = (0..n as u32).collect();

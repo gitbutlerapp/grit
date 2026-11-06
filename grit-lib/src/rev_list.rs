@@ -1005,9 +1005,9 @@ fn retain_maximal_commits(
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] / [`Error::InvalidRef`] for bad revision
+/// Returns [`ObjectError::ObjectNotFound`] / [`Error::InvalidRef`] for bad revision
 /// specs, [`RevListError::UnexpandedSymmetricRange`] for a raw `A...B` spec, and
-/// [`Error::CorruptObject`] for non-commit or malformed commit data.
+/// [`ObjectError::CorruptObject`] for non-commit or malformed commit data.
 pub fn rev_list(
     repo: &Repository,
     positive_specs: &[String],
@@ -2372,7 +2372,7 @@ fn resolve_specs_with_options(
     for spec in specs {
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) | Error::InvalidRef(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }) | Error::InvalidRef(_))
                 if ignore_missing =>
             {
                 continue
@@ -2388,7 +2388,7 @@ fn resolve_specs_with_options(
             // (e.g. submodule-change detection over a remote carrying a tag-of-blob, t5516
             // "refuse fetch to current branch of worktree") do not abort.
             Ok(None) => {}
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) | Error::InvalidRef(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }) | Error::InvalidRef(_))
                 if ignore_missing => {}
             Err(err) => return Err(err),
         }
@@ -2440,9 +2440,7 @@ fn resolve_specs_for_objects_with_options(
         if let Ok(raw_oid) = spec.parse::<ObjectId>() {
             let raw_object = match repo.odb().read(&raw_oid) {
                 Ok(obj) => obj,
-                Err(ObjectError::ObjectNotFound { .. }) if ignore_missing => {
-                    continue
-                }
+                Err(ObjectError::ObjectNotFound { .. }) if ignore_missing => continue,
                 Err(ObjectError::ObjectNotFound { .. } | ObjectError::PromisedObjectMissing(_))
                     if missing_action != MissingAction::Error =>
                 {
@@ -2507,10 +2505,8 @@ fn resolve_specs_for_objects_with_options(
                 let treeish_oid = match resolve_revision_for_range_end(repo, treeish) {
                     Ok(oid) => oid,
                     Err(
-                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
-                            | Error::InvalidRef(_),
-                    ) if ignore_missing =>
-                    {
+                        Error::Object(ObjectError::ObjectNotFound { .. }) | Error::InvalidRef(_),
+                    ) if ignore_missing => {
                         continue;
                     }
                     Err(err) => return Err(err),
@@ -2518,10 +2514,8 @@ fn resolve_specs_for_objects_with_options(
                 let object_oid = match resolve_treeish_path(repo, treeish_oid, path) {
                     Ok(oid) => oid,
                     Err(
-                        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
-                            | Error::InvalidRef(_),
-                    ) if ignore_missing =>
-                    {
+                        Error::Object(ObjectError::ObjectNotFound { .. }) | Error::InvalidRef(_),
+                    ) if ignore_missing => {
                         continue;
                     }
                     Err(err) => return Err(err),
@@ -2547,7 +2541,7 @@ fn resolve_specs_for_objects_with_options(
 
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) | Error::InvalidRef(_))
+            Err(Error::Object(ObjectError::ObjectNotFound { .. }) | Error::InvalidRef(_))
                 if ignore_missing =>
             {
                 continue
@@ -2572,7 +2566,7 @@ fn resolve_specs_for_objects_with_options(
                 });
             }
             Err(Error::Object(ObjectError::CorruptObject { .. }))
-            | Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))
+            | Err(Error::Object(ObjectError::ObjectNotFound { .. }))
                 if ignore_missing => {}
             Err(err) => return Err(err),
         }
@@ -5815,7 +5809,10 @@ fn whole_commit_parents(
     crate::objects::parse_commit_tree_and_parents_lenient(buf, hex_len)
         .map(|(_, parents)| parents)
         .ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, format!("commit {oid} has no valid tree header")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("commit {oid} has no valid tree header"),
+            ))
         })
 }
 

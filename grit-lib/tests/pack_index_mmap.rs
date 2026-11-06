@@ -1,8 +1,6 @@
 //! Memory-mapped pack index open path and lazy validation behavior.
 
-use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::maintenance::{repack_all, RepackOptions};
@@ -12,6 +10,7 @@ use grit_lib::objects::pack::{
     read_pack_index_cached, read_pack_index_no_verify, verify_pack_and_collect,
     write_v2_pack_index_with_trailer,
 };
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::test_support::pack::pack_cache_guard;
@@ -137,7 +136,10 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_not_panic() {
     body.extend_from_slice(&[0u8; 20]);
     let idx = parse_pack_index_bytes(Path::new("bad-large-slot.idx"), body, false).expect("lazy");
     let err = idx.find_offset(&oid).expect_err("corrupt slot");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }
 
 #[test]
@@ -160,7 +162,10 @@ fn lazy_v2_out_of_range_large_offset_slot_returns_corruption_on_lookup() {
     let err = idx
         .find_offset(&oid)
         .expect_err("slot 1 with one large entry");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }
 
 #[test]
@@ -181,7 +186,10 @@ fn corrupt_large_offset_read_object_from_pack_propagates_error() {
     let mut idx = idx;
     idx.pack_path = pack_path;
     let err = read_object_from_pack(&idx, &oid).expect_err("typed corruption");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }
 
 #[test]

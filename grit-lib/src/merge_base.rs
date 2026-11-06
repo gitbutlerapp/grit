@@ -35,8 +35,8 @@ use crate::shallow::load_shallow_boundaries;
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when a revision does not resolve and
-/// [`Error::CorruptObject`] when the resolved object is not a commit.
+/// Returns [`ObjectError::ObjectNotFound`] when a revision does not resolve and
+/// [`ObjectError::CorruptObject`] when the resolved object is not a commit.
 pub fn resolve_commit_specs(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     let mut out = Vec::with_capacity(specs.len());
     for spec in specs {
@@ -798,7 +798,7 @@ pub fn fork_point(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] if an encountered object is not a commit.
+/// Returns [`ObjectError::CorruptObject`] if an encountered object is not a commit.
 pub fn ancestor_closure(repo: &Repository, tip: ObjectId) -> Result<HashSet<ObjectId>> {
     let mut cache = CommitGraphCache::new(repo);
     Ok(cache.ancestor_closure(tip)?.into_iter().collect())
@@ -881,7 +881,7 @@ pub fn ahead_behind_of_target_commits(
 /// applying the hide filter). Use this for bounded ahead-of-target lists and status shortlogs.
 ///
 /// Shallow boundaries (`.git/shallow`) stop parent traversal without following
-/// absent parent objects. Other missing commits propagate [`Error::ObjectNotFound`].
+/// absent parent objects. Other missing commits propagate [`ObjectError::ObjectNotFound`].
 ///
 /// # Errors
 ///
@@ -1541,7 +1541,12 @@ fn try_count_diff_via_stored_commit_bitmaps(
     let Some(index) = repo
         .odb()
         .with_pack_read_context(|| BitmapIndex::open(repo))
-        .map_err(|e| Error::Object(ObjectError::corrupt_object(None, format!("pack bitmap: {e}"))))?
+        .map_err(|e| {
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack bitmap: {e}"),
+            ))
+        })?
     else {
         return Ok(None);
     };
@@ -2360,10 +2365,11 @@ impl OpenQueueTally {
 
 fn first_parent_oid(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<ObjectId> {
     let parents = cache.parents_of(oid)?;
-    parents
-        .first()
-        .copied()
-        .ok_or_else(|| Error::Object(ObjectError::object_not_found(format!("{oid} has no parent"))))
+    parents.first().copied().ok_or_else(|| {
+        Error::Object(ObjectError::object_not_found(format!(
+            "{oid} has no parent"
+        )))
+    })
 }
 
 /// Classify `first` and `second` along first-parent chains, using commit-graph generations
@@ -3409,7 +3415,7 @@ impl<'r> CommitGraphCache<'r> {
         self.ensure_single_pack_reader();
         if let Some(reader) = self.single_pack.as_mut() {
             match reader.read_object_into_with_delta_policy(oid, true, buf) {
-                Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {}
+                Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {}
                 read => return read,
             }
         }
@@ -3509,9 +3515,7 @@ impl<'r> CommitGraphCache<'r> {
         if self.shallow_boundaries.contains(&oid) {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::InvalidRef(msg) => {
-                        Error::Object(ObjectError::corrupt_object(None, msg))
-                    }
+                    Error::InvalidRef(msg) => Error::Object(ObjectError::corrupt_object(None, msg)),
                     other => other,
                 })?;
             let object = self.repo.odb().read(&commit_oid)?;
@@ -3571,9 +3575,7 @@ impl<'r> CommitGraphCache<'r> {
         } else {
             let commit_oid =
                 peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-                    Error::InvalidRef(msg) => {
-                        Error::Object(ObjectError::corrupt_object(None, msg))
-                    }
+                    Error::InvalidRef(msg) => Error::Object(ObjectError::corrupt_object(None, msg)),
                     other => other,
                 })?;
             let kind =
@@ -5393,7 +5395,6 @@ mod tests {
         assert!(matches!(
             err,
             Error::Object(ObjectError::ObjectNotFound { .. })
-                | Error::Object(ObjectError::ObjectNotFound { .. })
         ));
 
         Ok(())

@@ -9999,7 +9999,7 @@ pub fn detect_renames_with_policy(
 /// used when `find_copies_harder` is true to consider unmodified files as copy sources.
 /// # Errors
 ///
-/// Returns [`Error::HashCollision`] when hashing worktree blob content for copy detection
+/// Returns [`crate::objects::ObjectError::HashCollision`] when hashing worktree blob content for copy detection
 /// would produce a known-bad SHA-1 object id.
 #[allow(dead_code)]
 fn detect_copies(

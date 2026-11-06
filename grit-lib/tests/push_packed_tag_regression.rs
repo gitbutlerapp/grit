@@ -1,7 +1,6 @@
 //! Regression for issue #2366: `push --tags` must not replace annotated tag objects with commits.
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;

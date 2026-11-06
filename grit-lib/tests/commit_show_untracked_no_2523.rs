@@ -1,7 +1,6 @@
 //! Auto-staging must not commit untracked paths hidden by `status.showUntrackedFiles=no` (issue #2523).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;

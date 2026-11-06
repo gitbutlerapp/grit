@@ -1,7 +1,6 @@
 //! `compare_refname_versions` must match `git for-each-ref --sort=version:refname`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::process::Command;
 
 use grit_lib::refs::version_sort::compare_refname_versions;

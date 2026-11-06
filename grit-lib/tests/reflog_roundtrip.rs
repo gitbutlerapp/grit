@@ -1,7 +1,6 @@
 //! Reflog read/write/expire round-trips vs system `git` (t0600/t1410/t1421 subset).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::collections::{BTreeSet, HashSet};

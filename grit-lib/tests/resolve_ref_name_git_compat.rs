@@ -1,7 +1,6 @@
 //! `Repository::resolve_ref_name` matches `git rev-parse --abbrev-ref` / `--symbolic-full-name`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::refs::ref_storage::RefStorageFormat;

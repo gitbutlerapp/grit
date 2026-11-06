@@ -1,6 +1,5 @@
 //! `RepositoryRemotes::remove` matches `git remote remove` on twin repositories.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use crate::support;
 
 use std::path::{Path, PathBuf};

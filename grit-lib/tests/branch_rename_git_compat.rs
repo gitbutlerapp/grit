@@ -1,7 +1,6 @@
 //! Branch rename through [`grit_lib::porcelain::branch::rename_branch`], checked against
 //! the system `git` on files (packed), reftable, and injected memory ref stores.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

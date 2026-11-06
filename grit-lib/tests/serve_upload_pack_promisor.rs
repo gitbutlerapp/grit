@@ -4,7 +4,6 @@
 //! with a clear error before any pack data is sent.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::collections::HashSet;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};

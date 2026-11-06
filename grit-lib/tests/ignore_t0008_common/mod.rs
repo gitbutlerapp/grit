@@ -3,7 +3,6 @@
 //! Several test binaries include this module and each uses only part of it.
 
 #[allow(dead_code)]
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

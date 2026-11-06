@@ -3,7 +3,6 @@
 //! normal-mode untracked cache on the index.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;

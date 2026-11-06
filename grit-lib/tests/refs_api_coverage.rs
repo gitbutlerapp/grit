@@ -1,7 +1,6 @@
 //! Additional refs API paths: DWIM, packed-refs, reflog policy, and CAS errors.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

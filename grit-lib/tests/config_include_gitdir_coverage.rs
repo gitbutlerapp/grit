@@ -1,7 +1,6 @@
 //! `includeIf gitdir:` relative patterns and strict `GIT_CONFIG_PARAMETERS` parsing.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 

@@ -478,7 +478,9 @@ fn partial_fetch_custom_primary_is_refused() {
     assert!(
         matches!(
             err,
-            RemoteError::Library(Error::Object(ObjectError::UnsupportedObjectStore { operation }) if operation == "partial fetch"
+            RemoteError::Library(Error::Object(ObjectError::UnsupportedObjectStore {
+                operation
+            })) if operation == "partial fetch"
         ),
         "{err:?}"
     );

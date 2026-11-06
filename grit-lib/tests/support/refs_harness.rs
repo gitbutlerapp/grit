@@ -1,7 +1,6 @@
 //! Backend-parameterized refs tests with grit ↔ git round-trip helpers.
 
 #[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;

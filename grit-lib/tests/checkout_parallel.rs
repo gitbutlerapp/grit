@@ -1,6 +1,5 @@
 //! Serial vs parallel checkout must produce identical worktrees and index files.
 
-use grit_lib::objects::ObjectError;
 use filetime::FileTime;
 use grit_lib::command_runner::{CommandStdin, RecordedResponse, RecordingRunner};
 use grit_lib::config::environment::RepositoryOptions;
@@ -10,6 +9,7 @@ use grit_lib::index::{
     entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR,
 };
 use grit_lib::objects::FileMode;
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::porcelain::checkout::checkout_between_trees;

@@ -4,7 +4,6 @@
 //! instead of reading and parsing each tree on the way by hand.
 
 use crate::error::Result;
-use crate::objects::ObjectError;
 use crate::objects::{ObjectId, TreeEntry, TreeRefIter};
 
 use super::{Odb, SessionTree};
@@ -34,8 +33,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`crate::error::Error::ObjectNotFound`] when a tree on the way is missing.
-    /// - [`crate::error::Error::CorruptObject`] when a tree on the way is not a tree object or
+    /// - [`crate::objects::ObjectError::ObjectNotFound`] when a tree on the way is missing.
+    /// - [`crate::objects::ObjectError::CorruptObject`] when a tree on the way is not a tree object or
     ///   does not parse.
     /// - Any other error [`Self::read`] reports.
     pub fn tree_entry_at_path(&self, tree: &ObjectId, path: &[u8]) -> Result<Option<TreeEntry>> {

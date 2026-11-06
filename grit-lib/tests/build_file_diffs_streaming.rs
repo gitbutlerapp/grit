@@ -1,7 +1,6 @@
 //! [`build_file_diffs_streaming`] matches [`build_file_diffs`] and propagates callback errors.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::diff::{
     build_file_diffs, build_file_diffs_streaming, diff_trees, DiffDetail, DiffOptions,
 };

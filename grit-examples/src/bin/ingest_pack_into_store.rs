@@ -5,7 +5,6 @@
 //! through the [`WritableObjectStore`](grit_lib::objects::odb::store::WritableObjectStore)
 //! trait, and through a repository whose primary is that store.
 
-use grit_lib::objects::ObjectError;
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -41,7 +40,11 @@ fn main() -> grit_lib::error::Result<()> {
         );
         parent = Some(source.odb().write(ObjectKind::Commit, body.as_bytes())?);
     }
-    let tip = parent.ok_or(grit_lib::error::ObjectError::object_not_found("tip".into()).into())?;
+    let tip = parent.ok_or_else(|| {
+        grit_lib::error::Error::Object(grit_lib::objects::ObjectError::object_not_found(
+            "tip".to_owned(),
+        ))
+    })?;
     let pack = build_pack(source.odb(), &[tip], &[], &PackBuildOptions::default())?;
     println!("pack_bytes={}", pack.len());
 

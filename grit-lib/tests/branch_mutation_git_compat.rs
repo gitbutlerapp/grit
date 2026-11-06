@@ -1,7 +1,6 @@
 //! Branch create, delete, upstream, and dry-run through `grit_lib::porcelain::branch`,
 //! checked against the system `git` binary.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;

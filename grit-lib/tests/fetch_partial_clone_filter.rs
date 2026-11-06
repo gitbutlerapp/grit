@@ -1,7 +1,6 @@
 //! Filtered fetch with promisor packs (partial clone) over upload-pack.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

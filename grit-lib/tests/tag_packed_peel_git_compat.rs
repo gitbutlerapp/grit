@@ -1,7 +1,6 @@
 //! `list_tags` classification from `packed-refs` peel lines and `create_tag` against packed
 //! refs, checked against the system `git` on repositories it wrote.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::RepositoryOptions;

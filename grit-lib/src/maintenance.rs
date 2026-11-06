@@ -577,7 +577,7 @@ impl BuiltCommitGraph {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] if the bytes fail verification (see
+    /// Returns [`ObjectError::CorruptObject`] if the bytes fail verification (see
     /// [`CommitGraphChain::from_bytes`]).
     pub fn to_chain(&self) -> Result<CommitGraphChain> {
         CommitGraphChain::from_bytes(self.bytes.clone())
@@ -703,7 +703,7 @@ pub(crate) fn build_commit_graph_for_commits(
 ///
 /// # Errors
 ///
-/// Returns [`Error::UnsupportedObjectStore`] for non-files ODB backends, or errors from graph
+/// Returns [`ObjectError::UnsupportedObjectStore`] for non-files ODB backends, or errors from graph
 /// generation and atomic I/O.
 pub fn write_commit_graph(
     repo: &Repository,
@@ -783,9 +783,9 @@ pub fn write_commit_graph(
 ///
 /// # Errors
 ///
-/// Returns [`Error::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
+/// Returns [`ObjectError::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
 /// `midx.version` is not an integer, [`crate::error::MidxError::UnknownWriteVersion`] (as
-/// [`Error::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
+/// [`ObjectError::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
 pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
     let odb = repo.odb();
     odb.require_files_primary("midx write")?;
@@ -1643,7 +1643,7 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 ///
 /// # Errors
 ///
-/// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock, plus failures
+/// [`ObjectError::MaintenanceRunning`] when another process holds the `gc.pid` lock, plus failures
 /// from each maintenance step.
 pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
     gc_with_cancel(repo, opts, &NeverCancel)
@@ -2519,7 +2519,7 @@ pub(crate) enum PromisorRewriteWhen {
 ///
 /// # Errors
 ///
-/// [`Error::UnsupportedObjectStore`] without a files-backed object store, and pack
+/// [`ObjectError::UnsupportedObjectStore`] without a files-backed object store, and pack
 /// read, write and file removal failures.
 pub(crate) fn rewrite_local_objects_without(
     repo: &Repository,

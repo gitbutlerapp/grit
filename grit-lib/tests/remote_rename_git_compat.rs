@@ -1,6 +1,5 @@
 //! `RepositoryRemotes::rename` vs the system `git remote rename`.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::RemoteError;

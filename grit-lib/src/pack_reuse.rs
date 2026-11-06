@@ -112,7 +112,10 @@ impl StreamingReuse {
             .parent()
             .and_then(|p| p.parent())
             .ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "pack path layout".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "pack path layout".to_owned(),
+                ))
             })?;
         let Some((bytes, start, end)) = crate::pack::packed_full_object_range(objects_dir, oid)?
         else {

@@ -5407,7 +5407,7 @@ pub(crate) fn read_blob_unless_streamed(
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] when the object is missing, [`Error::Io`] when its stream is
+/// [`ObjectError::ObjectNotFound`] when the object is missing, [`Error::Io`] when its stream is
 /// corrupt, and the usual work-tree write errors.
 pub(crate) fn stream_checkout_entry(
     repo: &Repository,

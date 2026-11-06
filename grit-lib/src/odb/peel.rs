@@ -29,8 +29,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] when `oid` or any object the chain names is missing.
-    /// - [`Error::CorruptObject`] when a tag has no valid `object` header, or the chain names
+    /// - [`ObjectError::ObjectNotFound`] when `oid` or any object the chain names is missing.
+    /// - [`ObjectError::CorruptObject`] when a tag has no valid `object` header, or the chain names
     ///   a tag it already passed through. Chains of any length are followed; content-addressed
     ///   ids make a cycle impossible in a real repository, but a pluggable store can serve one.
     /// - Any other error [`Self::read`] / [`Self::read_info`] reports for the objects read.
@@ -87,8 +87,8 @@ impl Odb {
     ///
     /// # Errors
     ///
-    /// - [`Error::ObjectNotFound`] when `oid` or an intermediate tag is missing.
-    /// - [`Error::CorruptObject`] when a tag has no valid `object` header, a `type tag` header
+    /// - [`ObjectError::ObjectNotFound`] when `oid` or an intermediate tag is missing.
+    /// - [`ObjectError::CorruptObject`] when a tag has no valid `object` header, a `type tag` header
     ///   names an object that is not a tag, or the chain loops.
     pub(crate) fn peel_tag_target(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
         self.peel_tag_target_from(oid, false)
@@ -152,7 +152,7 @@ impl Odb {
     /// Peel `oid` through annotated tags and a commit to a tree.
     ///
     /// Returns `None` when the chain ends at a blob. Errors are those of [`Self::peel_tags`],
-    /// plus [`Error::CorruptObject`] for a commit without a valid `tree` header.
+    /// plus [`ObjectError::CorruptObject`] for a commit without a valid `tree` header.
     pub(crate) fn peel_to_tree(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
         match self.peel_tags(oid)? {
             (tree, ObjectKind::Tree) => Ok(Some(tree)),

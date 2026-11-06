@@ -118,9 +118,9 @@ impl ReceivePackIngest {
                         continue;
                     }
                     let Some(obj) = overlay.read(oid)? else {
-                        return Err(
-                            crate::error::Error::Object(ObjectError::object_not_found(oid.to_hex()))
-                        );
+                        return Err(crate::error::Error::Object(ObjectError::object_not_found(
+                            oid.to_hex(),
+                        )));
                     };
                     primary.write(obj.kind, &obj.data, WriteOptions::default())?;
                 }

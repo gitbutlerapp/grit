@@ -1,7 +1,7 @@
 //! Regression tests for bounded `rev-list` / `grit log` fast paths.
 
-use grit_lib::objects::ObjectError;
 use crate::support;
+use grit_lib::objects::ObjectError;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
@@ -203,7 +203,10 @@ fn rev_list_errors_on_missing_parent_without_shallow() {
         ..Default::default()
     };
     let err = rev_list(&repo, &[tip.to_hex()], &[], &opts).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+    ));
 }
 
 #[test]

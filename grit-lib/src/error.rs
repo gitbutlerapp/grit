@@ -13,7 +13,6 @@
 //! # }
 //! ```
 
-use crate::objects::ObjectError;
 use std::path::PathBuf;
 
 use thiserror::Error;
@@ -2120,7 +2119,7 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether this is a missing-object failure from object lookup (legacy or [`ObjectError`]).
+    /// Whether this is a missing-object failure from object lookup (legacy or [`crate::objects::ObjectError`]).
     #[must_use]
     pub fn is_object_not_found(&self) -> bool {
         matches!(

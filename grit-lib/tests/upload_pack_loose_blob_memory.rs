@@ -2,7 +2,6 @@
 
 #![cfg(all(target_os = "linux", feature = "full-tests"))]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 mod upload_pack_blob_memory_support;
 
 use upload_pack_blob_memory_support::{

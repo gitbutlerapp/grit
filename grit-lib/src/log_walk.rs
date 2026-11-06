@@ -196,7 +196,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] for an invalid cursor, when the query changed since
+    /// Returns [`ObjectError::CorruptObject`] for an invalid cursor, when the query changed since
     /// the cursor was issued, or when commit objects cannot be read.
     pub fn step(
         repo: &Repository,
@@ -250,7 +250,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] if internal serialization fails.
+    /// Returns [`ObjectError::CorruptObject`] if internal serialization fails.
     pub fn encode(&self) -> Result<String> {
         let mut buf = Vec::new();
         write_snapshot_v3(&mut buf, &self.query, &self.walk)?;
@@ -261,7 +261,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] if internal serialization fails, or [`Error::Io`] when
+    /// Returns [`ObjectError::CorruptObject`] if internal serialization fails, or [`Error::Io`] when
     /// the snapshot cannot be written.
     pub fn encode_short(&self, repo: &Repository) -> Result<String> {
         let mut buf = Vec::new();
@@ -277,7 +277,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the token is malformed.
+    /// Returns [`ObjectError::CorruptObject`] when the token is malformed.
     pub fn decode(token: &str) -> Result<Self> {
         Self::decode_with_git_dir(token, None)
     }
@@ -286,7 +286,7 @@ impl LogWalkCursor {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the token is malformed.
+    /// Returns [`ObjectError::CorruptObject`] when the token is malformed.
     pub fn decode_with_git_dir(token: &str, git_dir: Option<&Path>) -> Result<Self> {
         if let Some(id) = token.strip_prefix(SHORT_CURSOR_PREFIX) {
             if id.len() != SHORT_CURSOR_ID_LEN || !id.bytes().all(is_short_cursor_id_byte) {
@@ -303,12 +303,18 @@ impl LogWalkCursor {
             })?;
             let path = log_walk_store_dir(git_dir).join(id);
             let bytes = std::fs::read(&path).map_err(|e| {
-                Error::Object(ObjectError::corrupt_object(None, format!("short log walk cursor not found: {e}")))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    format!("short log walk cursor not found: {e}"),
+                ))
             })?;
             return read_snapshot(&bytes);
         }
         let payload = token.strip_prefix(CURSOR_PREFIX).ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "unrecognized log walk cursor".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "unrecognized log walk cursor".to_owned(),
+            ))
         })?;
         let bytes = base64_decode(payload.as_bytes()).map_err(|_| {
             Error::Object(ObjectError::corrupt_object(

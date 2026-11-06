@@ -321,7 +321,8 @@ fn odb_builder_must_name_env_object_directory() {
     assert!(
         matches!(
             mismatch,
-            Err(Error::Object(ObjectError::OdbObjectsDirMismatch { ref repository, .. }) if repository == &objq
+            Err(Error::Object(ObjectError::OdbObjectsDirMismatch { ref repository, .. }))
+                if repository == &objq
         ),
         "{mismatch:?}"
     );

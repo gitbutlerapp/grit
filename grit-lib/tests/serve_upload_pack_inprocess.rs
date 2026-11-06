@@ -1,7 +1,6 @@
 //! In-process `upload_pack` coverage (HTTP compat tests spawn a separate binary).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::FlagCancel;

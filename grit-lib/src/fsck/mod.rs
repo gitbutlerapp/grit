@@ -1027,7 +1027,7 @@ fn verify_custom_primary_objects(
                 continue;
             }
             Err(err) => {
-                push_corrupt_parse(issues, config, strict, oid, Error::from(err));
+                push_corrupt_parse(issues, config, strict, oid, err);
                 continue;
             }
         }
@@ -1555,7 +1555,7 @@ fn walk_connectivity(
             } else {
                 match odb.read_into_caching_delta_bases(&oid, &mut read_buf) {
                     Ok(kind) => kind,
-                    Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+                    Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                         if root_kind == WalkRootKind::IndexOnly && parent.is_zero() {
                             // Report once from [`fsck_index_missing_blobs`].
                         } else if should_emit(config, strict, "missingObject") {

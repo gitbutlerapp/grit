@@ -53,9 +53,7 @@ fn format_object_info_line(
     let hex = oid.to_hex();
     let info = match repo.odb().read_info_without_fetch(oid) {
         Ok(info) => info,
-        Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
-            return Ok(format!("{hex} "))
-        }
+        Err(Error::Object(ObjectError::ObjectNotFound { .. })) => return Ok(format!("{hex} ")),
         Err(err) => return Err(ServeError::Repository(err)),
     };
     let mut line = hex;

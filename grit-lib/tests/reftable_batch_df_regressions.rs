@@ -1,7 +1,6 @@
 //! Reftable batch verify, CAS, and D/F regressions for stacked-table reads.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::error::Result;

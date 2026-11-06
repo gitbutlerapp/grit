@@ -245,11 +245,14 @@ fn assert_corrupt_loose(err: Error, oid: &ObjectId, path: &std::path::Path) {
             path: got_path,
             source,
             ..
-        } => {
+        }) => {
             assert_eq!(got_oid, *oid);
             assert_eq!(got_path, path);
             assert!(
-                matches!(source.as_ref(), Error::Object(ObjectError::Zlib { .. })) | Error::Object(ObjectError::CorruptObject { .. })),
+                matches!(
+                    source.as_ref(),
+                    ObjectError::Zlib { .. } | ObjectError::CorruptObject { .. }
+                ),
                 "source: {source:?}"
             );
         }
@@ -305,9 +308,12 @@ fn t1060_loose_empty_file_returns_corrupt_loose_with_io_source() {
     std::fs::write(&path, []).expect("empty loose");
     let err = odb.read(&oid).unwrap_err();
     match err {
-        Error::Object(ObjectError::CorruptLooseObject { source, .. } => {
+        Error::Object(ObjectError::CorruptLooseObject { source, .. }) => {
             assert!(
-                matches!(*source, Error::Io(_) | Error::Object(ObjectError::Zlib { .. })),
+                matches!(
+                    source.as_ref(),
+                    ObjectError::PathIo { .. } | ObjectError::Zlib { .. }
+                ),
                 "{source:?}"
             );
         }
@@ -366,15 +372,14 @@ fn t1060_packed_zlib_bit_flip_names_pack_and_offset() {
             offset,
             source,
             ..
-        } => {
+        }) => {
             assert_eq!(got_oid, oid);
             assert_eq!(pack, pack_path);
             assert!(offset > 0);
             assert!(
                 matches!(
-                    *source,
-                    Error::Object(ObjectError::Zlib { .. })
-                        | Error::Object(ObjectError::CorruptObject { .. })
+                    source.as_ref(),
+                    ObjectError::Zlib { .. } | ObjectError::CorruptObject { .. }
                 ),
                 "{source:?}"
             );
@@ -433,7 +438,7 @@ fn t1060_loose_header_type_mismatch_returns_loose_hash_mismatch() {
     std::fs::write(&path, zlib).unwrap();
     let err = Odb::read_loose_verify_oid(&path, &oid).unwrap_err();
     assert!(
-        matches!(err, Error::Object(ObjectError::LooseHashMismatch { .. }),
+        matches!(err, Error::Object(ObjectError::LooseHashMismatch { .. })),
         "expected LooseHashMismatch, got {err:?}"
     );
 }
@@ -452,7 +457,10 @@ fn t1060_read_loose_verify_oid_wrong_path_returns_loose_hash_mismatch() {
     std::fs::copy(&real_path, &decoy_path).expect("copy to wrong name");
     let _ = std::fs::remove_file(&real_path);
     let err = Odb::read_loose_verify_oid(&decoy_path, &decoy_oid).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::LooseHashMismatch { .. }), "{err:?}");
+    assert!(
+        matches!(err, Error::Object(ObjectError::LooseHashMismatch { .. })),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -461,7 +469,13 @@ fn t1060_missing_loose_object_returns_object_not_found() {
     let odb = Odb::new(&repo.objects_dir());
     let missing = odb.hash(ObjectKind::Blob, b"never-written").expect("hash");
     let err = odb.read(&missing).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]
@@ -595,7 +609,10 @@ fn t1060_object_header_too_long_returns_typed_error() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, zlib).unwrap();
     let err = odb.read(&oid).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::ObjectHeaderTooLong { .. }), "{err:?}");
+    assert!(
+        matches!(err, Error::Object(ObjectError::ObjectHeaderTooLong { .. })),
+        "{err:?}"
+    );
 }
 
 #[test]

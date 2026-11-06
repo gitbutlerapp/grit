@@ -14,6 +14,7 @@ autobenches = false
 # `lints.workspace = true` is incompatible with relaxing `unsafe_code` on this crate alone.
 [lints.rust]
 unsafe_code = "allow"
+dead_code = "allow"
 
 [lints.clippy]
 unwrap_used = "deny"

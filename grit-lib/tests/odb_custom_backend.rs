@@ -220,7 +220,7 @@ fn custom_primary_rejects_a_different_objects_dir() {
         Error::Object(ObjectError::OdbObjectsDirMismatch {
             builder,
             repository,
-        } => {
+        }) => {
             assert_eq!(
                 builder,
                 other.join("objects").canonicalize().expect("canon")
@@ -508,12 +508,14 @@ fn memory_primary_rejects_filesystem_gc_and_commit_graph() {
     let (_dir, repo, _store) = memory_repo();
     assert!(matches!(
         repo.odb().gc(),
-        Err(Error::Object(ObjectError::UnsupportedObjectStore { operation: "gc" })
+        Err(Error::Object(ObjectError::UnsupportedObjectStore {
+            operation: "gc"
+        }))
     ));
     assert!(matches!(
         repo.odb().write_commit_graph(),
         Err(Error::Object(ObjectError::UnsupportedObjectStore {
             operation: "commit-graph write"
-        })
+        }))
     ));
 }

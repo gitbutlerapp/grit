@@ -1,7 +1,6 @@
 //! Sweep low-coverage non-history modules that still count toward `[total]`.
 
 #[allow(clippy::unwrap_used)]
-
 use grit_lib::commit::signing::{verify_commit, GpgConfig};
 use grit_lib::config::git_path::{
     cleanup_path, git_path_relative_component, is_common_git_path, normalize_path_copy,

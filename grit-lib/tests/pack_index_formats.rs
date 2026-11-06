@@ -1,8 +1,6 @@
 //! Pack index v1/v2 layouts, fanout edge cases, and bounds checks (t5302/t5313/t5308).
 
-use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use grit_lib::error::Error;
@@ -15,7 +13,7 @@ use grit_lib::objects::pack::{
     reprepare_pack_directory_on_miss, revalidate_stale_pack_bytes, skip_one_pack_object,
     verify_pack_and_collect, write_v2_pack_index, PackIndex, PackIndexEntry,
 };
-use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
+use grit_lib::objects::{HashAlgo, ObjectError, ObjectId, ObjectKind, ObjectResult};
 use grit_lib::test_support::pack::pack_cache_guard;
 use grit_test_support::objects::{
     git_cat_file_batch_check, git_supports_sha256, write_pack_and_index, HashAlgo as FixtureAlgo,
@@ -470,19 +468,24 @@ fn empty_pack_index_from_git() {
     });
 }
 
-fn assert_corrupt(result: Result<(), Error>) {
+fn assert_corrupt(result: ObjectResult<()>) {
     match result {
-        Err(Error::Object(ObjectError::CorruptObject { .. })) => {}
+        Err(ObjectError::CorruptObject { .. }) => {}
         other => panic!("expected CorruptObject, got {other:?}"),
     }
 }
 
 fn assert_corrupt_contains(result: Result<(), Error>, needle: &str) {
     match result {
-        Err(Error::Object(ObjectError::CorruptObject { .. })) => {
+        Err(Error::Object(ObjectError::CorruptObject { reason, .. })) => {
+            let message = match reason {
+                grit_lib::objects::CorruptObjectReason::Detail { message } => message,
+                #[allow(unreachable_patterns)]
+                _ => panic!("unexpected corrupt reason: {reason:?}"),
+            };
             assert!(
-                msg.contains(needle),
-                "expected CorruptObject containing {needle:?}, got {msg:?}"
+                message.contains(needle),
+                "expected CorruptObject containing {needle:?}, got {message:?}"
             );
         }
         other => panic!("expected CorruptObject, got {other:?}"),
@@ -568,7 +571,7 @@ fn truncated_idx_bad_magic_version_and_trailer() {
     trailer_bytes[last] ^= 0xff;
     std::fs::write(&bad_trailer, &trailer_bytes).expect("write bad trailer idx");
     match read_pack_index(&bad_trailer) {
-        Err(Error::Object(ObjectError::PackIndexChecksumMismatch { path, .. })) => assert_eq!(path, bad_trailer),
+        Err(ObjectError::PackIndexChecksumMismatch { path, .. }) => assert_eq!(path, bad_trailer),
         other => panic!(
             "expected PackIndexChecksumMismatch, got {:?}",
             other.map(|_| ())
@@ -743,12 +746,18 @@ fn bogus_offsets_and_ofs_delta_rejected_without_panic() {
     bad32_idx.pack_path = bad32_pack.clone();
     let bad32_read = read_object_from_pack(&bad32_idx, &oid1);
     assert!(
-        matches!(bad32_read, Err(Error::Object(ObjectError::CorruptObject { .. })),
+        matches!(
+            bad32_read,
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
+        ),
         "bogus 32-bit offset read: {bad32_read:?}"
     );
     let bad32_verify = verify_pack_and_collect(&bad32_path);
     assert!(
-        matches!(bad32_verify, Err(Error::Object(ObjectError::CorruptObject { .. })),
+        matches!(
+            bad32_verify,
+            Err(Error::Object(ObjectError::CorruptObject { .. }))
+        ),
         "bogus 32-bit offset verify: {bad32_verify:?}"
     );
 

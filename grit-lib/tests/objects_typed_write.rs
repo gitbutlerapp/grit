@@ -1,10 +1,10 @@
 //! Typed tree/commit creation through [`grit_lib::objects::Objects`], cross-checked with
 //! system `git fsck --strict` and `git cat-file` (issue #1746).
 
-use grit_lib::objects::ObjectError;
 use grit_lib::change_id::{change_id, ChangeId};
 use grit_lib::error::Error;
 use grit_lib::ident::{parse_signature, Signature, SignatureError, SignatureField};
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::{
     serialize_commit, serialize_tree, CommitData, HashAlgo, NewCommit, ObjectId, ObjectKind,
     TreeEntry, TreeEntryError,
@@ -239,7 +239,10 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         oid: missing,
     }]);
     assert!(
-        matches!(missing_file, Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))),
+        matches!(
+            missing_file,
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))
+        ),
         "{missing_file:?}"
     );
 
@@ -573,7 +576,13 @@ fn write_commit_checks_tree_and_parent_kinds() {
         .objects()
         .write_commit(&NewCommit::new(missing, ada(1), ada(1), "missing tree"))
         .expect_err("tree must exist");
-    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]

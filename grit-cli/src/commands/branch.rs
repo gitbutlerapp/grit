@@ -1,8 +1,8 @@
 //! `grit branch` — list branches, or create / delete / rename / configure one.
 
-use grit_lib::objects::ObjectError;
 use anyhow::{bail, Context, Error as AnyhowError, Result};
 use grit_lib::error::Error;
+use grit_lib::objects::ObjectError;
 use grit_lib::porcelain::branch::{
     create_branch, delete_branch, preview_unset_upstream, rename_branch, set_upstream,
     unset_upstream, validate_set_upstream, CreateBranchOptions, DeleteMode, RenameBranchOptions,
@@ -713,7 +713,7 @@ fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
         Error::RevParse(
             RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
         )
-        | Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) => {
+        | Error::Object(ObjectError::ObjectNotFound { .. }) => {
             map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
                 label: rev.to_owned(),
                 reason: "revision not found".into(),

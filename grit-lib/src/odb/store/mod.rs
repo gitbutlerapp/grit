@@ -2,7 +2,7 @@
 //!
 //! Backends implement read, metadata, streaming, iteration, and (optionally) write
 //! operations without allocating error strings on cache misses: a missing object
-//! is `Ok(None)`, not [`Error::ObjectNotFound`].
+//! is `Ok(None)`, not [`ObjectError::ObjectNotFound`].
 //!
 //! Thread safety: [`ObjectStore`] requires `Send + Sync` so repositories can share
 //! a store across threads; individual methods may take internal locks.
@@ -96,7 +96,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     ///
     /// # Errors
     ///
-    /// Returns I/O or corruption errors from the backend; never [`Error::ObjectNotFound`].
+    /// Returns I/O or corruption errors from the backend; never [`ObjectError::ObjectNotFound`].
     fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>>;
 
     /// Load object payload into `buf`, reusing its capacity when possible.
@@ -197,7 +197,7 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex or is longer
+    /// Returns [`ObjectError::InvalidObjectId`] when `prefix` is not valid hex or is longer
     /// than a full object id for this store's hash algorithm.
     fn lookup_prefix(
         &self,

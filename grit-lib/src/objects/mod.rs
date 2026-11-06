@@ -53,12 +53,13 @@ pub mod odb {
 pub mod pack {
     //! Pack files, indexes, and packfile I/O.
     pub use crate::pack::{
-        clear_pack_cache, hash_object_bytes, oid_bytes_to_hex, read_alternates_recursive,
-        read_idx_object_ids, read_local_pack_indexes, read_object_from_pack_at_offset,
-        read_object_from_packs, read_pack_index, read_pack_index_cached,
-        read_packed_delta_dependency, skip_one_pack_object, write_v2_pack_index,
-        write_v2_pack_index_with_trailer, PackIndex, PackIndexEntryRef, SingleLocalPackReader,
-        DEFAULT_PACK_DEPTH,
+        clear_pack_cache, hash_object_bytes, max_verify_pack_delta_depth, oid_bytes_to_hex,
+        read_alternates_recursive, read_idx_object_ids, read_local_pack_indexes,
+        read_object_from_pack, read_object_from_pack_at_offset, read_object_from_pack_into,
+        read_object_from_packs, read_pack_index, read_pack_index_cached, read_pack_index_no_verify,
+        read_packed_delta_dependency, skip_one_pack_object, verify_pack_and_collect,
+        write_v2_pack_index, write_v2_pack_index_with_trailer, PackIndex, PackIndexEntryRef,
+        PackedType, SingleLocalPackReader, DEFAULT_PACK_DEPTH,
     };
     pub use crate::pack_reuse_root::*;
 }
@@ -93,7 +94,12 @@ pub mod hash {
 
 pub mod commit_graph {
     //! Commit-graph files for reachability and generation numbers.
+    pub use crate::bloom::BloomFilterSettings;
     pub use crate::commit_graph_file::BloomWalkStatsHandle;
+    pub use crate::commit_graph_write::{
+        build_commit_graph_bytes, collect_reachable_commit_oids, load_commit_graph_commit_info,
+        CommitGraphCommitInfo,
+    };
 }
 
 pub mod bitmap {
@@ -175,8 +181,9 @@ pub mod pack_object_select {
     };
 }
 
+/// Side-band pack demux and temporary pack receive during fetch.
 #[allow(unused_imports)]
-pub(crate) mod pack_receive {
+pub mod pack_receive {
     pub use crate::pack_receive::*;
 }
 

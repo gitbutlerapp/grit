@@ -1,7 +1,6 @@
 //! Reflog identity parsing vs system `git` (files and reftable backends).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

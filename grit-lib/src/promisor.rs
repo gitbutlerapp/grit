@@ -177,9 +177,7 @@ pub(crate) fn promisor_referenced_objects(odb: &Odb) -> Result<HashSet<ObjectId>
         set.insert(oid);
         match odb.read_info_without_fetch(&oid) {
             Ok(info) if info.kind == ObjectKind::Blob => continue,
-            Err(crate::error::Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
-                continue
-            }
+            Err(crate::error::Error::Object(ObjectError::ObjectNotFound { .. })) => continue,
             Err(err) => return Err(err),
             Ok(_) => {}
         }
@@ -231,9 +229,7 @@ pub(crate) fn maintenance_promise_boundary(odb: &Odb) -> Result<HashSet<ObjectId
         }
         match odb.read_info_without_fetch(&oid) {
             Ok(info) if info.kind == ObjectKind::Blob => continue,
-            Err(crate::error::Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
-                continue
-            }
+            Err(crate::error::Error::Object(ObjectError::ObjectNotFound { .. })) => continue,
             Err(err) => return Err(err),
             Ok(_) => {}
         }

@@ -3,7 +3,6 @@
 //! Isolated test binary so other tests do not inflate the measured peak.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use grit_lib::diff::{

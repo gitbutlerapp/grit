@@ -31,7 +31,6 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::thread;
 
-use grit_lib::error::Result;
 use grit_lib::objects::hash;
 use grit_lib::objects::odb::store::{ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::WriteOptions;

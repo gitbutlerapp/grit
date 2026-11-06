@@ -173,7 +173,10 @@ fn corrupt_zlib_loose_object_returns_typed_error() {
 
     let err = odb.read(&oid).unwrap_err();
     assert!(
-        matches!(err, grit_lib::error::Error::Object(ObjectError::Zlib { .. })),
+        matches!(
+            err,
+            grit_lib::error::Error::Object(ObjectError::Zlib { .. })
+        ),
         "expected Zlib error, got {err:?}"
     );
 }

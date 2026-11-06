@@ -1,7 +1,6 @@
 //! Reflog expire vs concurrent ref updates must not drop entries (issue #2286).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::sync::Arc;
 use std::thread;
 

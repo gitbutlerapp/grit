@@ -1,7 +1,6 @@
 //! Integration tests for the in-memory history rewrite planner.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::objects::ObjectError;
 
 use crate::support;
@@ -1112,7 +1111,10 @@ fn plan_rewrite_surfaces_missing_object_as_library_error() {
     .expect_err("missing commit object");
     match err {
         grit_lib::revwalk::history::HistoryError::Library(boxed) => {
-            assert!(matches!(*boxed, grit_lib::error::Error::Object(ObjectError::ObjectNotFound { spec: _, .. })));
+            assert!(matches!(
+                *boxed,
+                grit_lib::error::Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+            ));
         }
         grit_lib::revwalk::history::HistoryError::Conflict { .. } => {
             panic!("missing object must not surface as Conflict");

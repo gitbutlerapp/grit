@@ -357,7 +357,7 @@ fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
     }
     match peel_to_commit_for_merge_base(repo, oid) {
         Ok(commit) => Ok(commit),
-        Err(crate::error::Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(oid),
+        Err(crate::error::Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(oid),
         Err(err) => Err(err),
     }
 }

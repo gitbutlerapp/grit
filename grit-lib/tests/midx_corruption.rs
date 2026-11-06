@@ -1,9 +1,8 @@
 //! Corrupt multi-pack-index images: `verify_midx` diagnostics and pack fallback reads (t5319).
 
-use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::midx_support;
+use grit_lib::objects::ObjectError;
 
 use std::fs;
 

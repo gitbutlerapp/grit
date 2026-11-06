@@ -138,7 +138,7 @@ fn assert_hook_failed(err: RemoteError, expected_status: i32) {
     match err {
         RemoteError::Library(Error::Hook(HookError::Failed {
             hook_name, status, ..
-        }) => {
+        })) => {
             assert_eq!(hook_name, "pre-push");
             assert_eq!(status, expected_status);
         }

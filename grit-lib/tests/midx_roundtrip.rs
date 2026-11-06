@@ -1,7 +1,6 @@
 //! Multi-pack-index round-trips: grit write vs git verify, git write vs grit read (t5319/t5334/t5335).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::midx_support;
 
 use grit_lib::objects::midx::{

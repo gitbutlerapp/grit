@@ -7,7 +7,7 @@
 //!
 //! **Object ids** name Git objects. SHA-1 ids are computed with [`sha1dc`] (collision
 //! detection, standard digest mode). [`ObjectHasher::finalize`], [`hash_object`], and
-//! [`HashAlgo::digest`] return [`Result`] and surface [`Error::HashCollision`] on
+//! [`HashAlgo::digest`] return [`Result`] and surface [`crate::objects::ObjectError::HashCollision`] on
 //! chosen-prefix collisions. Canonical store bytes are `"<kind> <len>\\0<payload>"`;
 //! use [`HashAlgo::digest`] when hashing raw bytes that should become an [`ObjectId`]
 //! (for example verifying loose object headers).
@@ -234,7 +234,7 @@ impl ObjectHasher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn finalize(self) -> Result<ObjectId> {
         match self {
             Self::Sha1(h) => match h.finalize() {
@@ -250,7 +250,7 @@ impl ObjectHasher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidObjectId`] when `out` is shorter than the digest
+    /// Returns [`crate::objects::ObjectError::InvalidObjectId`] when `out` is shorter than the digest
     /// length for this algorithm (a diagnostic string names the required size).
     pub fn finalize_into(self, out: &mut [u8]) -> Result<usize> {
         match self {
@@ -334,7 +334,7 @@ impl HashAlgo {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn digest(self, data: &[u8]) -> Result<ObjectId> {
         let mut hasher = self.hasher();
         hasher.update(data);
@@ -345,7 +345,7 @@ impl HashAlgo {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn hash_object(self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
         hash_object(self, kind, data)
     }
@@ -362,7 +362,7 @@ impl HashAlgo {
 ///
 /// # Errors
 ///
-/// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+/// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
 pub fn hash_object(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
     let len = u64::try_from(data.len()).unwrap_or(u64::MAX);
     let mut hasher = ObjectHasher::for_object(algo, kind, len);
@@ -395,7 +395,7 @@ impl ObjectPayloadHasher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    /// Returns [`crate::objects::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
     pub fn finish(self) -> Result<ObjectId> {
         self.inner.finalize()
     }

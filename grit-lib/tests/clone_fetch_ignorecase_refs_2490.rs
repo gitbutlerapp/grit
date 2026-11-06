@@ -2,7 +2,6 @@
 //! when `core.ignorecase` is enabled (macOS APFS / Windows NTFS).
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::fs;
 use std::path::Path;
 use std::process::Command;

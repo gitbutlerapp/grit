@@ -342,10 +342,10 @@ impl RepositoryBuilder {
     /// # Errors
     ///
     /// Same as [`Repository::open`], plus:
-    /// - [`Error::OdbObjectsDirMismatch`] when a files-backed [`Self::odb_builder`] names a
+    /// - [`ObjectError::OdbObjectsDirMismatch`] when a files-backed [`Self::odb_builder`] names a
     ///   directory other than the repository's `objects/` (or the environment's
     ///   `GIT_OBJECT_DIRECTORY`).
-    /// - [`Error::ObjectFormatMismatch`] when the builder's custom primary, a read source or
+    /// - [`ObjectError::ObjectFormatMismatch`] when the builder's custom primary, a read source or
     ///   its attached [`commit_graph`](crate::odb::OdbBuilder::commit_graph) reports a
     ///   [`hash_algo`](crate::odb::store::ObjectStore::hash_algo) other than the
     ///   repository's `extensions.objectformat` (SHA-1 when unset or when the git directory
@@ -1310,7 +1310,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`crate::error::Error::TreeSha256MissingSubmodules`] when submodule
+    /// Returns [`crate::objects::ObjectError::TreeSha256MissingSubmodules`] when submodule
     /// checkouts or objects needed for hashing are absent.
     pub fn tree_sha256(
         &self,
@@ -1962,7 +1962,7 @@ impl Repository {
         Ok(repo)
     }
 
-    /// Fail with [`Error::ObjectFormatMismatch`] when one of `injected` (the hash algorithms
+    /// Fail with [`ObjectError::ObjectFormatMismatch`] when one of `injected` (the hash algorithms
     /// of the stores and commit-graph passed to [`RepositoryBuilder::odb_builder`]) differs from
     /// `extensions.objectformat`, SHA-1 when unset.
     ///

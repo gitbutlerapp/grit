@@ -2,7 +2,6 @@
 //! not as "object missing" (issue #1751).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::io;
 use std::ops::ControlFlow;
 use std::path::Path;

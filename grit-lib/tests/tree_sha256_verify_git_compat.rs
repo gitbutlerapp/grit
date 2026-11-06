@@ -2,7 +2,6 @@
 
 use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -514,7 +513,10 @@ fn non_tag_object_rejected() {
             },
         )
         .unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::TagVerifyNotTag { .. }));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::TagVerifyNotTag { .. })
+    ));
 }
 
 #[test]

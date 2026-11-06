@@ -69,7 +69,7 @@ pub struct PruneStats {
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] if a non-promised root is missing, an error if the walk runs
+/// Returns [`ObjectError::ObjectNotFound`] if a non-promised root is missing, an error if the walk runs
 /// and a reachable object is missing or cannot be read or parsed, or on I/O failure
 /// while enumerating or deleting loose object files.
 pub fn prune_loose_unreachable(
@@ -219,7 +219,7 @@ impl<'a> LazyReachable<'a> {
     ///
     /// # Errors
     ///
-    /// Same as the reachability walk: [`Error::ObjectNotFound`] for a missing non-promised
+    /// Same as the reachability walk: [`ObjectError::ObjectNotFound`] for a missing non-promised
     /// object, and read or parse errors.
     pub(crate) fn get(&self) -> Result<&OidHashSet> {
         if let Some(closure) = self.closure.get() {
@@ -229,13 +229,13 @@ impl<'a> LazyReachable<'a> {
         Ok(self.closure.get_or_init(|| closure))
     }
 
-    /// Fail with [`Error::ObjectNotFound`] when a non-promised root is missing.
+    /// Fail with [`ObjectError::ObjectNotFound`] when a non-promised root is missing.
     pub(crate) fn require_roots_exist(&self) -> Result<()> {
         if self.closure.get().is_some() {
             return Ok(());
         }
         match require_objects_exist(self.odb, self.roots, &HashSet::new()) {
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                 require_objects_exist(self.odb, self.roots, self.promised()?)
             }
             result => result,
@@ -265,7 +265,7 @@ pub(crate) const S_IFDIR: u32 = 0o040000;
 ///
 /// # Errors
 ///
-/// [`Error::ObjectNotFound`] when a reachable object is missing, and read or parse
+/// [`ObjectError::ObjectNotFound`] when a reachable object is missing, and read or parse
 /// errors for the objects that are walked.
 fn reachable_closure(
     odb: &Odb,
@@ -343,7 +343,7 @@ fn reachable_closure(
     Ok(seen)
 }
 
-/// Fail with [`Error::ObjectNotFound`] for the first of `oids` that does not exist.
+/// Fail with [`ObjectError::ObjectNotFound`] for the first of `oids` that does not exist.
 ///
 /// Local pack indexes are loaded once and searched directly: going through
 /// [`Odb::exists`] or [`Odb::read_info`] per object revalidates the pack directory

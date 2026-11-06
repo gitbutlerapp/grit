@@ -7,9 +7,9 @@
 //! commit outside the promisor pack, Git can write neither a pack bitmap nor a
 //! multi-pack one, and `git gc` on a bare repository (bitmaps on by default) fails.
 
-use grit_lib::objects::ObjectError;
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::ObjectError;
 use std::path::Path;
 
 use grit_lib::error::Error;
@@ -225,7 +225,10 @@ fn git_maintenance_keeps_objects_of_a_kept_pack_the_promisor_pack_names() {
 
     // The pushed commit and tree name the kept commit and blob.
     match offload(&opts) {
-        Err(Error::Object(ObjectError::Offload(OffloadError::KeptPackObjectPromised { pack, .. }))) => {
+        Err(Error::Object(ObjectError::Offload(OffloadError::KeptPackObjectPromised {
+            pack,
+            ..
+        }))) => {
             assert_eq!(pack.file_name(), kept_pack.file_name());
         }
         other => panic!("expected a refusal, got {other:?}"),

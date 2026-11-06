@@ -75,7 +75,7 @@ fn validated_pack_body(pack: &[u8], hash_algo: HashAlgo) -> Result<(usize, usize
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the stream is malformed or contains delta objects.
+/// Returns [`ObjectError::CorruptObject`] when the stream is malformed or contains delta objects.
 pub fn enumerate_whole_pack_entries(
     pack: &[u8],
     hash_algo: HashAlgo,
@@ -123,7 +123,7 @@ pub fn enumerate_whole_pack_entries(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] or [`Error::CorruptObject`] on failure.
+/// Returns [`Error::Io`] or [`ObjectError::CorruptObject`] on failure.
 fn write_pack_index_v2(
     idx_path: &Path,
     pack_path: &Path,
@@ -196,7 +196,7 @@ fn write_pack_index_v2(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when `pack` cannot be indexed, or [`Error::Io`] on failure.
+/// Returns [`ObjectError::CorruptObject`] when `pack` cannot be indexed, or [`Error::Io`] on failure.
 pub fn install_pack_stream(
     objects_dir: &Path,
     pack: &[u8],
@@ -222,7 +222,7 @@ pub fn install_pack_stream(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when `pack` is malformed.
+/// Returns [`ObjectError::CorruptObject`] when `pack` is malformed.
 #[must_use = "callers use this for size reporting"]
 pub fn whole_pack_uncompressed_size(pack: &[u8], hash_algo: HashAlgo) -> Result<u64> {
     let hash_bytes = hash_algo.len();
@@ -289,10 +289,7 @@ fn packed_type_to_kind(pt: PackedType) -> Result<ObjectKind> {
         PackedType::Blob => Ok(ObjectKind::Blob),
         PackedType::Tag => Ok(ObjectKind::Tag),
         PackedType::RefDelta | PackedType::OfsDelta => Err(Error::Object(
-            ObjectError::corrupt_object(
-                None,
-                "delta object in whole-object enumeration",
-            ),
+            ObjectError::corrupt_object(None, "delta object in whole-object enumeration"),
         )),
     }
 }

@@ -1918,11 +1918,23 @@ fn prune_rejects_missing_root_with_empty_loose_store() {
         &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
     )
     .expect_err("prune must not accept a missing root");
-    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+        ),
+        "{err:?}"
+    );
 
     let err = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &[missing_oid()], None)
         .expect_err("missing root");
-    assert!(matches!(err, Error::Object(ObjectError::ObjectNotFound { spec: _, .. })), "{err:?}");
+    assert!(
+        matches!(
+            err,
+            Error::Object(ObjectError::ObjectNotFound { spec: _, .. })
+        ),
+        "{err:?}"
+    );
 
     gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false))
         .expect_err("full gc must not accept a missing root");

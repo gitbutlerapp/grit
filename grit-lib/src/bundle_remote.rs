@@ -7,7 +7,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::bundle::{plan_bundle_create, Bundle, BundleCreatePlan, BundleError, BundleSpec};
+use crate::bundle::{Bundle, BundleError, BundleSpec};
 use crate::error::{Error, Result};
 use crate::fetch::{NoProgress, Progress};
 use crate::objects::ObjectId;
@@ -124,19 +124,6 @@ pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> 
     })
 }
 
-/// Plan bundle creation from revision options without writing a file.
-///
-/// # Errors
-///
-/// Same as [`resolve_bundle_spec`] and [`plan_bundle_create`].
-pub(crate) fn plan_create_with_options(
-    repo: &Repository,
-    options: &BundleCreateOptions,
-) -> Result<BundleCreatePlan> {
-    let spec = resolve_bundle_spec(repo, options)?;
-    plan_bundle_create(repo, &spec).map_err(map_bundle_err)
-}
-
 /// Write a bundle file using ref-set flags and revision tokens.
 ///
 /// # Errors
@@ -206,19 +193,6 @@ pub fn write_bundle_spec_to_path_with_cancel(
     crate::atomic_replace::replace_file(&temp, path).map_err(BundleError::from)?;
     std::mem::forget(_cleanup);
     Ok(spec.include.len())
-}
-
-/// Like [`write_bundle_with_options_with_cancel`], reporting progress through `progress`.
-pub(crate) fn write_bundle_with_options_with_progress(
-    repo: &Repository,
-    path: &Path,
-    options: &BundleCreateOptions,
-    progress: &mut dyn ProgressSink,
-    cancel: &dyn crate::progress::Cancel,
-) -> Result<usize> {
-    let spec = resolve_bundle_spec(repo, options)?;
-    write_bundle_spec_to_path_with_cancel(repo, &spec, path, progress, cancel)
-        .map_err(map_bundle_err)
 }
 
 fn strip_all_rev_flag(tokens: &[String]) -> (Vec<String>, bool) {
@@ -314,7 +288,7 @@ pub fn split_revision_specs_for_bundle(tokens: &[String]) -> (Vec<String>, Vec<S
 /// # Errors
 ///
 /// Propagates bundle verification, pack ingest, refspec, and ref update failures.
-pub(crate) fn fetch_from_bundle(
+pub fn fetch_from_bundle(
     local_git_dir: &Path,
     bundle_path: &Path,
     opts: &FetchOptions,

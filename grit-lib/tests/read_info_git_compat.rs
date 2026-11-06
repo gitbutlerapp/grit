@@ -1,11 +1,11 @@
 //! [`Odb::read_info`] matches `git cat-file --batch-check` across storage layouts.
 
-use grit_lib::objects::ObjectError;
 use grit_lib::error::Error;
 use grit_lib::objects::delta_encode::encode_lcp_delta;
 use grit_lib::objects::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_idx_object_ids};
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_test_support::{git, git_cmd};
 use std::collections::HashSet;
@@ -363,7 +363,8 @@ fn read_info_corrupt_loose_header_is_typed_error() {
 
     let odb = Odb::new(&objects);
     match odb.read_info(&oid) {
-        Err(Error::Object(ObjectError::CorruptObject { .. })) | Err(Error::Object(ObjectError::ObjectHeaderTooLong { .. })) => {}
+        Err(Error::Object(ObjectError::CorruptObject { .. }))
+        | Err(Error::Object(ObjectError::ObjectHeaderTooLong { .. })) => {}
         other => panic!("expected corrupt header error, got {other:?}"),
     }
 }

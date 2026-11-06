@@ -1,7 +1,6 @@
 //! `restore_hunks` on the worktree, checked against system `git`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::io::Write;
 use std::path::Path;

@@ -1,7 +1,7 @@
 //! Tree, index, and worktree diffs with rename/copy/break vs system `git` raw output.
 
-use grit_lib::objects::ObjectError;
 use crate::support;
+use grit_lib::objects::ObjectError;
 
 use std::fs;
 

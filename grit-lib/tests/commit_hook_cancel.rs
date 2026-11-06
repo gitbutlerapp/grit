@@ -2,7 +2,6 @@
 
 #![cfg(unix)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::os::unix::fs::PermissionsExt;
 use std::thread;
 use std::time::Duration;

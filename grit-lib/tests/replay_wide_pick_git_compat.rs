@@ -5,7 +5,6 @@
 //! whose index carries fresh stat data and a valid cache-tree.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 

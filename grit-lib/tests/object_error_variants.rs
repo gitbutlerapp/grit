@@ -1,13 +1,12 @@
 //! Typed object-store errors: damaged fixtures from system git, variant assertions.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 
-use grit_lib::error::Error;
-use grit_lib::objects::ObjectError;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::read_pack_index;
+use grit_lib::objects::unpack_objects::{ingest_pack_into, pack_is_thin, UnpackOptions};
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::ObjectId;
 use grit_test_support::objects::{write_loose_object, HashAlgo as FixtureAlgo, RepoFixture};
 
@@ -37,8 +36,13 @@ fn corrupt_loose_object_truncated_bytes() {
     let odb = Odb::new(&repo.path().join(".git/objects"));
     let err = odb.read(&oid).expect_err("truncated loose object");
     match err {
-        ObjectError::CorruptLooseObject { oid: got, .. } => {
+        ObjectError::CorruptLooseObject {
+            oid: got,
+            path: got_path,
+            ..
+        } => {
             assert_eq!(got, oid);
+            assert_eq!(got_path, path);
         }
         other => panic!("expected corrupt loose object, got {other:?}"),
     }
@@ -67,11 +71,9 @@ fn pack_index_checksum_mismatch_flipped_trailer() {
     }
     fs::write(&idx, bytes).expect("flip checksum");
 
-    use grit_lib::error::Error;
     let err = read_pack_index(&idx).expect_err("bad idx checksum");
     match err {
-        Error::Object(ObjectError::PackIndexChecksumMismatch { .. })
-        | Error::Object(ObjectError::PackIndexChecksumMismatch { .. }) => {}
+        ObjectError::PackIndexChecksumMismatch { path, .. } => assert_eq!(path, idx),
         other => panic!("expected pack index checksum error, got {other:?}"),
     }
 }
@@ -92,9 +94,7 @@ fn object_not_found_missing_oid() {
 
 #[test]
 fn thin_pack_unresolved_deltas_without_bases() {
-    use grit_lib::error::Error;
     use grit_lib::objects::odb::store::MemoryStore;
-    use grit_lib::objects::unpack_objects::{ingest_pack_into, pack_is_thin, UnpackOptions};
     use grit_lib::objects::HashAlgo;
     use std::io::{Cursor, Write};
     use std::process::Command;
@@ -142,12 +142,7 @@ fn thin_pack_unresolved_deltas_without_bases() {
         &UnpackOptions::default(),
     )
     .expect_err("thin pack without bases");
-    let object_err = match err {
-        Error::Object(inner) => inner,
-        Error::Object(ObjectError::UnresolvedDeltas { count }) => ObjectError::UnresolvedDeltas { count },
-        other => panic!("expected unresolved deltas, got {other:?}"),
-    };
-    match object_err {
+    match err {
         ObjectError::UnresolvedDeltas { count } => assert!(count > 0),
         other => panic!("expected unresolved deltas, got {other:?}"),
     }

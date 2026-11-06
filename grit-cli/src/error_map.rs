@@ -171,7 +171,7 @@ pub fn stage_conflict_markers_human(paths: &[String]) -> String {
     msg
 }
 
-/// Map library errors from [`crate::commands::add::stage_paths`] to structured CLI errors.
+/// Map library errors from [`crate::commands::add::run`] to structured CLI errors.
 #[must_use]
 pub fn map_stage_lib_error(err: LibError) -> Error {
     match err {
@@ -413,9 +413,7 @@ pub fn map_remote_error(err: RemoteError) -> Error {
             })
         }
         RemoteError::Library(LibError::Object(ObjectError::HashCollision { oid })) => {
-            crate::json_error::map_lib_error(LibError::Object(ObjectError::HashCollision {
-                oid,
-            }))
+            crate::json_error::map_lib_error(LibError::Object(ObjectError::HashCollision { oid }))
         }
         RemoteError::Library(hook @ LibError::Hook(_)) => Error::new(hook),
         RemoteError::Library(lib) if lib.is_cancelled() => Error::new(lib),

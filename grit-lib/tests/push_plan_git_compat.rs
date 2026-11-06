@@ -2,7 +2,6 @@
 //! `git push --porcelain --dry-run` on the same bare remote.
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use grit_lib::config::environment::Environment;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;

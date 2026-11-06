@@ -1,7 +1,6 @@
 //! Coverage touch for public tree-sha256 API items.
 
 #[allow(clippy::unwrap_used)]
-
 use std::str::FromStr;
 
 use grit_lib::error::Error;

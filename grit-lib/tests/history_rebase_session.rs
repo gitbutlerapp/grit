@@ -1,7 +1,6 @@
 //! Stop/resume rebase session tests.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::objects::ObjectId;

@@ -4,7 +4,6 @@
 //! refuses it, while objects a promisor remote promises may be missing.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

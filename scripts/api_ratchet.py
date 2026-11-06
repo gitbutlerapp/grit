@@ -56,6 +56,7 @@ METRIC_KEYS = (
 
 ERROR_CATCH_ALL_VARIANTS = frozenset({"Message", "Other", "Generic", "Custom", "Msg"})
 UMBRELLA_ERROR_PATH = "grit_lib::error::Error"
+GRIT_UMBRELLA_ERROR = UMBRELLA_ERROR_PATH
 
 CANCEL_FAMILY_NAMES = frozenset(
     {
@@ -963,20 +964,29 @@ def variant_carries_catch_all_string(
 
 
 def field_type_is_umbrella_error(type_node: Any) -> bool:
+    """True when a field type is the library umbrella [`Error`] (not `std::io::Error`)."""
     text = type_display(type_node)
-    if text == UMBRELLA_ERROR_PATH or text.endswith("::error::Error"):
+    if text == GRIT_UMBRELLA_ERROR:
         return True
-    if "Box" in text and "Error" in text:
+    if text.endswith("::error::Error") and "std::io::Error" not in text:
+        return True
+    # `Box<grit_lib::error::Error>` (and similar boxed umbrella handles).
+    if "Box<" in text and GRIT_UMBRELLA_ERROR in text:
+        return True
+    if "Box<" in text and text.endswith("::error::Error>") and "std::io::Error" not in text:
         return True
     if isinstance(type_node, dict) and "resolved_path" in type_node:
         rp = type_node["resolved_path"]
         path = rp.get("path", "")
         if path in {"Box", "alloc::boxed::Box"} or path.endswith("::Box"):
             inner = _format_generic_args(rp.get("args"))
-            if "Error" in inner or "error::Error" in inner:
+            if GRIT_UMBRELLA_ERROR in inner or (
+                "error::Error" in inner and "std::io::Error" not in inner
+            ):
                 return True
-        if path.endswith("::Error") or path == "Error":
-            return True
+        if path == GRIT_UMBRELLA_ERROR or path.endswith("::error::Error"):
+            if "std::io::Error" not in path:
+                return True
     if isinstance(type_node, dict) and "type" in type_node:
         return field_type_is_umbrella_error(type_node["type"])
     return False

@@ -169,7 +169,7 @@ fn normalize_pack_idx_basename(raw: &str) -> Result<String> {
 
 /// Read a big-endian `u32` from `data` at byte offset `off`.
 ///
-/// Returns [`Error::CorruptObject`] if `data` does not contain 4 bytes at `off`,
+/// Returns [`ObjectError::CorruptObject`] if `data` does not contain 4 bytes at `off`,
 /// replacing the previous fixed-width-slice `.try_into().unwrap()` with real
 /// bounds handling (the success-path value is unchanged).
 fn read_be_u32(data: &[u8], off: usize) -> Result<u32> {
@@ -191,7 +191,7 @@ fn read_be_u32(data: &[u8], off: usize) -> Result<u32> {
 
 /// Read a big-endian `u64` from `data` at byte offset `off`.
 ///
-/// Returns [`Error::CorruptObject`] if `data` does not contain 8 bytes at `off`,
+/// Returns [`ObjectError::CorruptObject`] if `data` does not contain 8 bytes at `off`,
 /// replacing the previous fixed-width-slice `.try_into().unwrap()` with real
 /// bounds handling (the success-path value is unchanged).
 fn read_be_u64(data: &[u8], off: usize) -> Result<u64> {
@@ -1335,14 +1335,20 @@ pub fn midx_sidecar_path_for_midx_file(midx_path: &Path, ext: &str) -> Result<Pa
             .and_then(|r| r.strip_suffix(".midx"))
         {
             let parent = midx_path.parent().ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "MIDX path has no parent directory".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "MIDX path has no parent directory".to_owned(),
+                ))
             })?;
             return Ok(parent.join(format!("multi-pack-index-{hash_part}.{ext}")));
         }
     }
     let hash_hex = midx_checksum_hex_from_path(midx_path)?;
     let parent = midx_path.parent().ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "MIDX path has no parent directory".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "MIDX path has no parent directory".to_owned(),
+        ))
     })?;
     Ok(parent.join(format!("multi-pack-index-{hash_hex}.{ext}")))
 }
@@ -1620,7 +1626,10 @@ fn build_midx_bytes_filtered(
     let mut best: HashMap<ObjectId, MidxEntry> = HashMap::new();
     for (pack_id, idx) in indexes.iter().enumerate() {
         let pack_id = u32::try_from(pack_id).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, "too many pack files for multi-pack-index".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "too many pack files for multi-pack-index".to_owned(),
+            ))
         })?;
         let mtime = pack_mtimes[pack_id as usize];
         for e in idx.iter() {
@@ -2371,11 +2380,14 @@ fn midx_checksum_is_valid(data: &[u8]) -> bool {
 ///
 /// # Errors
 ///
-/// Returns I/O errors or [`Error::CorruptObject`] for missing or malformed metadata.
+/// Returns I/O errors or [`ObjectError::CorruptObject`] for missing or malformed metadata.
 pub fn read_midx_pack_idx_names(objects_dir: &Path) -> Result<Vec<String>> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "no multi-pack-index found".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "no multi-pack-index found".to_owned(),
+        ))
     })?;
     let metadata = fs::metadata(&path).map_err(Error::Io)?;
     read_midx_pack_idx_names_from_path(&path, &metadata)
@@ -2399,7 +2411,10 @@ pub(crate) fn read_midx_pack_idx_names_from_path(
         .checked_add(pn_len)
         .and_then(|end| data.get(pn_off..end))
         .ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "MIDX pack names are outside the file".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "MIDX pack names are outside the file".to_owned(),
+            ))
         })?;
     parse_pack_names_blob(blob)
 }
@@ -2418,7 +2433,10 @@ pub struct MidxObjectRef {
 pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObjectRef>)> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "no multi-pack-index found".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "no multi-pack-index found".to_owned(),
+        ))
     })?;
     let data = fs::read(&path).map_err(Error::Io)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
@@ -2459,7 +2477,10 @@ pub fn read_midx_objects(objects_dir: &Path) -> Result<(Vec<String>, Vec<MidxObj
 pub fn midx_checksum_hex(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "no multi-pack-index found".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "no multi-pack-index found".to_owned(),
+        ))
     })?;
     midx_checksum_hex_from_path(&path)
 }
@@ -2719,7 +2740,10 @@ pub fn read_midx_btmp_ranges(objects_dir: &Path) -> Result<Vec<MidxBtmpPackRange
         let bitmap_nr = read_be_u32(&data, base + 4)?;
         out.push(MidxBtmpPackRange {
             pack_id: u32::try_from(i).map_err(|_| {
-                Error::Object(ObjectError::corrupt_object(None, "too many packs in MIDX BTMP".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "too many packs in MIDX BTMP".to_owned(),
+                ))
             })?,
             bitmap_pos,
             bitmap_nr,
@@ -2785,7 +2809,7 @@ enum MidxLoadResult {
 }
 
 /// Validate and load a MIDX image for object reads, mirroring `load_multi_pack_index`
-/// in git/midx.c. Fatal corruptions return [`Error::Midx`]; recoverable corruptions emit
+/// in git/midx.c. Fatal corruptions return [`ObjectError::Midx`]; recoverable corruptions emit
 /// [`Warning`] values through `diagnostics` and return [`MidxLoadResult::Skip`].
 fn midx_load_for_read(
     data: &PackData,
@@ -2984,7 +3008,10 @@ pub fn try_read_info_via_midx_with_diagnostics(
 pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "no multi-pack-index found".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "no multi-pack-index found".to_owned(),
+        ))
     })?;
     let data = fs::read(&path).map_err(Error::Io)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
@@ -3028,7 +3055,10 @@ pub fn read_midx_preferred_idx_name(objects_dir: &Path) -> Result<String> {
         ))
     })?;
     names.get(idx).cloned().ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "preferred pack id out of range".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "preferred pack id out of range".to_owned(),
+        ))
     })
 }
 
@@ -3278,7 +3308,7 @@ pub fn write_multi_pack_index_with_options(
         let path = pack_dir.join(name);
         // Do not re-verify the idx trailer here; Git reads the offset table
         // directly (t5319 forces a deliberately corrupt-but-valid 64-bit idx).
-        indexes.push(crate::pack::read_pack_index_no_verify(&path)?);
+        indexes.push(crate::pack::read_pack_index_no_verify(&path).map_err(Error::from)?);
     }
 
     // Git refuses an explicitly preferred pack that has no objects.
@@ -3305,7 +3335,10 @@ pub fn write_multi_pack_index_with_options(
     let mut best: HashMap<ObjectId, MidxEntry> = HashMap::new();
     for (pack_id, idx) in indexes.iter().enumerate() {
         let pack_id = u32::try_from(pack_id).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, "too many pack files for multi-pack-index".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "too many pack files for multi-pack-index".to_owned(),
+            ))
         })?;
         let mtime = pack_mtimes_layer[pack_id as usize];
         for e in idx.iter() {
@@ -3654,7 +3687,10 @@ pub fn compact_multi_pack_index(
     let mut indexes: Vec<PackIndex> = Vec::with_capacity(ordered_idx_names.len());
     for name in &ordered_idx_names {
         let path = pack_dir.join(name);
-        indexes.push(crate::pack::read_pack_index_no_verify(&path)?);
+        indexes.push(
+            crate::pack::read_pack_index_no_verify(&path)
+                .map_err(|e| CompactError::Other(e.to_string()))?,
+        );
     }
 
     // When writing a bitmap, git sets the preferred pack to the first (oldest) pack
@@ -4390,7 +4426,9 @@ mod tests {
         .expect_err("version 3");
         assert!(matches!(
             err,
-            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version: 3 }))
+            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion {
+                version: 3
+            }))
         ));
         assert!(!midx_path.exists(), "rejected write must not leave a MIDX");
     }

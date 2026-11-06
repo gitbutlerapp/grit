@@ -1,7 +1,6 @@
 //! Annotated tag list metadata matches `git for-each-ref` (subject, tagger, date).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::tag::{list_tags, TagKind};

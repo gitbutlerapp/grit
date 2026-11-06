@@ -752,7 +752,7 @@ fn resolve_create_start(
 
 fn validate_start_commit(repo: &Repository, oid: ObjectId, label: &str) -> Result<ObjectId> {
     peel_to_commit_for_merge_base(repo, oid).map_err(|err| match err {
-        Error::Object(ObjectError::ObjectNotFound { spec: _, .. }) => {
+        Error::Object(ObjectError::ObjectNotFound { .. }) => {
             Error::Branch(BranchError::InvalidStartPoint {
                 label: label.to_owned(),
                 reason: "object not found".into(),

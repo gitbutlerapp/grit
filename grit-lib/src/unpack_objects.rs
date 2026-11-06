@@ -15,13 +15,14 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read};
 
-use crate::error::{Error, Result};
+use crate::error::{Error, PathIoError, PathIoOperation, Result};
+use crate::git_dir::GitDirPathOperation;
 use crate::gitmodules::{self, DotFsckTracker};
 use crate::hash::{ChecksumHasher, ObjectPayloadHasher};
 use crate::index::MODE_GITLINK;
 use crate::index_pack::ObjectKindCounts;
-use crate::objects::ObjectError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
+use crate::objects::{ObjectError, ObjectResult};
 use crate::odb::store::{ObjectStore, WritableObjectStore};
 use crate::odb::{Odb, WriteOptions};
 use crate::pack::{decode_pack_object_size_varint, decode_pack_object_size_varint_from_first};
@@ -235,6 +236,21 @@ fn test_note_retained_bytes(bytes: usize) {
     let _ = bytes;
 }
 
+fn map_unpack_ingest_error(err: Error) -> ObjectError {
+    match err {
+        Error::Object(o) => o,
+        Error::Cancelled => ObjectError::OperationCancelled,
+        Error::Io(source) => ObjectError::PathIo {
+            path_io: PathIoError {
+                operation: PathIoOperation::GitDir(GitDirPathOperation::GcPack),
+                path: None,
+                source,
+            },
+        },
+        other => ObjectError::from_umbrella(other),
+    }
+}
+
 fn test_note_pending_delta_bytes(pending: &[PendingDelta], cache_bytes: usize) {
     #[cfg(test)]
     {
@@ -329,7 +345,10 @@ impl UnpackSink for Odb {
         dry_run: bool,
     ) -> Result<ObjectId> {
         let size_u64 = u64::try_from(size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("object size {size} exceeds address space")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("object size {size} exceeds address space"),
+            ))
         })?;
         if dry_run {
             let mut hasher = ObjectPayloadHasher::new(self.hash_algo(), kind, size_u64);
@@ -397,10 +416,10 @@ impl UnpackSink for StoreSink<'_> {
 ///
 /// # Errors
 ///
-/// - [`Error::CorruptObject`] — invalid pack format or checksum mismatch.
-/// - [`Error::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `odb`.
+/// - [`ObjectError::CorruptObject`] — invalid pack format or checksum mismatch.
+/// - [`ObjectError::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `odb`.
 /// - [`Error::Io`] — I/O failure reading from `reader`.
-/// - [`Error::Zlib`] — decompression failure.
+/// - [`ObjectError::Zlib`] — decompression failure.
 pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) -> Result<usize> {
     unpack_into(reader, odb, opts, None, None, None).map(|unpacked| unpacked.count)
 }
@@ -489,28 +508,28 @@ pub(crate) fn unpack_objects_with_promises(
 ///
 /// # Errors
 ///
-/// - [`Error::CorruptObject`] — invalid pack format, checksum mismatch, or (with
+/// - [`ObjectError::CorruptObject`] — invalid pack format, checksum mismatch, or (with
 ///   [`UnpackOptions::strict`]) a reference that resolves nowhere.
-/// - [`Error::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `bases`.
-/// - [`Error::Io`] — failure reading from `reader`.
-/// - [`Error::Zlib`] — decompression failure.
+/// - [`ObjectError::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `bases`.
+/// - [`ObjectError::PathIo`] — failure reading from `reader` or other I/O on the unpack path.
+/// - [`ObjectError::Zlib`] — decompression failure.
 /// - Any error `store` or `bases` return.
 pub fn ingest_pack_into(
     reader: &mut dyn Read,
     store: &dyn WritableObjectStore,
     bases: &dyn ObjectStore,
     opts: &UnpackOptions,
-) -> Result<IngestedObjects> {
+) -> ObjectResult<IngestedObjects> {
     ingest_pack_into_with_progress(reader, store, bases, opts, None, None)
 }
 
 /// Like [`ingest_pack_into`], reporting [`ProgressPhase::IndexingObjects`] and
 /// [`ProgressPhase::ResolvingDeltas`] on `progress` and stopping with
-/// [`Error::Cancelled`] once `cancel` fires.
+/// [`ObjectError::OperationCancelled`] once `cancel` fires.
 ///
 /// # Errors
 ///
-/// Same as [`ingest_pack_into`], plus [`Error::Cancelled`].
+/// Same as [`ingest_pack_into`], plus [`ObjectError::OperationCancelled`] when cancelled.
 pub fn ingest_pack_into_with_progress(
     reader: &mut dyn Read,
     store: &dyn WritableObjectStore,
@@ -518,7 +537,7 @@ pub fn ingest_pack_into_with_progress(
     opts: &UnpackOptions,
     progress: Option<&mut dyn ProgressSink>,
     cancel: Option<&dyn Cancel>,
-) -> Result<IngestedObjects> {
+) -> ObjectResult<IngestedObjects> {
     match unpack_into(
         reader,
         &StoreSink { store, bases },
@@ -533,7 +552,7 @@ pub fn ingest_pack_into_with_progress(
         }
         Err(err) => {
             let _ = store.rollback();
-            Err(err)
+            Err(map_unpack_ingest_error(err))
         }
     }
 }
@@ -670,7 +689,10 @@ fn unpack_into<S: UnpackSink + ?Sized>(
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
                 let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "ofs-delta base offset underflow".to_owned(),
+                    ))
                 })?;
                 let delta_data = rd.decompress(size)?;
                 let delta = PendingDelta {
@@ -1220,7 +1242,7 @@ fn strict_ref_resolves(
 ///
 /// # Errors
 ///
-/// [`Error::CorruptObject`] for a reference that resolves nowhere; [`Odb::contains`]
+/// [`ObjectError::CorruptObject`] for a reference that resolves nowhere; [`Odb::contains`]
 /// failures propagate unchanged.
 pub fn strict_verify_packed_references(
     odb: Option<&Odb>,
@@ -1322,7 +1344,10 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
                 let _base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "ofs-delta base offset underflow".to_owned(),
+                    ))
                 })?;
                 let zlib_offset = rd.pos;
                 let consumed = skip_zlib_at(data, zlib_offset, size)?;
@@ -1389,8 +1414,8 @@ fn pack_is_thin_with_ofs_deltas(
 ///
 /// # Errors
 ///
-/// Returns [`Error::UnresolvedDeltas`] when some delta bases are in neither the pack
-/// nor `odb`, and [`Error::CorruptObject`] or [`Error::Zlib`] for a malformed pack.
+/// Returns [`ObjectError::UnresolvedDeltas`] when some delta bases are in neither the pack
+/// nor `odb`, and [`ObjectError::CorruptObject`] or [`ObjectError::Zlib`] for a malformed pack.
 pub fn pack_bytes_to_object_map(data: &[u8], odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
     build_pack_object_map(PackReader::new(data), odb)
 }
@@ -1419,7 +1444,7 @@ pub struct PackIndexRecord {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] for a malformed pack and [`Error::UnresolvedDeltas`]
+/// Returns [`ObjectError::CorruptObject`] for a malformed pack and [`ObjectError::UnresolvedDeltas`]
 /// for deltas whose bases are in neither the pack nor `odb`.
 pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackIndexRecord>> {
     pack_index_records_with_threads(
@@ -1507,7 +1532,10 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
                 let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "ofs-delta base offset underflow".to_owned(),
+                    ))
                 })?;
                 let delta_data = rd.decompress(size)?;
                 pending.push(PendingDelta {
@@ -1652,7 +1680,10 @@ impl<'a> PackReader<'a> {
     pub(crate) fn read_u32_be(&mut self) -> Result<u32> {
         let bytes = self.read_exact(4)?;
         Ok(u32::from_be_bytes(bytes.try_into().map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, "u32 read failed".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "u32 read failed".to_owned(),
+            ))
         })?))
     }
 
@@ -1716,7 +1747,10 @@ pub(crate) fn decompress_zlib_at_into(
         slice,
         &mut pos,
         u64::try_from(expected_size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("pack object size overflow: {expected_size}")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {expected_size}"),
+            ))
         })?,
         out,
     )?;
@@ -2108,7 +2142,7 @@ impl<'a> StreamingPackReader<'a> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] if the delta is malformed, the source-size
+/// Returns [`ObjectError::CorruptObject`] if the delta is malformed, the source-size
 /// field does not match `base.len()`, or the result length does not match the
 /// declared destination size.
 pub fn apply_delta(base: &[u8], delta: &[u8]) -> Result<Vec<u8>> {
@@ -2179,7 +2213,10 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
             }
 
             let end = offset.checked_add(size).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "delta COPY range overflows usize".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "delta COPY range overflows usize".to_owned(),
+                ))
             })?;
             let chunk = base.get(offset..end).ok_or_else(|| {
                 Error::Object(ObjectError::corrupt_object(
@@ -2195,7 +2232,10 @@ pub fn apply_delta_into(out: &mut Vec<u8>, base: &[u8], delta: &[u8]) -> Result<
             // INSERT instruction: copy the next `cmd` literal bytes verbatim.
             let n = cmd as usize;
             let chunk = delta.get(pos..pos + n).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "truncated delta INSERT data".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "truncated delta INSERT data".to_owned(),
+                ))
             })?;
             out.extend_from_slice(chunk);
             pos += n;
@@ -2290,7 +2330,10 @@ pub(crate) fn apply_delta_prefix_into(
             }
 
             let end = offset.checked_add(size).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "delta COPY range overflows usize".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "delta COPY range overflows usize".to_owned(),
+                ))
             })?;
             let chunk = base.get(offset..end).ok_or_else(|| {
                 Error::Object(ObjectError::corrupt_object(
@@ -2302,7 +2345,10 @@ pub(crate) fn apply_delta_prefix_into(
                 ))
             })?;
             result_len = result_len.checked_add(size).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "delta result length overflow".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "delta result length overflow".to_owned(),
+                ))
             })?;
             if !done {
                 let room = max_out.saturating_sub(out.len());
@@ -2326,11 +2372,17 @@ pub(crate) fn apply_delta_prefix_into(
         } else {
             let n = cmd as usize;
             let chunk = delta.get(pos..pos + n).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "truncated delta INSERT data".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "truncated delta INSERT data".to_owned(),
+                ))
             })?;
             pos += n;
             result_len = result_len.checked_add(n).ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "delta result length overflow".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "delta result length overflow".to_owned(),
+                ))
             })?;
             if !done {
                 let room = max_out.saturating_sub(out.len());
@@ -2408,7 +2460,10 @@ fn read_delta_varint(data: &[u8], pos: &mut usize) -> Result<usize> {
     let mut shift = 0u32;
     loop {
         let b = *data.get(*pos).ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "truncated delta varint".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "truncated delta varint".to_owned(),
+            ))
         })?;
         *pos += 1;
         value |= ((b & 0x7f) as usize) << shift;

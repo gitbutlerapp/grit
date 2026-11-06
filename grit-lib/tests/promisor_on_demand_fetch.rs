@@ -1,9 +1,9 @@
 //! On-demand promisor object fetch (partial clone lazy fetch).
 
-use grit_lib::objects::ObjectError;
 #![cfg(feature = "http-ureq")]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::ObjectError;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

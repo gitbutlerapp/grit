@@ -40,7 +40,7 @@ impl CorruptObjectReason {
 
 /// Object database, pack, MIDX, commit-graph, and fsck failures.
 ///
-/// Wrapped by [`Error::Object`](crate::error::Error::Object) at the repository boundary.
+/// Wrapped by [`Error::Object`] at the repository boundary.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ObjectError {
@@ -78,6 +78,41 @@ pub enum ObjectError {
         missing: ObjectId,
         /// One entry per remote that failed, in try order.
         failures: Vec<(String, Box<ObjectError>)>,
+    },
+
+    /// Promisor lazy-fetch nesting exceeded the per-thread limit (Git parity guard).
+    #[error("too many nested promisor lazy fetches (limit {limit})")]
+    PromisorLazyFetchNestedTooDeep {
+        /// Maximum nesting depth allowed.
+        limit: u32,
+    },
+
+    /// Promisor lazy-fetch did not materialize the object before the retry budget.
+    #[error("promisor lazy fetch did not materialize {} after {attempts} attempts", .oid.to_hex())]
+    PromisorLazyFetchIncomplete {
+        /// Object id still missing after attempts.
+        oid: ObjectId,
+        /// Number of lazy-fetch retries tried.
+        attempts: u32,
+    },
+
+    /// [`crate::odb::Odb`] has no git-directory path for promisor lazy fetch.
+    #[error("promisor lazy fetch requires a git directory on the ODB")]
+    PromisorLazyFetchNoGitDir,
+
+    /// A promisor fetch finished but the object is still not present locally.
+    #[error("promisor fetch completed but {} is still missing locally", .0.to_hex())]
+    PromisorFetchStillMissing(ObjectId),
+
+    /// A long-running object-store operation stopped at a cancellation checkpoint.
+    #[error("operation cancelled")]
+    OperationCancelled,
+
+    /// Remote transport or configuration failed during a promisor fetch attempt.
+    #[error("promisor remote: {detail}")]
+    PromisorRemoteFailure {
+        /// What went wrong with the remote or request.
+        detail: String,
     },
 
     /// An object's stored data is corrupt or malformed.
@@ -392,7 +427,7 @@ fn maintenance_running_message(holder: &GcLockHolder) -> String {
 }
 
 impl ObjectError {
-    /// Map a repository-level [`Error`] into [`ObjectError`] when crossing into the ODB.
+    /// Map a repository-level [`enum@Error`] into [`ObjectError`] when crossing into the ODB.
     #[must_use]
     pub fn from_umbrella(err: Error) -> Self {
         match err {
@@ -405,6 +440,7 @@ impl ObjectError {
             } => Self::PathIo {
                 path_io: PathIoError::git_dir(path, operation, source),
             },
+            Error::Cancelled => Self::OperationCancelled,
             other => Self::Nested(Box::new(other)),
         }
     }
@@ -435,6 +471,12 @@ impl ObjectError {
             Self::ObjectNotFound { .. } => "object_not_found",
             Self::PromisedObjectMissing(_) => "promised_object_missing",
             Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
+            Self::PromisorLazyFetchNestedTooDeep { .. } => "promisor_lazy_fetch_nested_too_deep",
+            Self::PromisorLazyFetchIncomplete { .. } => "promisor_lazy_fetch_incomplete",
+            Self::PromisorLazyFetchNoGitDir => "promisor_lazy_fetch_no_git_dir",
+            Self::PromisorFetchStillMissing(_) => "promisor_fetch_still_missing",
+            Self::OperationCancelled => "operation_cancelled",
+            Self::PromisorRemoteFailure { .. } => "promisor_remote_failure",
             Self::CorruptObject { .. } => "corrupt_object",
             Self::PackIndexChecksumMismatch { .. } => "pack_index_checksum_mismatch",
             Self::UnresolvedDeltas { .. } => "unresolved_deltas",

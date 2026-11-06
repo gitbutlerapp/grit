@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::error::Error;
+use grit_lib::error::{Error, GitDirPathOperation, PathIoError};
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::index_pack::{ingest_received_pack, IngestPackOptions};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, ObjectStream, WritableObjectStore};
@@ -20,6 +20,8 @@ use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
 use grit_lib::objects::CommitData;
+use grit_lib::objects::ObjectError;
+use grit_lib::objects::ObjectResult;
 use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, write_commit_object, CommitRequest};
@@ -237,30 +239,27 @@ impl ObjectStore for TransactionalStore {
         self.inner.hash_algo()
     }
 
-    fn read(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<Object>> {
+    fn read(&self, oid: &ObjectId) -> ObjectResult<Option<Object>> {
         self.inner.read(oid)
     }
 
-    fn read_info(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectInfo>> {
+    fn read_info(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectInfo>> {
         self.inner.read_info(oid)
     }
 
-    fn contains(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+    fn contains(&self, oid: &ObjectId) -> ObjectResult<bool> {
         self.inner.contains(oid)
     }
 
-    fn contains_many(&self, oids: &[ObjectId]) -> grit_lib::error::Result<Vec<bool>> {
+    fn contains_many(&self, oids: &[ObjectId]) -> ObjectResult<Vec<bool>> {
         self.inner.contains_many(oids)
     }
 
-    fn open_stream(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<ObjectStream<'_>>> {
+    fn open_stream(&self, oid: &ObjectId) -> ObjectResult<Option<ObjectStream<'_>>> {
         self.inner.open_stream(oid)
     }
 
-    fn for_each_object(
-        &self,
-        f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
-    ) -> grit_lib::error::Result<()> {
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> ObjectResult<()> {
         self.inner.for_each_object(f)
     }
 }
@@ -271,7 +270,7 @@ impl WritableObjectStore for TransactionalStore {
         kind: ObjectKind,
         data: &[u8],
         options: WriteOptions,
-    ) -> grit_lib::error::Result<ObjectId> {
+    ) -> ObjectResult<ObjectId> {
         let oid = self.inner.write(kind, data, options)?;
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.staged.insert(oid);
@@ -280,13 +279,18 @@ impl WritableObjectStore for TransactionalStore {
         Ok(oid)
     }
 
-    fn freshen(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+    fn freshen(&self, oid: &ObjectId) -> ObjectResult<bool> {
         self.inner.freshen(oid)
     }
 
-    fn flush(&self) -> grit_lib::error::Result<()> {
+    fn flush(&self) -> ObjectResult<()> {
         if self.fail_flush.load(Ordering::Relaxed) {
-            return Err(Error::Io(std::io::Error::other("injected flush failure")));
+            return Err(PathIoError::git_dir(
+                ".git/objects (test store)",
+                GitDirPathOperation::GcPack,
+                std::io::Error::other("injected flush failure"),
+            )
+            .into());
         }
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let drained: Vec<ObjectId> = state.staged.drain().collect();
@@ -296,7 +300,7 @@ impl WritableObjectStore for TransactionalStore {
         Ok(())
     }
 
-    fn rollback(&self) -> grit_lib::error::Result<()> {
+    fn rollback(&self) -> ObjectResult<()> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.staged.clear();
         drop(state);
@@ -529,7 +533,7 @@ fn write_commit_object_flush_failure_rolls_back_staged() {
         extra_headers: Vec::new(),
     };
     let err = write_commit_object(&repo, &data, Some(false)).expect_err("flush fails");
-    assert!(matches!(err, Error::Io(_)));
+    assert!(matches!(err, Error::GitDirPathIo { .. }));
     assert!(
         store.events().iter().any(|e| e == "obj.rollback"),
         "rollback after failed flush: {:?}",
@@ -567,7 +571,20 @@ fn ingest_flush_failure_rolls_back_staged() {
         &UnpackOptions::default(),
     )
     .expect_err("flush fails");
-    assert!(matches!(err, Error::Io(_)));
+    assert!(
+        matches!(
+            err,
+            ObjectError::PathIo {
+                path_io: PathIoError {
+                    operation: grit_lib::error::PathIoOperation::GitDir(
+                        GitDirPathOperation::GcPack
+                    ),
+                    ..
+                },
+            }
+        ),
+        "{err:?}"
+    );
     assert!(store.events().iter().any(|e| e == "obj.rollback"));
     assert!(
         store.state.lock().unwrap().committed.is_empty(),

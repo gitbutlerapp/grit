@@ -3,7 +3,6 @@
 //! This module keeps environment access injectable so callers can test identity resolution
 //! without mutating process-wide state.
 
-use crate::objects::ObjectError;
 use std::ffi::OsString;
 
 use thiserror::Error;

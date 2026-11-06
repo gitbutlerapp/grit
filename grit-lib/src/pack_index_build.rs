@@ -233,8 +233,8 @@ pub(crate) fn build_mapped_pack_index(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] for a malformed pack or a bad trailer (when
-/// `verify_trailer`), and [`Error::UnresolvedDeltas`] for deltas whose bases are in
+/// Returns [`ObjectError::CorruptObject`] for a malformed pack or a bad trailer (when
+/// `verify_trailer`), and [`ObjectError::UnresolvedDeltas`] for deltas whose bases are in
 /// neither the pack nor `odb`.
 pub fn build_pack_index_records(
     pack: &[u8],
@@ -744,7 +744,10 @@ fn push_ofs_delta(
 ) -> Result<()> {
     let neg = rd.read_ofs_neg_offset()?;
     let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-        Error::Object(ObjectError::corrupt_object(None, "ofs-delta base offset underflow".to_owned()))
+        Error::Object(ObjectError::corrupt_object(
+            None,
+            "ofs-delta base offset underflow".to_owned(),
+        ))
     })?;
     let zlib_offset = rd.pos;
     let consumed = skip_zlib_at_with_scratch(skip_scratch, pack, zlib_offset, size)?;

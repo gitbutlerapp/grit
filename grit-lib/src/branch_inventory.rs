@@ -229,7 +229,9 @@ fn ref_query_error(err: RefQueryError) -> Error {
         RefQueryError::MissingObjectDatabase => {
             Error::Message("creator-date sort requires commit objects".into())
         }
-        RefQueryError::MissingObject(oid) => Error::Object(ObjectError::object_not_found(oid.to_string())),
+        RefQueryError::MissingObject(oid) => {
+            Error::Object(ObjectError::object_not_found(oid.to_string()))
+        }
         RefQueryError::NotCommit(oid) => Error::Message(format!("not a commit: {oid}")),
     }
 }

@@ -1,7 +1,6 @@
 //! Repository-level fsck compared to system `git fsck` (upstream t1450-style cases).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::objects::ObjectError;
 
 use std::fs;

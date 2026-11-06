@@ -1,7 +1,7 @@
 //! `resolve` / `read_object_for_display` compatibility with system `git`.
 
-use grit_lib::objects::ObjectError;
 use crate::support;
+use grit_lib::objects::ObjectError;
 
 use std::io::Write;
 use std::process::{Command, Stdio};

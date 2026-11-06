@@ -1,7 +1,6 @@
 //! [`GitButlerWorkspace::detect`] on repositories set up the way GitButler leaves them.
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::path::Path;
 use std::process::Command;
 

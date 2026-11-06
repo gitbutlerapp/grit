@@ -1,7 +1,6 @@
 //! `GIT_CONFIG_PARAMETERS` strict parsing and command-layer merge coverage.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::path::Path;
 
 use grit_lib::config::environment::Environment;

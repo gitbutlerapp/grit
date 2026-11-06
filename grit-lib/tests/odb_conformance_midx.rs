@@ -1,9 +1,8 @@
 //! [`MidxObjects`] conformance and Git MIDX round-trips (8-pack repos).
 
-use grit_lib::objects::ObjectError;
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::midx_support;
+use grit_lib::objects::ObjectError;
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;

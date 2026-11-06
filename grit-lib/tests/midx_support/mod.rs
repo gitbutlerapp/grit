@@ -3,7 +3,6 @@
 //! Several test binaries include this module and each uses only part of it.
 
 #[allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
-
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};

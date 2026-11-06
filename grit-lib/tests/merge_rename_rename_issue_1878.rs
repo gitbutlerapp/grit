@@ -2,7 +2,6 @@
 //! must stop with a conflict, the same index stages and the same result tree as Git.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

@@ -20,7 +20,6 @@
 //! `MemoryRefStore` is implemented exactly this way. Run the
 //! `grit_test_support::refstore_conformance` suite to check a backend against the built-ins.
 
-use crate::objects::ObjectError;
 use std::collections::{hash_map::Entry, BTreeMap, HashMap};
 
 use crate::objects::{ObjectId, ObjectKind};

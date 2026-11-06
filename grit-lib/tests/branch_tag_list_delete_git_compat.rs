@@ -3,7 +3,6 @@
 //! upstream, a linked worktree), plus the reftable backend and an injected
 //! `MemoryRefStore`.
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::path::Path;
 use std::sync::Arc;
 

@@ -1,7 +1,6 @@
 //! Extra multi-pack-index write, chain, and compaction paths for line coverage (t5319/t5335).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::midx_support;
 
 use grit_lib::objects::midx::{

@@ -1,7 +1,6 @@
 //! Targeted line coverage for [`grit_lib::config`] helpers not fully exercised by oracle tests.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 

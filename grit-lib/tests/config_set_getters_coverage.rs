@@ -1,7 +1,6 @@
 //! Exercise [`ConfigSet`] typed accessors and merge paths for line coverage.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::fs;
 use std::path::Path;
 

@@ -113,7 +113,7 @@ pub struct TreeSha256TagHeaders {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Object(ObjectError::TagVerifyDuplicateTreeSha256Header)`] or parse failures for malformed headers.
+/// Returns [`crate::objects::ObjectError::TagVerifyDuplicateTreeSha256Header`] or parse failures for malformed headers.
 pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders> {
     let mut object = None;
     let mut claimed = None;
@@ -160,7 +160,7 @@ pub fn parse_tree_sha256_tag_headers(data: &[u8]) -> Result<TreeSha256TagHeaders
 ///
 /// # Errors
 ///
-/// Returns [`Error::TagVerifyNotTag`] when `oid` is not a tag object, header parse
+/// Returns [`crate::objects::ObjectError::TagVerifyNotTag`] when `oid` is not a tag object, header parse
 /// failures, or signing subprocess errors. When digest recomputation requires missing
 /// submodules, returns [`Ok`] with [`TagVerification::tree_sha256`] set to `None` and
 /// [`TagVerification::missing_submodules`] populated.

@@ -358,16 +358,17 @@ fn corrupt_chain_missing_and_mismatched_layer() {
     let layer_path = graphdir.join(format!("graph-{hash}.graph"));
     std::fs::remove_file(&layer_path).expect("remove layer");
     let err = CommitGraphChain::try_load(&objects).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            Error::Object(ObjectError::CorruptObject { .. }) | Error::Io(_)
-        )
-    );
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. }) | Error::Io(_)
+    ));
 
     std::fs::write(&layer_path, b"not a graph").expect("bad layer");
     let err = CommitGraphChain::try_load(&objects).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }
 
 #[test]

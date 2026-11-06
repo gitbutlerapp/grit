@@ -40,7 +40,7 @@ pub fn resolve_commit_filter_target(
 /// # Errors
 ///
 /// Propagates object read and parse failures (except missing intermediate objects, which
-/// return `false`). Returns [`Error::CorruptObject`] when a tag peel cycle is detected.
+/// return `false`). Returns [`ObjectError::CorruptObject`] when a tag peel cycle is detected.
 pub fn ref_points_at(
     odb: &Odb,
     ref_oid: ObjectId,

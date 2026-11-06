@@ -3,7 +3,6 @@
 //! each checked against the system `git upload-pack` answering the same request.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::io::{Cursor, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};

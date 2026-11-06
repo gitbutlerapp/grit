@@ -1,6 +1,5 @@
 //! `grit tag` — list tags, or create / delete one.
 
-use grit_lib::objects::ObjectError;
 use crate::context;
 use crate::error_kind::ErrorKind;
 use crate::json_error::{StructuredCliError, StructuredJsonError};
@@ -12,6 +11,7 @@ use grit_lib::commit::signing::{should_sign_tag, GpgConfig, TrustLevel};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::short_hex;
+use grit_lib::objects::ObjectError;
 use grit_lib::porcelain::tag::{
     create_tag, delete_tag, list_tags_with_detail, verify_tag_by_name, CreateTagRequest,
     TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,

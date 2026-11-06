@@ -1,7 +1,6 @@
 //! Basic `refs_fsck` integration for files-backend repositories.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;

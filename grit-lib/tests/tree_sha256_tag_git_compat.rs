@@ -262,7 +262,10 @@ fn missing_submodule_fails_before_writing_tag() {
     )
     .unwrap_err();
     assert!(
-        matches!(err, Error::Object(ObjectError::TreeSha256MissingSubmodules(_)))),
+        matches!(
+            err,
+            Error::Object(ObjectError::TreeSha256MissingSubmodules(_))
+        ),
         "{err:?}"
     );
     assert!(list_tags(&repo, &RefQuery::default())
@@ -294,7 +297,10 @@ fn tree_sha256_with_no_sign_is_error() {
         },
     )
     .unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::TreeSha256RequiresSigning)));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::TreeSha256RequiresSigning)
+    ));
 }
 
 #[test]

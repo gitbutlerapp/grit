@@ -6560,7 +6560,7 @@ mod packed_refs_parse_tests {
         keep: Option<PackedRecordFilter<'_>>,
     ) -> Result<Vec<(String, ObjectId, PackedPeel)>> {
         let mut out = Vec::new();
-        view.for_each_record(path, None, keep, |name, oid, peel| {
+        let _ = view.for_each_record(path, None, keep, |name, oid, peel| {
             out.push((name.to_owned(), oid, peel));
             ControlFlow::Continue(())
         })?;

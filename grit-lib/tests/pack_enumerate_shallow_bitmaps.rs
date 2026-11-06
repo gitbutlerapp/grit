@@ -3,7 +3,6 @@
 //! of a have (which runs to the root) must not decide what the client holds.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::collections::HashSet;
 use std::path::Path;
 

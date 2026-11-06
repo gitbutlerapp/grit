@@ -133,8 +133,8 @@ pub(crate) fn canonical_tree_entries(
 ///
 /// # Errors
 ///
-/// - [`Error::ObjectNotFound`] when an entry requires a stored object that is missing.
-/// - [`Error::UnexpectedObjectKind`] when a stored object has the wrong kind.
+/// - [`ObjectError::ObjectNotFound`] when an entry requires a stored object that is missing.
+/// - [`ObjectError::UnexpectedObjectKind`] when a stored object has the wrong kind.
 pub(crate) fn validate_tree_entry_stored_kinds(
     odb: &Odb,
     entries: &[TreeEntry],
@@ -253,9 +253,7 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
 ///     name: b"README".to_vec(),
 ///     oid: blob,
 /// }])?;
-/// let when = OffsetDateTime::from_unix_timestamp(1_700_000_000).map_err(|e| {
-///     grit_lib::error::Error::Message(e.to_string())
-/// })?;
+/// let when = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp");
 /// let ada = Signature::new("Ada Lovelace", "ada@example.com", when)?;
 /// let commit = repo
 ///     .objects()

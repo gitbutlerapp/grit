@@ -7,7 +7,6 @@
 //! against the system `git diff --raw`.
 #![cfg(unix)]
 #[allow(clippy::expect_used)]
-
 use grit_lib::objects::FileMode;
 use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::Path;

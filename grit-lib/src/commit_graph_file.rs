@@ -415,29 +415,47 @@ impl CommitGraphLayer {
                     extra_edges_end = Some(if i + 1 < num_chunks {
                         let e2 = toc_start
                             .checked_add((i + 1).checked_mul(12).ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?)
                             .ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?;
                         parse_toc_offset(
                             body.len(),
                             body[e2 + 4..e2 + 12].try_into().map_err(|_| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?,
                         )?
                     } else {
                         let term = toc_start
                             .checked_add(num_chunks.checked_mul(12).ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?)
                             .ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?;
                         parse_toc_offset(
                             body.len(),
                             body[term + 4..term + 12].try_into().map_err(|_| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?,
                         )?
                     });
@@ -447,29 +465,47 @@ impl CommitGraphLayer {
                     let end = if i + 1 < num_chunks {
                         let e2 = toc_start
                             .checked_add((i + 1).checked_mul(12).ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?)
                             .ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?;
                         parse_toc_offset(
                             body.len(),
                             body[e2 + 4..e2 + 12].try_into().map_err(|_| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?,
                         )?
                     } else {
                         let term = toc_start
                             .checked_add(num_chunks.checked_mul(12).ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?)
                             .ok_or_else(|| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?;
                         parse_toc_offset(
                             body.len(),
                             body[term + 4..term + 12].try_into().map_err(|_| {
-                                Error::Object(ObjectError::corrupt_object(None, "commit-graph bad TOC".to_owned()))
+                                Error::Object(ObjectError::corrupt_object(
+                                    None,
+                                    "commit-graph bad TOC".to_owned(),
+                                ))
                             })?,
                         )?
                     };
@@ -542,7 +578,10 @@ impl CommitGraphLayer {
                 let gda_end = chunk_byte_range(gda, &toc_entries, file_end)?;
                 let gda_len = gda_end.saturating_sub(gda);
                 let fo = fanout_off.ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "commit-graph missing fanout".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "commit-graph missing fanout".to_owned(),
+                    ))
                 })?;
                 let num_commits_probe = fanout_num_commits(body, fo)?;
                 let expected = num_commits_probe as usize * 4;
@@ -553,7 +592,10 @@ impl CommitGraphLayer {
                     )));
                 }
                 let gda_slice = body.get(gda..gda + expected).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "commit-graph generation data OOB".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "commit-graph generation data OOB".to_owned(),
+                    ))
                 })?;
                 let mut max_overflow_idx: Option<u32> = None;
                 for w in 0..num_commits_probe as usize {
@@ -601,13 +643,22 @@ impl CommitGraphLayer {
         });
 
         let fanout_off = fanout_off.ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "commit-graph missing OID fanout chunk".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "commit-graph missing OID fanout chunk".to_owned(),
+            ))
         })?;
         let oid_lookup_off = oid_lookup_off.ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "commit-graph missing OID lookup chunk".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "commit-graph missing OID lookup chunk".to_owned(),
+            ))
         })?;
         let commit_data_off = commit_data_off.ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "commit-graph missing commit data chunk".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "commit-graph missing commit data chunk".to_owned(),
+            ))
         })?;
         let num_commits = fanout_num_commits(body, fanout_off)?;
         let oid_lookup_bytes = (num_commits as usize)
@@ -629,7 +680,10 @@ impl CommitGraphLayer {
                     .ok_or_else(commit_graph_chunk_oob)?;
                 let a =
                     u32::from_be_bytes(body_slice(body, a_off, 4)?.try_into().map_err(|_| {
-                        Error::Object(ObjectError::corrupt_object(None, "commit-graph fanout corrupt".to_owned()))
+                        Error::Object(ObjectError::corrupt_object(
+                            None,
+                            "commit-graph fanout corrupt".to_owned(),
+                        ))
                     })?);
                 let b_off = fanout_off
                     .checked_add(
@@ -640,7 +694,10 @@ impl CommitGraphLayer {
                     .ok_or_else(commit_graph_chunk_oob)?;
                 let b =
                     u32::from_be_bytes(body_slice(body, b_off, 4)?.try_into().map_err(|_| {
-                        Error::Object(ObjectError::corrupt_object(None, "commit-graph fanout corrupt".to_owned()))
+                        Error::Object(ObjectError::corrupt_object(
+                            None,
+                            "commit-graph fanout corrupt".to_owned(),
+                        ))
                     })?);
                 if a > b {
                     return Err(Error::Object(ObjectError::corrupt_object(
@@ -1061,7 +1118,7 @@ impl CommitGraphChain {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the bytes are not a valid commit-graph file, or
+    /// Returns [`ObjectError::CorruptObject`] when the bytes are not a valid commit-graph file, or
     /// when the file is one layer of a split chain (it names base graphs it depends on).
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         if bytes.get(7).is_some_and(|&base_graphs| base_graphs != 0) {
@@ -1266,7 +1323,7 @@ impl CommitGraphChain {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when any layer fails verification.
+    /// Returns [`ObjectError::CorruptObject`] when any layer fails verification.
     pub fn verify_on_disk(objects_dir: &Path) -> Result<(), Error> {
         let Some(chain) = Self::try_load(objects_dir)? else {
             return Ok(());
@@ -1977,10 +2034,10 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::bloom::BloomFilterSettings;
-    use crate::error::Error;
-    use crate::objects::ObjectError;
     use crate::commit_graph_write::{build_commit_graph_bytes, load_commit_graph_commit_info};
+    use crate::error::Error;
     use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::objects::ObjectError;
     use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::write_tree_from_index;

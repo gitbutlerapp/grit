@@ -523,7 +523,9 @@ impl core::marker::Unpin for grit_lib::bundle::bundle_remote::BundleCreateOption
 impl core::marker::UnsafeUnpin for grit_lib::bundle::bundle_remote::BundleCreateOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bundle::bundle_remote::BundleCreateOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
 pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle_with_progress(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
+pub fn grit_lib::bundle::bundle_remote::resolve_bundle_spec(&grit_lib::repo::Repository, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<grit_lib::bundle::BundleSpec>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_from_rev_specs(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String]) -> grit_lib::error::Result<usize>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<usize>
 #[non_exhaustive] pub enum grit_lib::bundle::BundleError
@@ -8782,6 +8784,47 @@ impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::bitmap::TypeBitmap<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::bitmap::TypeBitmap<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::bitmap::TypeBitmap<'a>
 pub mod grit_lib::objects::commit_graph
+pub struct grit_lib::objects::commit_graph::BloomFilterSettings
+pub grit_lib::objects::commit_graph::BloomFilterSettings::bits_per_entry: u32
+pub grit_lib::objects::commit_graph::BloomFilterSettings::hash_version: u32
+pub grit_lib::objects::commit_graph::BloomFilterSettings::max_changed_paths: u32
+pub grit_lib::objects::commit_graph::BloomFilterSettings::num_hashes: u32
+impl core::clone::Clone for grit_lib::objects::commit_graph::BloomFilterSettings
+pub fn grit_lib::objects::commit_graph::BloomFilterSettings::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::cmp::PartialEq for grit_lib::objects::commit_graph::BloomFilterSettings
+pub fn grit_lib::objects::commit_graph::BloomFilterSettings::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::objects::commit_graph::BloomFilterSettings
+pub fn grit_lib::objects::commit_graph::BloomFilterSettings::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::commit_graph::BloomFilterSettings
+pub fn grit_lib::objects::commit_graph::BloomFilterSettings::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::marker::StructuralPartialEq for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::marker::Freeze for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::marker::Send for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::marker::Sync for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::marker::Unpin for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::marker::UnsafeUnpin for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::commit_graph::BloomFilterSettings
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::commit_graph::BloomFilterSettings
+pub struct grit_lib::objects::commit_graph::CommitGraphCommitInfo
+pub grit_lib::objects::commit_graph::CommitGraphCommitInfo::commit_time: u64
+pub grit_lib::objects::commit_graph::CommitGraphCommitInfo::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::objects::commit_graph::CommitGraphCommitInfo::tree: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+pub fn grit_lib::objects::commit_graph::CommitGraphCommitInfo::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+pub fn grit_lib::objects::commit_graph::CommitGraphCommitInfo::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+impl core::marker::Send for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+impl core::marker::Sync for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+impl core::marker::Unpin for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+impl core::marker::UnsafeUnpin for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::commit_graph::CommitGraphCommitInfo
+pub fn grit_lib::objects::commit_graph::build_commit_graph_bytes(&[grit_lib::objects::ObjectId], &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, grit_lib::objects::commit_graph::CommitGraphCommitInfo>, &grit_lib::prelude::Odb, bool, &grit_lib::objects::commit_graph::BloomFilterSettings, core::option::Option<&grit_lib::commit_graph_file::CommitGraphChain>, &[&[u8]], core::option::Option<u32>, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<u8>>, &std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<u8>>, bool) -> grit_lib::error::Result<(alloc::vec::Vec<u8>, grit_lib::commit_graph_write::BloomWriteStats)>
+pub fn grit_lib::objects::commit_graph::collect_reachable_commit_oids(&std::path::Path, &grit_lib::prelude::Odb) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub fn grit_lib::objects::commit_graph::load_commit_graph_commit_info(&grit_lib::prelude::Odb, grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::commit_graph::CommitGraphCommitInfo>
 pub type grit_lib::objects::commit_graph::BloomWalkStatsHandle = alloc::rcs::arc::Arc<std::sync::poison::mutex::Mutex<grit_lib::commit_graph_file::BloomWalkStats>>
 pub mod grit_lib::objects::delta_encode
 pub struct grit_lib::objects::delta_encode::DeltaIndex
@@ -8876,6 +8919,7 @@ pub grit_lib::objects::error::ObjectError::OdbObjectsDirMismatch
 pub grit_lib::objects::error::ObjectError::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::objects::error::ObjectError::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::objects::error::ObjectError::Offload(grit_lib::maintenance::OffloadError)
+pub grit_lib::objects::error::ObjectError::OperationCancelled
 pub grit_lib::objects::error::ObjectError::PackDeltaBaseNotWritten
 pub grit_lib::objects::error::ObjectError::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
 pub grit_lib::objects::error::ObjectError::PackDeltaBaseNotWritten::target: grit_lib::objects::ObjectId
@@ -8890,6 +8934,15 @@ pub grit_lib::objects::error::ObjectError::PromisedObjectMissing(grit_lib::objec
 pub grit_lib::objects::error::ObjectError::PromisorFetchFailed
 pub grit_lib::objects::error::ObjectError::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::objects::error::ObjectError>)>
 pub grit_lib::objects::error::ObjectError::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::PromisorFetchStillMissing(grit_lib::objects::ObjectId)
+pub grit_lib::objects::error::ObjectError::PromisorLazyFetchIncomplete
+pub grit_lib::objects::error::ObjectError::PromisorLazyFetchIncomplete::attempts: u32
+pub grit_lib::objects::error::ObjectError::PromisorLazyFetchIncomplete::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::error::ObjectError::PromisorLazyFetchNestedTooDeep
+pub grit_lib::objects::error::ObjectError::PromisorLazyFetchNestedTooDeep::limit: u32
+pub grit_lib::objects::error::ObjectError::PromisorLazyFetchNoGitDir
+pub grit_lib::objects::error::ObjectError::PromisorRemoteFailure
+pub grit_lib::objects::error::ObjectError::PromisorRemoteFailure::detail: alloc::string::String
 pub grit_lib::objects::error::ObjectError::TagVerifyDuplicateTreeSha256Header
 pub grit_lib::objects::error::ObjectError::TagVerifyMissingObjectHeader
 pub grit_lib::objects::error::ObjectError::TagVerifyNotTag
@@ -9941,6 +9994,31 @@ pub fn alloc::rcs::arc::Arc<T>::rollback(&self) -> grit_lib::objects::error::Obj
 pub fn alloc::rcs::arc::Arc<T>::write(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 pub fn alloc::rcs::arc::Arc<T>::write_stream(&self, grit_lib::objects::ObjectKind, u64, &mut dyn alloc::io::read::Read, grit_lib::objects::odb::WriteOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::ObjectId>
 pub mod grit_lib::objects::pack
+pub enum grit_lib::objects::pack::PackedType
+pub grit_lib::objects::pack::PackedType::Blob
+pub grit_lib::objects::pack::PackedType::Commit
+pub grit_lib::objects::pack::PackedType::OfsDelta
+pub grit_lib::objects::pack::PackedType::RefDelta
+pub grit_lib::objects::pack::PackedType::Tag
+pub grit_lib::objects::pack::PackedType::Tree
+impl grit_lib::objects::pack::PackedType
+pub fn grit_lib::objects::pack::PackedType::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::objects::pack::PackedType
+pub fn grit_lib::objects::pack::PackedType::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::pack::PackedType
+impl core::cmp::PartialEq for grit_lib::objects::pack::PackedType
+pub fn grit_lib::objects::pack::PackedType::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::pack::PackedType
+pub fn grit_lib::objects::pack::PackedType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::pack::PackedType
+impl core::marker::StructuralPartialEq for grit_lib::objects::pack::PackedType
+impl core::marker::Freeze for grit_lib::objects::pack::PackedType
+impl core::marker::Send for grit_lib::objects::pack::PackedType
+impl core::marker::Sync for grit_lib::objects::pack::PackedType
+impl core::marker::Unpin for grit_lib::objects::pack::PackedType
+impl core::marker::UnsafeUnpin for grit_lib::objects::pack::PackedType
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack::PackedType
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::PackedType
 pub struct grit_lib::objects::pack::PackIndex
 pub grit_lib::objects::pack::PackIndex::fanout: [u32; 256]
 pub grit_lib::objects::pack::PackIndex::idx_path: std::path::PathBuf
@@ -9948,19 +10026,19 @@ pub grit_lib::objects::pack::PackIndex::is_cruft: bool
 pub grit_lib::objects::pack::PackIndex::is_promisor: bool
 pub grit_lib::objects::pack::PackIndex::pack_path: std::path::PathBuf
 impl grit_lib::objects::pack::PackIndex
-pub fn grit_lib::objects::pack::PackIndex::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::objects::pack::PackIndex::contains(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<bool>
 pub fn grit_lib::objects::pack::PackIndex::crc32_at(&self, usize) -> core::option::Option<u32>
-pub fn grit_lib::objects::pack::PackIndex::crc32_for_pack_offset(&self, u64) -> grit_lib::error::Result<core::option::Option<u32>>
-pub fn grit_lib::objects::pack::PackIndex::find_offset(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<core::option::Option<u64>>
-pub fn grit_lib::objects::pack::PackIndex::find_offset_monotonic(&self, &grit_lib::objects::ObjectId, &mut usize) -> grit_lib::error::Result<core::option::Option<u64>>
+pub fn grit_lib::objects::pack::PackIndex::crc32_for_pack_offset(&self, u64) -> grit_lib::objects::error::ObjectResult<core::option::Option<u32>>
+pub fn grit_lib::objects::pack::PackIndex::find_offset(&self, &grit_lib::objects::ObjectId) -> grit_lib::objects::error::ObjectResult<core::option::Option<u64>>
+pub fn grit_lib::objects::pack::PackIndex::find_offset_monotonic(&self, &grit_lib::objects::ObjectId, &mut usize) -> grit_lib::objects::error::ObjectResult<core::option::Option<u64>>
 pub fn grit_lib::objects::pack::PackIndex::find_position(&self, &grit_lib::objects::ObjectId) -> core::option::Option<usize>
-pub fn grit_lib::objects::pack::PackIndex::find_position_by_offset_sorted(&self, u64) -> grit_lib::error::Result<core::option::Option<usize>>
+pub fn grit_lib::objects::pack::PackIndex::find_position_by_offset_sorted(&self, u64) -> grit_lib::objects::error::ObjectResult<core::option::Option<usize>>
 pub fn grit_lib::objects::pack::PackIndex::hash_bytes(&self) -> usize
 pub fn grit_lib::objects::pack::PackIndex::is_empty(&self) -> bool
 pub fn grit_lib::objects::pack::PackIndex::iter(&self) -> grit_lib::pack_index::PackIndexIter<'_>
 pub fn grit_lib::objects::pack::PackIndex::len(&self) -> usize
-pub fn grit_lib::objects::pack::PackIndex::next_pack_offset_after(&self, u64, u64) -> grit_lib::error::Result<u64>
-pub fn grit_lib::objects::pack::PackIndex::offset_at(&self, usize) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack::PackIndex::next_pack_offset_after(&self, u64, u64) -> grit_lib::objects::error::ObjectResult<u64>
+pub fn grit_lib::objects::pack::PackIndex::offset_at(&self, usize) -> grit_lib::objects::error::ObjectResult<u64>
 pub fn grit_lib::objects::pack::PackIndex::oid_at(&self, usize) -> &[u8]
 impl core::clone::Clone for grit_lib::objects::pack::PackIndex
 pub fn grit_lib::objects::pack::PackIndex::clone(&self) -> Self
@@ -9976,7 +10054,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::PackIndex
 pub struct grit_lib::objects::pack::PackIndexEntryRef<'a>
 impl<'a> grit_lib::objects::pack::PackIndexEntryRef<'a>
 pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::crc32(&self) -> core::option::Option<u32>
-pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::offset(&self) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::offset(&self) -> grit_lib::objects::error::ObjectResult<u64>
 pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::oid(&self) -> &'a [u8]
 impl<'a> core::clone::Clone for grit_lib::objects::pack::PackIndexEntryRef<'a>
 pub fn grit_lib::objects::pack::PackIndexEntryRef<'a>::clone(&self) -> Self
@@ -10040,17 +10118,22 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::Streaming
 pub const grit_lib::objects::pack::DEFAULT_PACK_DEPTH: usize
 pub fn grit_lib::objects::pack::clear_pack_cache()
 pub fn grit_lib::objects::pack::hash_object_bytes(grit_lib::objects::ObjectKind, &[u8], usize) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::objects::pack::max_verify_pack_delta_depth(&[grit_lib::pack::VerifyObjectRecord]) -> u64
 pub fn grit_lib::objects::pack::oid_bytes_to_hex(&[u8]) -> alloc::string::String
 pub fn grit_lib::objects::pack::read_alternates_recursive(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<std::path::PathBuf>>
 pub fn grit_lib::objects::pack::read_idx_object_ids(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::objects::pack::read_local_pack_indexes(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::pack::PackIndex>>
+pub fn grit_lib::objects::pack::read_object_from_pack(&grit_lib::objects::pack::PackIndex, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::objects::pack::read_object_from_pack_at_offset(&grit_lib::objects::pack::PackIndex, u64) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::pack::read_object_from_pack_into(&grit_lib::objects::pack::PackIndex, &grit_lib::objects::ObjectId, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<grit_lib::objects::ObjectKind>
 pub fn grit_lib::objects::pack::read_object_from_packs(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
-pub fn grit_lib::objects::pack::read_pack_index(&std::path::Path) -> grit_lib::error::Result<grit_lib::objects::pack::PackIndex>
-pub fn grit_lib::objects::pack::read_pack_index_cached(&std::path::Path) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::objects::pack::PackIndex>>
+pub fn grit_lib::objects::pack::read_pack_index(&std::path::Path) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::pack::PackIndex>
+pub fn grit_lib::objects::pack::read_pack_index_cached(&std::path::Path) -> grit_lib::objects::error::ObjectResult<alloc::rcs::arc::Arc<grit_lib::objects::pack::PackIndex>>
+pub fn grit_lib::objects::pack::read_pack_index_no_verify(&std::path::Path) -> grit_lib::objects::error::ObjectResult<grit_lib::objects::pack::PackIndex>
 pub fn grit_lib::objects::pack::read_packed_delta_dependency(&[u8], u64, usize) -> grit_lib::error::Result<core::option::Option<grit_lib::pack::PackedDeltaDependency>>
 pub fn grit_lib::objects::pack::skip_one_pack_object(&[u8], &mut usize, u64, usize) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::pack::try_write_streaming_pack(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack_objects::PackStats>>
+pub fn grit_lib::objects::pack::verify_pack_and_collect(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::pack::VerifyObjectRecord>>
 pub fn grit_lib::objects::pack::write_v2_pack_index(&std::path::Path, &std::path::Path, &[(grit_lib::objects::ObjectId, u64, u32)], usize) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::pack::write_v2_pack_index_with_trailer(&std::path::Path, &[(grit_lib::objects::ObjectId, u64, u32)], &[u8], usize, core::option::Option<usize>) -> grit_lib::error::Result<()>
 pub mod grit_lib::objects::pack_object_select
@@ -10222,6 +10305,38 @@ pub fn grit_lib::objects::pack_objects::build_pack_from_send_list(&grit_lib::pre
 pub fn grit_lib::objects::pack_objects::build_pack_with_shallow_and_filter(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack_objects::write_pack_for_push(&grit_lib::prelude::Odb, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::io::write::Write) -> grit_lib::error::Result<grit_lib::objects::pack_objects::PackStats>
 pub fn grit_lib::objects::pack_objects::write_upload_pack_stream(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<grit_lib::objects::pack_objects::PackStats>
+pub mod grit_lib::objects::pack_receive
+pub enum grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+pub grit_lib::objects::pack_receive::PackReceiveTarget::File(&'a mut dyn core::io::write::Write)
+pub grit_lib::objects::pack_receive::PackReceiveTarget::Memory(&'a mut alloc::vec::Vec<u8>)
+impl<'a> core::marker::Freeze for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+impl<'a> !core::marker::Send for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+impl<'a> !core::marker::Sync for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+impl<'a> core::marker::Unpin for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+impl<'a> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_receive::PackReceiveTarget<'a>
+pub struct grit_lib::objects::pack_receive::TempPackReceive
+impl grit_lib::objects::pack_receive::TempPackReceive
+pub fn grit_lib::objects::pack_receive::TempPackReceive::create(&std::path::Path) -> grit_lib::error::Result<Self>
+pub fn grit_lib::objects::pack_receive::TempPackReceive::finish(self) -> grit_lib::error::Result<core::option::Option<std::path::PathBuf>>
+pub fn grit_lib::objects::pack_receive::TempPackReceive::path(&self) -> &std::path::Path
+pub fn grit_lib::objects::pack_receive::TempPackReceive::read_sideband(&mut self, &mut dyn alloc::io::read::Read, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+impl core::io::write::Write for grit_lib::objects::pack_receive::TempPackReceive
+pub fn grit_lib::objects::pack_receive::TempPackReceive::flush(&mut self) -> core::io::error::Result<()>
+pub fn grit_lib::objects::pack_receive::TempPackReceive::write(&mut self, &[u8]) -> core::io::error::Result<usize>
+impl core::marker::Freeze for grit_lib::objects::pack_receive::TempPackReceive
+impl core::marker::Send for grit_lib::objects::pack_receive::TempPackReceive
+impl core::marker::Sync for grit_lib::objects::pack_receive::TempPackReceive
+impl core::marker::Unpin for grit_lib::objects::pack_receive::TempPackReceive
+impl core::marker::UnsafeUnpin for grit_lib::objects::pack_receive::TempPackReceive
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack_receive::TempPackReceive
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_receive::TempPackReceive
+pub fn grit_lib::objects::pack_receive::append_pack_data(&[u8], &mut grit_lib::objects::pack_receive::PackReceiveTarget<'_>, &mut alloc::vec::Vec<u8>, &mut bool) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack_receive::copy_reader_to_writer(&mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack_receive::copy_reader_to_writer_cancellable(&mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<u64>
+pub fn grit_lib::objects::pack_receive::read_sideband_pack_tail(&mut dyn alloc::io::read::Read, &mut grit_lib::objects::pack_receive::PackReceiveTarget<'_>, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, &mut alloc::vec::Vec<u8>, &mut bool, &mut alloc::vec::Vec<u8>) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::pack_receive::read_sideband_pack_to(&mut dyn alloc::io::read::Read, &mut grit_lib::objects::pack_receive::PackReceiveTarget<'_>, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub mod grit_lib::objects::pack_store
 pub struct grit_lib::objects::pack_store::PackStore
 impl grit_lib::objects::pack_store::PackStore
@@ -10480,7 +10595,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::unpack_objec
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::unpack_objects::UnpackOptions
 pub fn grit_lib::objects::unpack_objects::apply_delta(&[u8], &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::unpack_objects::apply_delta_into(&mut alloc::vec::Vec<u8>, &[u8], &[u8]) -> grit_lib::error::Result<()>
-pub fn grit_lib::objects::unpack_objects::ingest_pack_into(&mut dyn alloc::io::read::Read, &dyn grit_lib::objects::odb::WritableObjectStore, &dyn grit_lib::objects::odb::ObjectStore, &grit_lib::objects::unpack_objects::UnpackOptions) -> grit_lib::error::Result<grit_lib::unpack_objects::IngestedObjects>
+pub fn grit_lib::objects::unpack_objects::ingest_pack_into(&mut dyn alloc::io::read::Read, &dyn grit_lib::objects::odb::WritableObjectStore, &dyn grit_lib::objects::odb::ObjectStore, &grit_lib::objects::unpack_objects::UnpackOptions) -> grit_lib::objects::error::ObjectResult<grit_lib::unpack_objects::IngestedObjects>
 pub fn grit_lib::objects::unpack_objects::pack_index_records_with_threads(&[u8], &grit_lib::prelude::Odb, grit_lib::parallel::Parallelism) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::unpack_objects::PackIndexRecord>>
 pub fn grit_lib::objects::unpack_objects::pack_is_thin(&[u8], grit_lib::objects::HashAlgo) -> bool
 #[non_exhaustive] pub enum grit_lib::objects::CorruptObjectReason
@@ -10606,6 +10721,7 @@ pub grit_lib::objects::ObjectError::OdbObjectsDirMismatch
 pub grit_lib::objects::ObjectError::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::objects::ObjectError::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::objects::ObjectError::Offload(grit_lib::maintenance::OffloadError)
+pub grit_lib::objects::ObjectError::OperationCancelled
 pub grit_lib::objects::ObjectError::PackDeltaBaseNotWritten
 pub grit_lib::objects::ObjectError::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
 pub grit_lib::objects::ObjectError::PackDeltaBaseNotWritten::target: grit_lib::objects::ObjectId
@@ -10620,6 +10736,15 @@ pub grit_lib::objects::ObjectError::PromisedObjectMissing(grit_lib::objects::Obj
 pub grit_lib::objects::ObjectError::PromisorFetchFailed
 pub grit_lib::objects::ObjectError::PromisorFetchFailed::failures: alloc::vec::Vec<(alloc::string::String, alloc::boxed::Box<grit_lib::objects::error::ObjectError>)>
 pub grit_lib::objects::ObjectError::PromisorFetchFailed::missing: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::PromisorFetchStillMissing(grit_lib::objects::ObjectId)
+pub grit_lib::objects::ObjectError::PromisorLazyFetchIncomplete
+pub grit_lib::objects::ObjectError::PromisorLazyFetchIncomplete::attempts: u32
+pub grit_lib::objects::ObjectError::PromisorLazyFetchIncomplete::oid: grit_lib::objects::ObjectId
+pub grit_lib::objects::ObjectError::PromisorLazyFetchNestedTooDeep
+pub grit_lib::objects::ObjectError::PromisorLazyFetchNestedTooDeep::limit: u32
+pub grit_lib::objects::ObjectError::PromisorLazyFetchNoGitDir
+pub grit_lib::objects::ObjectError::PromisorRemoteFailure
+pub grit_lib::objects::ObjectError::PromisorRemoteFailure::detail: alloc::string::String
 pub grit_lib::objects::ObjectError::TagVerifyDuplicateTreeSha256Header
 pub grit_lib::objects::ObjectError::TagVerifyMissingObjectHeader
 pub grit_lib::objects::ObjectError::TagVerifyNotTag

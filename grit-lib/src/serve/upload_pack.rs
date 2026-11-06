@@ -14,7 +14,6 @@ use super::{
 };
 use crate::config::ConfigSet;
 use crate::objects::pack_objects::PackStats;
-use crate::objects::ObjectError;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::pack_object_select::{PackObjectSelection, TagCandidate};
 use crate::pack_objects::{

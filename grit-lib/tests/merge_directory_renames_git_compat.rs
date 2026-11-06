@@ -3,7 +3,6 @@
 //! through the index and work tree with the system `git`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

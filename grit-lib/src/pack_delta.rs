@@ -150,7 +150,7 @@ const WRITE_BATCH_ENTRIES: usize = 256;
 ///
 /// # Errors
 ///
-/// Returns object read or encoding errors, [`Error::PackDeltaBaseNotWritten`] when the
+/// Returns object read or encoding errors, [`ObjectError::PackDeltaBaseNotWritten`] when the
 /// pack is not thin (`opts.thin` unset) and a delta comes before its base (a base
 /// missing from `entries`, or a delta cycle), [`Error::Io`] when writing to `w`
 /// fails, and [`Error::Cancelled`] once `stop` fires.
@@ -227,7 +227,10 @@ fn write_pack_in_batches(
                 let in_pack_offset = oid_to_offset.get(&base_oid).copied();
                 if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
                     let dist = offset.checked_sub(base_off).ok_or_else(|| {
-                        Error::Object(ObjectError::corrupt_object(None, "ofs-delta distance underflow".to_owned()))
+                        Error::Object(ObjectError::corrupt_object(
+                            None,
+                            "ofs-delta distance underflow".to_owned(),
+                        ))
                     })?;
                     encode_pack_object_header(&mut header, 6, prep.payload_len);
                     encode_ofs_delta_distance(&mut header, dist);
@@ -265,7 +268,10 @@ fn write_pack_in_batches(
             }
             body => {
                 let bytes = body.as_slice().ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "missing prepared pack body".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "missing prepared pack body".to_owned(),
+                    ))
                 })?;
                 crate::pack_objects::write_all_chunked(&mut out, bytes)?;
                 let mut crc = crc32fast::Hasher::new();

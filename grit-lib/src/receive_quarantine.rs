@@ -171,7 +171,7 @@ impl ReceiveQuarantine {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UnsupportedObjectStore`] when `source` is not files-backed,
+    /// Returns [`ObjectError::UnsupportedObjectStore`] when `source` is not files-backed,
     /// or [`Error::Io`] when the directory cannot be created.
     pub fn create(source: &Odb, git_dir: &Path) -> Result<Self> {
         let main_objects = source

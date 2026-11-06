@@ -1,7 +1,6 @@
 //! Integration tests for [`grit_lib::revwalk::history::rebase_onto`].
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;

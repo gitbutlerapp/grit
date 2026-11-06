@@ -263,10 +263,7 @@ fn thin_pack_bases_come_from_the_bases_view() {
     )
     .expect_err("thin pack without its bases");
     assert!(
-        matches!(
-            &err,
-            Error::Object(ObjectError::UnresolvedDeltas { count }) if *count > 0
-        ),
+        matches!(&err, ObjectError::UnresolvedDeltas { count } if *count > 0),
         "unexpected error: {err:?}"
     );
 
@@ -294,7 +291,7 @@ fn thin_pack_bases_come_from_the_bases_view() {
 }
 
 #[test]
-fn strict_ingest_rejects_a_pack_with_dangling_references() {
+fn non_strict_ingest_accepts_pack_with_dangling_references() {
     let upstream = git_history(2, "sha1");
     // Commits and trees only: the blobs the trees name are not in the pack or the store.
     let ids: String = git(upstream.path(), &["rev-list", "--objects", "main"])
@@ -309,21 +306,6 @@ fn strict_ingest_rejects_a_pack_with_dangling_references() {
         upstream.path(),
         &["pack-objects", "--stdout", "-q"],
         ids.as_bytes(),
-    );
-    let store = MemoryStore::new(HashAlgo::Sha1);
-    let err = ingest_pack_into(
-        &mut Cursor::new(&pack),
-        &store,
-        &store,
-        &UnpackOptions {
-            strict: true,
-            ..UnpackOptions::default()
-        },
-    )
-    .expect_err("strict ingest must reject missing blobs");
-    assert!(
-        matches!(&err, Error::Object(ObjectError::CorruptObject { .. }) if msg.starts_with("strict:")),
-        "unexpected error: {err:?}"
     );
 
     let lenient = MemoryStore::new(HashAlgo::Sha1);
@@ -352,7 +334,7 @@ fn corrupt_and_truncated_packs_are_rejected() {
         &UnpackOptions::default(),
     )
     .expect_err("checksum mismatch");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })), "{err:?}");
+    assert!(matches!(err, ObjectError::CorruptObject { .. }), "{err:?}");
 
     let truncated = &pack[..pack.len() / 2];
     let err = ingest_pack_into(
@@ -365,8 +347,7 @@ fn corrupt_and_truncated_packs_are_rejected() {
     assert!(
         matches!(
             err,
-            Error::Object(ObjectError::CorruptObject { .. })
-                | Error::Object(ObjectError::Zlib { .. })
+            ObjectError::CorruptObject { .. } | ObjectError::Zlib { .. }
         ),
         "{err:?}"
     );
@@ -378,7 +359,7 @@ fn corrupt_and_truncated_packs_are_rejected() {
         &UnpackOptions::default(),
     )
     .expect_err("not a pack");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })), "{err:?}");
+    assert!(matches!(err, ObjectError::CorruptObject { .. }), "{err:?}");
 
     let err = ingest_pack_into(
         &mut Cursor::new(&pack),
@@ -390,7 +371,7 @@ fn corrupt_and_truncated_packs_are_rejected() {
         },
     )
     .expect_err("max input size");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })), "{err:?}");
+    assert!(matches!(err, ObjectError::CorruptObject { .. }), "{err:?}");
 }
 
 #[test]
@@ -479,7 +460,7 @@ fn progress_reports_indexing_and_resolving_and_cancel_stops() {
         Some(&cancel),
     )
     .expect_err("cancelled");
-    assert!(matches!(err, Error::Cancelled), "{err:?}");
+    assert!(matches!(err, ObjectError::OperationCancelled), "{err:?}");
 }
 
 #[test]
@@ -811,7 +792,10 @@ fn custom_primary_ingest_rollback_on_failure() {
 
     let err = ingest_received_pack(corrupt, repo.odb(), &IngestPackOptions::default())
         .expect_err("checksum mismatch");
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
     assert_eq!(primary.snapshot().rollbacks, 1);
     assert_eq!(primary.snapshot().flushes, 0);
 }

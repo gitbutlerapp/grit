@@ -1,8 +1,8 @@
 //! Alternate ordering when an earlier store cannot serve an OID (system git oracle).
 
-use grit_lib::objects::ObjectError;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::ObjectKind;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

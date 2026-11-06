@@ -1,7 +1,6 @@
 //! Coverage for [`grit_lib::refs::listing`] public API.
 
 #[allow(clippy::unwrap_used)]
-
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::commit::create_commit;
 use grit_lib::porcelain::tag::{create_tag, CreateTagRequest};

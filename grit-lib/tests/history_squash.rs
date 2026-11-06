@@ -1,7 +1,6 @@
 //! Tests for [`grit_lib::revwalk::history::squash`].
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::objects::parse_commit;

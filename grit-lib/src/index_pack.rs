@@ -252,7 +252,7 @@ impl IngestPackOptions {
 ///
 /// # Errors
 ///
-/// [`Error::CorruptObject`] when the bytes are not a complete pack, plus any
+/// [`ObjectError::CorruptObject`] when the bytes are not a complete pack, plus any
 /// indexing, delta-resolution, or object-store failure.
 pub fn ingest_received_pack(
     pack: Vec<u8>,
@@ -699,7 +699,7 @@ fn write_keep_marker(final_pack: &Path, opts: &IngestPackOptions) -> Result<Opti
 /// # Errors
 ///
 /// Returns [`Error::Io`] on file errors, an object-database error when a base cannot be
-/// read, and [`Error::CorruptObject`] when the object count would overflow.
+/// read, and [`ObjectError::CorruptObject`] when the object count would overflow.
 fn append_thin_bases(
     pack_path: &Path,
     odb: &Odb,
@@ -722,7 +722,10 @@ fn append_thin_bases(
             u32::from_be_bytes([header[8], header[9], header[10], header[11]]).checked_add(added)
         })
         .ok_or_else(|| {
-            Error::Object(ObjectError::corrupt_object(None, "thin pack fix: object count overflow".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "thin pack fix: object count overflow".to_owned(),
+            ))
         })?;
     header[8..12].copy_from_slice(&count.to_be_bytes());
 

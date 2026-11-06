@@ -976,7 +976,10 @@ pub(crate) fn write_delta_pack_stream(
     let delta_count = plan.entries.iter().filter(|e| e.base.is_some()).count() as u32;
     Ok(PackStats {
         object_count: u32::try_from(plan.entries.len()).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, "pack object count exceeds u32".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "pack object count exceeds u32".to_owned(),
+            ))
         })?,
         pack_bytes: reuse_stats.0,
         delta_count,
@@ -1131,7 +1134,10 @@ fn write_planned_entries(
             })?;
             if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
                 let dist = start.checked_sub(base_off).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta distance underflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "ofs-delta distance underflow".to_owned(),
+                    ))
                 })?;
                 encode_pack_object_header(&mut chunk, 6, delta_len);
                 encode_ofs_delta_distance(&mut chunk, dist);
@@ -1175,7 +1181,10 @@ fn write_planned_entries(
             };
             if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
                 let dist = start.checked_sub(base_off).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "ofs-delta distance underflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "ofs-delta distance underflow".to_owned(),
+                    ))
                 })?;
                 encode_pack_object_header(&mut chunk, 6, delta_len);
                 encode_ofs_delta_distance(&mut chunk, dist);

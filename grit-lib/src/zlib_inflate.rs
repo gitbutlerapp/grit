@@ -219,7 +219,10 @@ impl ZlibInflateScratch {
             if let Some(dest) = delta_uncompressed_result_size_if_complete(&self.delta_prefix)? {
                 *pos += in_off;
                 return u64::try_from(dest).map_err(|_| {
-                    Error::Object(ObjectError::corrupt_object(None, "delta result size overflow".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "delta result size overflow".to_owned(),
+                    ))
                 });
             }
             if self.delta_prefix.len() >= MAX_PREFIX {
@@ -288,8 +291,8 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when declared size does not match inflated output.
-    /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Returns [`ObjectError::CorruptObject`] when declared size does not match inflated output.
+    /// Returns [`ObjectError::Zlib`] for invalid or truncated zlib data.
     /// Inflate exactly `expected_size` bytes and pass each produced slice to `update`.
     ///
     /// Uses a fixed stack buffer so large pack objects are not allocated whole in memory.
@@ -301,7 +304,10 @@ impl ZlibInflateScratch {
         mut update: impl FnMut(&[u8]) -> Result<()>,
     ) -> Result<()> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("pack object size overflow: {expected_size}")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {expected_size}"),
+            ))
         })?;
         self.reset();
         let input = &bytes[*pos..];
@@ -377,7 +383,7 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Returns [`ObjectError::Zlib`] for invalid or truncated zlib data.
     pub fn decompress_prefix_into(
         &mut self,
         bytes: &[u8],
@@ -392,7 +398,10 @@ impl ZlibInflateScratch {
         out.resize(max_out, 0);
         let consumed = self.decompress_into(bytes, out, false)?;
         out.truncate(self.dec.total_out().try_into().map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, "inflate output overflow".to_owned()))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                "inflate output overflow".to_owned(),
+            ))
         })?);
         Ok(consumed)
     }
@@ -431,7 +440,7 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] for invalid zlib, preset-dictionary streams, or truncated input.
+    /// Returns [`ObjectError::Zlib`] for invalid zlib, preset-dictionary streams, or truncated input.
     /// Returns [`Error::Io`] for read failures, including a file too short to hold a zlib header.
     pub fn inflate_loose_file(
         &mut self,
@@ -605,7 +614,7 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Zlib`] for invalid zlib data and [`Error::Io`] for read failures.
+    /// Returns [`ObjectError::Zlib`] for invalid zlib data and [`Error::Io`] for read failures.
     pub fn inflate_loose_header(&mut self, file: &mut std::fs::File) -> Result<Vec<u8>> {
         const HEADER_INPUT_CHUNK: usize = 512;
         self.reset();
@@ -664,7 +673,10 @@ impl ZlibInflateScratch {
         out: &mut Vec<u8>,
     ) -> Result<()> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("pack object size overflow: {expected_size}")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {expected_size}"),
+            ))
         })?;
         out.clear();
         if expected <= MAX_HEADER_SIZE_RESERVE {
@@ -762,8 +774,8 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when the stream does not inflate to exactly
-    /// `expected_size` bytes, and [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Returns [`ObjectError::CorruptObject`] when the stream does not inflate to exactly
+    /// `expected_size` bytes, and [`ObjectError::Zlib`] for invalid or truncated zlib data.
     pub(crate) fn decompress_prefix_until(
         &mut self,
         input: &[u8],
@@ -773,7 +785,10 @@ impl ZlibInflateScratch {
         prefix_len: impl Fn(&[u8]) -> Option<usize>,
     ) -> Result<bool> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("pack object size overflow: {expected_size}")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {expected_size}"),
+            ))
         })?;
         self.reset();
         out.clear();
@@ -848,8 +863,8 @@ impl ZlibInflateScratch {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::CorruptObject`] when inflated output exceeds `expected_size`, or when
-    /// the stream ends before producing `expected_size` bytes. Returns [`Error::Zlib`] for
+    /// Returns [`ObjectError::CorruptObject`] when inflated output exceeds `expected_size`, or when
+    /// the stream ends before producing `expected_size` bytes. Returns [`ObjectError::Zlib`] for
     /// invalid or truncated zlib data.
     pub fn skip_zlib_stream(
         &mut self,
@@ -858,7 +873,10 @@ impl ZlibInflateScratch {
         expected_size: u64,
     ) -> Result<()> {
         let expected = usize::try_from(expected_size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("pack object size overflow: {expected_size}")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("pack object size overflow: {expected_size}"),
+            ))
         })?;
         let input = &bytes[*pos..];
         self.reset();

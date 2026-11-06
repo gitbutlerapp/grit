@@ -1094,7 +1094,7 @@ pub fn make_snapshot(
 /// [`CheckoutError::PromisedBlobs`] when blobs are missing and the repository has
 /// no promisor fetcher, [`CheckoutError::PromisedBlobsNotFetched`] when the fetch
 /// failed or left some missing, [`CheckoutError::Library`] with
-/// [`crate::error::Error::ObjectNotFound`] for a missing blob nothing promises,
+/// [`crate::objects::ObjectError::ObjectNotFound`] for a missing blob nothing promises,
 /// and object read failures.
 pub fn fetch_promised_blobs(repo: &Repository, snapshot: ObjectId) -> Result<usize> {
     let tree = parse_commit(&repo.odb().read(&snapshot)?.data)?.tree;

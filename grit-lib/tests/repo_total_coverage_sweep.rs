@@ -1,7 +1,6 @@
 //! Repository handle sweeps for `[total]` coverage on `repo.rs` and handles.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};

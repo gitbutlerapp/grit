@@ -51,7 +51,10 @@ impl BitmapOrder {
                 ..
             } => {
                 let row = *rank_to_index_row.get(pos).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "bitmap position out of range".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "bitmap position out of range".to_owned(),
+                    ))
                 })? as usize;
                 ObjectId::from_bytes(index.oid_at(row))
             }
@@ -59,10 +62,16 @@ impl BitmapOrder {
                 oids, rid_order, ..
             } => {
                 let oid_idx = *rid_order.get(pos).ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "bitmap position out of range".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "bitmap position out of range".to_owned(),
+                    ))
                 })? as usize;
                 oids.get(oid_idx).copied().ok_or_else(|| {
-                    Error::Object(ObjectError::corrupt_object(None, "MIDX reverse index out of range".to_owned()))
+                    Error::Object(ObjectError::corrupt_object(
+                        None,
+                        "MIDX reverse index out of range".to_owned(),
+                    ))
                 })
             }
         }
@@ -117,7 +126,10 @@ impl BitmapOrder {
         match self {
             Self::Pack { index, .. } => ObjectId::from_bytes(index.oid_at(row as usize)),
             Self::Midx { oids, .. } => oids.get(row as usize).copied().ok_or_else(|| {
-                Error::Object(ObjectError::corrupt_object(None, "MIDX object row out of range".to_owned()))
+                Error::Object(ObjectError::corrupt_object(
+                    None,
+                    "MIDX object row out of range".to_owned(),
+                ))
             }),
         }
     }

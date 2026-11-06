@@ -25,7 +25,6 @@
 //! # }
 //! ```
 
-use crate::objects::ObjectError;
 use std::fs;
 use std::path::Path;
 

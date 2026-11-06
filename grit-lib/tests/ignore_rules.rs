@@ -2,7 +2,6 @@
 //! [`IgnoreMatcher::check_path`] against system `git check-ignore`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};

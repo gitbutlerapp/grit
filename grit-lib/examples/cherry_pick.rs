@@ -6,7 +6,6 @@
 //!
 //! Run: `cargo run -p grit-lib --example cherry_pick`
 
-use crate::objects::ObjectError;
 use grit_lib::commit::trailers;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::merge_file::MergeFavor;
@@ -14,6 +13,7 @@ use grit_lib::diff::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, WhitespaceMergeOptions,
 };
 use grit_lib::index::write_tree::write_tree_from_index;
+use grit_lib::objects::ObjectError;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
@@ -135,7 +135,10 @@ fn main() -> grit_lib::error::Result<()> {
     let picked_obj = repo.odb().read(&picked)?;
     let picked_data = parse_commit(&picked_obj.data)?;
     let parent = picked_data.parents.first().copied().ok_or_else(|| {
-        grit_lib::error::Error::Object(ObjectError::corrupt_object(None, "picked commit has no parent"))
+        grit_lib::error::Error::Object(ObjectError::corrupt_object(
+            None,
+            "picked commit has no parent",
+        ))
     })?;
 
     let base_tree = tree_of_commit(&repo, parent)?;

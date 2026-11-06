@@ -177,7 +177,10 @@ impl StagedPack {
         let (first, tail) = read_first_payload_chunk(reader, size)?;
         let compression = compression_after_first_chunk(&first, compression);
         let payload_len = usize::try_from(size).map_err(|_| {
-            Error::Object(ObjectError::corrupt_object(None, format!("object size {size} exceeds address space")))
+            Error::Object(ObjectError::corrupt_object(
+                None,
+                format!("object size {size} exceeds address space"),
+            ))
         })?;
         fs::create_dir_all(pack_dir)?;
         let tmp = tempfile::Builder::new()

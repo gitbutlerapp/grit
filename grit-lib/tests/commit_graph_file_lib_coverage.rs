@@ -593,7 +593,10 @@ fn grit_octopus_graph_rejects_invalid_extra_edge_parent() {
         bytes[off..off + 4].copy_from_slice(&99u32.to_be_bytes());
         reseal_commit_graph(&mut bytes, repo.odb().hash_algo());
         let err = CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes).unwrap_err();
-        assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+        assert!(matches!(
+            err,
+            Error::Object(ObjectError::CorruptObject { .. })
+        ));
     }
 }
 
@@ -636,7 +639,10 @@ fn grit_graph_rejects_invalid_parent_index_in_cdat() {
     bytes[cdat_off + hash_len..cdat_off + hash_len + 4].copy_from_slice(&99u32.to_be_bytes());
     reseal_commit_graph(&mut bytes, repo.odb().hash_algo());
     let err = CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }
 
 #[test]
@@ -754,7 +760,10 @@ fn grit_graph_rejects_unsupported_hash_version() {
     bytes[5] = 99;
     reseal_commit_graph(&mut bytes, repo.odb().hash_algo());
     let err = CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes).unwrap_err();
-    assert!(matches!(err, Error::Object(ObjectError::CorruptObject { .. })));
+    assert!(matches!(
+        err,
+        Error::Object(ObjectError::CorruptObject { .. })
+    ));
 }
 
 #[test]

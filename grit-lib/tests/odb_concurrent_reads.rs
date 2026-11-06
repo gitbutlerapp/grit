@@ -279,7 +279,10 @@ fn stale_read_after_invalidation() {
         "read after cross-thread invalidation must not return removed pack objects"
     );
     assert!(
-        matches!(odb.read(&oid), Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))),
+        matches!(
+            odb.read(&oid),
+            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. }))
+        ),
         "serial read after pack removal must miss"
     );
 }

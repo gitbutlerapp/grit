@@ -1,7 +1,6 @@
 //! Integration sweeps targeting history aggregate (`diff`, `revwalk`, `revparse`) coverage.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
     diff_commits_with_renames, diff_index_to_tree, diff_index_to_worktree_with_options,

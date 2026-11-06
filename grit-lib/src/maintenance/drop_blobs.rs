@@ -427,13 +427,13 @@ impl DropPromisedBlobsReport {
 ///
 /// # Errors
 ///
-/// - [`Error::UnsupportedObjectStore`] without a files-backed object store;
-/// - [`Error::PreciousObjectsRepository`] when `extensions.preciousObjects` is set;
-/// - [`Error::NoPromisorRemote`] when no remote is a promisor and
+/// - [`ObjectError::UnsupportedObjectStore`] without a files-backed object store;
+/// - [`ObjectError::PreciousObjectsRepository`] when `extensions.preciousObjects` is set;
+/// - [`ObjectError::NoPromisorRemote`] when no remote is a promisor and
 ///   `extensions.partialClone` is unset;
 /// - [`Error::OperationInProgress`] when a worktree is in the middle of a merge,
 ///   rebase, cherry-pick, revert, am or bisect;
-/// - [`Error::MaintenanceRunning`] when another process holds `gc.pid`;
+/// - [`ObjectError::MaintenanceRunning`] when another process holds `gc.pid`;
 /// - pack read, write and removal failures.
 pub fn drop_promised_blobs(
     repo: &Repository,
@@ -1018,9 +1018,7 @@ impl<'a> EntryKinds<'a> {
                         Some(base_pos) => cur = base_pos,
                         None => match self.odb.read_info_without_fetch(&base) {
                             Ok(info) => break Some(info.kind),
-                            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
-                                break None
-                            }
+                            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => break None,
                             Err(err) => return Err(err),
                         },
                     }

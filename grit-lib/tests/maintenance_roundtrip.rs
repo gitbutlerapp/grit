@@ -1,7 +1,7 @@
 //! Commit-graph, MIDX, and pack-refs maintenance vs system `git`.
 
-use grit_lib::objects::ObjectError;
 use crate::support;
+use grit_lib::objects::ObjectError;
 
 use std::fs;
 use std::path::Path;
@@ -347,7 +347,9 @@ fn write_midx_rejects_invalid_midx_version() {
     assert!(
         matches!(
             err,
-            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version: 3 }))
+            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion {
+                version: 3
+            }))
         ),
         "{err:?}"
     );
@@ -355,7 +357,9 @@ fn write_midx_rejects_invalid_midx_version() {
     assert!(
         matches!(
             err,
-            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version: 3 }))
+            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion {
+                version: 3
+            }))
         ),
         "{err:?}"
     );
@@ -377,7 +381,9 @@ fn write_midx_rejects_invalid_midx_version() {
     assert!(
         matches!(
             err,
-            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version: 0 }))
+            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion {
+                version: 0
+            }))
         ),
         "{err:?}"
     );
@@ -386,7 +392,9 @@ fn write_midx_rejects_invalid_midx_version() {
     assert!(
         matches!(
             err,
-            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion { version: 0 }))
+            Error::Object(ObjectError::Midx(MidxError::UnknownWriteVersion {
+                version: 0
+            }))
         ),
         "{err:?}"
     );

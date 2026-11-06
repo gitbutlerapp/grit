@@ -1,7 +1,6 @@
 //! Oracle helpers: compare grit rev-parse APIs to `git rev-parse --verify -q`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
-
 use std::path::Path;
 
 use grit_lib::error::Error;

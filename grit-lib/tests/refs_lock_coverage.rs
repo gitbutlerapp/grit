@@ -1,7 +1,6 @@
 //! Loose-ref lock collision and broken-ref update errors.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use std::fs;

@@ -128,7 +128,7 @@ impl PushedObjects<'_> {
         };
         match odb.read_info_without_fetch(oid) {
             Ok(info) => Ok(Some(info.kind)),
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => Ok(None),
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => Ok(None),
             Err(err) => Err(err),
         }
     }

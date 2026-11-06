@@ -57,7 +57,7 @@ pub fn cat_file_batch(repo: &Repository) -> Result<()> {
             if let Some(reader) = fast.as_mut() {
                 match reader.read_object(&oid) {
                     Ok(object) => write_batch_object_body(&mut stdout, hex, &object)?,
-                    Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+                    Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                         write_batch_object(&mut stdout, repo, hex, &oid)?;
                     }
                     Err(e) => return Err(e.into()),
@@ -99,7 +99,7 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
             let info_result = if let Some(reader) = fast.as_mut() {
                 match reader.read_info(&oid) {
                     Ok(info) => Ok(info),
-                    Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+                    Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                         repo.odb().read_info(&oid)
                     }
                     Err(e) => Err(ObjectError::from_umbrella(e)),
@@ -111,7 +111,7 @@ pub fn cat_file_batch_check(repo: &Repository) -> Result<()> {
                 Ok(info) => {
                     writeln!(stdout, "{hex_str} {} {}", info.kind.as_str(), info.size)?;
                 }
-                Err(ObjectError::ObjectNotFound { spec: _, .. }) => {
+                Err(ObjectError::ObjectNotFound { .. }) => {
                     writeln!(stdout, "{hex_str} missing")?;
                 }
                 Err(e) => return Err(e.into()),
@@ -150,7 +150,8 @@ pub fn cat_file_batch_all_unordered(repo: &Repository) -> Result<()> {
 fn emit_pack_in_offset_order(out: &mut impl Write, idx: &PackIndex) -> Result<()> {
     let offsets: Vec<u64> = (0..idx.len())
         .map(|i| idx.offset_at(i))
-        .collect::<std::result::Result<Vec<_>, Error>>()
+        .collect::<std::result::Result<Vec<_>, ObjectError>>()
+        .map_err(Error::from)
         .context("pack index offset")?;
     let mut order: Vec<usize> = (0..idx.len()).collect();
     order.sort_by(|&a, &b| offsets[a].cmp(&offsets[b]));
@@ -174,7 +175,7 @@ fn write_batch_object(
     let hex_str = std::str::from_utf8(hex).context("oid line utf-8")?;
     match repo.odb().read(oid) {
         Ok(object) => write_batch_object_body(out, hex, &object),
-        Err(ObjectError::ObjectNotFound { spec: _, .. }) => {
+        Err(ObjectError::ObjectNotFound { .. }) => {
             writeln!(out, "{hex_str} missing")?;
             Ok(())
         }

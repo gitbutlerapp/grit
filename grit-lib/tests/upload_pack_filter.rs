@@ -4,7 +4,6 @@
 //! `git index-pack` (not `--strict`: a filtered pack is not closed by design).
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};

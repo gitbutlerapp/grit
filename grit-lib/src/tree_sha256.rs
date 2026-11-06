@@ -153,7 +153,7 @@ pub struct MissingSubmodule {
 ///
 /// # Errors
 ///
-/// Returns [`Error::TreeSha256MissingSubmodules`] when any submodule required for
+/// Returns [`crate::objects::ObjectError::TreeSha256MissingSubmodules`] when any submodule required for
 /// hashing is missing; the error lists every missing path.
 pub fn tree_sha256(
     repo: &Repository,
@@ -637,7 +637,7 @@ impl TreeSha256Claim {
     /// # Errors
     ///
     /// Returns [`TreeSha256ClaimError::DuplicateDigestHeader`] or
-    /// [`TreeSha256ClaimError::InvalidExcludedPath`], or [`Error::Object(ObjectError::TreeSha256InvalidHex)`] when the
+    /// [`TreeSha256ClaimError::InvalidExcludedPath`], or [`crate::objects::ObjectError::TreeSha256InvalidHex`] when the
     /// digest value is not exactly 64 ASCII hex digits (no trimming; surrounding or trailing
     /// whitespace is rejected).
     pub fn from_tag(tag: &TagData) -> Result<Option<Self>> {

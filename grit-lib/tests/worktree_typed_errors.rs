@@ -1,9 +1,9 @@
 //! Linked worktree refusals surface as typed `Error::Worktree` / `Error::Branch` variants,
 //! and a refused operation leaves a registry that system Git still reads cleanly.
 
-use grit_lib::objects::ObjectError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::objects::ObjectError;
 use grit_lib::porcelain::branch::BranchError;
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::LockWorktreeOptions;
@@ -102,7 +102,7 @@ fn lock_and_unlock_refusals_are_typed() {
     lock(&repo, &linked, Some("hold")).unwrap();
     assert!(git(&main, &["worktree", "list", "--porcelain"]).contains("locked hold"));
     match lock(&repo, &linked, None) {
-        Err(Error::Worktree(WorktreeError::AlreadyLocked { reason }) => {
+        Err(Error::Worktree(WorktreeError::AlreadyLocked { reason })) => {
             assert_eq!(reason.as_deref(), Some("hold"));
         }
         other => panic!("expected AlreadyLocked, got {other:?}"),

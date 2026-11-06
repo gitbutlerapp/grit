@@ -1,7 +1,6 @@
 //! Ref query sort, pattern, and limit parity with `git for-each-ref`.
 
 #[allow(clippy::unwrap_used, clippy::expect_used)]
-
 use crate::support;
 
 use grit_lib::refs::listing::{

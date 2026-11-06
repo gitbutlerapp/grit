@@ -209,7 +209,7 @@ impl Repository {
     /// # Errors
     ///
     /// Returns an object-store error if a named tag's object cannot be read, or
-    /// [`Error::CorruptObject`] if an annotated tag cannot be parsed.
+    /// [`ObjectError::CorruptObject`] if an annotated tag cannot be parsed.
     #[inline]
     pub fn revision_label(&self, spec: &str) -> Result<Option<RevisionLabel>> {
         if spec == "HEAD" {
@@ -259,7 +259,7 @@ impl Repository {
     pub fn resolve(&self, spec: &str) -> std::result::Result<ResolvedObject, ResolveError> {
         let oid = match resolve_revision(self, spec) {
             Ok(o) => o,
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 });
@@ -333,7 +333,7 @@ impl Repository {
 
         let oid = match resolve_revision_for_verify(self, spec) {
             Ok(o) => o,
-            Err(Error::Object(ObjectError::ObjectNotFound { spec: _, .. })) => {
+            Err(Error::Object(ObjectError::ObjectNotFound { .. })) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 });
@@ -451,7 +451,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`] when the object is missing.
+    /// Returns [`ObjectError::ObjectNotFound`] when the object is missing.
     pub fn read_object_raw_for_display(&self, oid: &ObjectId) -> Result<Object> {
         self.read_replaced(oid)
     }
@@ -463,7 +463,7 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`] when the object is missing.
+    /// Returns [`ObjectError::ObjectNotFound`] when the object is missing.
     pub fn read_object_info_for_display(&self, oid: &ObjectId) -> Result<ObjectInfo> {
         self.read_info_replaced(oid)
     }
@@ -492,8 +492,8 @@ impl Repository {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::ObjectNotFound`] when the object is missing and
-    /// [`Error::CorruptObject`] when parsing fails.
+    /// Returns [`ObjectError::ObjectNotFound`] when the object is missing and
+    /// [`ObjectError::CorruptObject`] when parsing fails.
     pub fn read_object_for_display(&self, oid: &ObjectId) -> Result<ObjectContents> {
         let obj = self.read_object_raw_for_display(oid)?;
         match obj.kind {
@@ -549,7 +549,7 @@ pub fn format_tree_entries_cat_file_p(entries: &[TreeEntry]) -> Vec<u8> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when `data` is not a valid tree.
+/// Returns [`ObjectError::CorruptObject`] when `data` is not a valid tree.
 pub fn format_tree_cat_file_p(data: &[u8]) -> Result<Vec<u8>> {
     let entries = parse_tree(data)?;
     Ok(format_tree_entries_cat_file_p(&entries))

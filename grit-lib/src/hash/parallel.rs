@@ -47,7 +47,7 @@ fn hash_parallel_options(threads: NonZeroUsize) -> ParallelOptions {
 ///
 /// # Errors
 ///
-/// Returns [`ParallelHashError::Task`] with [`Error::HashCollision`] when sha1dc
+/// Returns [`ParallelHashError::Task`] with [`crate::objects::ObjectError::HashCollision`] when sha1dc
 /// detects a chosen-prefix collision in any item.
 pub fn hash_objects_parallel(
     algo: HashAlgo,

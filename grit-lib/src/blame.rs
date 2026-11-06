@@ -1820,7 +1820,9 @@ pub(crate) fn read_object_for_blame(
                     return odb.read(oid).map_err(LibError::from);
                 }
             }
-            Err(LibError::Object(ObjectError::object_not_found(oid.to_hex())))
+            Err(LibError::Object(ObjectError::object_not_found(
+                oid.to_hex(),
+            )))
         }
         Err(err) => Err(err.into()),
     }

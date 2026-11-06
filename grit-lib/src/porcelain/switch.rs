@@ -1,6 +1,5 @@
 //! Switch branches or detach `HEAD` at a commit, updating the working tree when needed.
 
-use crate::objects::ObjectError;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::branch_tracking::write_branch_upstream_config;

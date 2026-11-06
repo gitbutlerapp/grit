@@ -2,7 +2,6 @@
 //! against repositories the system `git` builds and then checks with `fsck`.
 
 #[allow(clippy::expect_used, clippy::unwrap_used)]
-
 use std::path::Path;
 
 use grit_lib::remote::transfer::{

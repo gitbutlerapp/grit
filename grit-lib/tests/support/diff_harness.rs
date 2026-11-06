@@ -1,7 +1,6 @@
 //! Hermetic git/grit diff test helpers: blob patch oracles and tree/index/worktree raw matrices.
 
 #[allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

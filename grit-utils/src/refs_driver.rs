@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 
 use anyhow::{bail, Context, Result};
-use grit_lib::error::Error;
 use grit_lib::objects::{ObjectError, ObjectId};
 use grit_lib::refs::gc::{update_refs, RefTransactionItem};
 use grit_lib::refs::listing::{query_refs, RefNamespace, RefQuery, RefQueryOptions};
@@ -34,7 +33,7 @@ pub fn for_each_ref(repo: &Repository, pattern: Option<&str>) -> Result<()> {
                 None => {
                     let kind = match repo.odb().read_info(&oid) {
                         Ok(info) => info.kind.as_str(),
-                        Err(ObjectError::ObjectNotFound { spec: _, .. }) => "missing",
+                        Err(ObjectError::ObjectNotFound { .. }) => "missing",
                         Err(e) => return Err(e.into()),
                     };
                     kind_by_oid.insert(oid, kind);
