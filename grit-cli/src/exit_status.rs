@@ -111,6 +111,9 @@ impl ExitStatus {
                 .downcast_ref::<grit_lib::remote::clone::CloneError>()
                 .is_some_and(grit_lib::remote::clone::CloneError::is_cancelled)
                 || cause
+                    .downcast_ref::<grit_lib::remote::RemoteError>()
+                    .is_some_and(grit_lib::remote::RemoteError::is_cancelled)
+                || cause
                     .downcast_ref::<grit_lib::error::Error>()
                     .is_some_and(grit_lib::error::Error::is_cancelled)
                 || cause
